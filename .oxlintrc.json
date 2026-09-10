@@ -1,0 +1,23 @@
+{
+	"extends": ["./node_modules/@effect/tsgo/oxlint-presets/recommended.json"],
+	"ignorePatterns": ["**/dist/**", "repos/**"],
+	"rules": {
+		"typescript/no-explicit-any": "error",
+		"typescript/consistent-type-imports": "error"
+	},
+	"overrides": [
+		{
+			"files": ["scripts/**/*.ts"],
+			"rules": {
+				"effecttsgo/global-console": "off",
+				"effecttsgo/node-builtin-import": "off"
+			}
+		},
+		{
+			"files": ["packages/ui/vite.config.ts"],
+			"rules": {
+				"effecttsgo/process-env": "off"
+			}
+		}
+	]
+}

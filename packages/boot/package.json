@@ -1,0 +1,18 @@
+{
+	"name": "@comms/boot",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"check": "tsc --noEmit",
+		"test": "vitest run --passWithNoTests --root ../.. --dir packages/boot/test",
+		"build": "bun build src/index.ts --target=bun --packages=external --outdir=dist"
+	},
+	"dependencies": {
+		"@effect/platform-bun": "4.0.0-rc.113",
+		"effect": "4.0.0-rc.113"
+	}
+}

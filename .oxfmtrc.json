@@ -1,0 +1,16 @@
+{
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"useTabs": true,
+	"printWidth": 120,
+	"ignorePatterns": [
+		"node_modules/",
+		"**/dist/",
+		"coverage/",
+		"repos/",
+		"bun.lock",
+		"SPEC.md",
+		"docs/tech.md",
+		"docs/sundial-audit.md",
+		"docs/**"
+	]
+}

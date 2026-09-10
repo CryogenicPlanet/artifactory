@@ -1,0 +1,21 @@
+{
+	"name": "@comms/server",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/start.ts"
+	},
+	"scripts": {
+		"check": "tsc --noEmit",
+		"test": "vitest run --passWithNoTests --root ../.. --dir packages/server/test",
+		"dev": "bun src/main.ts",
+		"start": "bun src/main.ts",
+		"build": "bun build src/main.ts src/start.ts src/server.ts --target=bun --packages=external --outdir=dist"
+	},
+	"dependencies": {
+		"@comms/boot": "workspace:*",
+		"@effect/platform-bun": "4.0.0-rc.113",
+		"effect": "4.0.0-rc.113"
+	}
+}

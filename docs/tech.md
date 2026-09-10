@@ -1,5 +1,11 @@
 # comms: tech choices
 
+## Current scaffold decision (2026-09-10)
+
+The agreed workspace packages are `boot`, `server`, and `ui`. `server` imports `boot` and its launcher starts boot supervising a separate server child entry. `ui` imports the server launcher for full-stack development; browser code uses HTTP. Running server is headless; running UI starts both. Boot never imports server implementation. Pages are content under `packages/server/pages/`, not a package. Add a `protocol` or `types` package only when shared schemas are needed. Formatting uses oxfmt with oxlint.
+
+This decision supersedes the older five-package layout, cross-package import restrictions, and standalone-UI commands below. Those sections describe the original proposal; use the root README for current paths and commands. Core behavior in SPEC.md remains future work.
+
 `SPEC.md` is written to be stack-agnostic except for three things it depends on: HTTP + JSON as the only surface, a SQL database as the only state, and one container with one volume as the deployment. Everything here is a choice that could change without changing the spec. Versions below were checked against npm on 2026-09-10.
 
 ## 1. Runtime, language, tooling

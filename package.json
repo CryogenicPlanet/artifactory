@@ -1,0 +1,37 @@
+{
+	"name": "comms",
+	"private": true,
+	"workspaces": [
+		"packages/*"
+	],
+	"type": "module",
+	"scripts": {
+		"prepare": "effect-tsgo patch --oxlint",
+		"dev": "bun packages/ui/dev.ts",
+		"check": "bun run format:check && bun run lint && bun run typecheck && bun run check:invariants",
+		"format": "oxfmt --write .",
+		"format:check": "oxfmt --check .",
+		"lint": "oxlint --type-aware packages scripts",
+		"typecheck": "tsc --noEmit && bun run --filter '*' check",
+		"check:invariants": "bun scripts/check-invariants.ts",
+		"build": "bun run --filter '*' build",
+		"test": "vitest run --passWithNoTests",
+		"start": "bun packages/server/src/main.ts",
+		"dev:server": "bun packages/server/src/main.ts",
+		"dev:ui": "bun packages/ui/dev.ts"
+	},
+	"devDependencies": {
+		"@effect/language-service": "0.87.2",
+		"@effect/tsgo": "0.44.0",
+		"@effect/vitest": "4.0.0-rc.113",
+		"bun-types": "1.4.2",
+		"effect": "4.0.0-rc.113",
+		"oxfmt": "0.67.0",
+		"oxlint": "1.82.0",
+		"oxlint-tsgolint": "7.0.2001",
+		"typescript": "7.0.2",
+		"typescript-parser": "npm:typescript@5.9.3",
+		"vitest": "5.0.0"
+	},
+	"packageManager": "bun@1.4.0"
+}
