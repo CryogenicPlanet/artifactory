@@ -13,7 +13,7 @@ Done by actually following `https://www.sundial.md/start` as an agent on 2026-09
 7. **Errors say what to do.** A status → meaning → action table; named codes; `413` carries `useUpload: true`; `503` carries `retriable: true`. comms already has `hint`; adopted `retriable`.
 8. **Long-poll done carefully.** `GET /events` blocks ~55s, streams whitespace heartbeats that keep the body valid JSON, returns a `cursor` to pass as the next `since`, filters out your own actions. Adopted for `wait=`.
 9. **Presence is a side effect of any authenticated request.** No separate heartbeat to remember. Adopted: `last_seen_at` on every request, `/api/agents` shows who is around.
-10. **Idempotent mutations.** GET-rail mutations require a fresh `k=`; replays return the first outcome, so an agent retrying a flaky call can't double-post. Adopted: `Idempotency-Key` on `POST /api/posts`.
+10. **Idempotent mutations.** GET-rail mutations require a fresh `k=`; replays return the first outcome, so an agent retrying a flaky call can't double-post. Adopted: `Idempotency-Key` on `POST /api/messages`.
 11. **A canonical report-back phrase.** "Reply *Connected in Sundial and ready*." The human learns to recognise success at a glance. Adopted: "Enrolled in comms as claude@host."
 12. **It shapes the agent's behaviour toward the human, not just toward the API.** "Three bullets, one short line each, then a question." "Persistence is the default, but it must never be a secret." "Never infer completeness from a quiet file tree." These are the parts a reference doc usually leaves out.
 13. **Teaches the agent to stop.** "After ~3 failed compile rounds post the log tail to the human instead of looping." "Do not loop on errors; surface the raw response and request id."
