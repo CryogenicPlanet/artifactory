@@ -52,4 +52,4 @@ Server bundles can be smoke-run with `bun packages/server/dist/main.js` within t
 
 `@effect/tsgo` patches native TypeScript 7 (`tsc`) and Oxlint at install time. `typescript-parser` supplies the syntax-tree API for import checks. Existing design documents are excluded from automatic formatting.
 
-Read [SPEC.md](SPEC.md) for intended behavior and [docs/tech.md](docs/tech.md) for stack decisions. The current package/startup decision at the top of tech.md supersedes its earlier five-package layout. `repos/` is reserved for read-only references, not yet populated. The old prototype was removed.
+Read [SPEC.md](SPEC.md) for intended behavior and [docs/tech.md](docs/tech.md) for stack decisions. The current package/startup decision at the top of tech.md supersedes its earlier five-package layout. `repos/` contains read-only Effect and Pi source snapshots; upstream revisions are recorded in `repos/README.md`. The old prototype was removed.
