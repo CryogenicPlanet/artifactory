@@ -1,6 +1,8 @@
 # App migrations
 
-Add `001_description.ts` (or `001-description.ts`) with a default-exported Effect requiring only `SqlClient`. Positive safe integer IDs run in numeric order; choose a new ID greater than every existing migration. The app-owned `migrations` table records IDs, names and timestamps. Applied IDs never rerun; keep applied files unchanged and add a forward migration. Duplicate IDs and malformed filenames fail startup. Compiled `.js`, `.mts` and `.mjs` modules are also accepted; do not ship two forms of the same ID. SQL files are not supported in this slice.
+Migration ID1 is reserved for the retired `001_webhook_subscriptions` migration; never reuse it. Existing ledger rows and subscription data stay intact. The subscriptions extension now owns its table through `api.migrate`.
+
+Add `002_description.ts` (or `002-description.ts`) with a default-exported Effect requiring only `SqlClient`. Positive safe integer IDs run in numeric order; choose a new ID greater than every existing migration. The app-owned `migrations` table records IDs, names and timestamps. Applied IDs never rerun; keep applied files unchanged and add a forward migration. Duplicate IDs and malformed filenames fail startup. Compiled `.js`, `.mts` and `.mjs` modules are also accepted; do not ship two forms of the same ID. SQL files are not supported in this slice.
 
 ```ts
 import { Effect } from "effect";

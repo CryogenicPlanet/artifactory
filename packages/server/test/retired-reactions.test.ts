@@ -11,6 +11,7 @@ it("removes reaction routes while preserving historical rows across restart", as
 	expect((await (await read("/api")).json()).paths).not.toHaveProperty("/api/reactions");
 	expect((await read("/api/reactions?message=m_old")).status).toBe(404);
 	expect((await app.post("/api/reactions", { message: "m_old", emoji: "+1" }, cookie)).status).toBe(404);
+	expect(await fixture.sql("SELECT name FROM sqlite_master WHERE name IN ('agents','reactions')")).toEqual([]);
 	await app.stop();
 	const outcome = JSON.stringify({ message: "m_old", emoji: "+1", instance: "legacy", active: true, seq: 42 });
 	// The retired receipt table exists only in v6; restart must migrate its complete outcome.
@@ -22,6 +23,9 @@ it("removes reaction routes while preserving historical rows across restart", as
 		"CREATE TABLE topic_idempotency(instance TEXT NOT NULL,key TEXT NOT NULL,input TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(instance,key))",
 		"CREATE TABLE read_idempotency(instance TEXT NOT NULL,key TEXT NOT NULL,topic TEXT NOT NULL,requested_seq INTEGER NOT NULL,effective_seq INTEGER NOT NULL,PRIMARY KEY(instance,key))",
 		"CREATE TABLE reaction_idempotency(instance TEXT NOT NULL,key TEXT NOT NULL,message TEXT NOT NULL,emoji TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(instance,key))",
+		"CREATE TABLE reactions(message_id TEXT NOT NULL,instance TEXT NOT NULL,emoji TEXT NOT NULL,active INTEGER NOT NULL,previous_active INTEGER NOT NULL,updated_seq INTEGER NOT NULL,PRIMARY KEY(message_id,instance,emoji))",
+		"CREATE TABLE agents(name TEXT PRIMARY KEY,emoji TEXT,color TEXT,status TEXT NOT NULL)",
+		"INSERT INTO agents VALUES('legacy-agent','a','blue','preserved')",
 		"INSERT INTO reactions VALUES('m_old','legacy','+1',1,0,42)",
 		`INSERT INTO reaction_idempotency VALUES('legacy','key','m_old','+1','${outcome}')`,
 		"ALTER TABLE messages DROP COLUMN mentions",
@@ -32,6 +36,9 @@ it("removes reaction routes while preserving historical rows across restart", as
 		await fixture.sql(statement);
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
+	expect(await fixture.sql("SELECT * FROM agents")).toEqual([
+		{ name: "legacy-agent", emoji: "a", color: "blue", status: "preserved" },
+	]);
 	expect(await fixture.sql("SELECT * FROM reactions")).toEqual([
 		{ message_id: "m_old", instance: "legacy", emoji: "+1", active: 1, previous_active: 0, updated_seq: 42 },
 	]);

@@ -72,9 +72,9 @@ const program = Effect.gen(function* () {
 					yield* sql`ALTER TABLE topics DROP COLUMN updated_seq`;
 					yield* sql`ALTER TABLE topics DROP COLUMN previous`;
 					yield* sql`ALTER TABLE topics DROP COLUMN deleted_at`;
-					yield* sql`DROP TABLE agents`;
+					yield* sql`DROP TABLE IF EXISTS agents`;
 					yield* sql`DROP TABLE kv`;
-					yield* sql`DROP TABLE reactions`;
+					yield* sql`DROP TABLE IF EXISTS reactions`;
 					yield* sql`DROP TABLE topic_page_continuations`;
 					yield* sql`ALTER TABLE messages DROP COLUMN mentions`;
 					yield* sql`ALTER TABLE messages DROP COLUMN previous_mentions`;

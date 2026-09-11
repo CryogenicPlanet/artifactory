@@ -100,6 +100,8 @@ const program = Effect.gen(function* () {
 					const initial = yield* messages.create(who, { topic: "project/child", body: "retained" }, "create");
 					const sibling = yield* messages.create(who, { topic: "project-other", body: "outside" });
 					yield* messages.topic(who, "project", { meta: { public: true, status: "active" } }, "meta");
+					// Retired data survives moves on upgraded boards; fresh stores no longer create it.
+					yield* sql`CREATE TABLE reactions(message_id TEXT NOT NULL,instance TEXT NOT NULL,emoji TEXT NOT NULL,active INTEGER NOT NULL,previous_active INTEGER NOT NULL,updated_seq INTEGER NOT NULL,PRIMARY KEY(message_id,instance,emoji))`;
 					yield* sql`INSERT INTO reactions VALUES(${initial.id},${who.instance},'ok',1,0,${initial.seq})`;
 					yield* messages.change(
 						sql`INSERT INTO reads VALUES(${who.instance},'project/child',${initial.seq})`.pipe(Effect.asVoid),

@@ -50,7 +50,8 @@ export const initialize = Effect.gen(function* () {
 				yield* sql`ALTER TABLE topics ADD COLUMN updated_seq INTEGER NOT NULL DEFAULT 0`;
 				yield* sql`ALTER TABLE topics ADD COLUMN previous TEXT`;
 				yield* sql`CREATE TABLE topic_idempotency(instance TEXT NOT NULL,key TEXT NOT NULL,input TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(instance,key))`;
-				yield* sql`CREATE TABLE reactions(message_id TEXT NOT NULL,instance TEXT NOT NULL,emoji TEXT NOT NULL,active INTEGER NOT NULL,previous_active INTEGER NOT NULL,updated_seq INTEGER NOT NULL,PRIMARY KEY(message_id,instance,emoji))`;
+				if (version > 0)
+					yield* sql`CREATE TABLE reactions(message_id TEXT NOT NULL,instance TEXT NOT NULL,emoji TEXT NOT NULL,active INTEGER NOT NULL,previous_active INTEGER NOT NULL,updated_seq INTEGER NOT NULL,PRIMARY KEY(message_id,instance,emoji))`;
 				yield* sql`CREATE TABLE reaction_idempotency(instance TEXT NOT NULL,key TEXT NOT NULL,message TEXT NOT NULL,emoji TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(instance,key))`;
 				yield* sql`CREATE VIRTUAL TABLE messages_fts USING fts5(message_id UNINDEXED, body, previous_body, tokenize='unicode61 remove_diacritics 2')`;
 				yield* sql`INSERT INTO messages_fts(rowid,message_id,body,previous_body) SELECT rowid,id,body,json_extract(previous,'$.body') FROM messages`;
@@ -60,7 +61,8 @@ export const initialize = Effect.gen(function* () {
 				yield* sql`PRAGMA user_version = 4`;
 			}
 			if (version < 5) {
-				yield* sql`CREATE TABLE agents(name TEXT PRIMARY KEY,emoji TEXT,color TEXT,status TEXT NOT NULL)`;
+				if (version > 0)
+					yield* sql`CREATE TABLE agents(name TEXT PRIMARY KEY,emoji TEXT,color TEXT,status TEXT NOT NULL)`;
 				yield* sql`CREATE TABLE kv(ns TEXT NOT NULL,key TEXT NOT NULL,value TEXT,updated_seq INTEGER NOT NULL,previous TEXT,PRIMARY KEY(ns,key))`;
 				yield* sql`PRAGMA user_version = 5`;
 			}
@@ -83,7 +85,6 @@ export const initialize = Effect.gen(function* () {
 				yield* sql`PRAGMA user_version = 9`;
 			}
 			yield* sql`SELECT deleted_at FROM topics LIMIT 1`;
-			yield* sql`SELECT name,emoji,color,status FROM agents LIMIT 1`;
 			yield* sql`SELECT ns,key,value,updated_seq,previous FROM kv LIMIT 1`;
 			yield* sql`SELECT updated_seq,previous FROM topics LIMIT 1`;
 			yield* sql`SELECT message_id,body,previous_body FROM messages_fts LIMIT 1`;

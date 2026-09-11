@@ -58,6 +58,9 @@ for (const fails of [false, true]) {
 		await app.stop();
 		await fixture.sql("DROP TABLE migrations");
 		await fixture.sql("DROP TABLE webhook_subscriptions");
+		await fixture.sql(
+			"DELETE FROM extension_migrations WHERE extension='subscriptions' AND name='webhook_subscriptions'",
+		);
 		await fixture.sql("UPDATE kernel_writer SET epoch='candidate-test'");
 		let entry = join(import.meta.dirname, "../src/server.ts");
 		if (fails) {
@@ -137,3 +140,31 @@ for (const fails of [false, true]) {
 		}
 	}, 20000);
 }
+
+it("lets the extension own fresh webhook storage and preserves retired migration receipts and rows", async (test) => {
+	const fixture = await conversation(test),
+		app = await fixture.launch();
+	await app.setup();
+	const cookie = await app.login();
+	await app.ready(cookie);
+	expect(await fixture.sql("SELECT * FROM migrations")).toEqual([]);
+	expect(await fixture.sql("SELECT name FROM extension_migrations WHERE extension='subscriptions'")).toEqual([
+		{ name: "webhook_subscriptions" },
+	]);
+	await app.stop();
+	// Reconstruct a previously applied app migration without changing its ID, name or timestamp.
+	await fixture.sql(
+		"INSERT INTO migrations(migration_id,name,created_at) VALUES(1,'webhook_subscriptions','2026-01-01 00:00:00')",
+	);
+	await fixture.sql(
+		`INSERT INTO webhook_subscriptions(id,instance,agent,human,input,idempotency_key,created_at,start_seq,created_seq,deleted_seq,cursor,attempts,next_attempt,last_error) VALUES('legacy','legacy','legacy',0,'{"filter":{},"deliver":{"kind":"webhook","url":"https://example.test/hook"}}','kept',1,1,1,2,1,3,4,'retained failure')`,
+	);
+	const ledger = await fixture.sql("SELECT * FROM migrations");
+	const receipts = await fixture.sql("SELECT * FROM extension_migrations WHERE extension='subscriptions'");
+	const subscriptions = await fixture.sql("SELECT * FROM webhook_subscriptions");
+	const resumed = await fixture.launch();
+	await resumed.ready(cookie);
+	expect(await fixture.sql("SELECT * FROM migrations")).toEqual(ledger);
+	expect(await fixture.sql("SELECT * FROM extension_migrations WHERE extension='subscriptions'")).toEqual(receipts);
+	expect(await fixture.sql("SELECT * FROM webhook_subscriptions")).toEqual(subscriptions);
+}, 20000);

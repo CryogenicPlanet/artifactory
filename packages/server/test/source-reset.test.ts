@@ -29,6 +29,9 @@ it("resets the entire source tree while preserving messages, pages, identity, to
 	const pair = Schema.decodeUnknownSync(Schema.Struct({ access: Schema.String }))(
 		await (await app.post(`/auth/enroll/${enrollment.id}`, { device_secret: enrollment.device_secret })).json(),
 	);
+	// A retired optional profile table can remain on upgraded boards; reset must preserve it too.
+	await fixture.sql("CREATE TABLE agents(name TEXT PRIMARY KEY,emoji TEXT,color TEXT,status TEXT NOT NULL)");
+	await fixture.sql("INSERT INTO agents VALUES('legacy-agent','a','blue','preserved')");
 	const identity = await fixture.sql("SELECT name,emoji,color,status FROM agents ORDER BY name");
 	const passkeys = await fixture.sql("SELECT id,public_key,label,created_at FROM passkeys ORDER BY id", "boot.db");
 	const tokens = await fixture.sql("SELECT id,family,hash,scopes,revoked_at FROM tokens ORDER BY id", "boot.db");
