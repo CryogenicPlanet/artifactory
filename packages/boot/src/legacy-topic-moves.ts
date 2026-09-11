@@ -3,7 +3,8 @@ import { Crypto, Effect, FileSystem, Option, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { fenceAppStore } from "./app-recovery.ts";
 import { decodeRows } from "./decode-rows.ts";
-import { Events, EventError } from "./events.ts";
+import { Events } from "./events.ts";
+import { RecoveryRejected } from "./recovery-intents.ts";
 import { sourceIO, validSourcePath } from "./source-io.ts";
 
 const Move = Schema.Struct({
@@ -21,7 +22,7 @@ const Page = Schema.Struct({
 	tree: Schema.NullOr(Schema.String),
 	state: Schema.Literals(["prepared", "publishing", "published", "completed"]),
 });
-const refused = () => new EventError({ code: "topic_move_recovery_required" });
+const refused = () => new RecoveryRejected({ code: "topic_move_recovery_required" });
 const legacyRows = (sql: SqlClient.SqlClient) =>
 	Effect.gen(function* () {
 		const tables =

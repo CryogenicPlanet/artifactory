@@ -40,6 +40,11 @@ const unavailable = {
 	hint: "Inspect /_boot/status; wait for the active operation or storage contention to finish before retrying.",
 } as const;
 const policy = {
+	topic_move_recovery_required: {
+		status: 409,
+		retriable: false,
+		hint: "Historical topic-move evidence needs operator repair. Preserve both legacy tables, page bytes, app outbox and keeper receipts; do not delete evidence to force recovery.",
+	},
 	recovery_intents_conflict: {
 		status: 409,
 		retriable: false,

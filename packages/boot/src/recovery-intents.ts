@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 
 export class RecoveryRejected extends Schema.TaggedError<RecoveryRejected>()("RecoveryRejected", {
-	code: Schema.Literal("recovery_intents_conflict"),
+	code: Schema.Literals(["recovery_intents_conflict", "topic_move_recovery_required"]),
 }) {
 	get message() {
 		return this.code;

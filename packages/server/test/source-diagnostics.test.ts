@@ -61,6 +61,7 @@ it(
 				{ timeout: 10000 },
 			)
 			.toContain("topic_move_recovery_required");
+		expect((await fetch(`${restarted.url}/_boot/lock`, { headers: { cookie } })).status).toBe(200);
 		const get = (path: string) => fetch(`${restarted.url}/api/fs/${path}`, { headers: { cookie } });
 		expect((await fetch(`${restarted.url}/api/fs/app/server.ts`)).status).toBe(401);
 		for (const [name, content] of [
@@ -85,10 +86,7 @@ it(
 		for (const [method, path] of [
 			["PUT", "/api/fs/app/server.ts?reload=0"],
 			["PUT", "/api/fs/pages/new/index.md"],
-			["DELETE", "/api/lock"],
-			["POST", "/api/lock"],
 			["POST", "/api/reload"],
-			["POST", "/api/revert"],
 		] as const) {
 			expect(
 				(
@@ -99,6 +97,22 @@ it(
 					})
 				).status,
 			).toBe(503);
+		}
+		for (const [method, path] of [
+			["POST", "/api/lock"],
+			["DELETE", "/api/lock"],
+			["POST", "/api/revert"],
+		] as const) {
+			// Retry through the restarted listener, preserving ambiguous publication evidence.
+			const retry = await fetch(`${restarted.url}${path}`, {
+				method,
+				headers: { cookie, origin: "https://comms.test", "content-type": "application/json" },
+				body: "{}",
+			});
+			expect({ status: retry.status, body: await retry.json() }).toMatchObject({
+				status: 409,
+				body: { error: { code: "topic_move_recovery_required", retriable: false } },
+			});
 		}
 		expect(await evidence()).toEqual(before);
 		expect(await readFile(join(fixture.root, "app/server.ts"), "utf8")).toBe(source);
