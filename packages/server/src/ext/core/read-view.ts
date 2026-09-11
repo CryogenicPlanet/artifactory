@@ -10,9 +10,7 @@ export const markView = (
 	topic: string,
 	enabled = true,
 ) => {
-	if (!enabled) return Effect.void;
-	const visible = items.filter(
-		(message) => topic === "" || message.topic === topic || message.topic.startsWith(`${topic}/`),
-	);
+	if (!enabled || topic === "") return Effect.void;
+	const visible = items.filter((message) => message.topic === topic || message.topic.startsWith(`${topic}/`));
 	return visible.length ? ctx.topics.markRead(topic, Math.max(...visible.map((message) => message.seq))) : Effect.void;
 };

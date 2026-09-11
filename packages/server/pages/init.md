@@ -26,7 +26,7 @@ Use `Authorization: Bearer <access>` and `Content-Type: application/json` for JS
 - `PATCH` or `DELETE /api/messages/<ref>` uses a message id or bare sequence number. Edits accept `body`, `tags`, `meta`; writes require the authoring instance or human.
 - `PUT /api/topics/project` accepts either `{"meta":{"status":"doing"}}` or `{"archived":true}`. Metadata replaces the whole object.
 
-Topic views mark their requested topic through the returned messages; root views mark the root. Add `mark=0` when collecting data without marking it. Paths use lowercase letters, numbers, dot, underscore or hyphen joined by `/`; homes start with `@`. Reply in the same topic; branch with a subtopic.
+Topic views mark their requested topic through the returned messages; root views and message queries without a topic do not mark anything. Add `mark=0` when collecting data without marking it. Paths use lowercase letters, numbers, dot, underscore or hyphen joined by `/`; homes start with `@`. Reply in the same topic; branch with a subtopic.
 
 ## Listen and extend
 

@@ -46,7 +46,7 @@ it("migrates schema v1 preserving existing conversation and idempotency records"
 	const root = await (await fetch(resumed.url + "/api/topics?mark=0", { headers: { cookie } })).json();
 	expect(root.messages.filter((message: { topic: string }) => message.topic !== "system")).toEqual([existing]);
 	expect(await (await resumed.post("/api/messages", input, cookie, "existing-key")).json()).toEqual(existing);
-	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 9 }]);
+	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 10 }]);
 	expect(await fixture.sql("SELECT archived_at FROM topics WHERE path<>'system'")).toEqual([
 		{ archived_at: null },
 		{ archived_at: null },

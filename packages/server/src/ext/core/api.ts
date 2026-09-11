@@ -60,12 +60,9 @@ const handlers = (extension: ExtensionApi) =>
 								...(wait > 0 || query.exclude_self === "1" ? { exclude: ctx.instance } : {}),
 							};
 							const view = (result: typeof Envelope.Type) =>
-								markView(
-									ctx,
-									result.items,
-									query.topic ?? "",
-									query.mark !== "0" && (query.topic !== undefined || query.mentions === undefined),
-								).pipe(Effect.as(result));
+								markView(ctx, result.items, query.topic ?? "", query.mark !== "0" && query.topic !== undefined).pipe(
+									Effect.as(result),
+								);
 							// Seed from the trusted fence: an invalid caller cursor must not poison the shared follower.
 							if (wait > 0) yield* changes.register(ctx.events, (yield* ctx.publicationFence).published_through);
 							const first = yield* ctx.messages.query(input);

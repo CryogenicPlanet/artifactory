@@ -4,6 +4,10 @@ import { conversation } from "./fixtures/conversation.ts";
 
 it("recognizes punctuation-terminated mentions without shortening another valid target", () => {
 	for (const [body, target] of [
+		["**@codex**", "@codex"],
+		['"@codex"', "@codex"],
+		["_@codex_", "@codex"],
+		["|@codex|", "@codex"],
 		["over to @codex.", "@codex"],
 		["over to @codex, thanks", "@codex"],
 		["over to @codex!", "@codex"],
@@ -15,6 +19,9 @@ it("recognizes punctuation-terminated mentions without shortening another valid 
 		expect(mentionsIn(body ?? "")).toEqual([target]);
 	for (const body of [
 		"x@codex",
+		"é@codex",
+		"x\u0301@codex",
+		"@@codex",
 		"@codexX",
 		"@codexé",
 		"@codex/",
@@ -61,6 +68,19 @@ it("marks only the requested subtree in OR results and never globally marks a me
 		body: JSON.stringify({ tags: ["selected"] }),
 	});
 	expect(taggedOutside.status).toBe(200);
+	for (const query of [
+		"since=0&q=home&limit=1",
+		"since=0&tag=selected",
+		`since=0&agent=${home.agent}`,
+		"newest=1&limit=1",
+	]) {
+		expect((await get(query)).items.length).toBeGreaterThan(0);
+		expect(await fixture.sql("SELECT topic,seq FROM reads")).toEqual([]);
+	}
+	const root = await fetch(`${app.url}/api/topics`, { headers: { cookie } });
+	expect(root.status).toBe(200);
+	expect((await root.json()).messages.length).toBeGreaterThan(0);
+	expect(await fixture.sql("SELECT topic,seq FROM reads")).toEqual([]);
 	const query = "since=0&topic=@codex&recursive=1&mentions=@codex&tag=selected";
 	expect((await get(query + "&mark=0")).items.map((message: { seq: number }) => message.seq)).toEqual([
 		home.seq,
@@ -81,17 +101,21 @@ it("reindexes both historical mention images on upgrade without changing message
 	await app.setup();
 	const cookie = await app.login();
 	await app.ready(cookie);
-	const input = { topic: "history", body: "over to @codex." };
+	const input = { topic: "history", body: "**@codex**" };
 	const original = await (await app.post("/api/messages", input, cookie, "historical-mention")).json();
 	// More than one migration page, using real published messages and their normal identities.
 	for (let index = 0; index < 256; index++) {
-		const response = await app.post("/api/messages", { topic: "history-pages", body: `item ${index} @alice.` }, cookie);
+		const response = await app.post(
+			"/api/messages",
+			{ topic: "history-pages", body: `item ${index} |@alice|` },
+			cookie,
+		);
 		expect(response.status).toBe(200);
 	}
 	await app.stop();
 	await fixture.sql("UPDATE messages SET mentions='[\"@alice.\"]' WHERE topic='history-pages'");
 	await fixture.sql(
-		"UPDATE messages SET mentions='[\"@codex.\"]',previous=json_object('body','previous @alice/job.'),previous_mentions='[\"@alice/job.\"]' WHERE topic='history'",
+		"UPDATE messages SET mentions='[\"@codex.\"]',previous=json_object('body','previous _@alice/job_'),previous_mentions='[\"@alice/job.\"]' WHERE topic='history'",
 	);
 	const history = await fixture.sql(
 		"SELECT id,seq,topic,agent,instance,body,tags,meta,created_at,edited_at,deleted_at,updated_seq,previous FROM messages WHERE topic='history'",
@@ -99,10 +123,14 @@ it("reindexes both historical mention images on upgrade without changing message
 	const receipts = await fixture.sql(
 		"SELECT * FROM idempotency WHERE json_extract(key,'$[1]')='historical-mention' ORDER BY instance,key",
 	);
-	await fixture.sql("PRAGMA user_version=8");
+	// Preserve legacy root marks rather than guessing which old reads were accidental.
+	await fixture.sql("INSERT INTO reads(instance,topic,seq) VALUES('legacy-instance','',1)");
+	const marks = await fixture.sql("SELECT * FROM reads ORDER BY instance,topic");
+	await fixture.sql("PRAGMA user_version=9");
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
-	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 9 }]);
+	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 10 }]);
+	expect(await fixture.sql("SELECT * FROM reads ORDER BY instance,topic")).toEqual(marks);
 	expect(
 		await fixture.sql("SELECT COUNT(*) AS count FROM messages WHERE topic='history-pages' AND mentions='[\"@alice\"]'"),
 	).toEqual([{ count: 256 }]);

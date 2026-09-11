@@ -13,7 +13,7 @@ export const initialize = Effect.gen(function* () {
 		Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ user_version: Schema.Int })))),
 	);
 	const version = versions[0]?.user_version;
-	if (version === undefined || version > 9) return yield* new KernelError({ code: "app_schema_unsupported" });
+	if (version === undefined || version > 10) return yield* new KernelError({ code: "app_schema_unsupported" });
 	yield* sql`PRAGMA journal_mode = WAL`;
 	yield* sql`PRAGMA synchronous = FULL`;
 	yield* sql.withTransaction(
@@ -84,6 +84,11 @@ export const initialize = Effect.gen(function* () {
 			if (version < 9) {
 				if (version >= 7) yield* reindexMentions(sql);
 				yield* sql`PRAGMA user_version = 9`;
+			}
+			if (version < 10) {
+				// Earlier rungs already rebuilt both images using the current mention grammar.
+				if (version === 9) yield* reindexMentions(sql);
+				yield* sql`PRAGMA user_version = 10`;
 			}
 			yield* registerProtectedSqlTable(sql, "topic_page_continuations");
 			yield* sql`SELECT deleted_at FROM topics LIMIT 1`;
