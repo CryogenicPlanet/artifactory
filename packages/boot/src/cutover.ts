@@ -105,7 +105,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 	});
 	const performReload = (
 		owner: Ownership,
-		options: {
+		request: {
 			readonly release?: boolean;
 			readonly check?: boolean;
 			readonly undo?: UndoSelection;
@@ -122,14 +122,14 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 				const current = yield* Ref.get(supervisor.current);
 				yield* retention.prune(yield* headroom.sample, 0, current ? [current.generation.n] : []);
 				yield* headroom.check();
-				const proposal = yield* options.trustedSource
-					? sources.prepareTrustedTree(owner, options.trustedSource.directory, options.trustedSource.agent)
-					: options.undo === undefined
+				const proposal = yield* request.trustedSource
+					? sources.prepareTrustedTree(owner, request.trustedSource.directory, request.trustedSource.agent)
+					: request.undo === undefined
 						? sources.prepare(owner)
-						: options.undo.generation !== undefined
-							? sources.prepareGeneration(owner, options.undo, options.coordinatorAgent)
-							: sources.prepareUndo(owner, options.undo, options.coordinatorAgent);
-				if (!options.check) {
+						: request.undo.generation !== undefined
+							? sources.prepareGeneration(owner, request.undo, request.coordinatorAgent)
+							: sources.prepareUndo(owner, request.undo, request.coordinatorAgent);
+				if (!request.check) {
 					const started = yield* Clock.monotonicTimeNanos;
 					yield* Effect.addFinalizer(() =>
 						Clock.monotonicTimeNanos.pipe(
@@ -137,22 +137,26 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						),
 					);
 				}
-				let candidate: ActiveChild | null = null;
-				let generation: Generation | null = null;
+				// Partial progress is retained for failure recovery; perform uses non-null local values.
+				const rollback: { generation: Generation | null; candidate: ActiveChild | null; priorClosed: boolean } = {
+					generation: null,
+					candidate: null,
+					priorClosed: false,
+				};
 
 				const prior = yield* Ref.get(supervisor.current);
-				let priorClosed = false;
 				const closePrior = Effect.gen(function* () {
-					if (prior && !priorClosed) {
+					if (prior && !rollback.priorClosed) {
 						yield* stop(prior);
 						yield* generations.retired(prior.generation.n);
-						priorClosed = true;
+						rollback.priorClosed = true;
 					}
 				});
 				const perform = Effect.gen(function* () {
 					const materialized = yield* sources.materialize(proposal);
-					generation = yield* generations.reserve(optionsSource.entryFile);
-					const directory = path.join(optionsSource.dataDirectory, "gen");
+					const reserved = yield* generations.reserve(options.entryFile);
+					rollback.generation = reserved;
+					const directory = path.join(options.dataDirectory, "gen");
 					yield* fs.makeDirectory(directory, { recursive: true });
 					const snapshots = yield* Snapshots.pipe(
 						Effect.provide(
@@ -161,10 +165,11 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							),
 						),
 					);
-					const snapshot = yield* snapshots.create(generation.n);
+					const snapshot = yield* snapshots.create(reserved.n);
 					yield* preparation.prepare(snapshot.directory, snapshot.directory);
-					yield* generations.setSnapshot(generation.n, snapshot.directory);
-					generation = { ...generation, snapshot_dir: snapshot.directory };
+					yield* generations.setSnapshot(reserved.n, snapshot.directory);
+					const generation = { ...reserved, snapshot_dir: snapshot.directory };
+					rollback.generation = generation;
 					if (!(yield* fs.exists(recovery.filename))) yield* recovery.prepare(yield* freshEpoch);
 					const clone = path.join(materialized, "rehearsal.db");
 					yield* backup.clone(clone);
@@ -185,7 +190,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							return Effect.gen(function* () {
 								return yield* new ChildError({
 									code:
-										(options.undo?.generation !== undefined || options.trustedSource !== undefined) &&
+										(request.undo?.generation !== undefined || request.trustedSource !== undefined) &&
 										Schema.is(ChildError)(error) &&
 										error.code === "health_failed"
 											? "incompatible_schema"
@@ -197,14 +202,15 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						Effect.ensuring(stop(rehearsed).pipe(Effect.orDie)),
 					);
 					yield* generations.rehearsed(generation.n, report);
-					if (options.check) {
+					if (request.check) {
 						yield* sources.discard(proposal);
 						return { generation: generation.n, status: "checked" };
 					}
 					yield* sources.publish(proposal);
-					candidate = yield* supervisor
+					const candidate = yield* supervisor
 						.launch(generation, recovery.filename, "candidate")
 						.pipe(Effect.provideContext(context));
+					rollback.candidate = candidate;
 					yield* supervisor.child.traffic.freeze;
 					const frozenAt = (yield* DateTime.nowAsDate).getTime();
 					let priorFrozen = false;
@@ -226,37 +232,36 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						if (prior && !priorFrozen) yield* closePrior;
 						yield* recovery.prepare(prior?.attempt.epoch ?? (yield* freshEpoch));
 						const id = yield* crypto.randomUUIDv4;
-						const directory = path.join(optionsSource.dataDirectory, "backups");
+						const directory = path.join(options.dataDirectory, "backups");
 						yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
 						const saved = path.join(directory, `${id}.db`);
 						const fence = (yield* events.state).published_through;
 						yield* retention.prune(yield* headroom.sample, yield* backup.estimatedBytes, [
 							...(prior ? [prior.generation.n] : []),
-							...(generation ? [generation.n] : []),
+							generation.n,
 						]);
 						const bytes = Number(yield* backup.clone(saved));
 						yield* sql.withTransaction(
 							Effect.gen(function* () {
-								yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation) VALUES(${id},${saved},'pre-flip',${bytes},${frozenAt},${fence},${generation?.n ?? null})`;
-								yield* sql`UPDATE generations SET backup_id=${id} WHERE n=${generation?.n ?? 0}`;
+								yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation) VALUES(${id},${saved},'pre-flip',${bytes},${frozenAt},${fence},${generation.n})`;
+								yield* sql`UPDATE generations SET backup_id=${id} WHERE n=${generation.n}`;
 								yield* events.writeBoot({
 									at: frozenAt,
 									type: "backup.taken",
 									level: "info",
 									actor: "boot",
 									instance: null,
-									generation: generation?.n ?? 0,
+									generation: generation.n,
 									request_id: null,
 									topic: null,
 									message_id: null,
 									payload: { id, reason: "pre-flip", bytes, published_through: fence },
 								});
-								yield* sql`INSERT INTO cutover VALUES(1,${generation?.n ?? 0},${prior?.generation.n ?? null},${id},${owner.id},${owner.family},'working',${candidate?.attempt.epoch ?? null})`;
+								yield* sql`INSERT INTO cutover VALUES(1,${generation.n},${prior?.generation.n ?? null},${id},${owner.id},${owner.family},'working',${candidate.attempt.epoch})`;
 							}),
 						);
 					}).pipe(Effect.timeout("30 seconds"));
 					yield* Effect.gen(function* () {
-						if (!candidate || !generation) return yield* Effect.die("Missing candidate");
 						yield* recovery.prepare(candidate.attempt.epoch);
 						yield* supervisor.recordAttempt(candidate, "starting");
 						yield* owners.opened(candidate.id);
@@ -265,26 +270,23 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					}).pipe(Effect.timeout("5 seconds"));
 					yield* sql.withTransaction(
 						Effect.gen(function* () {
-							if (!generation) return yield* Effect.die("Missing candidate");
 							yield* generations.healthy(generation.n);
 							yield* sql`UPDATE cutover SET phase='accepted' WHERE singleton=1`;
-							yield* acceptSourceRevert(options.revertRequest, generation.n).pipe(
+							yield* acceptSourceRevert(request.revertRequest, generation.n).pipe(
 								Effect.provideService(SqlClient.SqlClient, sql),
 							);
 						}),
 					);
 
-					if (!candidate) return yield* Effect.die("Missing candidate");
 					yield* activate(candidate, "accepted");
 					yield* supervisor.child.traffic.release;
 					const freezeMs = (yield* DateTime.nowAsDate).getTime() - frozenAt;
-					if (!candidate) return yield* Effect.die("Missing candidate");
-					if (prior && !priorClosed) {
+					if (prior && !rollback.priorClosed) {
 						yield* prior.process.control("draining").pipe(Effect.ignore);
 						yield* closePrior;
 					}
 					yield* activate(candidate, "live");
-					yield* finish(owner, true, options.release ?? false);
+					yield* finish(owner, true, request.release ?? false);
 					yield* sql`DELETE FROM cutover WHERE singleton=1`;
 					return {
 						generation: candidate.generation.n,
@@ -293,14 +295,13 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					};
 				});
 				const result = yield* perform.pipe(Effect.interruptible, Effect.exit);
-				const failedGeneration = ((): Generation | null => generation)();
 				if (result._tag === "Success") {
 					yield* refresh;
 					return { ...result.value, lock: (yield* lock.inspect).value };
 				}
 				const failure = Cause.findError(result.cause);
 				const incompatibleSeed =
-					options.trustedSource !== undefined &&
+					request.trustedSource !== undefined &&
 					result.cause.reasons.length === 1 &&
 					failure._tag === "Success" &&
 					Schema.is(ChildError)(failure.success) &&
@@ -309,7 +310,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					Cause.pretty(result.cause).replace(/[a-f0-9]{64}/g, "[redacted]") +
 					(incompatibleSeed ? "; image seed is incompatible with current data; apply a forward source fix" : "");
 				const persisted = yield* read;
-				const failedCandidate = ((): ActiveChild | null => candidate)();
+				const { generation: failedGeneration, candidate: failedCandidate } = rollback;
 				const stderr = (
 					failure._tag === "Success" && Schema.is(ChildError)(failure.success)
 						? (failure.success.stderr ?? "")
@@ -331,7 +332,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					const selected = (yield* generations.list).find((item) => item.n === acceptedGeneration);
 					if (!selected) return yield* new ChildError({ code: "accepted_snapshot_missing" });
 					yield* start(selected);
-					yield* finish(owner, true, options.release ?? false);
+					yield* finish(owner, true, request.release ?? false);
 					yield* sql`DELETE FROM cutover WHERE singleton=1`;
 					yield* supervisor.child.traffic.release;
 					return { generation: selected.n, status: "live", lock: (yield* lock.inspect).value };
@@ -353,7 +354,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						// No backup checkpoint exists: reconcile the authoritative store.
 						yield* start(prior.generation);
 					});
-					yield* priorClosed ? restart : prior.process.control("live").pipe(Effect.catch(() => restart));
+					yield* rollback.priorClosed ? restart : prior.process.control("live").pipe(Effect.catch(() => restart));
 				}
 				// Source publication may have committed even when its completion response failed.
 				yield* sources.recover;
@@ -379,7 +380,6 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 				};
 			}),
 		).pipe(Effect.uninterruptible);
-	const optionsSource = options;
 	// The durable reset_pin marker also protects a human undo borrowing an editor's overlay.
 	const withBorrowedLock = <A, E, R>(note: string, operation: (owner: Ownership) => Effect.Effect<A, E, R>) =>
 		Effect.gen(function* () {
@@ -415,7 +415,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					if (!(yield* Ref.get(ready)) || (yield* recoveryIntents(sql)).count > 0)
 						return yield* new ChildError({ code: "cutover_recovery_required" });
 					yield* supervisor.assertClosure;
-					const seed = yield* seedSource(optionsSource).pipe(Effect.provideService(HeadroomPolicy, policy));
+					const seed = yield* seedSource(options).pipe(Effect.provideService(HeadroomPolicy, policy));
 					yield* authorize(seed.digest);
 					return yield* withBorrowedLock("Reset source to seed", (owner) =>
 						performReload(owner, { trustedSource: { directory: seed.directory, agent } }),
@@ -455,7 +455,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 		reset,
 		revertHuman,
 		seedDigest: Effect.scoped(
-			seedSource(optionsSource)
+			seedSource(options)
 				.pipe(Effect.provideService(HeadroomPolicy, policy))
 				.pipe(Effect.map((seed) => seed.digest)),
 		),

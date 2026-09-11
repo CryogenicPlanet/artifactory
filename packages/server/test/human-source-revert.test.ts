@@ -61,7 +61,7 @@ it.for(["published", "working", "accepted"] as const)(
 			reached = join(fixture.root, "undo-reached");
 		const needle =
 			boundary === "published"
-				? "candidate = yield* supervisor"
+				? "const candidate = yield* supervisor"
 				: boundary === "working"
 					? "yield* recovery.prepare(candidate.attempt.epoch);"
 					: "const freezeMs = (yield* DateTime.nowAsDate).getTime() - frozenAt;";

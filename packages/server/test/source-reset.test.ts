@@ -144,7 +144,7 @@ it.for(["rehearsal", "published", "accepted"] as const)(
 			boundary === "rehearsal"
 				? "const report = yield* rehearsed.process.health.pipe("
 				: boundary === "published"
-					? "candidate = yield* supervisor"
+					? "const candidate = yield* supervisor"
 					: "const freezeMs = (yield* DateTime.nowAsDate).getTime() - frozenAt;";
 		expect(source.split(needle)).toHaveLength(2);
 		await writeFile(
