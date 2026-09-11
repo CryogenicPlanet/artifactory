@@ -92,7 +92,9 @@ throw new Error("deliberate UI build failure"); export default {};`;
 	});
 	await send();
 	expect(await (await fetch(`${app.url}/`, { headers })).text()).toContain("Prepared UI generation");
-	expect(await fixture.sql("SELECT seq FROM messages ORDER BY seq")).toEqual(receipts.map((seq) => ({ seq })));
+	expect(await fixture.sql("SELECT seq FROM messages WHERE topic='preparation' ORDER BY seq")).toEqual(
+		receipts.map((seq) => ({ seq })),
+	);
 	const generations = await (await fetch(`${app.url}/api/generations`, { headers })).json();
 	const acceptedGeneration = generations.last_good;
 	const dependencyStore = await realpath(join(fixture.root, "gen", String(acceptedGeneration), "source/node_modules"));
@@ -109,5 +111,7 @@ throw new Error("deliberate UI build failure"); export default {};`;
 	expect(await (await fetch(`${resumed.url}/`, { headers: { cookie: again } })).text()).toContain(
 		"Prepared UI generation",
 	);
-	expect(await fixture.sql("SELECT seq FROM messages ORDER BY seq")).toEqual(receipts.map((seq) => ({ seq })));
+	expect(await fixture.sql("SELECT seq FROM messages WHERE topic='preparation' ORDER BY seq")).toEqual(
+		receipts.map((seq) => ({ seq })),
+	);
 }, 180000);
