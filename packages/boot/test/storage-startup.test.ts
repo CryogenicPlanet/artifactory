@@ -4,6 +4,7 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { Schema } from "effect";
 import { expect, it } from "vitest";
 import { seedSession, sessionFetch } from "./fixtures/session.ts";
 
@@ -170,7 +171,28 @@ it.for([false, true, "configured"] as const)(
 				body: '{"topic":"saved","body":"after policy change without restart"}',
 			});
 			expect(admitted.status).toBe(200);
-			expect((await restarted.request(page, { method: "PUT", body: "after policy change" })).status).toBe(200);
+			const send = () => restarted.request(page, { method: "PUT", body: "after policy change" });
+			const pending = Schema.Struct({
+				error: Schema.Struct({ code: Schema.Literals(["publication_pending"]), retriable: Schema.Literals([true]) }),
+			});
+			let repaired = await send();
+			// A live background reservation can refuse raw publication before its journal exists.
+			// Retry only that explicit refusal after capacity is restored, never an uncertain write.
+			await expect
+				.poll(
+					async () => {
+						if (repaired.status === 503 && Schema.is(pending)(await repaired.clone().json())) repaired = await send();
+						return repaired.status;
+					},
+					{ timeout: 2000, interval: 20 },
+				)
+				.toBe(200);
+			expect(await (await restarted.request(page)).text()).toBe("after policy change");
+			expect(await (await restarted.request(`${restarted.url}/api/messages?topic=saved&since=0`)).json()).toMatchObject(
+				{
+					items: [{ body: "durable before low space" }, { body: "after policy change without restart" }],
+				},
+			);
 		}
 	},
 );
