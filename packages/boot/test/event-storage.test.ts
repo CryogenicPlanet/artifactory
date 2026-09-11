@@ -79,6 +79,7 @@ it("evicts published pages including index allocation, preserves replay receipts
 	expect(pages).toEqual([{ within_budget: 1 }]);
 });
 
+// Twenty fresh Bun/SQLite processes exercise persisted admission across restarts; Linux exceeded the default 5s.
 it("reports protected excess and refuses new admission while leaving pending rows and allocation untouched", async (test) => {
 	const app = await store(test);
 	await app.run({ op: "reserve", transaction: "pending", count: 1 });
@@ -92,7 +93,7 @@ it("reports protected excess and refuses new admission while leaving pending row
 	expect(await app.sql("SELECT count(*) AS count FROM events")).toEqual([{ count: 12 }]);
 	await app.run({ op: "abort", transaction: "pending" });
 	expect(await app.prune()).toMatchObject({ status: { status: "within_budget" }, admission: { _tag: "Success" } });
-});
+}, 15000);
 
 it("limits each pass, rolls back a failed chunk, and recovers on another process without touching receipt tables", async (test) => {
 	const app = await store(test);

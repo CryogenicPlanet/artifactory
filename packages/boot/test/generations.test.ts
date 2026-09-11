@@ -142,10 +142,13 @@ async function launch(
 }
 
 describe("durable boot generations in real Bun and SQLite", () => {
+	// Three boot lifetimes include keeper startup and health; retain a separate bounded readiness wait for each.
 	it("executes only the snapshot, restarts it with broken or missing sources, and never overwrites edits", async (test) => {
 		const env = await fixture(test);
 		const first = await launch(test, env);
-		await expect.poll(async () => (await first.state()).child.state).toBe("live");
+		await expect
+			.poll(async () => (await first.state()).child, { timeout: 15000 })
+			.toMatchObject({ state: "live", generation: 1 });
 		expect(await (await first.fetch(first.url)).json()).toEqual({
 			message: "original",
 			content: "snapshot-content",
@@ -169,7 +172,9 @@ describe("durable boot generations in real Bun and SQLite", () => {
 		});
 		await first.stop();
 		const restarted = await launch(test, env);
-		await expect.poll(async () => (await restarted.state()).child.state).toBe("live");
+		await expect
+			.poll(async () => (await restarted.state()).child, { timeout: 15000 })
+			.toMatchObject({ state: "live", generation: 1 });
 		expect(await (await restarted.fetch(restarted.url)).json()).toEqual({
 			message: "original",
 			content: "snapshot-content",
@@ -180,14 +185,16 @@ describe("durable boot generations in real Bun and SQLite", () => {
 		await restarted.stop();
 		await rm(join(env.data, "app"), { recursive: true });
 		const missing = await launch(test, env);
-		await expect.poll(async () => (await missing.state()).child.state).toBe("live");
+		await expect
+			.poll(async () => (await missing.state()).child, { timeout: 15000 })
+			.toMatchObject({ state: "live", generation: 1 });
 		expect((await missing.state()).child.generation).toBe(1);
-	}, 15000);
+	}, 60000);
 
 	it("restarts the same good snapshot after every healthy run instead of counting lifetime crashes", async (test) => {
 		const env = await fixture(test);
 		const app = await launch(test, env);
-		await expect.poll(async () => (await app.state()).child.state).toBe("live");
+		await expect.poll(async () => (await app.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		for (let crashes = 1; crashes <= 4; crashes++) {
 			await app.fetch(`${app.url}/crash`);
 			await expect
@@ -257,7 +264,7 @@ await helper.exited;
 		await broken.stop();
 		await writeFile(join(env.data, "app/server.ts"), entrySource);
 		const repaired = await launch(test, env);
-		await expect.poll(async () => (await repaired.state()).child.state).toBe("live");
+		await expect.poll(async () => (await repaired.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		expect((await repaired.history()).items).toMatchObject([
 			{ n: 2, good: 1 },
 			{ n: 1, good: 0 },
@@ -300,7 +307,7 @@ await helper.exited;
 	it("migrates the original schema and preserves its known-good snapshot", async (test) => {
 		const env = await fixture(test);
 		const first = await launch(test, env);
-		await expect.poll(async () => (await first.state()).child.state).toBe("live");
+		await expect.poll(async () => (await first.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		await first.stop();
 		await sql(env.data, "DROP TABLE settings");
 		await sql(env.data, "DROP TABLE passkeys");
@@ -314,7 +321,7 @@ await helper.exited;
 		await rm(join(env.data, "app"), { recursive: true });
 		await rm(env.seed, { recursive: true });
 		const migrated = await launch(test, env);
-		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
+		await expect.poll(async () => (await migrated.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		expect((await migrated.state()).child.generation).toBe(1);
 		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 16 }]);
 		expect(await sql(env.data, "SELECT value FROM settings WHERE key = 'app_seeded'")).toEqual([{ value: "1" }]);
@@ -323,7 +330,7 @@ await helper.exited;
 	it("migrates schema two without losing seed or generation metadata", async (test) => {
 		const env = await fixture(test);
 		const first = await launch(test, env);
-		await expect.poll(async () => (await first.state()).child.state).toBe("live");
+		await expect.poll(async () => (await first.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		await first.stop();
 		await sql(env.data, "DROP TABLE passkeys");
 		await sql(env.data, "DROP TABLE auth_challenges");
@@ -334,7 +341,7 @@ await helper.exited;
 		await sql(env.data, "DROP TABLE public_paths");
 		await sql(env.data, "PRAGMA user_version = 2");
 		const migrated = await launch(test, env);
-		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
+		await expect.poll(async () => (await migrated.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		expect((await migrated.state()).child.generation).toBe(1);
 		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 16 }]);
 		expect(await sql(env.data, "SELECT value FROM settings WHERE key = 'app_seeded'")).toEqual([{ value: "1" }]);
@@ -344,7 +351,7 @@ await helper.exited;
 	it("migrates schema three while preserving active edit ownership and staged deletions", async (test) => {
 		const env = await fixture(test);
 		const first = await launch(test, env);
-		await expect.poll(async () => (await first.state()).child.state).toBe("live");
+		await expect.poll(async () => (await first.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		await first.stop();
 		await sql(env.data, "DROP TABLE passkeys");
 		await sql(env.data, "DROP TABLE auth_challenges");
@@ -362,7 +369,7 @@ await helper.exited;
 		);
 		await sql(env.data, "INSERT INTO staging VALUES ('saved-lock', 'app/obsolete.ts', NULL, NULL, 0)");
 		const migrated = await launch(test, env);
-		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
+		await expect.poll(async () => (await migrated.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		expect((await migrated.state()).child.generation).toBe(1);
 		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 16 }]);
 		expect(await sql(env.data, "SELECT id, holder_family FROM edit_lock")).toEqual([
@@ -378,7 +385,7 @@ await helper.exited;
 	it("migrates schema four preserving auth, active ownership and the staged overlay", async (test) => {
 		const env = await fixture(test);
 		const first = await launch(test, env);
-		await expect.poll(async () => (await first.state()).child.state).toBe("live");
+		await expect.poll(async () => (await first.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		await first.stop();
 		await removeSourceSchema(env.data);
 		await sql(env.data, "ALTER TABLE edit_lock DROP COLUMN reset_pin");
@@ -394,7 +401,7 @@ await helper.exited;
 		await sql(env.data, "DROP TABLE public_paths");
 		await sql(env.data, "PRAGMA user_version = 4");
 		const migrated = await launch(test, env);
-		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
+		await expect.poll(async () => (await migrated.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 16 }]);
 		expect(await sql(env.data, "SELECT id,counter,label FROM passkeys")).toEqual([
 			{ id: "saved-key", counter: 4, label: "laptop" },
@@ -412,7 +419,7 @@ await helper.exited;
 	it("keeps auth and saved-good serving during source recovery conflict, blocks new snapshots, then replays before clearing pin", async (test) => {
 		const env = await fixture(test);
 		const first = await launch(test, env);
-		await expect.poll(async () => (await first.state()).child.state).toBe("live");
+		await expect.poll(async () => (await first.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		await first.stop();
 		const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 		await sql(
@@ -430,7 +437,7 @@ await helper.exited;
 		);
 		await writeFile(join(env.data, "app/content.txt"), "external");
 		const conflicted = await launch(test, env);
-		await expect.poll(async () => (await conflicted.state()).child.state).toBe("live");
+		await expect.poll(async () => (await conflicted.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		const status = await (await conflicted.fetch(`${conflicted.url}/_boot/status`)).json();
 		expect(status).toMatchObject({
 			authenticated: true,
@@ -448,7 +455,7 @@ await helper.exited;
 		await blocked.stop();
 		await writeFile(join(env.data, "app/content.txt"), "snapshot-content");
 		const recovered = await launch(test, env);
-		await expect.poll(async () => (await recovered.state()).child.state).toBe("live");
+		await expect.poll(async () => (await recovered.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		expect(await (await recovered.fetch(recovered.url)).json()).toMatchObject({ content: "changed", generation: "2" });
 		expect(await sql(env.data, "SELECT * FROM edit_lock")).toEqual([]);
 		expect(await sql(env.data, "SELECT * FROM staging")).toEqual([]);
@@ -457,10 +464,13 @@ await helper.exited;
 		]);
 	}, 15000);
 
+	// Fallback runs three failed child attempts before the older snapshot, then another full crash recovery.
 	it("falls back to an older good snapshot after the newest snapshot exhausts its attempts", async (test) => {
 		const env = await fixture(test);
 		const first = await launch(test, env);
-		await expect.poll(async () => (await first.state()).child.state).toBe("live");
+		await expect
+			.poll(async () => (await first.state()).child, { timeout: 15000 })
+			.toMatchObject({ state: "live", generation: 1 });
 		await first.stop();
 		// Model two previously accepted snapshots, then damage the newer one's entry on disk.
 		await cp(join(env.data, "gen/1"), join(env.data, "gen/2"), { recursive: true });
@@ -474,7 +484,7 @@ await helper.exited;
 		await writeFile(join(env.data, "app/message.ts"), "broken editable source");
 		const app = await launch(test, env);
 		await expect
-			.poll(async () => (await app.state()).child, { timeout: 5000 })
+			.poll(async () => (await app.state()).child, { timeout: 20000 })
 			.toMatchObject({ state: "live", generation: 1 });
 		expect((await app.history()).items).toMatchObject([
 			{ n: 2, good: 1, status: "failed" },
@@ -484,11 +494,8 @@ await helper.exited;
 		const previousPid = (await app.state()).child.pid;
 		await app.fetch(`${app.url}/crash`);
 		await expect
-			.poll(async () => {
-				const child = (await app.state()).child;
-				return child.state === "live" && child.pid !== previousPid;
-			})
-			.toBe(true);
+			.poll(async () => (await app.state()).child, { timeout: 15000 })
+			.toMatchObject({ state: "live", generation: 1, pid: expect.not.toBeOneOf([null, previousPid]) });
 		await expect.poll(async () => (await app.state()).child).toMatchObject({ state: "live", generation: 1 });
 		expect(
 			await sql(
@@ -496,12 +503,12 @@ await helper.exited;
 				"SELECT json_extract(event, '$.generation') AS generation, json_extract(event, '$.payload.reason') AS reason, json_extract(event, '$.payload.attempts') AS attempts FROM events WHERE type='generation.failed' AND json_extract(event, '$.payload.reason')='startup_failures'",
 			),
 		).toEqual([{ generation: 2, reason: "startup_failures", attempts: 3 }]);
-	}, 15000);
+	}, 60000);
 
 	it("refuses a corrupted stored entry instead of executing outside its snapshot", async (test) => {
 		const env = await fixture(test);
 		const first = await launch(test, env);
-		await expect.poll(async () => (await first.state()).child.state).toBe("live");
+		await expect.poll(async () => (await first.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		await first.stop();
 		await sql(env.data, "UPDATE generations SET entry_file = '../../../app/server.ts'");
 		const app = await launch(test, env);

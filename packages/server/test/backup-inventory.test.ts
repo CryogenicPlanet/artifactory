@@ -150,6 +150,7 @@ it("keeps inventory available while the app is down without creating files or ch
 	await app.stop();
 	await rm(join(fixture.root, "comms.db"));
 	const down = await fixture.launch();
+	// Three failing app/keeper startups must finish before checking inventory side effects (Linux was starting attempt 3 at 5s).
 	await expect
 		.poll(
 			async () => {
@@ -158,7 +159,7 @@ it("keeps inventory available while the app is down without creating files or ch
 					Schema.Struct({ child: Schema.Struct({ state: Schema.String, attempt: Schema.Int }) }),
 				)(await response.json()).child;
 			},
-			{ timeout: 5000 },
+			{ timeout: 20000 },
 		)
 		.toMatchObject({ state: "failed", attempt: 3 });
 	await fixture.sql(
@@ -180,4 +181,4 @@ it("keeps inventory available while the app is down without creating files or ch
 	);
 	expect((await readdir(fixture.root, { recursive: true })).sort()).toEqual(files);
 	expect((await fetch(`${down.url}/api/messages`, { headers: { cookie } })).status).toBe(503);
-}, 20000);
+}, 45000);

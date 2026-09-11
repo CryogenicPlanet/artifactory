@@ -172,17 +172,24 @@ it("rejects wrong and stale channel credentials, including a request body held a
 	);
 	await delay(50);
 	process.kill(first.child.pid, "SIGKILL");
+	// Complete the held body when retirement revokes the old channel, before waiting for a new child.
+	// Candidate startup is unrelated to the two-second request-body deadline.
 	await expect
 		.poll(
-			async () => {
-				const next = await state();
-				return next.child.state === "live" && next.child.pid !== first.child.pid;
-			},
+			async () =>
+				(
+					await fetch(`${app.url}/_boot/seq`, {
+						headers: { "x-boot-secret": channel.secret },
+					})
+				).status,
 			{ timeout: 1800, interval: 20 },
 		)
-		.toBe(true);
+		.toBe(403);
 	request.end('"count":1}');
 	expect(await result).toBe(403);
+	await expect
+		.poll(async () => (await state()).child, { timeout: 15000 })
+		.toMatchObject({ state: "live", pid: expect.not.toBeOneOf([null, first.child.pid]) });
 	expect((await fetch(`${app.url}/_boot/seq`, { headers: { "x-boot-secret": channel.secret } })).status).toBe(403);
 	expect(await fixture.sql("SELECT id FROM event_batches WHERE id='late-body'", "boot.db")).toEqual([]);
-}, 10000);
+}, 30000);
