@@ -15,6 +15,10 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -46,6 +50,7 @@ jobs:
       - name: Build
         run: bun run build
       - name: Serial Linux startup diagnostics
+        if: matrix.shard == 1
         continue-on-error: true
         run: >-
           bun run test
@@ -56,4 +61,4 @@ jobs:
           -t 'forwards upload chunks before the request finishes|creates a passkey and a protected session, forwards verified identity, and logs out|recovers process death at replacement boundary 0 idempotently from its own journal'
       - name: Boot and server recovery tests
         # Each file launches Bun processes; four workers exceeded measured fixture budgets on this runner.
-        run: bun run test packages/boot/test packages/server/test --maxWorkers=2
+        run: bun run test packages/boot/test packages/server/test --maxWorkers=2 --shard=${{ matrix.shard }}/2 --reporter=verbose
