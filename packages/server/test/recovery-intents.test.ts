@@ -81,8 +81,13 @@ it.for([insertCutover, insertRestore, insertMove, insertSource] as const)(
 		const ownership = await fixture.sql("SELECT * FROM child_attempts", "boot.db");
 		const restores = await fixture.sql("SELECT * FROM db_restore_requests", "boot.db");
 		const backups = await fixture.sql("SELECT * FROM backups", "boot.db");
-		expect((await app.post("/api/reload", {}, cookie)).status).toBe(503);
-		expect((await app.post("/_boot/db/backup", {}, cookie)).status).toBe(503);
+		for (const path of ["/api/reload", "/_boot/db/backup"]) {
+			const response = await app.post(path, {}, cookie);
+			expect({ status: response.status, body: await response.json() }, path).toMatchObject({
+				status: 409,
+				body: { error: { code: "cutover_recovery_required", retriable: false } },
+			});
+		}
 		expect(
 			(
 				await fetch(`${app.url}/api/fs/pages/old/index.md`, {
@@ -92,21 +97,22 @@ it.for([insertCutover, insertRestore, insertMove, insertSource] as const)(
 				})
 			).status,
 		).toBe(503);
-		if (pending !== insertRestore)
-			expect(
-				(
-					await fetch(`${app.url}/_boot/db/restore`, {
-						method: "POST",
-						headers: {
-							cookie,
-							origin: "https://comms.test",
-							"content-type": "application/json",
-							"x-comms-assertion": proof,
-						},
-						body: JSON.stringify({ backup }),
-					})
-				).status,
-			).toBe(503);
+		if (pending !== insertRestore) {
+			const response = await fetch(`${app.url}/_boot/db/restore`, {
+				method: "POST",
+				headers: {
+					cookie,
+					origin: "https://comms.test",
+					"content-type": "application/json",
+					"x-comms-assertion": proof,
+				},
+				body: JSON.stringify({ backup }),
+			});
+			expect({ status: response.status, body: await response.json() }).toMatchObject({
+				status: 409,
+				body: { error: { code: "restore_recovery_required", retriable: false } },
+			});
+		}
 		expect(await fixture.sql("SELECT * FROM db_restore_requests", "boot.db")).toEqual(restores);
 		expect(await fixture.sql("SELECT * FROM backups", "boot.db")).toEqual(backups);
 		expect(await fixture.sql("SELECT * FROM generations", "boot.db")).toEqual(generations);

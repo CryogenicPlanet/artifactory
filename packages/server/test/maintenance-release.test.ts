@@ -68,7 +68,10 @@ it.for(["selection", "lock-release"] as const)(
 			headers: { cookie, origin: "https://comms.test", "content-type": "application/json", "X-Comms-Assertion": proof },
 			body: JSON.stringify({ backup: saved.id }),
 		});
-		expect(response.status).toBe(503);
+		expect({ status: response.status, body: await response.json() }).toMatchObject({
+			status: 409,
+			body: { error: { code: "restore_recovery_required", retriable: false } },
+		});
 		expect(await gates(app.url, cookie)).toEqual({ traffic: { frozen: false }, fixture_requests: { frozen: false } });
 		expect((await fetch(`${app.url}/api/messages?since=0`, { headers: { cookie } })).status).toBe(503);
 		expect((await app.post("/api/messages", { topic: "restore", body: "unsafe" }, cookie)).status).toBe(503);

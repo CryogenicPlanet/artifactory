@@ -135,7 +135,10 @@ it(
 			).status,
 		).toBe(200);
 		const reload = await authenticated(`${app.url}/api/reload`, { method: "POST", body: "{}" });
-		expect(reload.status).toBe(503);
+		expect({ status: reload.status, body: await reload.json() }).toMatchObject({
+			status: 409,
+			body: { error: { code: "child_closure_unproven", retriable: false } },
+		});
 		expect(await attempts()).toEqual([{ opened: 1, closed: 0 }]);
 		expect(await sql("comms.db", "SELECT epoch FROM kernel_writer")).toEqual(epoch);
 		expect(await sql("boot.db", "SELECT cutover_in_flight FROM edit_lock")).toEqual([{ cutover_in_flight: 0 }]);

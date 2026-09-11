@@ -66,9 +66,13 @@ it(
 		expect((await app.post("/api/messages", { topic: "backup", body: "after copies" }, cookie)).status).toBe(200);
 		await fixture.sql("INSERT INTO source_batches VALUES('pending',NULL,'fixture',0,'publishing')", "boot.db");
 		const refused = await post(human);
-		expect(refused.status).toBe(503);
+		expect(refused.status).toBe(409);
 		expect(await refused.json()).toMatchObject({
-			error: { code: "backup_failed", retriable: false, hint: expect.stringContaining("may already exist") },
+			error: {
+				code: "cutover_recovery_required",
+				retriable: false,
+				hint: expect.stringContaining("may already exist"),
+			},
 		});
 		expect(await fixture.sql("SELECT COUNT(*) count FROM backups", "boot.db")).toEqual([{ count: 2 }]);
 	},
