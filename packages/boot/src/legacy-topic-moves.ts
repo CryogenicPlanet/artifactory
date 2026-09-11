@@ -3,7 +3,7 @@ import { Crypto, Effect, FileSystem, Option, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { fenceAppStore } from "./app-recovery.ts";
 import { decodeRows } from "./decode-rows.ts";
-import { Events } from "./events.ts";
+import { Events, EventRecord } from "./events.ts";
 import { RecoveryRejected } from "./recovery-intents.ts";
 import { sourceIO, validSourcePath } from "./source-io.ts";
 
@@ -31,7 +31,30 @@ const legacyRows = (sql: SqlClient.SqlClient) =>
 		if (tables.length !== 2) return yield* refused();
 		const moves = yield* sql`SELECT * FROM topic_moves`.pipe(decodeRows(Move));
 		const pages = yield* sql`SELECT * FROM topic_page_moves`.pipe(decodeRows(Page));
-		if (pages.some((page) => !moves.some((move) => move.id === page.id))) return yield* refused();
+		for (const page of pages.filter((page) => !moves.some((move) => move.id === page.id))) {
+			if (page.state !== "completed") return yield* refused();
+			// Only immutable publication evidence can retire an orphan; later page edits are legitimate.
+			const proof = yield* sql`SELECT b.from_seq,e.seq,e.event FROM event_batches b
+ JOIN events e ON e.transaction_id=b.id JOIN seq s ON s.singleton=1
+ WHERE b.id=${page.id} AND b.state='published' AND b.from_seq=b.to_seq
+ AND s.pending_id IS NOT b.id AND s.published_through>=b.to_seq`.pipe(
+				decodeRows(Schema.Struct({ from_seq: Schema.Int, seq: Schema.Int, event: Schema.String })),
+			);
+			const retained = proof[0];
+			if (proof.length !== 1 || !retained || retained.seq !== retained.from_seq) return yield* refused();
+			const event = yield* Schema.decodeEffect(Schema.fromJsonString(EventRecord))(retained.event);
+			const payload = yield* Schema.decodeUnknownEffect(Schema.Struct({ from: Schema.String, to: Schema.String }))(
+				event.payload,
+			);
+			if (
+				event.seq !== retained.seq ||
+				event.type !== "topic.moved" ||
+				event.topic !== payload.to ||
+				page.from_path !== `pages/${payload.from}` ||
+				page.to_path !== `pages/${payload.to}`
+			)
+				return yield* refused();
+		}
 		if (moves.filter((move) => move.state !== "completed" && move.state !== "aborted").length > 1)
 			return yield* refused();
 		return { moves, pages };

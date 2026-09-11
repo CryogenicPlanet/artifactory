@@ -253,3 +253,74 @@ it.for(["missing", "aborted", "range", "attempt", "move-seq"] as const)(
 		await expect(stat(join(app.root, "pages/new"))).rejects.toMatchObject({ code: "ENOENT" });
 	},
 );
+
+it("retires a proved completed orphan without opening the app store or reverting later page edits", async (test) => {
+	const app = await fixture(test);
+	await app.call({ op: "seed", committed: true });
+	await app.crash("events");
+	await app.sql("UPDATE topic_page_moves SET state='completed'");
+	await app.sql("DELETE FROM topic_moves");
+	await writeFile(join(app.root, "pages/new/page.md"), "later page edit");
+	await writeFile(join(app.root, "comms.db"), "app store must not be opened");
+	const store = await readFile(join(app.root, "comms.db"));
+	const events = await app.sql("SELECT * FROM events ORDER BY seq");
+	const batches = await app.sql("SELECT * FROM event_batches");
+	const allocator = await app.sql("SELECT * FROM seq");
+	expect(await app.call({ op: "recover" })).toMatchObject({ _tag: "Success" });
+	expect(await app.call({ op: "recover" })).toMatchObject({ _tag: "Success" });
+	expect(await readFile(join(app.root, "comms.db"))).toEqual(store);
+	expect(await readFile(join(app.root, "pages/new/page.md"), "utf8")).toBe("later page edit");
+	expect(await app.sql("SELECT * FROM events ORDER BY seq")).toEqual(events);
+	expect(await app.sql("SELECT * FROM event_batches")).toEqual(batches);
+	expect(await app.sql("SELECT * FROM seq")).toEqual(allocator);
+	expect(await app.sql("SELECT name FROM sqlite_master WHERE name IN ('topic_moves','topic_page_moves')")).toEqual([]);
+});
+
+it.for([
+	["pruned event", "DELETE FROM events WHERE seq=1"],
+	["missing receipt", "DELETE FROM event_batches"],
+	["aborted receipt", "UPDATE event_batches SET state='aborted'"],
+	["multiple-event receipt", "UPDATE event_batches SET to_seq=2"],
+	["pending owner", "UPDATE seq SET pending_id='move'"],
+	["unpublished allocator fence", "UPDATE seq SET published_through=0"],
+	["wrong event", "UPDATE events SET event=json_set(event,'$.type','message.created') WHERE seq=1"],
+	["wrong paths", "UPDATE events SET event=json_set(event,'$.payload.from','unrelated') WHERE seq=1"],
+	["wrong event sequence", "UPDATE events SET event=json_set(event,'$.seq',99) WHERE seq=1"],
+	["wrong stored sequence", "UPDATE events SET seq=99 WHERE seq=1"],
+	["invalid event JSON", "UPDATE events SET event='{}' WHERE seq=1"],
+	[
+		"duplicate evidence",
+		"INSERT INTO events(seq,transaction_id,event,topic) SELECT 99,transaction_id,event,topic FROM events WHERE seq=1",
+	],
+	["prepared orphan", "UPDATE topic_page_moves SET state='prepared'"],
+	["publishing orphan", "UPDATE topic_page_moves SET state='publishing'"],
+	["published orphan", "UPDATE topic_page_moves SET state='published'"],
+	[
+		"another unproved orphan",
+		"INSERT INTO topic_page_moves VALUES('unknown','pages/a','pages/b','human',NULL,'completed')",
+	],
+] as const)("preserves completed orphan metadata with %s", async ([, statement], test) => {
+	const app = await fixture(test);
+	await app.call({ op: "seed", committed: true });
+	await app.crash("events");
+	await app.sql("UPDATE topic_page_moves SET state='completed'");
+	await app.sql("DELETE FROM topic_moves");
+	await app.sql(statement);
+	const evidence = () =>
+		Promise.all([
+			app.sql("SELECT * FROM topic_moves"),
+			app.sql("SELECT * FROM topic_page_moves"),
+			app.sql("SELECT * FROM event_batches"),
+			app.sql("SELECT * FROM events ORDER BY seq"),
+			app.sql("SELECT * FROM seq"),
+		]);
+	const before = await evidence();
+	const store = await readFile(join(app.root, "comms.db"));
+	expect(await app.call({ op: "recover" })).toMatchObject({
+		_tag: "Failure",
+		failure: { code: "topic_move_recovery_required" },
+	});
+	expect(await evidence()).toEqual(before);
+	expect(await readFile(join(app.root, "comms.db"))).toEqual(store);
+	expect(await readFile(join(app.root, "pages/new/page.md"), "utf8")).toBe("preserved");
+});
