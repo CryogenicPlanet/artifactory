@@ -25,9 +25,15 @@ The last pushed checkpoint above is historical. The following review changes are
 
 Before the boot reduction was integrated, repository check/build passed and the full suite produced **402 passed, one failed (403 tests, 104 files)**. The remaining failure was `generation-revert.test.ts` initial readiness: child still `starting` after the fixture's 15-second deadline, before the edit under test. It is not yet diagnosed as a product failure or resource-pressure flake. After the reduction, check/build and all 22 focused integration tests across four files passed, including generation restore. No deadline was relaxed; the isolated rerun does not establish the original timeout cause. A fresh read-only integration review found no blockers.
 
+A newer Linux run at `0813fe6`, [34570039082](https://github.com/CryogenicPlanet/artifactory/actions/runs/34570039082), passes check/build and the three serial diagnostic cases; the required parallel suite is still running.
+
 Linux CI was actually run at `181939b`: [run 34567582863](https://github.com/CryogenicPlanet/artifactory/actions/runs/34567582863). Install/check/build passed; tests produced **306 passed, 101 failed**. Beyond known local failures, representative tests exhausted one-second startup polling or a five-second whole-test budget. Logs lack child diagnostics at timeout, so neither resource pressure nor lifecycle failure is established. Reproduce representative cases serially with redacted process/status diagnostics before changing deadlines. OS ownership, container execution, descendant closure and real reboot acceptance remain unverified.
 
 Do not repeat the public-page retry workaround. Fix the production read path and remove the retry allowance when its replacement lands.
+
+The delta recovery fixes are committed in `a205ce1` (maintenance finalization; root check and 10 tests passed) and `e13b3af` (page-intent diagnostic access; root check and 13 tests passed). Linux diagnostics are committed in `0813fe6`; the three selected root cases passed without relaxed deadlines.
+
+Lifecycle items 12/13 are integrated. The full root suite with two workers passed **393/393 tests across 103 files** in 282 seconds; root check/build also pass. This includes the boot reductions and both delta recovery fixes. The UI handoff is frozen, with 620 CSS lines removed and no added dependencies/tests; it includes minimal API client changes and will land with that API. Shared mutation/type/API/extension/wait integration is progressing separately; do not mark it shipped from individual worker checks.
 
 ## Active parallel work and integration boundaries
 
@@ -80,7 +86,7 @@ Numbers match the owner's review. None of these is marked complete merely becaus
 | 8 | Signal-driven message and boot-event long-polls. Once streaming starts, failures must still finish with the documented envelope. Retain heartbeat, cursor and drain semantics; stop 100 ms full-query loops. |
 | 9 | One `mutate({ events, idempotency?, body })` owns relay, epoch, reservation, transaction, outbox, receipt and safe abort. Every retained writer uses it. Consolidate idempotency with compatible migration and lost-response behavior. |
 | 10 | Cache/pin the publication fence and consume append acknowledgements. Preserve transaction-snapshot visibility; remove repetitive fence HTTP calls from idle waits. |
-| 11 | Index unshipped outbox rows and implement safe outbox/receipt retention. Coordinate pruning with recovery evidence, reserved ranges, retries and backup restore; deleting acknowledged rows must not break replay/reconciliation. |
+| 11 | Owner selected a 30-day idempotency replay guarantee. Index unshipped outbox rows and implement safe outbox/receipt retention. Coordinate pruning with recovery evidence, reserved ranges, retries and backup restore; deleting acknowledged rows must not break replay/reconciliation. |
 | 12 | Count consecutive startup failures, reset on healthy start, and emit `generation.failed` on demotion. |
 | 13 | Apply the freeze budget to drain, with separate backup/go-to-health deadlines and typed retriable `freeze_timeout`. Preserve the pre-/post-acceptance rollback boundary. |
 | 14 | Indexed boot event columns for type/actor/instance/topic/level. Topic alone is currently projected. Remove duplicate filtering and advance empty filtered cursors correctly. |
