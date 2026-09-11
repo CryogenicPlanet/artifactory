@@ -115,7 +115,9 @@ it("reindexes both historical mention images on upgrade without changing message
 		),
 	).toEqual(history);
 	expect(
-		await fixture.sql("SELECT * FROM idempotency WHERE json_extract(key,'$[1]')='historical-mention' ORDER BY instance,key"),
+		await fixture.sql(
+			"SELECT * FROM idempotency WHERE json_extract(key,'$[1]')='historical-mention' ORDER BY instance,key",
+		),
 	).toEqual(receipts);
 	expect(await (await resumed.post("/api/messages", input, cookie, "historical-mention")).json()).toEqual(original);
 }, 30000);
