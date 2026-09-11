@@ -89,6 +89,10 @@ describe("real Bun boot proxy", () => {
 			scopes: "read,write,fs",
 			label: "human",
 			requestId: expect.stringMatching(/^[a-f0-9]{32}$/),
+			trace: expect.stringMatching(/^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/),
+			publicTrace: expect.stringMatching(/^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/),
+			traceState: null,
+			baggage: null,
 			forwarded: null,
 			hop: null,
 			contentType: "text/plain",
@@ -176,7 +180,7 @@ describe("real Bun boot proxy", () => {
 		await expect.poll(async () => (await app.state()).state, { timeout: 5000 }).toBe("live");
 		const state = await app.state();
 		if (typeof state.port !== "number" || typeof state.pid !== "number") throw new Error("Expected child address");
-		const messages = await app.fetch(`${app.url}/api/messages?since=0`);
+		const messages = await app.fetch(`${app.url}/api/messages?since=0&topic=proxy-empty`);
 		expect(messages.status).toBe(200);
 		expect(await messages.json()).toMatchObject({ items: [] });
 		expect((await fetch(`http://127.0.0.1:${state.port}/health`)).status).toBe(403);
