@@ -37,6 +37,10 @@ it("serves a private compiled board from its generation and confines SPA fallbac
 		const response = await get(path);
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toContain("text/html");
+		expect(response.headers.get("content-security-policy")).toBe(
+			"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; manifest-src 'self'",
+		);
+		expect(response.headers.get("referrer-policy")).toBe("no-referrer");
 		expect(await response.text()).toBe(html);
 	}
 	const recovery = await get("/_boot/recovery");
@@ -72,6 +76,8 @@ it("serves a private compiled board from its generation and confines SPA fallbac
 	await rm(join(board, "index.html"));
 	const fallback = await get("/");
 	expect(fallback.status).toBe(503);
+	expect(fallback.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+	expect(fallback.headers.get("content-security-policy")).toContain("form-action 'self'");
 	expect(await fallback.text()).toContain("open recovery help");
 	expect((await get("/api/messages?since=0")).status).toBe(200);
 	await app.stop();

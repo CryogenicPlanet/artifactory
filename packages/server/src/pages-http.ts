@@ -1,18 +1,13 @@
 import { Messages } from "./ext/core/messages.ts";
 import { Cause, Effect, FileSystem, Layer, Option, Scope, Stream } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, Mime } from "effect/unstable/http";
-import { failure, identity } from "./conversation-request.ts";
+import { identity } from "./conversation-request.ts";
 import { PageRejected, Pages } from "./ext/core/pages.ts";
 import { escapeHtml, pageDocument, pageHref } from "./page-markdown.ts";
 import { routes as assetRoutes } from "./page-assets.ts";
 
-const pageHeaders = Object.freeze({
-	"cache-control": "no-store",
-	"x-content-type-options": "nosniff",
-	"referrer-policy": "no-referrer",
-	"content-security-policy":
-		"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
-});
+import { htmlHeaders as pageHeaders } from "./html-headers.ts";
+import { pageFailure } from "./page-failure.ts";
 
 const page = Effect.gen(function* () {
 	const request = yield* HttpServerRequest.HttpServerRequest;
@@ -93,27 +88,5 @@ const page = Effect.gen(function* () {
 			);
 		}),
 	);
-}).pipe(
-	Effect.catchTags({
-		PageRejected: (error) =>
-			Effect.succeed(
-				HttpServerResponse.jsonUnsafe(
-					{
-						error: {
-							code: error.code,
-							message: "Page request failed.",
-							hint:
-								error.code === "pages_move_pending"
-									? "This page tree is moving. Finish the original topic move with its original Idempotency-Key if one was supplied; other topics remain available."
-									: "Check the page path under /p/.",
-							retriable: error.code === "pages_unavailable" || error.code === "pages_move_pending",
-						},
-					},
-					{ status: error.code === "page_not_found" ? 404 : error.code === "page_path_invalid" ? 400 : 503 },
-				),
-			),
-		KernelError: (error) => failure(Effect.fail(error)),
-	}),
-	Effect.catchCause(() => Effect.succeed(HttpServerResponse.empty({ status: 503 }))),
-);
+}).pipe(pageFailure);
 export const routes = Layer.mergeAll(HttpRouter.add("GET", "/p/*", page), assetRoutes);

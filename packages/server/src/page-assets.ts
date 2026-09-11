@@ -1,4 +1,5 @@
 import { Effect, Layer, Path } from "effect";
+import { failure } from "./conversation-request.ts";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 
 // Only these package-owned files are public; never serve a node_modules directory.
@@ -35,7 +36,7 @@ export const routes = Layer.mergeAll(
 					contentType: name.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8",
 					headers,
 				});
-			}).pipe(Effect.catchCause(() => Effect.succeed(HttpServerResponse.empty({ status: 503, headers })))),
+			}).pipe(failure),
 		),
 	),
 );

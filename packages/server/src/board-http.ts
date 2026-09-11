@@ -1,7 +1,14 @@
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { boardRecovery } from "./board-recovery.ts";
-import { identity } from "./conversation-request.ts";
+import { failure, identity } from "./conversation-request.ts";
+
+import { htmlHeaders } from "./html-headers.ts";
+
+const boardHeaders = Object.freeze({
+	...htmlHeaders,
+	"content-security-policy": `${htmlHeaders["content-security-policy"]}; manifest-src 'self'`,
+});
 
 /** Only built board files adjacent to this generation are served; never the editable tree. */
 const board = (directory: string) =>
@@ -33,7 +40,7 @@ const board = (directory: string) =>
 				: HttpServerResponse.text(boardRecovery, {
 						contentType: "text/html; charset=utf-8",
 						status: 503,
-						headers: { "cache-control": "no-store" },
+						headers: boardHeaders,
 					});
 		if (!(yield* fs.exists(directory))) return unavailable();
 		let target = directory;
@@ -44,12 +51,9 @@ const board = (directory: string) =>
 		}
 		if ((yield* fs.stat(target)).type !== "File") return unavailable();
 		return yield* HttpServerResponse.file(target, {
-			headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
+			headers: asset ? { "cache-control": "no-store", "x-content-type-options": "nosniff" } : boardHeaders,
 		});
-	}).pipe(
-		Effect.catchTag("KernelError", () => Effect.succeed(HttpServerResponse.empty({ status: 403 }))),
-		Effect.catchCause(() => Effect.succeed(HttpServerResponse.empty({ status: 503 }))),
-	);
+	}).pipe(failure);
 
 export const routes = (directory: string) =>
 	Layer.mergeAll(
