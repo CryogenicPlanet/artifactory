@@ -1,10 +1,11 @@
+import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
 import { PlatformError } from "effect/PlatformError";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import { isHttpClientError } from "effect/unstable/http/HttpClientError";
 import { ChildError } from "./child-process.ts";
 import { Cause, Effect, Schema } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
 import { authErrorResponse, authFailure, authenticate, body, humanSession } from "./auth-http.ts";
 import type { DatabaseBackup } from "./database-backup.ts";
@@ -20,8 +21,7 @@ export const backupRoute = (
 	config: AuthConfig,
 ) =>
 	Effect.gen(function* () {
-		const request = yield* HttpServerRequest.HttpServerRequest;
-		const url = new URL(request.url, "http://localhost");
+		const { request, url } = yield* bootRoute;
 		const create = url.pathname === "/_boot/db/backup" && request.method === "POST";
 		if (!create && (request.method !== "GET" || url.pathname !== "/_boot/db/backups")) return null;
 		return yield* authFailure(
@@ -31,8 +31,7 @@ export const backupRoute = (
 						const identity = yield* authenticate(auth, request);
 						if (identity.kind !== "human" && !identity.scopes.includes("fs"))
 							return yield* new AuthError({ code: "scope_required" });
-						if (identity.kind === "human" && request.headers.origin !== config.expectedOrigin)
-							return yield* new AuthError({ code: "origin_invalid" });
+						yield* checkBootOrigin("backupWrite", request, config, identity.kind);
 					});
 					yield* authorize;
 					if (url.search) return yield* new AuthError({ code: "invalid_request" });

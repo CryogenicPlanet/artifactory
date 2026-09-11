@@ -1,13 +1,13 @@
+import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { Effect, Schema } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
 import { assertionProof, authFailure, body, humanSession } from "./auth-http.ts";
 
 /** These exact routes survive child failure; refresh proves itself, revoke always requires the human. */
 export const tokenRoute = (auth: Auth["Service"], config: AuthConfig) =>
 	Effect.gen(function* () {
-		const request = yield* HttpServerRequest.HttpServerRequest;
-		const url = new URL(request.url, "http://localhost");
+		const { request, url } = yield* bootRoute;
 		const refresh = request.method === "POST" && ["/auth/refresh", "/_boot/refresh"].includes(url.pathname);
 		const family =
 			request.method === "POST"
@@ -22,7 +22,7 @@ export const tokenRoute = (auth: Auth["Service"], config: AuthConfig) =>
 					const pair = yield* auth.refreshTokens(input.refresh, request.headers["idempotency-key"]);
 					return HttpServerResponse.jsonUnsafe(pair, { headers: { "x-comms-token-expires": String(pair.expires_at) } });
 				}
-				if (request.headers.origin !== config.expectedOrigin) return yield* new AuthError({ code: "origin_invalid" });
+				yield* checkBootOrigin("tokenRevoke", request, config);
 				const session = yield* humanSession(auth, request);
 				yield* body(Schema.Struct({}));
 				if (!family) return yield* new AuthError({ code: "invalid_request" });

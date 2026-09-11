@@ -1,9 +1,10 @@
+import { bootRoute } from "./boot-route.ts";
 import { requestBytes } from "./request-bytes.ts";
 import { editFailure, errorResponse } from "./edit-failure.ts";
 import type { SourceReverts } from "./source-revert.ts";
 import { SourceResetParams } from "./source-reset-schema.ts";
 import { Effect, Schema } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth } from "./auth.ts";
 import { assertionProof, authenticate, body, humanSession } from "./auth-http.ts";
 import { databaseRestoreResponse } from "./database-restore-http.ts";
@@ -36,8 +37,7 @@ export const editRoute = (
 	restore: DatabaseRestore,
 ) =>
 	Effect.gen(function* () {
-		const request = yield* HttpServerRequest.HttpServerRequest;
-		const url = new URL(request.url, "http://localhost");
+		const { request, url } = yield* bootRoute;
 		const route = url.pathname.replace(/^\/api\//, "/_boot/");
 		if (
 			route !== "/_boot/reset" &&

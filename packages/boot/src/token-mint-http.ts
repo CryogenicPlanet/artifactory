@@ -1,18 +1,18 @@
+import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { Effect } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
 import { assertionProof, authFailure, body, humanSession, sessionToken } from "./auth-http.ts";
 import { MintToken } from "./token-mint-schema.ts";
 
 export const tokenMintRoute = (auth: Auth["Service"], config: AuthConfig) =>
 	Effect.gen(function* () {
-		const request = yield* HttpServerRequest.HttpServerRequest;
-		const url = new URL(request.url, "http://localhost");
+		const { request, url } = yield* bootRoute;
 		if (request.method !== "POST" || !["/_boot/tokens", "/api/tokens"].includes(url.pathname)) return null;
 		return yield* authFailure(
 			Effect.gen(function* () {
 				if (url.search) return yield* new AuthError({ code: "invalid_request" });
-				if (request.headers.origin !== config.expectedOrigin) return yield* new AuthError({ code: "origin_invalid" });
+				yield* checkBootOrigin("tokenMint", request, config);
 				const session = yield* humanSession(auth, request);
 				const secret = sessionToken(request);
 				if (!secret) return yield* new AuthError({ code: "session_invalid" });

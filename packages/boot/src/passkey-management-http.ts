@@ -1,13 +1,13 @@
+import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { Effect, Schema } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
 import { assertionProof, humanSession, authFailure, body } from "./auth-http.ts";
 import { PasskeyRegistrationResponse } from "./passkey-management-schema.ts";
 
 export const passkeyManagementRoute = (auth: Auth["Service"], config: AuthConfig) =>
 	Effect.gen(function* () {
-		const request = yield* HttpServerRequest.HttpServerRequest;
-		const url = new URL(request.url, "http://localhost");
+		const { request, url } = yield* bootRoute;
 		const path = url.pathname;
 		const list = request.method === "GET" && path === "/_boot/auth/passkeys";
 		const start = request.method === "POST" && path === "/_boot/auth/passkeys/options";
@@ -17,8 +17,7 @@ export const passkeyManagementRoute = (auth: Auth["Service"], config: AuthConfig
 		if (!list && !start && !finish && !remove) return null;
 		return yield* authFailure(
 			Effect.gen(function* () {
-				if (!list && request.headers.origin !== config.expectedOrigin)
-					return yield* new AuthError({ code: "origin_invalid" });
+				yield* checkBootOrigin(list ? "passkeyRead" : "passkeyWrite", request, config);
 				if (url.search) return yield* new AuthError({ code: "invalid_request" });
 				const session = yield* humanSession(auth, request);
 				if (list) return HttpServerResponse.jsonUnsafe(yield* auth.listPasskeys(session.id));

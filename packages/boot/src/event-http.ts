@@ -1,3 +1,4 @@
+import { bootRoute } from "./boot-route.ts";
 import { requestBytes } from "./request-bytes.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
 import { isSqlError } from "effect/unstable/sql/SqlError";
@@ -185,8 +186,7 @@ export const eventRoute = (
 	backup?: DatabaseBackup,
 ) =>
 	Effect.gen(function* () {
-		const request = yield* HttpServerRequest.HttpServerRequest;
-		const url = new URL(request.url, "http://localhost");
+		const { request, url } = yield* bootRoute;
 		const capture = url.pathname === "/_boot/db/backup" && request.headers["x-boot-secret"] !== undefined;
 		const internal =
 			capture ||

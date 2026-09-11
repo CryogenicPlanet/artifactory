@@ -1,13 +1,13 @@
+import { bootRoute } from "./boot-route.ts";
 import { Effect } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth } from "./auth.ts";
 import { authFailure, humanSession } from "./auth-http.ts";
 
 /** Human-only account metadata, available without a healthy app or a fresh assertion. */
 export const accountRoute = (auth: Auth["Service"]) =>
 	Effect.gen(function* () {
-		const request = yield* HttpServerRequest.HttpServerRequest;
-		const url = new URL(request.url, "http://localhost");
+		const { request, url } = yield* bootRoute;
 		const enrollments = url.pathname === "/_boot/enrollments";
 		if (request.method !== "GET" || (!enrollments && url.pathname !== "/_boot/tokens")) return null;
 		return yield* authFailure(

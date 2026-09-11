@@ -1,8 +1,9 @@
+import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { SettingsChange } from "./settings-schema.ts";
 import { SourceResetParams } from "./source-reset-schema.ts";
 import type { Editing } from "./edit-http.ts";
 import { Clock, Effect, Schema } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
 import { assertionProof, humanSession, authFailure, authErrorResponse, body } from "./auth-http.ts";
 import { AddPasskey, DeletePasskey } from "./passkey-management-schema.ts";
@@ -40,9 +41,8 @@ const pageHeaders = Object.freeze({
 });
 export const enrollmentRoute = (auth: Auth["Service"], config: AuthConfig, editing?: Pick<Editing, "cutover">) =>
 	Effect.gen(function* () {
-		const request = yield* HttpServerRequest.HttpServerRequest;
-		const url = new URL(request.url, "http://localhost"),
-			path = url.pathname;
+		const { request, url } = yield* bootRoute;
+		const path = url.pathname;
 		const create = request.method === "POST" && ["/auth/enroll", "/_boot/enroll"].includes(path);
 		const poll =
 			request.method === "POST" ? /^\/(?:auth|_boot)\/enroll\/(e_[A-Za-z0-9_-]{43})$/.exec(path)?.[1] : undefined;
@@ -83,7 +83,7 @@ export const enrollmentRoute = (auth: Auth["Service"], config: AuthConfig, editi
 						yield* Effect.sleep("100 millis");
 					}
 				}
-				if (request.headers.origin !== config.expectedOrigin) return yield* new AuthError({ code: "origin_invalid" });
+				yield* checkBootOrigin("enrollmentHuman", request, config);
 				if (url.search) return yield* new AuthError({ code: "invalid_request" });
 				if (challenge) {
 					const input = yield* body(challengeInput);

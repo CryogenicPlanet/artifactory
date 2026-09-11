@@ -1,3 +1,4 @@
+import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { requestBytes } from "./request-bytes.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
 import { isSqlError } from "effect/unstable/sql/SqlError";
@@ -251,8 +252,8 @@ export const assertionProof = (request: HttpServerRequest.HttpServerRequest) =>
 /** Exact boot-owned entry points; other /auth and /_boot paths remain private. */
 export const authRoute = (auth: Auth["Service"], config: AuthConfig) =>
 	Effect.gen(function* () {
-		const request = yield* HttpServerRequest.HttpServerRequest;
-		const path = new URL(request.url, "http://localhost").pathname;
+		const { request, url } = yield* bootRoute;
+		const path = url.pathname;
 		if (request.method === "GET" && path === "/_boot/auth/client.js")
 			return HttpServerResponse.text(authClient, {
 				contentType: "text/javascript",
@@ -285,7 +286,7 @@ export const authRoute = (auth: Auth["Service"], config: AuthConfig) =>
 						},
 					});
 				}
-				if (request.headers.origin !== config.expectedOrigin) return yield* new AuthError({ code: "origin_invalid" });
+				yield* checkBootOrigin("authWrite", request, config);
 				if (path === "/_boot/auth/setup/options") {
 					const input = yield* body(Schema.Struct({ code: Schema.String }));
 					return HttpServerResponse.jsonUnsafe(yield* auth.startSetup(input.code));
