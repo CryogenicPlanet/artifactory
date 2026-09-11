@@ -9,6 +9,7 @@ import { KernelBoot } from "../../src/kernel-boot.ts";
 const Input = Schema.Struct({
 	op: Schema.Literals(["reserve", "crash", "recover", "legacy"]),
 	bootId: Schema.NullOr(Schema.String),
+	unopened: Schema.optionalKey(Schema.Boolean),
 	storedId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 const program = Effect.gen(function* () {
@@ -50,9 +51,9 @@ const program = Effect.gen(function* () {
 			const attempts = yield* ChildAttempts;
 			if (input.op === "reserve" || input.op === "crash") {
 				const reserved = yield* attempts.reserve(1);
-				// The identity is durable even before the attempt receives permission to open a database.
+				// No go handshake or later opened call is needed to durably own an attempted spawn.
 				const beforeOpen = yield* sql`SELECT boot_id,opened FROM child_attempts WHERE id=${reserved.id}`;
-				yield* attempts.opened(reserved.id);
+				if (input.unopened) yield* sql`UPDATE child_attempts SET opened=0 WHERE id=${reserved.id}`;
 				if (input.storedId !== undefined)
 					yield* sql`UPDATE child_attempts SET boot_id=${input.storedId} WHERE id=${reserved.id}`;
 				if (input.op === "crash") {

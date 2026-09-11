@@ -28,7 +28,7 @@ async function execute(root: string, input: unknown) {
 }
 
 describe("durable child ownership across kernel lifetimes", () => {
-	it("persists kernel identity before opening and recovers after a changed kernel across real process loss", async (test) => {
+	it("persists spawn intent before editable imports and recovers after a changed kernel across real process loss", async (test) => {
 		const root = await directory(test);
 		const processHandle = spawn(
 			"bun",
@@ -50,7 +50,7 @@ describe("durable child ownership across kernel lifetimes", () => {
 		});
 		await expect.poll(() => output, { timeout: 5000 }).toContain("beforeOpen");
 		const reserved: unknown = JSON.parse(output);
-		expect(reserved).toMatchObject({ beforeOpen: [{ boot_id: firstBoot, opened: 0 }] });
+		expect(reserved).toMatchObject({ beforeOpen: [{ boot_id: firstBoot, opened: 1 }] });
 		processHandle.kill("SIGKILL");
 		await exited;
 		expect(await execute(root, { op: "recover", bootId: firstBoot })).toMatchObject({
@@ -78,10 +78,27 @@ describe("durable child ownership across kernel lifetimes", () => {
 		{ name: "empty current kernel", recorded: firstBoot, current: "" },
 	])("never infers closure from $name", async ({ recorded, current }, test) => {
 		const root = await directory(test);
-		expect(await execute(root, { op: "reserve", bootId: recorded })).toMatchObject({ beforeOpen: [{ opened: 0 }] });
+		expect(await execute(root, { op: "reserve", bootId: recorded })).toMatchObject({ beforeOpen: [{ opened: 1 }] });
 		expect(await execute(root, { op: "recover", bootId: current })).toMatchObject({
 			result: "Failure",
 			rows: [{ closed: 0 }],
+		});
+	});
+
+	it("requires closure for historical attempts whose imports ran before opened was recorded", async (test) => {
+		const root = await directory(test);
+		const reserved = Schema.decodeUnknownSync(Reservation)(
+			await execute(root, { op: "reserve", bootId: firstBoot, unopened: true }),
+		);
+		expect(await execute(root, { op: "recover", bootId: firstBoot })).toMatchObject({
+			result: "Failure",
+			error: expect.stringContaining("child_closure_unproven"),
+			rows: [{ opened: 0, closed: 0 }],
+		});
+		await writeFile(reserved.receipt, reserved.id);
+		expect(await execute(root, { op: "recover", bootId: firstBoot })).toMatchObject({
+			result: "Success",
+			rows: [{ opened: 0, closed: 1 }],
 		});
 	});
 

@@ -27,13 +27,15 @@ const make = (directory: string) =>
 					yield* fs.makeDirectory(receipts, { recursive: true, mode: 0o700 });
 					const id = Buffer.from(yield* crypto.randomBytes(32)).toString("hex");
 					const receipt = path.join(receipts, `${id}.closed`);
-					yield* sql`INSERT INTO child_attempts(id,generation,receipt,boot_id) VALUES(${id},${generation},${receipt},${bootId})`;
+					// Editable imports can open the store before the go handshake. Reservation is the durable spawn intent.
+					yield* sql`INSERT INTO child_attempts(id,generation,receipt,boot_id,opened) VALUES(${id},${generation},${receipt},${bootId},1)`;
 					return { id, receipt };
 				}),
 			opened: (id: string) => sql`UPDATE child_attempts SET opened=1 WHERE id=${id}`.pipe(Effect.asVoid),
 			closed,
 			recover: Effect.gen(function* () {
-				const owners = yield* sql`SELECT id,receipt,boot_id FROM child_attempts WHERE opened=1 AND closed=0`.pipe(
+				// Older versions marked opened only after imports; their unopened rows also need closure proof.
+				const owners = yield* sql`SELECT id,receipt,boot_id FROM child_attempts WHERE closed=0`.pipe(
 					Effect.flatMap(
 						Schema.decodeUnknownEffect(
 							Schema.Array(
