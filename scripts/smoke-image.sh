@@ -55,7 +55,7 @@ docker exec --user 1002:1002 "$container" sh -ec '
     test ! -w /data/gen
     ! sudo -n /opt/comms/deployment/preparation-keeper >/dev/null 2>&1
 '
-docker exec --user 1001:1003 "$container" bun -e 'import {Database} from "bun:sqlite"; const db=new Database("/data/store/comms.db"); db.exec("CREATE TABLE image_ownership_probe(value TEXT)"); db.query("INSERT INTO image_ownership_probe VALUES (?)").run("preserved"); db.close();'
+docker exec --user 1001:1003 "$container" bun -e 'import {Database} from "bun:sqlite"; const db=new Database("/data/store/comms.db"); db.exec("PRAGMA busy_timeout=2000"); db.exec("CREATE TABLE image_ownership_probe(value TEXT)"); db.query("INSERT INTO image_ownership_probe VALUES (?)").run("preserved"); db.close();'
 docker restart --time 10 "$container" >/dev/null
 port=$(docker port "$container" 8080/tcp | sed 's/.*://')
 wait_for_app
