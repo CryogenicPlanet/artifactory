@@ -51,7 +51,7 @@ it("combines exact explicit mentions with a topic union, excludes self, paginate
 	expect((await get("since=0&mentions=@alice")).items).toEqual([unicode]);
 }, 30000);
 
-it("marks only returned message sequences at the requested topic or root, with side-effect-free peeks and no events", async (test) => {
+it("marks only returned message sequences at an explicit topic, leaving root queries and peeks unchanged without events", async (test) => {
 	const fixture = await conversation(test),
 		app = await fixture.launch();
 	await app.setup();
@@ -82,8 +82,8 @@ it("marks only returned message sequences at the requested topic or root, with s
 		{ topic: "project", seq: first.seq },
 		{ topic: "project/child", seq: second.seq },
 	]);
-	await get("/api/messages?newest=1&limit=1");
-	expect(await fixture.sql("SELECT topic,seq FROM reads WHERE topic=''")).toEqual([{ topic: "", seq: outside.seq }]);
+	expect((await get("/api/messages?newest=1&limit=1")).items).toEqual([outside]);
+	expect(await fixture.sql("SELECT topic,seq FROM reads WHERE topic=''")).toEqual([]);
 	const marks = await fixture.sql("SELECT * FROM reads ORDER BY topic");
 	await get("/api/messages?newest=1&limit=1");
 	expect(await fixture.sql("SELECT * FROM reads ORDER BY topic")).toEqual(marks);
