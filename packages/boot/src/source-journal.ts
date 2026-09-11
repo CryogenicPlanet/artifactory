@@ -1,3 +1,4 @@
+import { decodeRows } from "./decode-rows.ts";
 import { Crypto, Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Events } from "./events.ts";
@@ -19,7 +20,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 	const crypto = yield* Crypto.Crypto;
 	const events = yield* Events;
 	const pending = sql`SELECT * FROM source_batches WHERE state = 'publishing'`.pipe(
-		Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Batch))),
+		decodeRows(Batch),
 		Effect.map((rows) => rows[0] ?? null),
 	);
 	const ready = Effect.gen(function* () {
@@ -28,22 +29,18 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 	});
 	const rows = (batch: string) =>
 		sql`SELECT path, before, before_sha, before_mode, desired, desired_sha, desired_mode, before_directory, desired_directory FROM source_changes WHERE batch = ${batch} ORDER BY path`.pipe(
-			Effect.flatMap(
-				Schema.decodeUnknownEffect(
-					Schema.Array(
-						Schema.Struct({
-							path: Schema.String,
-							before_directory: Schema.Literals([0, 1]),
-							desired_directory: Schema.Literals([0, 1]),
-							before: Schema.NullOr(Schema.Uint8Array),
-							before_sha: Schema.NullOr(Schema.String),
-							before_mode: Schema.NullOr(Schema.Int),
-							desired: Schema.NullOr(Schema.Uint8Array),
-							desired_sha: Schema.NullOr(Schema.String),
-							desired_mode: Schema.NullOr(Schema.Int),
-						}),
-					),
-				),
+			decodeRows(
+				Schema.Struct({
+					path: Schema.String,
+					before_directory: Schema.Literals([0, 1]),
+					desired_directory: Schema.Literals([0, 1]),
+					before: Schema.NullOr(Schema.Uint8Array),
+					before_sha: Schema.NullOr(Schema.String),
+					before_mode: Schema.NullOr(Schema.Int),
+					desired: Schema.NullOr(Schema.Uint8Array),
+					desired_sha: Schema.NullOr(Schema.String),
+					desired_mode: Schema.NullOr(Schema.Int),
+				}),
 			),
 			Effect.map((rows) =>
 				rows.map((row) => ({
@@ -136,14 +133,12 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 		return batch.id;
 	});
 	const history = (name: string) =>
-		sql`SELECT * FROM versions WHERE path = ${name} ORDER BY id DESC`.pipe(
-			Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Version))),
-		);
+		sql`SELECT * FROM versions WHERE path = ${name} ORDER BY id DESC`.pipe(decodeRows(Version));
 	const previous = (batch: string) =>
 		Effect.gen(function* () {
 			yield* ready;
 			const versions = yield* sql`SELECT * FROM versions WHERE batch = ${batch} ORDER BY path`.pipe(
-				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Version))),
+				decodeRows(Version),
 			);
 			if (versions.length === 0) return yield* new SourceRejected({ code: "batch_missing", path: batch });
 			for (const version of versions)
@@ -177,7 +172,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 					: selection.path !== undefined
 						? sql`SELECT * FROM versions WHERE path = ${selection.path} ORDER BY (sha IS NOT previous_sha OR mode IS NOT previous_mode OR directory != previous_directory) DESC,id DESC LIMIT 1`
 						: sql`SELECT * FROM versions WHERE (path = 'app' OR path LIKE 'app/%') AND batch != COALESCE((SELECT value FROM settings WHERE key='source.watcher_baseline'),'') ORDER BY id DESC LIMIT 1`
-			).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Version))));
+			).pipe(decodeRows(Version));
 			const version = rows[0];
 			if (!version)
 				return yield* new SourceRejected({
@@ -193,9 +188,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 			if (selected.generation !== undefined)
 				return yield* new SourceRejected({ code: "invalid_path", path: "generation" });
 			if (selected.batch !== null) return yield* previous(selected.batch);
-			const rows = yield* sql`SELECT * FROM versions WHERE id = ${selected.version}`.pipe(
-				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Version))),
-			);
+			const rows = yield* sql`SELECT * FROM versions WHERE id = ${selected.version}`.pipe(decodeRows(Version));
 			const version = rows[0];
 			if (!version) return yield* new SourceRejected({ code: "batch_missing", path: String(selected.version) });
 			if (version.directory || version.previous_directory)
@@ -239,7 +232,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 					...(selection.generation === undefined ? {} : { generation: selection.generation }),
 				});
 				const rows = yield* sql`SELECT value FROM settings WHERE key = ${key}`.pipe(
-					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ value: Schema.String })))),
+					decodeRows(Schema.Struct({ value: Schema.String })),
 				);
 				const saved = rows[0] ? yield* Schema.decodeEffect(Binding)(rows[0].value) : null;
 				if (saved && saved.request !== request)
@@ -261,9 +254,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 				if (selected.generation !== undefined) return null;
 				const chosen =
 					selected.batch === null
-						? yield* sql`SELECT * FROM versions WHERE id = ${selected.version}`.pipe(
-								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Version))),
-							)
+						? yield* sql`SELECT * FROM versions WHERE id = ${selected.version}`.pipe(decodeRows(Version))
 						: [];
 				const version = chosen[0];
 				if (selected.batch === null && !version)
@@ -272,7 +263,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 				const batch = selected.batch ?? version?.batch;
 				if (batch === undefined) return yield* new SourceRejected({ code: "batch_missing", path: "revert" });
 				const versions = yield* sql`SELECT * FROM versions WHERE batch = ${batch} ORDER BY path`.pipe(
-					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Version))),
+					decodeRows(Version),
 				);
 				if (versions.length === 0) return yield* new SourceRejected({ code: "batch_missing", path: batch });
 				if (!versions.some((row) => row.directory || row.previous_directory)) return null;
@@ -320,7 +311,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 				selection.version !== undefined
 					? sql`SELECT path FROM versions WHERE id = ${selection.version}`
 					: sql`SELECT path FROM versions WHERE batch = ${selection.batch}`
-			).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ path: Schema.String })))));
+			).pipe(decodeRows(Schema.Struct({ path: Schema.String })));
 			return rows.length > 0 && rows.every((row) => row.path.startsWith("pages/"));
 		});
 	return { ready, begin, recover, history, previous, undo, treeUndo, selectUndo, targetsPages };

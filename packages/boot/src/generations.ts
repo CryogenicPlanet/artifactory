@@ -1,3 +1,4 @@
+import { decodeRows } from "./decode-rows.ts";
 import type { RehearsalReport } from "./rehearsal-report.ts";
 import { Context, DateTime, Effect, Layer, Schema } from "effect";
 import { Events } from "./events.ts";
@@ -49,15 +50,11 @@ const make = Effect.gen(function* () {
 	) =>
 		sql.withTransaction(
 			Effect.gen(function* () {
-				const rows = yield* statement.pipe(
-					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ n: Schema.Int })))),
-				);
+				const rows = yield* statement.pipe(decodeRows(Schema.Struct({ n: Schema.Int })));
 				for (const row of rows) yield* record(row.n, status, payload);
 			}),
 		);
-	const list = sql`SELECT * FROM generations ORDER BY n DESC`.pipe(
-		Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Generation))),
-	);
+	const list = sql`SELECT * FROM generations ORDER BY n DESC`.pipe(decodeRows(Generation));
 	return {
 		list,
 		recover: sql.withTransaction(
@@ -72,7 +69,7 @@ const make = Effect.gen(function* () {
 			}),
 		),
 		appSeeded: sql`SELECT value FROM settings WHERE key = 'app_seeded'`.pipe(
-			Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ value: Schema.Literal("1") })))),
+			decodeRows(Schema.Struct({ value: Schema.Literal("1") })),
 			Effect.map((rows) => rows.length > 0),
 		),
 		markAppSeeded: sql`INSERT OR IGNORE INTO settings (key, value) VALUES ('app_seeded', '1')`.pipe(Effect.asVoid),
@@ -81,9 +78,7 @@ const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const now = yield* DateTime.nowAsDate;
 					const rows = yield* sql`INSERT INTO generations (entry_file, status, started_at)
-				VALUES (${entryFile}, 'starting', ${now.getTime()}) RETURNING *`.pipe(
-						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Generation))),
-					);
+				VALUES (${entryFile}, 'starting', ${now.getTime()}) RETURNING *`.pipe(decodeRows(Generation));
 					const generation = rows[0];
 					if (!generation || !Number.isSafeInteger(generation.n)) return yield* Effect.die("Invalid generation id");
 					yield* record(generation.n, "starting");

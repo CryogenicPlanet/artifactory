@@ -1,3 +1,4 @@
+import { decodeRows } from "./decode-rows.ts";
 import { Cause, Clock, Crypto, Effect, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { HttpServerResponse } from "effect/unstable/http";
@@ -75,7 +76,7 @@ export const sourceReverts = Effect.gen(function* () {
 			}
 			if (receipt.page_batch === null) return receipt;
 			const batches = yield* sql`SELECT state FROM source_batches WHERE id=${receipt.page_batch}`.pipe(
-				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ state: Schema.String })))),
+				decodeRows(Schema.Struct({ state: Schema.String })),
 			);
 			if (!batches[0]) return yield* Effect.die("Missing source revert publication journal");
 			if (batches[0].state !== "published") return receipt;
@@ -101,9 +102,7 @@ export const sourceReverts = Effect.gen(function* () {
 					const after = yield* Ref.get(cursor);
 					const rows =
 						yield* sql`SELECT key,value FROM settings WHERE key>${after} AND key<'source-revert-result:~' ORDER BY key LIMIT 256`.pipe(
-							Effect.flatMap(
-								Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String }))),
-							),
+							decodeRows(Schema.Struct({ key: Schema.String, value: Schema.String })),
 						);
 					const now = yield* Clock.currentTimeMillis;
 					let deleted = 0;
@@ -162,9 +161,7 @@ export const sourceReverts = Effect.gen(function* () {
 			.withTransaction(
 				Effect.gen(function* () {
 					const rows = yield* sql`SELECT key,value FROM settings WHERE key LIKE 'source-revert-result:%'`.pipe(
-						Effect.flatMap(
-							Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String }))),
-						),
+						decodeRows(Schema.Struct({ key: Schema.String, value: Schema.String })),
 					);
 					for (const row of rows) {
 						const receipt = yield* reconcilePage(row.key, yield* Schema.decodeEffect(Stored)(row.value));

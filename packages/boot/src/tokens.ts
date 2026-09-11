@@ -1,3 +1,4 @@
+import { decodeRows } from "./decode-rows.ts";
 import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -100,7 +101,7 @@ export const makeTokens = <E, R>(
 						return yield* refuse("invalid_request");
 					const digest = yield* hash(secret);
 					const row = (yield* sql`SELECT * FROM tokens WHERE hash=${digest} AND kind='refresh'`.pipe(
-						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Token))),
+						decodeRows(Token),
 						Effect.mapError(() => new ReceiptError({})),
 					))[0];
 					if (!row) return yield* refuse("refresh_invalid");
@@ -111,9 +112,7 @@ export const makeTokens = <E, R>(
 						if (keyHash !== null) {
 							const bound =
 								yield* sql`SELECT predecessor FROM refresh_idempotency WHERE family=${row.family} AND key_hash=${keyHash}`.pipe(
-									Effect.flatMap(
-										Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ predecessor: Schema.String }))),
-									),
+									decodeRows(Schema.Struct({ predecessor: Schema.String })),
 								);
 							if (bound[0] && bound[0].predecessor !== row.id) return yield* refuse("idempotency_conflict");
 						}
@@ -136,7 +135,7 @@ export const makeTokens = <E, R>(
 						}
 						yield* checkKey;
 						const receipt = (yield* sql`SELECT * FROM refresh_receipts WHERE predecessor=${row.id}`.pipe(
-							Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Receipt))),
+							decodeRows(Receipt),
 						))[0];
 						if (
 							!receipt ||
@@ -150,7 +149,7 @@ export const makeTokens = <E, R>(
 							refreshHash = yield* hash(pair.refresh);
 						const successors =
 							yield* sql`SELECT * FROM tokens WHERE family=${row.family} AND (id=${receipt.successor_access_id} OR id=${receipt.successor_refresh_id})`.pipe(
-								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Token))),
+								decodeRows(Token),
 							);
 						const access = successors.find(
 							(token) => token.id === receipt.successor_access_id && token.kind === "access",
@@ -181,7 +180,7 @@ export const makeTokens = <E, R>(
 					yield* checkKey;
 					// The exact pair is the durable grant, including for human mints without enrollment.
 					const current = yield* sql`SELECT * FROM tokens WHERE family=${row.family} AND pair_id=${row.pair_id}`.pipe(
-						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Token))),
+						decodeRows(Token),
 						Effect.mapError(() => new ReceiptError({})),
 					);
 					const access = current.find((token) => token.kind === "access");

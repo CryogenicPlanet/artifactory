@@ -1,3 +1,4 @@
+import { decodeRows } from "./decode-rows.ts";
 import { Clock, Context, Deferred, Effect, Layer, Ref, Schema } from "effect";
 import { SqlClient, type Statement } from "effect/unstable/sql";
 import type { EventStorageRejected } from "./event-storage.ts";
@@ -84,7 +85,7 @@ const make = Effect.fn("Events")(function* (
 	const sql = yield* SqlClient.SqlClient;
 	const state =
 		sql`SELECT next,published_through,pending_id,pending_attempt,pending_from,pending_to FROM seq WHERE singleton=1`.pipe(
-			Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Sequence))),
+			decodeRows(Sequence),
 			Effect.flatMap((rows) => (rows[0] ? Effect.succeed(rows[0]) : Effect.die("Missing sequence row"))),
 		);
 	const stopped = yield* Ref.make(false);
@@ -112,17 +113,13 @@ const make = Effect.fn("Events")(function* (
 				const current = yield* state;
 				const records =
 					yield* sql`SELECT attempt,from_seq,to_seq,state FROM event_batches WHERE id=${batch.transaction}`.pipe(
-						Effect.flatMap(
-							Schema.decodeUnknownEffect(
-								Schema.Array(
-									Schema.Struct({
-										attempt: Schema.String,
-										from_seq: Schema.Int,
-										to_seq: Schema.Int,
-										state: Schema.String,
-									}),
-								),
-							),
+						decodeRows(
+							Schema.Struct({
+								attempt: Schema.String,
+								from_seq: Schema.Int,
+								to_seq: Schema.Int,
+								state: Schema.String,
+							}),
 						),
 					);
 				const record = records[0];
@@ -139,7 +136,7 @@ const make = Effect.fn("Events")(function* (
 				if (record.state === "published") {
 					const retained =
 						yield* sql`SELECT event FROM events WHERE transaction_id=${batch.transaction} ORDER BY seq`.pipe(
-							Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ event: Schema.String })))),
+							decodeRows(Schema.Struct({ event: Schema.String })),
 						);
 					// Retention can remove finalized events. Never resurrect them on replay.
 					for (const row of retained) {
@@ -207,17 +204,13 @@ const make = Effect.fn("Events")(function* (
 				const current = yield* state;
 				const previous =
 					yield* sql`SELECT attempt,from_seq,to_seq,state FROM event_batches WHERE id=${transaction}`.pipe(
-						Effect.flatMap(
-							Schema.decodeUnknownEffect(
-								Schema.Array(
-									Schema.Struct({
-										attempt: Schema.String,
-										from_seq: Schema.Int,
-										to_seq: Schema.Int,
-										state: Schema.String,
-									}),
-								),
-							),
+						decodeRows(
+							Schema.Struct({
+								attempt: Schema.String,
+								from_seq: Schema.Int,
+								to_seq: Schema.Int,
+								state: Schema.String,
+							}),
 						),
 					);
 				if (previous[0]) {
@@ -327,11 +320,7 @@ const make = Effect.fn("Events")(function* (
 				// One lookahead distinguishes a full page from exhausted filtered history. Only decode returned rows.
 				const rows =
 					yield* sql`SELECT event,topic FROM events ${indexed} WHERE ${sql.and(filters)} ORDER BY seq LIMIT ${input.limit + 1}`.pipe(
-						Effect.flatMap(
-							Schema.decodeUnknownEffect(
-								Schema.Array(Schema.Struct({ event: Schema.String, topic: Schema.NullOr(Schema.String) })),
-							),
-						),
+						decodeRows(Schema.Struct({ event: Schema.String, topic: Schema.NullOr(Schema.String) })),
 					);
 				const items = yield* Effect.forEach(rows.slice(0, input.limit), (row) =>
 					decode(row.event).pipe(Effect.map((event) => ({ ...event, topic: row.topic }))),
