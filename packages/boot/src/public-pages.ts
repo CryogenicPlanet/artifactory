@@ -1,5 +1,5 @@
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Context, Effect, FileSystem, Layer, Path, Schema, type Semaphore } from "effect";
+import { Clock, Context, Effect, FileSystem, Layer, Path, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { SourceRejected } from "./source-schema.ts";
 import { Events } from "./events.ts";
@@ -50,40 +50,49 @@ const make = (directory: string, operationGate: Semaphore.Semaphore, channelGate
 			);
 		const withWrite = <A, E, R>(names: readonly string[], effect: Effect.Effect<A, E, R>) =>
 			operationGate.withPermit(
-				channelGate.withPermit(
-					Effect.gen(function* () {
-						// The reservation gate makes the tombstone check and page journal publication indivisible
-						// with respect to topic deletion; no sequenced topic mutation can reserve or publish between them.
-						yield* Effect.gen(function* () {
-							if ((yield* events.state).pending_id !== null) return yield* new PublicPagesUnavailable({});
-							yield* appRead(
-								Effect.gen(function* () {
-									const sql = yield* SqlClient.SqlClient;
-									const tables = yield* sql`SELECT name FROM sqlite_master WHERE type='table' AND name='topics'`;
-									if (tables.length === 0) {
-										const versions = yield* sql`PRAGMA user_version`.pipe(
-											Effect.flatMap(
-												Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ user_version: Schema.Int }))),
-											),
-										);
-										// Boot-only stores exist before the editable app creates its domain schema.
-										if (versions[0]?.user_version === 0) return;
-										return yield* new PublicPagesUnavailable({});
-									}
-									for (const name of names) {
-										const relative = name.slice("pages/".length).split("/").slice(0, -1).join("/");
-										const deleted =
-											yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${relative} OR substr(${relative},1,length(path)+1)=path||'/') LIMIT 1`;
-										if (deleted.length) return yield* new SourceRejected({ code: "topic_deleted", path: name });
-									}
-								}),
-							);
-						}).pipe(
-							Effect.mapError((error) => (error._tag === "SourceRejected" ? error : new PublicPagesUnavailable({}))),
+				Effect.gen(function* () {
+					const deadline = (yield* Clock.monotonicTimeNanos) + 1_000_000_000n;
+					while (true) {
+						const admitted = yield* channelGate.withPermit(
+							Effect.gen(function* () {
+								// The reservation gate makes the tombstone check and page journal publication indivisible
+								// with respect to topic deletion; no sequenced topic mutation can reserve or publish between them.
+								if ((yield* events.state).pending_id !== null) return null;
+								yield* appRead(
+									Effect.gen(function* () {
+										const sql = yield* SqlClient.SqlClient;
+										const tables = yield* sql`SELECT name FROM sqlite_master WHERE type='table' AND name='topics'`;
+										if (tables.length === 0) {
+											const versions = yield* sql`PRAGMA user_version`.pipe(
+												Effect.flatMap(
+													Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ user_version: Schema.Int }))),
+												),
+											);
+											// Boot-only stores exist before the editable app creates its domain schema.
+											if (versions[0]?.user_version === 0) return;
+											return yield* new PublicPagesUnavailable({});
+										}
+										for (const name of names) {
+											const relative = name.slice("pages/".length).split("/").slice(0, -1).join("/");
+											const deleted =
+												yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${relative} OR substr(${relative},1,length(path)+1)=path||'/') LIMIT 1`;
+											if (deleted.length) return yield* new SourceRejected({ code: "topic_deleted", path: name });
+										}
+									}),
+								).pipe(
+									Effect.mapError((error) =>
+										error._tag === "SourceRejected" ? error : new PublicPagesUnavailable({}),
+									),
+								);
+								return { value: yield* effect };
+							}),
 						);
-						return yield* effect;
-					}),
-				),
+						if (admitted !== null) return admitted.value;
+						if ((yield* Clock.monotonicTimeNanos) >= deadline) return yield* new PublicPagesUnavailable({});
+						// Allow the pending app outbox to append before checking again. Never retry publication.
+						yield* Effect.sleep("10 millis");
+					}
+				}),
 			);
 		const check = (pathname: string) =>
 			operationGate

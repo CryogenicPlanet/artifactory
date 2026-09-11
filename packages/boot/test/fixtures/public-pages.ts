@@ -3,7 +3,7 @@ import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Database } from "bun:sqlite";
 import { Console, Deferred, Effect, FileSystem, Fiber, Layer, Semaphore } from "effect";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
-import { layer as eventsLayer } from "../../src/events.ts";
+import { Events, layer as eventsLayer } from "../../src/events.ts";
 import { PublicPages, layer } from "../../src/public-pages.ts";
 
 const main = Effect.gen(function* () {
@@ -31,6 +31,21 @@ const main = Effect.gen(function* () {
 		const policy = yield* PublicPages.pipe(
 			Effect.provide(layer(root, operationGate, channelGate).pipe(Layer.provide(eventsLayer))),
 		);
+		const events = yield* Events.pipe(Effect.provide(eventsLayer));
+		yield* events.reserve("pending-page-admission", 1, "fixture");
+		let writes = 0;
+		const publish = Effect.sync(() => {
+			writes++;
+			return "published once";
+		});
+		const waiting = yield* policy.withWrite(["pages/guide/file.md"], publish).pipe(Effect.forkScoped);
+		yield* Effect.sleep("30 millis");
+		const beforeSettlement = writes;
+		yield* channelGate.withPermit(events.abort("pending-page-admission", "fixture"));
+		const settled = yield* Fiber.join(waiting);
+		yield* events.reserve("stuck-page-admission", 1, "fixture");
+		const stuck = yield* policy.withWrite(["pages/guide/file.md"], publish).pipe(Effect.result);
+		yield* channelGate.withPermit(events.abort("stuck-page-admission", "fixture"));
 		const initial = (yield* policy.check("/p/guide/file.md")) !== null;
 		const held = yield* Deferred.make<void>(),
 			release = yield* Deferred.make<void>();
@@ -78,6 +93,10 @@ const main = Effect.gen(function* () {
 		yield* fs.remove(`${root}/comms.db`);
 		const missing = yield* policy.check("/p/guide/file.md").pipe(Effect.result);
 		return {
+			beforeSettlement,
+			settled,
+			writes,
+			stuck: stuck._tag,
 			initial,
 			blocked: blocked._tag,
 			after,

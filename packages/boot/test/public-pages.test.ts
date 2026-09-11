@@ -10,6 +10,10 @@ it("bounds admission behind restore, releases its gate, and reads replacement st
 	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
 	const result = await promisify(execFile)("bun", [join(import.meta.dirname, "fixtures/public-pages.ts"), root]);
 	expect(JSON.parse(result.stdout)).toEqual({
+		beforeSettlement: 0,
+		settled: "published once",
+		writes: 1,
+		stuck: "Failure",
 		initial: true,
 		blocked: "Failure",
 		after: true,
