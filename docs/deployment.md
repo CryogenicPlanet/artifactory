@@ -36,3 +36,11 @@ The original §7.9 launch description cannot work literally: a process that perm
 - Verify actual Linux denied reads/writes as the app UID, successful SQLite WAL access by both intended roles, startup and good/bad/good reload, and boot/keeper crash recovery. Ownership assertions in a Dockerfile are insufficient.
 
 This contract intentionally adds no permanent root HTTP service, recursive ownership repair, or new orchestration framework. The remaining implementation belongs with boot's storage and child-process lifecycle, followed by a real Linux integration test.
+
+## Linux CI
+
+`.github/workflows/linux.yml` runs on pull requests and pushes to `master`: frozen-lockfile installation, repository checks, all package builds, and the boot/server test suites with four workers. It uses Ubuntu 24.04, Node **22.22.3**, commit-pinned checkout/setup actions, and the published Bun **1.4.0** Linux x64 archive with a fixed SHA-256 checksum. The runtime revision is checked before dependency installation. Permissions are read-only; checkout does not retain credentials. There are no deployment, image publication, secrets, or browser UI test steps.
+
+This deliberately verifies the Bun release declared by `package.json` and `Dockerfile`. The development host reports `bun --version` as `1.4.0` but `bun --revision` as `1.4.0-canary.1+4924862cf`; these are different builds. The published 1.4.0 release targets `34cbb9a40b4bd1bd767d134a7065e66c2432a676`. A versioned release for the old canary was not available, so CI does not download a moving canary or pretend to match it. Updating the runtime requires changing its pinned archive checksum and revision together.
+
+A passing run supplies Linux application/process regression evidence. It does not verify the Docker image, separate boot/app/build users, filesystem ownership enforcement, a real machine reboot, or browser UI behavior. Those checks remain separate acceptance work. The workflow must run on GitHub before it can supply Linux evidence; local validation of its file is not a successful CI run.
