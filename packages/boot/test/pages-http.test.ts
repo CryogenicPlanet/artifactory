@@ -337,7 +337,8 @@ const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
   const channel=(path,body)=>fetch(process.env.BOOT_URL+path,{method:'POST',headers:{'x-boot-secret':process.env.BOOT_SECRET,'content-type':'application/json'},body:JSON.stringify(body)});
   await Bun.write(process.env.PAGES_DIRECTORY+'/reserve-requested','ready');
   const reservation=await channel('/_boot/seq/reserve',{transaction:'fixture-page-move',count:1});
-  if(reservation.status!==200) return new Response('reserve failed',{status:500});
+  await Bun.write(process.env.PAGES_DIRECTORY+'/reserve-response',String(reservation.status));
+  if(reservation.status!==200) return new Response('reserve failed: '+await reservation.text(),{status:500});
   const range=await reservation.json();
   const root=process.env.PAGES_DIRECTORY;
   await Effect.runPromise(Effect.gen(function*(){
@@ -373,7 +374,18 @@ const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
 			await expect
 				.poll(async () => readFile(join(env.root, "page-captured"), "utf8").catch(() => ""), { timeout: 5000 })
 				.toBe("ready");
-		const move = app.call(`${app.url}/move`, { method: "POST", body: "{}" });
+		let moveResponse = "pending";
+		const move = app.call(`${app.url}/move`, { method: "POST", body: "{}" }).then(
+			async (response) => {
+				moveResponse = `${response.status}: ${(await response.text()).slice(0, 2048)}`;
+				return response;
+			},
+			(error: unknown) => {
+				moveResponse = String(error).slice(0, 2048);
+				throw error;
+			},
+		);
+		void move.catch(() => undefined);
 		if (undoing) {
 			await expect
 				.poll(async () => readFile(join(env.root, "data/pages/reserve-requested"), "utf8").catch(() => ""), {
@@ -387,8 +399,16 @@ const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
 		}
 		const history = await env.sql("SELECT * FROM source_batches ORDER BY id");
 		await expect
-			.poll(async () => readFile(join(env.root, "data/pages/move-held"), "utf8").catch(() => ""), { timeout: 5000 })
-			.toBe("ready");
+			.poll(
+				async () => ({
+					held: await readFile(join(env.root, "data/pages/move-held"), "utf8").catch(() => ""),
+					requested: await readFile(join(env.root, "data/pages/reserve-requested"), "utf8").catch(() => ""),
+					reservation: await readFile(join(env.root, "data/pages/reserve-response"), "utf8").catch(() => ""),
+					response: moveResponse,
+				}),
+				{ timeout: 5000 },
+			)
+			.toMatchObject({ held: "ready" });
 		expect((await app.call(target, { method: "PUT", body: "must not race rename" })).status).toBe(503);
 		expect(
 			(
