@@ -1,4 +1,3 @@
-import type { HttpServerRequest } from "effect/unstable/http";
 import type { TopicQuery } from "@comms/protocol/topics-http";
 
 import type { Api as ExtensionApi } from "../../kernel/extension-api.ts";
@@ -11,33 +10,34 @@ import { refusal } from "../../conversation-request.ts";
 import { KernelError } from "../../kernel/boot-channel.ts";
 
 import { markView } from "./read-view.ts";
+import { validTopic } from "./messages.ts";
 
 export const topicHandlers = (api: typeof Api, extension: ExtensionApi) => {
-	const detail = ({
-		query,
-		request,
-	}: {
-		readonly query: typeof TopicQuery.Type;
-		readonly request: HttpServerRequest.HttpServerRequest;
-	}) =>
+	const detail = (path: string, query: typeof TopicQuery.Type) =>
 		refusal(
 			Effect.gen(function* () {
 				const ctx = yield* extension.context("read");
 				const depth = query.depth ?? 1;
-				const url = new URL(request.url, "http://localhost");
-				const path =
-					url.pathname === "/api/topics"
-						? ""
-						: yield* Effect.try({
-								try: () => decodeURIComponent(url.pathname.slice("/api/topics/".length)),
-								catch: () => new KernelError({ code: "query_invalid" }),
-							});
+				if (path !== "" && !validTopic(path)) return yield* new KernelError({ code: "input_invalid" });
 				const result = yield* ctx.topics.read(path, { depth, archived: query.archived === "1" });
 				yield* markView(ctx, result.messages, path, query.mark !== "0");
 				return result;
 			}),
 		);
 	return HttpApiBuilder.group(api, "topics", (handlers) =>
-		handlers.handle("detail", detail).handle("legacyDetail", detail),
+		handlers
+			.handle("detail", ({ params, query }) => detail(params.path, query))
+			.handle("legacyDetail", ({ request, query }) =>
+				refusal(
+					Effect.gen(function* () {
+						const pathname = new URL(request.url, "http://localhost").pathname;
+						const path = yield* Effect.try({
+							try: () => (pathname === "/api/topics" ? "" : decodeURIComponent(pathname.slice("/api/topics/".length))),
+							catch: () => new KernelError({ code: "input_invalid" }),
+						});
+						return yield* detail(path, query);
+					}),
+				),
+			),
 	).pipe(Layer.provide(bodyLayer(131072)));
 };

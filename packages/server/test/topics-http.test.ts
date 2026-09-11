@@ -72,3 +72,41 @@ it("lists all children even beyond the recent-message window", async (test) => {
 	expect(topic.unread).toBe(205);
 	expect(topic.subtopics[0].path).toBe("many/child-204");
 }, 30000);
+
+it("decodes canonical and legacy topic paths once and distinguishes invalid paths from queries", async (test) => {
+	const fixture = await conversation(test),
+		app = await fixture.launch();
+	await app.setup();
+	const cookie = await app.login();
+	await app.ready(cookie);
+	expect((await app.post("/api/messages", { topic: "notes/nested", body: "path boundary" }, cookie)).status).toBe(200);
+	for (const path of ["notes%2Fnested", "notes/nested"]) {
+		const response = await fetch(app.url + `/api/topics/${path}?mark=0`, { headers: { cookie } });
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({ path: "notes/nested", messages: [{ body: "path boundary" }] });
+	}
+	for (const path of ["notes%252Fnested", "notes/100%25-done", "100%25-done", "notes/Uppercase", "Uppercase"]) {
+		for (const method of ["GET", "PUT"]) {
+			const response = await fetch(app.url + `/api/topics/${path}`, {
+				method,
+				headers: { cookie, origin: "https://comms.test", "content-type": "application/json" },
+				...(method === "PUT" ? { body: JSON.stringify({ meta: {} }) } : {}),
+			});
+			expect(response.status, `${method} ${path}`).toBe(400);
+			expect(await response.json()).toMatchObject({ error: { code: "input_invalid", retriable: false } });
+		}
+	}
+	// The outer router rejects malformed URL escapes before either handler runs.
+	for (const method of ["GET", "PUT"]) {
+		const response = await fetch(app.url + "/api/topics/notes/100%-done", {
+			method,
+			headers: { cookie, origin: "https://comms.test" },
+		});
+		expect(response.status).toBe(404);
+	}
+	for (const path of ["notes%2Fnested", "notes/nested", ""]) {
+		const response = await fetch(app.url + `/api/topics/${path}?depth=nope`, { headers: { cookie } });
+		expect(response.status).toBe(400);
+		expect(await response.json()).toMatchObject({ error: { code: "query_invalid", retriable: false } });
+	}
+});
