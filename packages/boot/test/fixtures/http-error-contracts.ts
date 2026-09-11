@@ -139,7 +139,7 @@ const program = Effect.gen(function* () {
 		scopes: ["read"],
 		expiresAt: 9999999999999,
 	};
-	const request = HttpServerRequest.fromWeb(new Request("http://localhost/api/events?since=0"));
+	const request = HttpServerRequest.fromWeb(new Request("http://localhost/_boot/events?since=0"));
 	for (const [failure, status, code] of [
 		[Effect.fail(new EventError({ code: "query_invalid" })), 400, "query_invalid"],
 		[Effect.fail(new EventError({ code: "events_unavailable" })), 503, "events_unavailable"],
@@ -163,6 +163,7 @@ const program = Effect.gen(function* () {
 			reserveStartup: () => unused,
 			writeBoot: () => unused,
 			query: () => failure,
+			diagnostics: () => failure,
 		};
 		const response = yield* eventRoute(service, attempts, identity, gate, route).pipe(
 			Effect.provideService(HttpServerRequest.HttpServerRequest, request),
@@ -171,7 +172,7 @@ const program = Effect.gen(function* () {
 		yield* check(response, status, code);
 		if (code === "handler_failed") {
 			const value = yield* HttpServerResponse.toClientResponse(response).json;
-			assert.ok(JSON.stringify(value).includes("GET /api/events"));
+			assert.ok(JSON.stringify(value).includes("GET /_boot/events"));
 		}
 	}
 	yield* Console.log("HTTP_ERROR_CONTRACTS_VERIFIED");

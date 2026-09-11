@@ -12,12 +12,14 @@ import { launch } from "./fixtures/proxy-launch.ts";
 const requestEvent = Schema.Struct({
 	...EventRecord.fields,
 	payload: Schema.Struct({
+		trace_id: Schema.String,
+		span_id: Schema.String,
 		method: Schema.String,
 		path: Schema.String,
 		status: Schema.Int,
 		duration_ms: Schema.Finite,
 		outcome: Schema.String,
-	}),
+	}).annotate({ parseOptions: { onExcessProperty: "error" } }),
 });
 const envelope = Schema.Struct({ items: Schema.Array(requestEvent), cursor: Schema.Int });
 const decode = Schema.decodeUnknownSync(envelope);
@@ -29,6 +31,23 @@ const inspect = async (data: string, statement: string) => {
 		statement,
 	]);
 	return Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(stdout);
+};
+// Logging tests inspect the durable writer through the real Events service, independently
+// of the editable event-browsing HTTP product. Its publication fence still applies.
+const recordedRequests = async (data: string) => {
+	const { stdout } = await execute("bun", [
+		join(import.meta.dirname, "fixtures/events-store.ts"),
+		data,
+		JSON.stringify({ op: "query", since: 0, types: ["http.request"] }),
+	]);
+	return Schema.decodeSync(
+		Schema.fromJsonString(
+			Schema.Struct({
+				_tag: Schema.Literal("Success"),
+				success: envelope,
+			}),
+		),
+	)(stdout).success;
 };
 const seedAgent = async (data: string, name: string) => {
 	const token = randomBytes(32).toString("base64url"),
@@ -68,7 +87,7 @@ it("records child requests and authentication refusals without query, body, cred
 		baggage: null,
 	});
 	expect(JSON.stringify(echo)).not.toContain("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-	const query = async () => decode(await (await app.fetch(`${app.url}/api/events?since=0&types=http.request`)).json());
+	const query = () => recordedRequests(app.data);
 	await expect.poll(async () => (await query()).items.length).toBe(1);
 	const logged = (await query()).items[0];
 	expect(logged).toMatchObject({
@@ -96,7 +115,7 @@ it("records child requests and authentication refusals without query, body, cred
 		expect((await fetch(`${app.url}/echo`, { headers })).status).toBe(401);
 	await app.fetch(`${app.url}/health`);
 	await app.fetch(`${app.url}/_boot/status`);
-	const stream = await app.fetch(`${app.url}/api/events?since=${logged?.seq ?? 0}&types=http.request&wait=60`);
+	const stream = await app.fetch(`${app.url}/_boot/events?since=${logged?.seq ?? 0}`);
 	await stream.body?.cancel();
 	await query();
 	await query();
@@ -116,7 +135,7 @@ it("records child requests and authentication refusals without query, body, cred
 it("logs completed streams after their last byte and disconnects once without retaining admission", async (test) => {
 	const app = await launch(test);
 	await expect.poll(async () => (await app.state()).state).toBe("live");
-	const query = async () => decode(await (await app.fetch(`${app.url}/api/events?since=0&types=http.request`)).json());
+	const query = () => recordedRequests(app.data);
 	const stream = await app.fetch(`${app.url}/stream`);
 	const reader = stream.body?.getReader();
 	if (!reader) throw new Error("Missing stream");
@@ -151,7 +170,7 @@ it("logs completed streams after their last byte and disconnects once without re
 }, 10000);
 
 it("keeps proxied events behind pending publication and hides other agents before pagination", async (test) => {
-	const app = await launch(test);
+	const app = await launch(test, "normal", true);
 	await expect.poll(async () => (await app.state()).state).toBe("live");
 	const codex = await seedAgent(app.data, "codex"),
 		claude = await seedAgent(app.data, "claude");
@@ -164,7 +183,7 @@ it("keeps proxied events behind pending publication and hides other agents befor
 		expect(JSON.parse(stdout)).toMatchObject({ _tag: "Success" });
 	};
 	await operation("reserve");
-	await (await fetch(`${app.url}/echo`, { headers: codex.headers })).text();
+	await (await fetch(`${app.url}/api/me`, { headers: codex.headers })).text();
 	await expect
 		.poll(async () =>
 			inspect(app.data, "SELECT count(*) AS n FROM events WHERE json_extract(event,'$.type')='http.request'"),
@@ -177,7 +196,7 @@ it("keeps proxied events behind pending publication and hides other agents befor
 		{ actor: "codex", instance: codex.id },
 	]);
 	expect(decode(await (await fetch(path, { headers: claude.headers })).json()).items).toHaveLength(0);
-	await (await fetch(`${app.url}/echo`, { headers: claude.headers })).text();
+	await (await fetch(`${app.url}/api/me`, { headers: claude.headers })).text();
 	await expect
 		.poll(async () => decode(await (await fetch(path, { headers: claude.headers })).json()).items)
 		.toMatchObject([{ actor: "claude", instance: claude.id }]);
@@ -242,7 +261,7 @@ it("finishes HTTP response and traffic cleanup while its diagnostic writer waits
 it("records boot auth and enrollment failures and app-down replies once without feed self-logging", async (test) => {
 	const app = await launch(test, "exit");
 	await expect.poll(async () => (await app.state()).state, { timeout: 10000 }).toBe("failed");
-	const query = async () => decode(await (await app.fetch(`${app.url}/api/events?since=0&types=http.request`)).json());
+	const query = () => recordedRequests(app.data);
 	for (const path of ["/_boot/auth/login/verify", "/auth/enroll", "/auth/refresh"]) {
 		const response = await fetch(`${app.url}${path}?secret=query-secret`, {
 			method: "POST",

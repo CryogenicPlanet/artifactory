@@ -72,7 +72,7 @@ const eventHints = {
 	},
 	child_forbidden: { hint: "Use the active boot-issued child channel; public callers cannot invoke this operation." },
 	child_not_live: { hint: "Wait for live admission before publishing through this child channel." },
-	scope_required: { hint: "Re-enroll and ask the human to grant read scope." },
+	scope_required: { hint: "Boot recovery diagnostics require a human session or fs-scoped access token." },
 	method_invalid: { hint: "Use the HTTP method documented for this event operation." },
 	backup_unavailable: { hint: "Inspect /_boot/status and backup metadata before requesting another copy." },
 	completion_event_invalid: { hint: "Supply the completion event belonging to this reserved operation." },
@@ -200,7 +200,7 @@ export const eventRoute = (
 		const internal =
 			capture ||
 			["/_boot/seq", "/_boot/seq/reserve", "/_boot/seq/abort", "/_boot/events/append"].includes(url.pathname);
-		const query = ["/_boot/events", "/api/events"].includes(url.pathname);
+		const query = url.pathname === "/_boot/events";
 		if (!internal && !query) return null;
 		let attempt: Attempt | null = null;
 		if (internal || request.headers["x-boot-secret"] !== undefined) {
@@ -222,7 +222,7 @@ export const eventRoute = (
 			if (attempt.state === "starting" && url.pathname === "/_boot/events/append")
 				return failure("child_not_live", 409);
 		} else if (!identity) return null;
-		else if (!identity.scopes.includes("read")) return failure("scope_required", 403);
+		else if (identity.kind !== "human" && !identity.scopes.includes("fs")) return failure("scope_required", 403);
 		const bodyText = request.method === "POST" ? yield* readBody(request, Schema.Unknown).pipe(Effect.result) : null;
 		if (capture) {
 			if (request.method !== "POST") return failure("method_invalid", 405);
@@ -268,6 +268,26 @@ export const eventRoute = (
 		}
 		if (query) {
 			if (request.method !== "GET") return failure("method_invalid", 405);
+			if (!attempt) {
+				const params = url.searchParams;
+				const since = params.has("since") ? Number(params.get("since")) : undefined;
+				const limit = Number(params.get("limit") ?? "100");
+				if (
+					url.search.length > 256 ||
+					[...params.keys()].some((key) => !["since", "limit"].includes(key) || params.getAll(key).length !== 1) ||
+					![...params.values()].every((value) => /^[0-9]+$/.test(value)) ||
+					(since !== undefined && (!Number.isSafeInteger(since) || since < 0)) ||
+					!Number.isSafeInteger(limit) ||
+					limit < 1 ||
+					limit > 200
+				)
+					return failure("query_invalid", 400);
+				return yield* Effect.gen(function* () {
+					const page = yield* service.diagnostics({ ...(since === undefined ? {} : { since }), limit });
+					if (!(yield* revalidate)) return failure("credential_invalid", 401);
+					return HttpServerResponse.jsonUnsafe(page, { headers: { "cache-control": "no-store" } });
+				}).pipe(Effect.timeout("2 seconds"), (effect) => eventFailure(effect, 0));
+			}
 			const read: typeof service.query = (input) =>
 				Effect.gen(function* () {
 					if (identity && identity.expiresAt <= (yield* DateTime.nowAsDate).getTime())

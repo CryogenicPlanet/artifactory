@@ -40,7 +40,7 @@ POST /_boot/db/backup  Capture a consistent app backup (human or fs scope).
 POST /_boot/db/restore  Human-only database restore with a fresh db.restore assertion.
 POST /_boot/restart {}  Human session and fresh boot.restart assertion; exits for the external supervisor to restart.
 POST /_boot/reset {}  Human-only source reset to image seed with a fresh app.reset assertion; data and pages stay current.
-GET /api/events?since=0&wait=60  Read or wait for published events.
+GET /_boot/events?limit=100  Read recent boot recovery events; optional since cursor.
 
 Source snapshots and restart recovery are active. Child crashes retry their snapshot three times,
 then try older known-good snapshots. Human passkey setup and login are available at /setup and /auth/login.
@@ -68,7 +68,6 @@ const reserved: readonly string[] = Object.freeze([
 	"/api/reload",
 	"/api/revert",
 	"/api/generations",
-	"/api/events",
 	"/api/tokens",
 	"/auth",
 	"/approve",
@@ -224,7 +223,7 @@ export const proxy = Effect.gen(function* () {
 					child.channelGate,
 					child.traffic.route,
 					authenticate(auth, request).pipe(
-						Effect.map((current) => current.scopes.includes("read")),
+						Effect.map((current) => current.kind === "human" || current.scopes.includes("fs")),
 						Effect.orElseSucceed(() => false),
 					),
 				);
@@ -397,7 +396,11 @@ export const proxy = Effect.gen(function* () {
 								return HttpServerResponse.empty({ status: response.status, headers: responseHeaders });
 							let body = converted.body.stream;
 							const credential = identity;
-							if (credential && responseHeaders["content-type"]?.split(";")[0]?.trim() === "text/event-stream") {
+							if (
+								credential &&
+								(path === "/api/events" ||
+									responseHeaders["content-type"]?.split(";")[0]?.trim() === "text/event-stream")
+							) {
 								// Authentication remains at the credential boundary even when the app owns the stream.
 								body = body.pipe(
 									Stream.takeWhileEffect(() =>

@@ -10,8 +10,8 @@ const integer = (value: string | null, fallback: number, maximum: number) => {
 	return Number.isSafeInteger(number) && number <= maximum ? number : null;
 };
 
-/** Boot-owned delivery uses bounded, authenticated page reads.
- * No child lifetime is retained while waiting for another event. */
+/** Private child transport retains wait compatibility for saved generations.
+ * New editable callers wait through the sequence signal; this is never public event browsing. */
 export const publicEventResponse = (
 	request: HttpServerRequest.HttpServerRequest,
 	identity: VerifiedIdentity | null,
@@ -30,7 +30,7 @@ export const publicEventResponse = (
 			"instance",
 			"level",
 			"wait",
-			...(identity === null ? ["request_actor"] : []),
+			...(identity === null ? ["request_actor", "exclude_message_instance"] : []),
 		];
 		if (
 			url.search.length > 4096 ||
@@ -46,7 +46,8 @@ export const publicEventResponse = (
 			agent = params.get("agent"),
 			instance = params.get("instance"),
 			level = params.get("level"),
-			requestActor = params.get("request_actor");
+			requestActor = params.get("request_actor"),
+			excludeMessageInstance = params.get("exclude_message_instance");
 		if (
 			since === null ||
 			limit === null ||
@@ -63,6 +64,8 @@ export const publicEventResponse = (
 			(agent !== null && (agent.length > 128 || !/^[a-z0-9][a-z0-9._-]*$/.test(agent))) ||
 			(instance !== null && (instance.length > 128 || !/^[a-zA-Z0-9_-]+$/.test(instance))) ||
 			(level !== null && !["debug", "info", "warn", "error"].includes(level)) ||
+			(excludeMessageInstance !== null &&
+				(excludeMessageInstance.length > 128 || !/^[a-zA-Z0-9_-]+$/.test(excludeMessageInstance))) ||
 			(requestActor !== null && (requestActor.length > 128 || !/^[a-z0-9][a-z0-9._-]*$/.test(requestActor)))
 		)
 			return yield* new EventError({ code: "query_invalid" });
@@ -74,6 +77,7 @@ export const publicEventResponse = (
 				: requestActor === null
 					? {}
 					: { requestActor }),
+			...(excludeMessageInstance === null ? {} : { excludeMessageInstance }),
 			...(wait > 0 && identity ? { excludeMessageInstance: identity.id } : {}),
 			...(topic === null ? {} : { topic }),
 			...(types === null ? {} : { types: types.split(",") }),

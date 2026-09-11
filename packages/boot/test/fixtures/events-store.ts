@@ -5,7 +5,7 @@ import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { Events, layer as eventsLayer, Batch, EventRecord } from "../../src/events.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../src/app-recovery.ts";
 const Input = Schema.Struct({
-	op: Schema.Literals(["init", "reserve", "append", "abort", "boot", "query", "recover", "state"]),
+	op: Schema.Literals(["init", "reserve", "append", "abort", "boot", "query", "diagnostics", "recover", "state"]),
 	epoch: Schema.optionalKey(Schema.String),
 	transaction: Schema.optionalKey(Schema.String),
 	count: Schema.optionalKey(Schema.Int),
@@ -53,6 +53,8 @@ const main = Effect.gen(function* () {
 					if (!input.event) return yield* Effect.die("Missing event");
 					yield* events.writeBoot(input.event);
 					return "ok";
+				case "diagnostics":
+					return yield* events.diagnostics({ ...input, limit: input.limit ?? 100 });
 				case "query":
 					return yield* events.query({
 						...input,

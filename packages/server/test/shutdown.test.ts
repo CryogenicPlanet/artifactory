@@ -7,7 +7,7 @@ import { conversation } from "./fixtures/conversation.ts";
 const ownerSchema = Schema.Array(Schema.Struct({ id: Schema.String, receipt: Schema.String }));
 const statusSchema = Schema.Struct({ child: Schema.Struct({ pid: Schema.Number }) });
 
-it("drains an idle boot long-poll on SIGTERM within ten seconds with positive child closure evidence", async (test) => {
+it("drains an idle app event long-poll on SIGTERM within ten seconds with positive child closure evidence", async (test) => {
 	const fixture = await conversation(test);
 	const app = await fixture.launch();
 	await app.setup();

@@ -14,6 +14,7 @@ export interface EventQuery {
 	readonly instance?: string;
 	readonly level?: string;
 	readonly requestActor?: string;
+	readonly excludeMessageInstance?: string;
 }
 export const Batch = Schema.Struct({
 	transaction: Schema.String,
@@ -215,6 +216,8 @@ const make = Effect.gen(function* () {
 			for (const field of ["agent", "instance", "level"] as const)
 				if (input[field] !== undefined) params.set(field, input[field]);
 			if (input.requestActor !== undefined) params.set("request_actor", input.requestActor);
+			if (input.excludeMessageInstance !== undefined)
+				params.set("exclude_message_instance", input.excludeMessageInstance);
 			return request(`/_boot/events?${params}`, EventPage, undefined, input.wait ? input.wait * 1000 + 5000 : 1500);
 		},
 		reserve: (transaction: string, count: number) => request("/_boot/seq/reserve", Range, { transaction, count }),

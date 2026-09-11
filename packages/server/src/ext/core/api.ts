@@ -1,6 +1,7 @@
 import { CoreApi as Api } from "@comms/protocol";
 
 import type { Api as ExtensionApi } from "../../kernel/extension-api.ts";
+import { eventsHandlers } from "../../events-http.ts";
 import { streamHandlers } from "../../stream-http.ts";
 
 import { layer as bodyLayer } from "../../request-schema.ts";
@@ -100,4 +101,5 @@ export const coreHandlers = (extension: ExtensionApi) =>
 		topicManagementHandlers(Api, extension),
 		profilesHandlers(Api, extension),
 		streamHandlers(Api, extension),
+		eventsHandlers(Api, extension),
 	);

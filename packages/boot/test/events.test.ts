@@ -379,3 +379,43 @@ it("publishes an app-owned move with long historical routing and recovers withou
 		await app.sql("SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('topic_moves','topic_page_moves')"),
 	).toEqual([]);
 }, 15000);
+
+it("boot diagnostics expose recovery failures behind a stuck app fence without exposing app events", async (test) => {
+	const app = await store(test);
+	await app.run({ op: "boot", event: { ...event(0), type: "generation.live" } });
+	await app.run({ op: "reserve", transaction: "spoof", count: 1 });
+	await app.run({ op: "boot", event: { ...event(0), type: "generation.failed" } });
+	await app.sql(
+		"INSERT INTO generations(n,entry_file,status,started_at,error,stderr) VALUES(1,'server.ts','failed',1,'startup failure','private-startup-marker')",
+	);
+	expect(await app.run({ op: "diagnostics" })).toMatchObject({
+		success: {
+			items: [{ seq: 1 }, { seq: 4, current_failure: { error: "startup failure", stderr: "private-startup-marker" } }],
+			cursor: 4,
+		},
+	});
+	expect(await app.run({ op: "query", since: 0 })).toMatchObject({ success: { items: [{ seq: 1 }], cursor: 1 } });
+	expect(await app.sql("SELECT pending_id,published_through FROM seq")).toEqual([
+		{ pending_id: "spoof", published_through: 1 },
+	]);
+	await app.run({
+		op: "append",
+		batch: {
+			transaction: "spoof",
+			from: 2,
+			to: 2,
+			events: [{ ...event(2), type: "generation.failed", actor: "boot" }],
+		},
+	});
+	await app.run({ op: "boot", event: { ...event(0), type: "http.request" } });
+	expect(await app.run({ op: "diagnostics", limit: 1 })).toMatchObject({ success: { items: [{ seq: 4 }], cursor: 5 } });
+	expect(await app.run({ op: "diagnostics", since: 0, limit: 1 })).toMatchObject({
+		success: { items: [{ seq: 1 }], cursor: 1 },
+	});
+	expect(await app.run({ op: "diagnostics", since: 1, limit: 1 })).toMatchObject({
+		success: { items: [{ seq: 4 }], cursor: 5 },
+	});
+	expect(await app.run({ op: "diagnostics", since: 6 })).toMatchObject({ failure: { code: "cursor_ahead" } });
+	expect(await app.sql("SELECT count(*) AS n FROM events")).toEqual([{ n: 5 }]);
+	expect(JSON.stringify(await app.run({ op: "query", since: 0 }))).not.toContain("private-startup-marker");
+});

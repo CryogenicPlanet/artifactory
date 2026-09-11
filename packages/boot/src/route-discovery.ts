@@ -1,6 +1,6 @@
 import type { Schema } from "effect";
 
-type Access = "public" | "read" | "fs" | "human" | "proof" | "device-secret" | "refresh-token" | "action-dependent";
+type Access = "public" | "fs" | "human" | "proof" | "device-secret" | "refresh-token" | "action-dependent";
 // Immutable descriptors live beside the handlers that own these routes. Private child IPC is intentionally excluded.
 const routes = [
 	[
@@ -112,9 +112,9 @@ const routes = [
 	],
 	[
 		"get",
-		["/_boot/events", "/api/events"],
-		"read",
-		"Query durable events with since, limit, types, topic, agent, instance, level and wait (0–60 seconds). since is exclusive; cursor is considered-through. Survives app swaps. Non-human http.request visibility is limited to the caller's agent.",
+		["/_boot/events"],
+		"fs",
+		"Read bounded boot recovery diagnostics while the app is unavailable. Optional since (exclusive) and limit (1–200); defaults to the latest 100 events. Diagnostic cursors are not application event cursors; pending app publication cannot hide boot failures. Application event browsing belongs to /api/events.",
 	],
 	[
 		"post",
@@ -231,10 +231,10 @@ export const recoveryManifest = () => {
 					security:
 						access === "human"
 							? [{ commsBootSession: [] }]
-							: access === "fs" || access === "read"
+							: access === "fs"
 								? [{ commsBootSession: [] }, { commsBootAccess: [] }]
 								: [],
-					"x-comms-scopes": access === "fs" || access === "read" ? [access] : [],
+					"x-comms-scopes": access === "fs" ? [access] : [],
 					parameters: [...path.matchAll(/\{([^}]+)\}/g)].map((match) => ({
 						name: match[0].slice(1, -1),
 						in: "path",

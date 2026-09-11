@@ -1,3 +1,4 @@
+import { redactHex } from "./auth-primitives.ts";
 import { decodeRows } from "./decode-rows.ts";
 import { Clock, Context, Deferred, Effect, Layer, Ref, Schema } from "effect";
 import { SqlClient, type Statement } from "effect/unstable/sql";
@@ -260,6 +261,53 @@ const make = Effect.fn("Events")(function* (
 					}),
 				)
 				.pipe(Effect.ensuring(notify)),
+		diagnostics: (input: { readonly since?: number; readonly limit: number }) =>
+			sql.withTransaction(
+				Effect.gen(function* () {
+					// This cursor belongs only to recovery diagnostics: app publication may be stuck.
+					const fence = (yield* state).next - 1;
+					if (input.since !== undefined && input.since > fence) return yield* new EventError({ code: "cursor_ahead" });
+					// Provenance comes from the immutable writer, never the app-controlled event type.
+					const rows = yield* sql`SELECT events.event, generations.error, generations.stderr FROM events
+					LEFT JOIN generations ON generations.n=json_extract(events.event,'$.generation')
+						AND events.type='generation.failed' AND generations.status='failed'
+					WHERE transaction_id IS NULL AND seq<=${fence}
+					AND (type GLOB 'generation.*' OR type GLOB 'lock.*' OR type GLOB 'fs.*'
+						OR type GLOB 'backup.*' OR type='db.restored')
+					AND seq>${input.since ?? 0}
+					ORDER BY seq ${input.since === undefined ? sql`DESC` : sql`ASC`} LIMIT ${input.limit + 1}`.pipe(
+						decodeRows(
+							Schema.Struct({
+								event: Schema.String,
+								error: Schema.NullOr(Schema.String),
+								stderr: Schema.NullOr(Schema.String),
+							}),
+						),
+					);
+					const items = yield* Effect.forEach(rows.slice(0, input.limit), (row) =>
+						decode(row.event).pipe(
+							Effect.map((event) => ({
+								...event,
+								...(row.error === null
+									? {}
+									: {
+											current_failure: {
+												error: redactHex(row.error).slice(-2048),
+												stderr: redactHex(row.stderr ?? "").slice(-2048),
+											},
+										}),
+							})),
+						),
+					);
+					if (input.since === undefined) items.reverse();
+					return {
+						items,
+						cursor: input.since !== undefined && rows.length > input.limit ? (items.at(-1)?.seq ?? fence) : fence,
+						timed_out: false,
+						drained: false,
+					};
+				}),
+			),
 		query: (input: {
 			readonly since?: number;
 			readonly limit: number;

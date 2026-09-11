@@ -24,7 +24,7 @@ it("waits without querying, advances filtered cursors, and finishes JSON after a
 			let queries = 0;
 			const cursors: number[] = [];
 			const query: Events["Service"]["query"] = () => Effect.sync(() => page(queries++ === 0 ? 0 : 5));
-			const response = yield* publicEventResponse(request("/api/events?since=0&wait=5"), null, query, (cursor) =>
+			const response = yield* publicEventResponse(request("/_boot/events?since=0&wait=5"), null, query, (cursor) =>
 				Effect.gen(function* () {
 					cursors.push(cursor);
 					if (cursor === 0) return yield* Deferred.await(signal);
@@ -52,7 +52,7 @@ it("returns the latest filtered cursor at its long-poll deadline", async () => {
 		Effect.gen(function* () {
 			let queries = 0;
 			const response = yield* publicEventResponse(
-				request("/api/events?since=0&wait=1"),
+				request("/_boot/events?since=0&wait=1"),
 				null,
 				() => Effect.sync(() => page(queries++ === 0 ? 0 : 4)),
 				(cursor) => (cursor === 0 ? Effect.succeed(4) : Effect.never),
@@ -67,7 +67,7 @@ it("returns the latest filtered cursor at its long-poll deadline", async () => {
 });
 
 it("finishes idle long-poll bodies when the captured credential expires", async () => {
-	for (const path of ["/api/events?wait=60"]) {
+	for (const path of ["/_boot/events?wait=60"]) {
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
 				let interrupted = false;
@@ -100,7 +100,7 @@ it("finishes a valid drained envelope on a post-header defect", async () => {
 	const result = await Effect.runPromise(
 		Effect.gen(function* () {
 			const response = yield* publicEventResponse(
-				request("/api/events?wait=1"),
+				request("/_boot/events?wait=1"),
 				null,
 				() => Effect.succeed(page(9)),
 				() => Effect.die("unavailable store"),

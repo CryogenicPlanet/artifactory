@@ -30,7 +30,7 @@ export default api => {${core ? "api.mount(CoreApi,coreHandlers(api));" : ""}api
 	);
 	await writeFile(
 		join(seed, "ext/reserved.ts"),
-		'export default api=>api.route("GET","/api/events",{description:"Invalid override",scope:"read",handler:async()=>Response.json({})});',
+		'export default api=>api.route("GET","/_boot/events",{description:"Invalid override",scope:"read",handler:async()=>Response.json({})});',
 	);
 	await writeFile(
 		join(seed, "ext/head.ts"),

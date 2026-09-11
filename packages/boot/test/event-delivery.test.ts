@@ -58,96 +58,39 @@ const event = (overrides: Record<string, unknown> = {}) => ({
 });
 const json = async (response: Response): Promise<unknown> => response.json();
 
-it("withholds the publication gap, filters before pagination, resumes without skipping visible rows", async (test) => {
+it("public diagnostics expose only bounded recovery events and reject application query features", async (test) => {
 	const app = await launch(test);
-	expect((await app.post("/_boot/seq/reserve", { transaction: "pending", count: 1 }, true)).status).toBe(200);
-	await app.post("/emit", event({ type: "http.request", actor: "other" }));
-	await app.post("/emit", event({ topic: "project-other" }));
+	await app.post("/emit", event({ type: "generation.failed", payload: { error: "startup failed" } }));
 	await app.post("/emit", event());
-	expect(await json(await app.get("/api/events?since=0"))).toMatchObject({ items: [], cursor: 0 });
-	expect((await app.get("/api/events?since=1")).status).toBe(400);
-	const waiting = app.get("/_boot/events?since=0&topic=project&wait=2&limit=1").then(json);
-	await delay(150);
-	expect((await app.post("/_boot/seq/abort", { transaction: "pending" }, true)).status).toBe(204);
-	expect(await waiting).toMatchObject({ items: [{ seq: 5 }], cursor: 5, timed_out: false, drained: false });
-	expect(await json(await app.get("/api/events?since=0&limit=1"))).toMatchObject({
-		items: [{ seq: 2, type: "seq.reserved" }],
+	expect(await json(await app.get("/_boot/events"))).toMatchObject({
+		items: [{ type: "generation.failed" }],
 		cursor: 2,
 	});
-	expect(await json(await app.get("/api/events?since=2&limit=1"))).toMatchObject({ items: [{ seq: 4 }], cursor: 4 });
-	expect(await json(await app.get("/api/events?since=4&limit=1"))).toMatchObject({ items: [{ seq: 5 }], cursor: 5 });
-	expect(
-		await json(await app.get("/api/events?since=0&types=http.*", { headers: { "x-test-human": "1" } })),
-	).toMatchObject({ items: [{ seq: 3 }] });
-}, 10000);
-
-it("wait excludes own messages, advances empty cursor, and omitted since starts at the published fence", async (test) => {
-	const app = await launch(test);
-	await app.post("/emit", event({ instance: "caller-family", actor: "codex" }));
-	expect(await json(await app.get("/api/events?since=0&wait=1"))).toEqual({
-		items: [],
-		cursor: 1,
-		timed_out: true,
-		drained: false,
-	});
-	expect(await json(await app.get("/api/events"))).toEqual({ items: [], cursor: 1, timed_out: false, drained: false });
-	expect(await json(await app.get("/api/events?since=0"))).toMatchObject({ items: [{ seq: 1 }] });
-	await app.post("/emit", event());
-	expect(await json(await app.get("/api/events?since=0&wait=1&limit=1"))).toMatchObject({
-		items: [{ seq: 2 }],
-		cursor: 2,
-	});
+	expect((await app.get("/api/events?since=0")).status).toBe(404);
 	for (const query of [
-		"wait=61",
-		"since=",
-		"limit=0",
+		"wait=1",
+		"types=generation.*",
+		"topic=project",
 		"since=0&since=1",
-		"topic=a//b",
-		"types=x**",
-		"level=fatal",
-		"wat=1",
+		"limit=201",
+		"since=3",
+		"since=",
 	])
-		expect((await app.get(`/api/events?${query}`)).status, query).toBe(400);
-	expect((await app.get("/_boot/stream")).status).toBe(404);
-	expect((await app.get("/api/stream")).status).toBe(404);
-	expect((await app.get("/api/events?request_actor=other")).status).toBe(400);
-	expect((await app.get("/api/events", { headers: { "x-no-read": "1" } })).status).toBe(403);
-}, 10000);
+		expect((await app.get(`/_boot/events?${query}`)).status, query).toBe(400);
+	expect((await app.get("/_boot/events", { headers: { "x-no-read": "1" } })).status).toBe(403);
+	expect((await app.get("/_boot/events", { headers: { "x-test-human": "1", "x-no-read": "1" } })).status).toBe(200);
+	const privatePage = await app.get("/_boot/events?since=0&types=message.*", {
+		headers: { "x-boot-secret": "fixture-secret" },
+	});
+	expect(await json(privatePage)).toMatchObject({ items: [{ type: "message.created" }] });
+});
 
-it("boot long-poll survives child retirement, emits heartbeats, and disconnect releases its subscription", async (test) => {
-	const app = await launch(test);
-	const longBody = app.get("/api/events?since=0&types=no.match&wait=11").then((response) => response.text());
-	const controller = new AbortController();
-	test.onTestFinished(() => controller.abort());
-	const response = await app.get("/api/events?wait=60", { signal: controller.signal });
-	const reader = response.body?.getReader();
-	if (!reader) throw new Error("Missing wait body");
-	await reader.read();
-	controller.abort();
-	await reader.cancel().catch(() => {});
-	await app.post("/retire", {});
-	await app.post("/emit", event());
-	const body = await longBody;
-	expect(body.startsWith("\n\n")).toBe(true);
-	expect(JSON.parse(body)).toEqual({ items: [], cursor: 1, timed_out: true, drained: false });
-	const stopped = await json(await app.get("/stats"));
-	await app.post("/emit", event());
-	await delay(200);
-	expect(await json(await app.get("/stats"))).toEqual(stopped);
-}, 15000);
-
-it("event pages and long-poll deadlines do not wait for the child channel gate", async (test) => {
+it("event pages do not wait for the child channel gate", async (test) => {
 	const app = await launch(test);
 	const held = app.post("/hold", {});
 	await expect.poll(async () => json(await app.get("/query-state"))).toMatchObject({ gateHeld: true });
-	for (const headers of [{}, { "x-boot-secret": "fixture-secret" }]) {
-		const response = await app.get("/api/events?since=0", { headers, signal: AbortSignal.timeout(1000) });
-		expect(response.status).toBe(200);
-	}
-	const started = performance.now();
-	const waiting = await app.get("/api/events?since=0&wait=1");
-	expect(await json(waiting)).toEqual({ items: [], cursor: 0, timed_out: true, drained: false });
-	expect(performance.now() - started).toBeLessThan(1800);
+	for (const headers of [{}, { "x-boot-secret": "fixture-secret" }])
+		expect((await app.get("/_boot/events?since=0", { headers, signal: AbortSignal.timeout(1000) })).status).toBe(200);
 	await held;
 }, 6000);
 
@@ -155,7 +98,7 @@ it.for([false, true])(
 	"a blocked event page cannot hold publication or retirement (child=%s)",
 	async (internal, test) => {
 		const app = await launch(test);
-		const reading = app.get("/api/events?since=0", {
+		const reading = app.get("/_boot/events?since=0", {
 			headers: { "x-block-query": "1", ...(internal ? { "x-boot-secret": "fixture-secret" } : {}) },
 		});
 		await expect.poll(async () => json(await app.get("/query-state"))).toMatchObject({ blockedReads: 1 });
@@ -179,14 +122,14 @@ it.for([false, true])(
 
 it("event page timeout and disconnect interrupt the query", async (test) => {
 	const app = await launch(test);
-	const response = await app.get("/api/events?since=0", { headers: { "x-block-query": "1" } });
+	const response = await app.get("/_boot/events?since=0", { headers: { "x-block-query": "1" } });
 	expect(response.status).toBe(503);
 	expect(await json(response)).toMatchObject({ error: { code: "events_unavailable", retriable: true } });
 	await expect.poll(async () => json(await app.get("/query-state"))).toMatchObject({ blockedReads: 0 });
 	const controller = new AbortController();
 	test.onTestFinished(() => controller.abort());
 	const reading = app
-		.get("/api/events?since=0", {
+		.get("/_boot/events?since=0", {
 			headers: { "x-block-query": "1" },
 			signal: controller.signal,
 		})
@@ -196,43 +139,6 @@ it("event page timeout and disconnect interrupt the query", async (test) => {
 	await reading;
 	await expect.poll(async () => json(await app.get("/query-state"))).toMatchObject({ blockedReads: 0 });
 });
-
-it("revoked credentials and captured expiry stop an open stream before new events are delivered", async (test) => {
-	const app = await launch(test);
-	const issued = await json(await app.post("/token", {}));
-	if (typeof issued !== "object" || issued === null || !("token" in issued) || typeof issued.token !== "string")
-		throw new Error("No token");
-	for (const headers of [{ authorization: `Bearer ${issued.token}` }, { "x-short-expiry": "1" }]) {
-		const controller = new AbortController();
-		test.onTestFinished(() => controller.abort());
-		const responses = await Promise.all(
-			["/api/events?wait=2"].map((path) => app.get(path, { headers, signal: controller.signal })),
-		);
-		const readers = responses.map((response) => {
-			const reader = response.body?.getReader();
-			if (!reader) throw new Error("No stream");
-			return reader;
-		});
-		await Promise.all(readers.map((reader) => reader.read()));
-		if (headers.authorization) await app.post("/revoke", {});
-		else await delay(450);
-		await app.post("/emit", event({ payload: { private: "must-not-deliver" } }));
-		for (const reader of readers) {
-			let body = "";
-			try {
-				while (true) {
-					const next = await reader.read();
-					if (next.done) break;
-					body += new TextDecoder().decode(next.value);
-				}
-			} catch {
-				/* Refusal closes an already-open response. */
-			}
-			expect(body).not.toContain("must-not-deliver");
-		}
-		controller.abort();
-	}
-}, 5000);
 
 it("sequence fence requires the current child secret and exact host without forwarding headers", async (test) => {
 	const app = await launch(test);

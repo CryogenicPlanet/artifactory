@@ -9,7 +9,6 @@ export const reserved = (path: string) => {
 			"/api/reload",
 			"/api/revert",
 			"/api/generations",
-			"/api/events",
 			"/api/tokens",
 			"/auth",
 			"/approve",
