@@ -148,9 +148,12 @@ it("merges page-only topic directories without manufacturing messages or changin
 	expect((await app.post("/api/messages", { topic: "project/conversation", body: "hello" }, cookie)).status).toBe(200);
 	const get = async (path: string) => (await fetch(app.url + path, { headers: { cookie } })).json();
 	const root = await get("/api/topics?mark=0");
-	expect(root.unread).toBe(1);
-	expect(root.messages).toHaveLength(1);
-	expect(root.subtopics.map((row: { path: string }) => row.path)).toEqual(["project", "only-pages"]);
+	expect(root.unread - (root.subtopics.find((row: { path: string }) => row.path === "system")?.unread ?? 0)).toBe(1);
+	expect(root.messages.filter((row: { topic: string }) => row.topic !== "system")).toHaveLength(1);
+	expect(root.subtopics.map((row: { path: string }) => row.path).filter((path: string) => path !== "system")).toEqual([
+		"project",
+		"only-pages",
+	]);
 	expect(await get("/api/topics/only-pages")).toMatchObject({
 		meta: {},
 		unread: 0,
@@ -165,12 +168,16 @@ it("merges page-only topic directories without manufacturing messages or changin
 		"project/reference",
 	]);
 	expect((await get("/api/topics/project?depth=2")).subtopics).toHaveLength(3);
-	expect(await fixture.sql("SELECT path FROM topics ORDER BY path")).toEqual([
+	expect(await fixture.sql("SELECT path FROM topics WHERE path<>'system' ORDER BY path")).toEqual([
 		{ path: "project" },
 		{ path: "project/conversation" },
 	]);
 	await fixture.sql("UPDATE topics SET archived_at=1 WHERE path='project'");
-	expect((await get("/api/topics")).subtopics.map((row: { path: string }) => row.path)).toEqual(["only-pages"]);
+	expect(
+		(await get("/api/topics")).subtopics
+			.map((row: { path: string }) => row.path)
+			.filter((path: string) => path !== "system"),
+	).toEqual(["only-pages"]);
 	expect((await get("/api/topics/project")).subtopics).toEqual([]);
 	expect((await get("/api/topics/project?archived=1")).subtopics).toHaveLength(2);
 	expect((await get("/api/topics/project/reference")).pages).toEqual(["guide.md"]);

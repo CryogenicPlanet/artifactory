@@ -55,7 +55,9 @@ api.mount(definition,HttpApiBuilder.group(definition,"mixed-input",h=>h.handle("
 	await app.setup();
 	const cookie = await app.login();
 	await app.ready(cookie);
-	expect(await fixture.sql("SELECT COUNT(*) AS count FROM messages")).toEqual([{ count: 0 }]);
+	expect(await fixture.sql("SELECT COUNT(*) AS count FROM messages WHERE instance<>'extension:system.ts'")).toEqual([
+		{ count: 0 },
+	]);
 	const get = (path: string) => fetch(app.url + path, { headers: { cookie } });
 	expect((await app.post("/api/messages", { topic: "core", body: "core extension works" }, cookie)).status).toBe(200);
 	expect((await app.post("/api/typed", { value: 4 }, cookie)).status).toBe(400);

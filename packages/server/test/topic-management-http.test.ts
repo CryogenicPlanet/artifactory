@@ -43,7 +43,9 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 	});
 	expect(await get(path)).toMatchObject({ meta: first.meta, messages: [], archived_at: null, archived_by: null });
 	expect((await fetch(app.url + "/p/project/notes/")).status).toBe(200);
-	expect((await get("/api/topics")).subtopics).toEqual([expect.objectContaining({ path: "project" })]);
+	expect((await get("/api/topics")).subtopics.filter((row: { path: string }) => row.path !== "system")).toEqual([
+		expect.objectContaining({ path: "project" }),
+	]);
 	const replaced = await (await call("PUT", path, { meta: { owner: "codex" } })).json();
 	expect(replaced.meta).toEqual({ owner: "codex" });
 	expect((await fetch(app.url + "/p/project/notes/")).status).toBe(401);
@@ -58,9 +60,18 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 	const pageHistory = await get("/api/fs/pages/project/notes/note.md?history");
 	const archived = await (await call("PUT", "/api/topics/project", { archived: true }, "archive")).json();
 	expect(archived.archived_at).toEqual(expect.any(Number));
-	expect((await get("/api/topics")).subtopics.map((row: { path: string }) => row.path)).toEqual(["project-other"]);
-	expect((await get("/api/topics")).unread).toBe(1);
-	expect((await get("/api/topics?archived=1")).subtopics).toHaveLength(2);
+	expect(
+		(await get("/api/topics")).subtopics
+			.map((row: { path: string }) => row.path)
+			.filter((path: string) => path !== "system"),
+	).toEqual(["project-other"]);
+	const archivedRoot = await get("/api/topics");
+	expect(
+		archivedRoot.unread - (archivedRoot.subtopics.find((row: { path: string }) => row.path === "system")?.unread ?? 0),
+	).toBe(1);
+	expect(
+		(await get("/api/topics?archived=1")).subtopics.filter((row: { path: string }) => row.path !== "system"),
+	).toHaveLength(2);
 	expect(await get("/api/topics/project")).toMatchObject({ archived_at: archived.archived_at, archived_by: "project" });
 	expect(await get("/api/topics/project/notes/child")).toMatchObject({
 		messages: [message],
@@ -94,7 +105,11 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 	expect((await call("PUT", "/api/topics/project", { archived: false })).status).toBe(200);
 	expect((await page("PUT", "project/notes/note.md", "unarchived page")).status).toBe(200);
 	expect(await (await call("PUT", "/api/topics/project", { archived: true }, "archive")).json()).toEqual(archived);
-	expect((await get("/api/topics")).unread).toBe(2);
+	const unarchivedRoot = await get("/api/topics");
+	expect(
+		unarchivedRoot.unread -
+			(unarchivedRoot.subtopics.find((row: { path: string }) => row.path === "system")?.unread ?? 0),
+	).toBe(2);
 	expect(await get("/api/topics/project/notes/child")).toMatchObject({ archived_at: null, archived_by: null });
 	for (const [method, target, body] of [
 		["PUT", path, {}],

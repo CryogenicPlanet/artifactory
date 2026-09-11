@@ -44,10 +44,13 @@ it("migrates schema v1 preserving existing conversation and idempotency records"
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
 	const root = await (await fetch(resumed.url + "/api/topics?mark=0", { headers: { cookie } })).json();
-	expect(root.messages).toEqual([existing]);
+	expect(root.messages.filter((message: { topic: string }) => message.topic !== "system")).toEqual([existing]);
 	expect(await (await resumed.post("/api/messages", input, cookie, "existing-key")).json()).toEqual(existing);
 	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 8 }]);
-	expect(await fixture.sql("SELECT archived_at FROM topics")).toEqual([{ archived_at: null }, { archived_at: null }]);
+	expect(await fixture.sql("SELECT archived_at FROM topics WHERE path<>'system'")).toEqual([
+		{ archived_at: null },
+		{ archived_at: null },
+	]);
 }, 30000);
 
 it("lists all children even beyond the recent-message window", async (test) => {

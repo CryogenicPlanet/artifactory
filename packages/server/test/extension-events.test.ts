@@ -13,12 +13,12 @@ it("delivers only published message payloads through live hooks and disables a f
 		`import {Effect,FileSystem} from "effect";
  export default api=>Effect.gen(function*(){
   const fs=yield* FileSystem.FileSystem;
-  api.on("message.created",(payload,ctx)=>fs.writeFileString(${JSON.stringify(record)},JSON.stringify({payload,seq:ctx.event.seq,instance:ctx.event.instance})+"\\n",{flag:"a"}));
+  api.on("message.created",(payload,ctx)=>payload.topic==="system"?Effect.void:fs.writeFileString(${JSON.stringify(record)},JSON.stringify({payload,seq:ctx.event.seq,instance:ctx.event.instance})+"\\n",{flag:"a"}));
  });`,
 	);
 	await writeFile(
 		join(seed, "ext/bad-observer.ts"),
-		'export default api=>api.on("message.created",async()=>{throw Error("subscriber failed")});',
+		'export default api=>api.on("message.created",async(payload)=>{if(payload.topic!=="system")throw Error("subscriber failed")});',
 	);
 	await writeFile(
 		join(seed, "ext/oversized.ts"),

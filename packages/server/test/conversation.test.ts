@@ -51,13 +51,15 @@ it("persists two signed-in instances, implicit topics, published events, idempot
 	expect((await (await read("/api")).json()).paths["/api/messages"].post.description).toContain(
 		"durable event publication",
 	);
-	expect(await fixture.sql("SELECT COUNT(*) AS count FROM topics")).toEqual([{ count: 3 }]);
+	expect(await fixture.sql("SELECT COUNT(*) AS count FROM topics WHERE path<>'system'")).toEqual([{ count: 3 }]);
 	expect(await fixture.sql("SELECT COUNT(*) AS count FROM outbox WHERE shipped_at IS NULL")).toEqual([{ count: 0 }]);
 	await app.stop();
 	const resumed = await fixture.launch();
 	const again = await resumed.login();
 	await resumed.ready(again);
-	const history = await (await fetch(`${resumed.url}/api/messages?since=0`, { headers: { cookie: again } })).json();
+	const history = await (
+		await fetch(`${resumed.url}/api/messages?since=0&topic=project&recursive=1`, { headers: { cookie: again } })
+	).json();
 	expect(history.items).toHaveLength(3);
 	expect(history.items[0]).toEqual(message);
 }, 30000);
@@ -76,7 +78,7 @@ it("keeps subtree boundaries and limit cursors safe and empty waits advance thro
 	expect(page.cursor).toBe(page.items[0].seq);
 	const next = await read(`/api/messages?topic=@pi&recursive=1&since=${page.cursor}&limit=1`);
 	expect(next.items[0].topic).toBe("@pi/child");
-	expect(await read("/api/messages?since=0&wait=1")).toEqual({
+	expect(await read("/api/messages?since=0&wait=1&topic=@pi&recursive=1")).toEqual({
 		items: [],
 		cursor: expect.any(Number),
 		timed_out: true,
