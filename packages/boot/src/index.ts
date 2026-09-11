@@ -3,9 +3,22 @@ import { logEvents } from "./log-events.ts";
 import { migrateAppStore } from "./app-store-layout.ts";
 import { sourceReverts } from "./source-revert.ts";
 import { SourceRejected } from "./source-schema.ts";
-import { recoveryIntents } from "./recovery-intents.ts";
+import { RecoveryRejected, recoveryIntents } from "./recovery-intents.ts";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Cause, Config, Context, Crypto, Deferred, Effect, FileSystem, Layer, Logger, Path, Ref } from "effect";
+import {
+	Cause,
+	Config,
+	Context,
+	Crypto,
+	Deferred,
+	Effect,
+	FileSystem,
+	Layer,
+	Logger,
+	Path,
+	Ref,
+	Semaphore,
+} from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { HttpRouter } from "effect/unstable/http";
 import { Auth, layer as authLayer, type AuthConfig } from "./auth.ts";
@@ -115,6 +128,70 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* Events;
 		const loggers = yield* logEvents(events);
+		const lifetime = yield* Effect.scope;
+		const recoveryGate = yield* Semaphore.make(1);
+		const supervised = yield* Ref.make(false);
+		const recover = (authorize: Effect.Effect<void, unknown>) =>
+			recoveryGate.withPermit(
+				Effect.gen(function* () {
+					yield* authorize;
+					const state = yield* Ref.get(phase);
+					if (state._tag === "Ready") return;
+					if (state._tag === "Stopping") return yield* Effect.interrupt;
+					yield* Ref.set(phase, { _tag: "Recovering" });
+					const owners = yield* supervisor.operationGate
+						.withPermit(
+							Effect.gen(function* () {
+								const intents = yield* recoveryIntents(sql);
+								if (intents.count > 1) return yield* new RecoveryRejected({ code: "recovery_intents_conflict" });
+								// Restore may have activated a child before a later recovery step failed.
+								// Withdraw its route and prove closure before selecting any authoritative store again.
+								const active = yield* Ref.get(supervisor.current);
+								yield* Ref.set(child.traffic.route, null);
+								if (active) yield* supervisor.retire(active);
+								yield* Ref.set(supervisor.current, null);
+								yield* supervisor.recoverClosure;
+								yield* (yield* Generations).recover;
+								if (isolated) yield* migrateAppStore({ dataDirectory: options.dataDirectory, filename: appFilename });
+								if (intents.move) yield* (yield* AppRecovery).prepare(yield* (yield* Crypto.Crypto).randomUUIDv4);
+							}),
+						)
+						.pipe(Effect.exit);
+					const source = owners._tag === "Failure" ? owners : yield* (yield* SourceFiles).recover.pipe(Effect.exit);
+					yield* Ref.set(
+						child.sourceError,
+						source._tag === "Failure" ? redactHex(Cause.pretty<unknown>(source.cause)) : null,
+					);
+					const recovered =
+						owners._tag === "Failure"
+							? owners
+							: yield* coordinator.recover.pipe(
+									Effect.andThen(restore.recover),
+									Effect.andThen(reverts.recover),
+									Effect.andThen(source._tag === "Success" ? (yield* EditLock).recover : Effect.void),
+									Effect.exit,
+								);
+					if (recovered._tag === "Failure") {
+						yield* Ref.update(phase, (current): RecoveryPhase =>
+							current._tag === "Stopping" ? current : { _tag: "Failed", cause: recovered.cause },
+						);
+						yield* Ref.set(child.sourceError, redactHex(Cause.pretty<unknown>(recovered.cause)));
+						yield* fail(recovered.cause);
+						return yield* Effect.failCause<unknown>(recovered.cause);
+					}
+					if ((yield* Ref.get(phase))._tag === "Stopping") return yield* Effect.interrupt;
+					yield* Ref.set(phase, { _tag: "Ready" });
+					if (!(yield* Ref.getAndSet(supervised, true)))
+						yield* run.pipe(
+							Effect.catchCause(fail),
+							Effect.provideService(Logger.CurrentLoggers, loggers),
+							Effect.forkIn(lifetime),
+						);
+				}).pipe(Effect.uninterruptible),
+			);
+		const recoveryContext = yield* Effect.context<Effect.Services<ReturnType<typeof recover>>>();
+		const retryRecovery = (authorize: Effect.Effect<void, unknown>) =>
+			recover(authorize).pipe(Effect.provideContext(recoveryContext));
 		const context = Context.add(
 			Context.pick(
 				Auth,
@@ -134,6 +211,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 				captures: yield* databaseBackup(supervisor),
 				restores: restore,
 				editing: {
+					retryRecovery,
 					reverts,
 					source: yield* SourceFiles,
 					lock: yield* EditLock,
@@ -175,40 +253,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			handle: proxy.pipe(Effect.provideContext(Context.add(context, Logger.CurrentLoggers, loggers))),
 			shutdown: supervisor.shutdown.pipe(Effect.provideContext(context), Effect.orDie),
 		});
-		const owners = yield* Effect.gen(function* () {
-			const intents = yield* recoveryIntents(sql);
-			if (intents.count > 1) return yield* Effect.die("Conflicting recovery intents");
-			// No recovery selects or mutates an authoritative store before this global check.
-			yield* (yield* Generations).recover;
-			yield* (yield* ChildAttempts).recover;
-			if (isolated) yield* migrateAppStore({ dataDirectory: options.dataDirectory, filename: appFilename });
-			if (intents.move) yield* (yield* AppRecovery).prepare(yield* (yield* Crypto.Crypto).randomUUIDv4);
-		}).pipe(Effect.exit);
-		const source = owners._tag === "Failure" ? owners : yield* (yield* SourceFiles).recover.pipe(Effect.exit);
-		if (source._tag === "Failure") yield* Ref.set(child.sourceError, redactHex(Cause.pretty<unknown>(source.cause)));
-		const recovered =
-			owners._tag === "Failure"
-				? owners
-				: yield* coordinator.recover.pipe(
-						Effect.andThen(restore.recover),
-						Effect.andThen(reverts.recover),
-						Effect.andThen(source._tag === "Success" ? (yield* EditLock).recover : Effect.void),
-						Effect.exit,
-					);
-		if (recovered._tag === "Failure") {
-			yield* Ref.update(phase, (current): RecoveryPhase =>
-				current._tag === "Stopping" ? current : { _tag: "Failed", cause: recovered.cause },
-			);
-			yield* Ref.set(child.sourceError, redactHex(Cause.pretty<unknown>(recovered.cause)));
-			yield* fail(recovered.cause);
-		} else {
-			yield* Ref.update(phase, (current): RecoveryPhase => (current._tag === "Stopping" ? current : { _tag: "Ready" }));
-			yield* run.pipe(
-				Effect.catchCause(fail),
-				Effect.provideService(Logger.CurrentLoggers, loggers),
-				Effect.forkScoped,
-			);
-		}
+		yield* retryRecovery(Effect.void).pipe(Effect.ignore);
 		return yield* Effect.never;
 	}).pipe(
 		Effect.provide(graph),

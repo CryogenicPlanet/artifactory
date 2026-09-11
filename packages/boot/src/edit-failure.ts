@@ -1,3 +1,4 @@
+import { RecoveryRejected } from "./recovery-intents.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
 import { authErrorResponse } from "./auth-http.ts";
 import { Cause, Effect, Option, Schema } from "effect";
@@ -39,6 +40,11 @@ const unavailable = {
 	hint: "Inspect /_boot/status; wait for the active operation or storage contention to finish before retrying.",
 } as const;
 const policy = {
+	recovery_intents_conflict: {
+		status: 409,
+		retriable: false,
+		hint: "Conflicting durable recovery journals need operator inspection. Preserve the journals, store and keeper receipts; do not choose or delete an intent to force recovery.",
+	},
 	...childErrorPolicy,
 	authority_expired: {
 		status: 401,
@@ -149,7 +155,8 @@ export const editFailure = (metrics: BootMetrics) => (cause: Cause.Cause<unknown
 		cause.reasons.every(
 			(reason) =>
 				reason._tag === "Fail" &&
-				(Schema.is(StorageRejected)(reason.error) ||
+				(Schema.is(RecoveryRejected)(reason.error) ||
+					Schema.is(StorageRejected)(reason.error) ||
 					Schema.is(ArtifactRetentionRejected)(reason.error) ||
 					Schema.is(FreezeTimeout)(reason.error) ||
 					Schema.is(EditRejected)(reason.error) ||
@@ -179,6 +186,7 @@ export const editFailure = (metrics: BootMetrics) => (cause: Cause.Cause<unknown
 			errorResponse(error.code, policy[error.code].status, error.holder),
 		);
 	if (
+		Schema.is(RecoveryRejected)(error) ||
 		Schema.is(StorageRejected)(error) ||
 		Schema.is(ArtifactRetentionRejected)(error) ||
 		Schema.is(FreezeTimeout)(error) ||

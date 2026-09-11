@@ -236,6 +236,8 @@ const make = Effect.gen(function* () {
 	});
 
 	return {
+		// Failed recovery diagnostics must not expire an editor or consume staged work.
+		snapshot: read,
 		inspect: withLockTransaction((lock, _now, transitions) => Effect.succeed({ value: lock, transitions }), false),
 		acquire: Effect.fn("EditLock.acquire")(function* (
 			family: string,

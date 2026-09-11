@@ -20,6 +20,7 @@ import { SourceRejected } from "./source-schema.ts";
 
 export interface Editing {
 	readonly writable: boolean;
+	readonly retryRecovery: (authorize: Effect.Effect<void, unknown>) => Effect.Effect<void, unknown>;
 	readonly reverts: SourceReverts;
 	readonly source: SourceFiles["Service"];
 	readonly lock: EditLock["Service"];
@@ -48,11 +49,27 @@ export const editRoute = (
 		)
 			return null;
 		if (!identity.scopes.includes("fs")) return yield* new AuthError({ code: "scope_required" });
-		if (!editing.writable && (request.method !== "GET" || !route.startsWith("/_boot/fs/")))
-			return errorResponse("editing_unavailable", 503);
 		return yield* Effect.gen(function* () {
+			let writable = editing.writable;
+			if (
+				!writable &&
+				identity.kind === "human" &&
+				((route === "/_boot/lock" && ["POST", "DELETE"].includes(request.method)) ||
+					(route === "/_boot/revert" && request.method === "POST"))
+			) {
+				yield* humanSession(auth, request);
+				yield* editing.retryRecovery(Effect.asVoid(humanSession(auth, request)));
+				yield* humanSession(auth, request);
+				writable = true;
+			}
+			if (!writable && identity.kind === "human" && route === "/_boot/lock" && request.method === "GET") {
+				if (url.search) return errorResponse("unsupported_query", 400);
+				return HttpServerResponse.jsonUnsafe({ lock: yield* editing.lock.snapshot });
+			}
+			if (!writable && (request.method !== "GET" || !route.startsWith("/_boot/fs/")))
+				return errorResponse("editing_unavailable", 503);
 			// Failed recovery permits committed-source diagnostics, without lock expiry or staged-overlay mutation.
-			const known = editing.writable ? (yield* editing.lock.inspect).value : null;
+			const known = writable ? (yield* editing.lock.inspect).value : null;
 			const owner = (): Ownership => ({ id: known?.id ?? "", family: identity.id });
 			const authoritative = <A, E, R>(operation: Effect.Effect<A, E, R>) =>
 				Effect.gen(function* () {

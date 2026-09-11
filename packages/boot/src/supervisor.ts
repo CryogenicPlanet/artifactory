@@ -344,6 +344,12 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		operationGate,
 		current,
 		assertClosure,
+		// Caller owns operationGate and has retired any current child before retrying startup.
+		recoverClosure: Effect.gen(function* () {
+			if (yield* Ref.get(current)) return yield* new ChildError({ code: "child_closure_unproven" });
+			yield* (yield* ChildAttempts).recover;
+			yield* Ref.set(closureUnproven, false);
+		}),
 		launch,
 		recordAttempt,
 		retire,

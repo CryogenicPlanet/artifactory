@@ -147,6 +147,12 @@ export const proxy = Effect.gen(function* () {
 		if (passkeyResponse) return passkeyResponse;
 		const enrollmentResponse = yield* enrollmentRoute(auth, authConfig, editing);
 		if (enrollmentResponse) return enrollmentResponse;
+		if (
+			(yield* Ref.get(phase))._tag !== "Ready" &&
+			request.method === "POST" &&
+			["/_boot/db/backup", "/_boot/db/restore"].includes(path)
+		)
+			return authErrorResponse("boot_unavailable", 503);
 		const backupResponse = yield* backupRoute(auth, backups, captures, authConfig);
 		if (backupResponse) return backupResponse;
 		const restored = yield* databaseRestoreRoute(restores, auth, authConfig);

@@ -91,6 +91,7 @@ const main = Effect.gen(function* () {
 			operationGate: yield* Semaphore.make(1),
 			callback: "http://localhost",
 			run: Effect.never,
+			recoverClosure: Effect.die("Unused recovery"),
 			shutdown: Effect.void,
 			assertClosure: Effect.gen(function* () {
 				if (closureFailed) return yield* new ChildError({ code: "child_closure_unproven" });

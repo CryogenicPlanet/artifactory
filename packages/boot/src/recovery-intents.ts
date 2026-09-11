@@ -1,6 +1,14 @@
 import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 
+export class RecoveryRejected extends Schema.TaggedError<RecoveryRejected>()("RecoveryRejected", {
+	code: Schema.Literal("recovery_intents_conflict"),
+}) {
+	get message() {
+		return this.code;
+	}
+}
+
 /** One recovery operation owns the stores. Read all durable admissions in one SQL snapshot. */
 export const recoveryIntents = (sql: SqlClient.SqlClient) =>
 	sql`SELECT
