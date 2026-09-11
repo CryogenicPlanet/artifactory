@@ -251,7 +251,7 @@ const program = Effect.gen(function* () {
 						assert.equal(appends, 1);
 						assert.equal(aborts.length, 0);
 						assert.equal(reservations.length, 1);
-						assert.equal((yield* events.state).published_through, 3);
+						assert.equal((yield* events.state).published_through, 4);
 						// Failed cleanup COMMIT left an open transaction hiding the committed outbox.
 						assert.equal((yield* sql`SELECT * FROM outbox`).length, 0);
 						yield* Effect.gen(function* () {
@@ -291,9 +291,9 @@ const program = Effect.gen(function* () {
 					);
 					assert.deepEqual(
 						(yield* events.query({ since: 0, limit: 10 })).items.map(({ seq }) => seq),
-						[1, 2, 3],
+						[1, 2, 3, 4],
 					);
-					assert.equal((yield* events.state).published_through, 3);
+					assert.equal((yield* events.state).published_through, 4);
 					assert.equal((yield* sql`SELECT * FROM outbox WHERE shipped_at IS NULL`).length, 0);
 					assert.equal(reservations.length, mode === "restart-after-ack" ? 0 : 1);
 					assert.equal((yield* sql`SELECT * FROM outbox`).length, 0);

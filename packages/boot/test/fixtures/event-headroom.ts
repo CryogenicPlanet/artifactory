@@ -92,7 +92,7 @@ Effect.gen(function* () {
 		yield* events.abort("abort", "epoch");
 		yield* events.writeBoot({ ...event, type: "storage.warning" });
 		assert.equal((yield* events.state).pending_id, null);
-		assert.equal((yield* events.state).published_through, 4);
+		assert.equal((yield* events.state).published_through, 6);
 
 		const send = (pathname: string, body: string, secret = "test") =>
 			eventRoute(events, attempts, null, gate, route).pipe(
@@ -118,7 +118,7 @@ Effect.gen(function* () {
 			yield* Ref.update(attempts, (current) => current.map((attempt) => ({ ...attempt, state })));
 			assert.equal((yield* send("/_boot/seq/reserve", '{"transaction":"new-write","count":1}'))?.status, 507);
 		}
-		assert.equal((yield* events.state).next, 6);
+		assert.equal((yield* events.state).next, 9);
 		yield* Ref.update(attempts, (current) => current.map((attempt) => ({ ...attempt, state: "accepted" })));
 		assert.equal((yield* send("/_boot/seq/reserve", '{"transaction":"too-many","count":2}'))?.status, 507);
 		// Finalized batches are acknowledgements, even when their original event was not a policy snapshot.
@@ -173,6 +173,18 @@ Effect.gen(function* () {
 			yield* Ref.update(attempts, (current) => current.map((attempt) => ({ ...attempt, state: "live" })));
 		}
 
+		assert.deepEqual(
+			yield* sql`SELECT json_extract(event,'$.payload.transaction') AS id,
+			json_extract(event,'$.payload.purpose') AS purpose FROM events WHERE type='seq.reserved' ORDER BY seq`,
+			[
+				{ id: "publish", purpose: "mutation" },
+				{ id: "abort", purpose: "mutation" },
+				{ id: "probe", purpose: "startup" },
+				{ id: "completion", purpose: "startup" },
+				{ id: "event_storage_unavailable", purpose: "startup" },
+				{ id: "event_storage_over_budget", purpose: "startup" },
+			],
+		);
 		yield* Console.log("reservation headroom verified");
 	}).pipe(Effect.provide(layer(admission)));
 }).pipe(

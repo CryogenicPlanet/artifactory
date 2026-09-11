@@ -27,9 +27,12 @@ async function store(test: TestContext) {
 	};
 	const sql = (statement: string) => command("store.ts", join(root, "boot.db"), statement);
 	const check = (path: string) => command("public-page-check.ts", root, path);
-	const append = async (seq: number, type: string, topic: string | null, payload: unknown) => {
-		const transaction = `tx-${seq}`;
-		await run({ op: "reserve", transaction });
+	const append = async (ordinal: number, type: string, topic: string | null, payload: unknown) => {
+		const transaction = `tx-${ordinal}`;
+		const reservation = Schema.decodeUnknownSync(
+			Schema.Struct({ success: Schema.Struct({ from: Schema.Int, to: Schema.Int }) }),
+		)(await run({ op: "reserve", transaction })).success;
+		const seq = reservation.from;
 		const batch = {
 			transaction,
 			from: seq,
@@ -58,7 +61,9 @@ async function store(test: TestContext) {
 it("publishes exact grants with events, rolls both back on failure, and never reapplies an old grant", async (test) => {
 	const app = await store(test);
 	await app.run({ op: "init" });
-	await app.sql("CREATE TRIGGER deny_event BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT,'injected'); END");
+	await app.sql(
+		"CREATE TRIGGER deny_event BEFORE INSERT ON events WHEN NEW.transaction_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'injected'); END",
+	);
 	const original = await app.append(1, "topic.meta", "guide", { path: "guide", meta: { public: true } });
 	expect(original.result).toMatchObject({ _tag: "Failure" });
 	expect(await app.sql("SELECT * FROM public_paths")).toEqual([]);
@@ -80,7 +85,7 @@ it("publishes exact grants with events, rolls both back on failure, and never re
 	expect(await app.sql("SELECT * FROM public_paths")).toEqual([]);
 	const mismatched = await app.append(6, "topic.meta", "guide", { path: "other", meta: { public: true } });
 	expect(mismatched.result).toMatchObject({ _tag: "Failure", failure: { code: "public_path_invalid" } });
-	expect(await app.sql("SELECT published_through FROM seq")).toEqual([{ published_through: 5 }]);
+	expect(await app.sql("SELECT published_through FROM seq")).toEqual([{ published_through: 10 }]);
 }, 15000);
 
 it("moves and revokes public subtrees without matching similarly named directories or replaying moves", async (test) => {
@@ -100,9 +105,9 @@ it("moves and revokes public subtrees without matching similarly named directori
 	]);
 	await app.append(5, "topic.meta", "a_b/new", { path: "a_b/new", meta: { public: true } });
 	await app.run({ op: "append", epoch: "restart", batch: move.batch });
-	expect(
-		(await app.append(6, "topic.deleted", "moved", { path: "moved", deleted_at: 1, seq: 6 })).result,
-	).toMatchObject({ _tag: "Success" });
+	expect((await app.append(6, "topic.deleted", "moved", { path: "moved", deleted_at: 1 })).result).toMatchObject({
+		_tag: "Success",
+	});
 	expect(await app.sql("SELECT path FROM public_paths ORDER BY path")).toEqual([
 		{ path: "a_b/new" },
 		{ path: "axb/child" },
@@ -160,7 +165,7 @@ it("publishes topic metadata and deletion for valid domain names that cannot be 
 	}
 	expect(await app.sql("SELECT * FROM public_paths")).toEqual([]);
 	expect(await app.sql("SELECT published_through,pending_id FROM seq")).toEqual([
-		{ published_through: 6, pending_id: null },
+		{ published_through: 12, pending_id: null },
 	]);
 }, 10000);
 
@@ -194,11 +199,13 @@ it("atomically replaces complete activation grants, including empty policy, with
 	const app = await store(test);
 	await app.run({ op: "init" });
 	await app.append(1, "topic.meta", "old", { path: "old", meta: { public: true } });
-	await app.sql("CREATE TRIGGER deny_event BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT,'injected'); END");
+	await app.sql(
+		"CREATE TRIGGER deny_event BEFORE INSERT ON events WHEN NEW.transaction_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'injected'); END",
+	);
 	const replacement = await app.append(2, "pages.public", null, { paths: ["new", "new/child"] });
 	expect(replacement.result).toMatchObject({ _tag: "Failure" });
 	expect(await app.sql("SELECT path FROM public_paths ORDER BY path")).toEqual([{ path: "old" }]);
-	expect(await app.sql("SELECT published_through FROM seq")).toEqual([{ published_through: 1 }]);
+	expect(await app.sql("SELECT published_through FROM seq")).toEqual([{ published_through: 2 }]);
 	await app.sql("DROP TRIGGER deny_event");
 	expect(await app.run({ op: "append", batch: replacement.batch })).toMatchObject({ _tag: "Success" });
 	expect(await app.sql("SELECT path FROM public_paths ORDER BY path")).toEqual([
@@ -207,7 +214,7 @@ it("atomically replaces complete activation grants, including empty policy, with
 	]);
 	await app.append(3, "pages.public", null, { paths: [] });
 	expect(await app.sql("SELECT path FROM public_paths")).toEqual([]);
-	await app.sql("DELETE FROM events WHERE seq=2");
+	await app.sql(`DELETE FROM events WHERE seq=${replacement.batch.from}`);
 	expect(await app.run({ op: "append", epoch: "restart", batch: replacement.batch })).toMatchObject({
 		_tag: "Success",
 	});
@@ -217,7 +224,7 @@ it("atomically replaces complete activation grants, including empty policy, with
 		_tag: "Failure",
 		failure: { code: "public_path_invalid" },
 	});
-	expect(await app.sql("SELECT published_through FROM seq")).toEqual([{ published_through: 3 }]);
+	expect(await app.sql("SELECT published_through FROM seq")).toEqual([{ published_through: 6 }]);
 }, 15000);
 
 it("rejects malformed and oversized activation policies without losing the preceding grants", async (test) => {

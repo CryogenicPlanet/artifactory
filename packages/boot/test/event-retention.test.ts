@@ -63,19 +63,32 @@ it("keeps exact age boundaries and unpublished rows, preserving receipts and cur
 	};
 	await app.run({ op: "append", batch });
 	await app.run({ op: "reserve", transaction: "pending", count: 1 });
-	await app.run({ op: "boot", event: event(6, "http.request", 40 * day) });
+	await app.run({ op: "boot", event: event(8, "http.request", 40 * day) });
 	const before = await app.sql("SELECT * FROM seq");
 	expect(await app.prune()).toMatchObject({ exit: "Success", deleted: 2 });
-	expect(await app.sql("SELECT seq FROM events ORDER BY seq")).toEqual([{ seq: 2 }, { seq: 3 }, { seq: 6 }]);
+	expect(await app.sql("SELECT seq FROM events ORDER BY seq")).toEqual([
+		{ seq: 2 },
+		{ seq: 3 },
+		{ seq: 5 },
+		{ seq: 7 },
+		{ seq: 8 },
+	]);
 	expect(await app.sql("SELECT * FROM seq")).toEqual(before);
 	expect(await app.run({ op: "append", epoch: "replacement", batch })).toMatchObject({ _tag: "Success" });
 	expect(await app.run({ op: "query", since: 0, limit: 1 })).toMatchObject({
 		success: { items: [{ seq: 2 }], cursor: 2 },
 	});
-	expect(await app.run({ op: "query", since: 3 })).toMatchObject({ success: { items: [], cursor: 4 } });
+	expect(await app.run({ op: "query", since: 3 })).toMatchObject({
+		success: { items: [{ seq: 5, type: "seq.reserved" }], cursor: 5 },
+	});
 	await app.run({ op: "abort", transaction: "pending" });
 	expect(await app.prune()).toMatchObject({ deleted: 1 });
-	expect(await app.sql("SELECT seq FROM events ORDER BY seq")).toEqual([{ seq: 2 }, { seq: 3 }]);
+	expect(await app.sql("SELECT seq FROM events ORDER BY seq")).toEqual([
+		{ seq: 2 },
+		{ seq: 3 },
+		{ seq: 5 },
+		{ seq: 7 },
+	]);
 	expect(await app.sql("SELECT id,state FROM event_batches ORDER BY id")).toEqual([
 		{ id: "first", state: "published" },
 		{ id: "pending", state: "aborted" },

@@ -38,7 +38,7 @@ Effect.gen(function* () {
 		results.push(yield* Fiber.join(second));
 		// An already completed publication cannot be lost when changed() starts later.
 		results.push(yield* events.changed(0));
-		const waiting = yield* events.changed(3).pipe(Effect.result, Effect.forkScoped);
+		const waiting = yield* events.changed(4).pipe(Effect.result, Effect.forkScoped);
 		yield* Effect.yieldNow;
 		yield* events.stopWaiting;
 		for (const result of [yield* Fiber.join(waiting), yield* events.changed(0).pipe(Effect.result)]) {

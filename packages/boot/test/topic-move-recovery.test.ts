@@ -70,7 +70,7 @@ it.for(["pages", "events"] as const)(
 		await expect(stat(join(app.root, "pages/old"))).rejects.toMatchObject({ code: "ENOENT" });
 		expect(await app.sql("SELECT state,seq FROM topic_moves")).toEqual([{ state: "completed", seq: 1 }]);
 		expect(await app.sql("SELECT state FROM topic_page_moves")).toEqual([{ state: "completed" }]);
-		expect(await app.sql("SELECT seq FROM events")).toEqual([{ seq: 1 }]);
+		expect(await app.sql("SELECT seq FROM events ORDER BY seq")).toEqual([{ seq: 1 }, { seq: 2 }]);
 	},
 );
 it("holds committed app evidence unpublished when the captured page tree conflicts", async (test) => {
@@ -85,5 +85,5 @@ it("holds committed app evidence unpublished when the captured page tree conflic
 		{ pending_id: "move", published_through: 0 },
 	]);
 	expect(await app.sql("SELECT state FROM topic_moves")).toEqual([{ state: "prepared" }]);
-	expect(await app.sql("SELECT seq FROM events")).toEqual([]);
+	expect(await app.sql("SELECT seq FROM events ORDER BY seq")).toEqual([{ seq: 2 }]);
 });

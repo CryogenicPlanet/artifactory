@@ -159,7 +159,7 @@ const program = Effect.gen(function* () {
 						yield* relay;
 						assert.equal((yield* sql`SELECT * FROM outbox`).length, 0);
 						assert.equal((yield* sql`SELECT * FROM idempotency`).length, 0);
-						assert.equal((yield* events.state).published_through, 2);
+						assert.equal((yield* events.state).published_through, 3);
 					}
 				} else if (mode === "bounded") {
 					yield* sql`WITH RECURSIVE ids(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM ids WHERE n<300)
@@ -184,7 +184,10 @@ const program = Effect.gen(function* () {
 					yield* relay;
 					assert.equal((yield* sql`SELECT * FROM outbox`).length, 0);
 					assert.equal((yield* sql`SELECT * FROM mutation_batches`).length, 17);
-					assert.equal((yield* events.query({ since: 0, limit: 20 })).items.length, 17);
+					const published = (yield* events.query({ since: 0, limit: 40 })).items;
+					assert.equal(published.length, 34);
+					assert.equal(published.filter((event) => event.type === "test.changed").length, 17);
+					assert.equal(published.filter((event) => event.type === "seq.reserved").length, 17);
 					assert.equal((yield* sql`SELECT * FROM idempotency`).length, 0);
 				}
 				yield* Console.log(`RETENTION_${mode}_OK`);

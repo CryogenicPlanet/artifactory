@@ -63,12 +63,12 @@ it("holds higher boot events behind an exact batch, preserves paging cursors, an
 		failure: { code: "batch_invalid" },
 	});
 	expect(await app.run({ op: "append", epoch: "wrong", batch })).toMatchObject({ _tag: "Failure" });
-	expect(await app.run({ op: "append", batch })).toMatchObject({ success: { published_through: 3 } });
+	expect(await app.run({ op: "append", batch })).toMatchObject({ success: { published_through: 4 } });
 	expect(await app.run({ op: "query", since: 0, limit: 1 })).toMatchObject({
 		success: { items: [event(1)], cursor: 1 },
 	});
 	expect(await app.run({ op: "query", since: 1 })).toMatchObject({
-		success: { items: [event(2), { seq: 3 }], cursor: 3 },
+		success: { items: [event(2), { seq: 3, type: "seq.reserved" }, { seq: 4, type: "generation.live" }], cursor: 4 },
 	});
 	expect(await app.run({ op: "append", epoch: "new-attempt", batch })).toMatchObject({ _tag: "Success" });
 	expect(
@@ -80,7 +80,7 @@ it("holds higher boot events behind an exact batch, preserves paging cursors, an
 	).toMatchObject({ _tag: "Failure", failure: { code: "batch_conflict" } });
 	await app.sql("DELETE FROM events WHERE seq=1");
 	await app.run({ op: "append", epoch: "another", batch });
-	expect(await app.sql("SELECT seq FROM events ORDER BY seq")).toEqual([{ seq: 2 }, { seq: 3 }]);
+	expect(await app.sql("SELECT seq FROM events ORDER BY seq")).toEqual([{ seq: 2 }, { seq: 3 }, { seq: 4 }]);
 }, 15000);
 
 it("fences before resolving committed or rolled-back transactions and can repeat after the fence-only crash window", async (test) => {
@@ -93,12 +93,14 @@ it("fences before resolving committed or rolled-back transactions and can repeat
 	await app.sql("UPDATE kernel_writer SET epoch='interrupted-fence'", "comms.db");
 	expect(await app.run({ op: "recover", epoch: "replacement" })).toMatchObject({ _tag: "Success" });
 	expect(await app.sql("SELECT epoch FROM kernel_writer", "comms.db")).toEqual([{ epoch: "replacement" }]);
-	expect(await app.run({ op: "query", since: 0 })).toMatchObject({ success: { items: [event(1)], cursor: 1 } });
+	expect(await app.run({ op: "query", since: 0 })).toMatchObject({
+		success: { items: [event(1), { seq: 2, type: "seq.reserved" }], cursor: 2 },
+	});
 	await app.run({ op: "reserve", epoch: "replacement", transaction: "rolled-back", count: 1 });
 	expect(await app.run({ op: "recover", epoch: "next" })).toMatchObject({ _tag: "Success" });
 	expect(await app.sql("SELECT state FROM event_batches WHERE id='rolled-back'")).toEqual([{ state: "aborted" }]);
 	expect(await app.run({ op: "reserve", epoch: "next", transaction: "after" })).toMatchObject({
-		success: { from: 3, to: 3 },
+		success: { from: 5, to: 5 },
 	});
 }, 15000);
 
@@ -181,12 +183,12 @@ it("routes moved history without changing immutable replay identity or rerouting
 	};
 	await app.run({ op: "reserve", transaction: "original", count: 2 });
 	await app.run({ op: "append", batch: original });
-	const rawBefore = await app.sql("SELECT event FROM events ORDER BY seq");
+	const rawBefore = await app.sql("SELECT event FROM events WHERE seq<=2 ORDER BY seq");
 	const move = {
 		transaction: "move-one",
-		from: 3,
-		to: 3,
-		events: [{ ...event(3), type: "topic.moved", topic: "b", payload: { from: "a", to: "b" } }],
+		from: 4,
+		to: 4,
+		events: [{ ...event(4), type: "topic.moved", topic: "b", payload: { from: "a", to: "b" } }],
 	};
 	await app.run({ op: "reserve", transaction: "move-one" });
 	await app.sql("INSERT INTO topic_moves VALUES('move-one','a','b','family',NULL,'hash','pages_published',NULL)");
@@ -214,40 +216,43 @@ it("routes moved history without changing immutable replay identity or rerouting
 		}),
 	).toMatchObject({ _tag: "Failure", failure: { code: "batch_conflict" } });
 	// A newly created topic at the old path is not the subtree that the old receipt moved.
-	await app.run({ op: "boot", event: { ...event(4), topic: "a/new" } });
+	await app.run({ op: "boot", event: { ...event(6), topic: "a/new" } });
 	const next = {
 		transaction: "move-two",
-		from: 5,
-		to: 5,
-		events: [{ ...event(5), type: "topic.moved", topic: "c", payload: { from: "b", to: "c" } }],
+		from: 7,
+		to: 7,
+		events: [{ ...event(7), type: "topic.moved", topic: "c", payload: { from: "b", to: "c" } }],
 	};
 	await app.run({ op: "reserve", transaction: "move-two" });
 	await app.sql("INSERT INTO topic_moves VALUES('move-two','b','c','family',NULL,'hash','pages_published',NULL)");
 	await app.run({ op: "append", batch: next });
 	expect(await app.run({ op: "append", epoch: "restart", batch: move })).toMatchObject({ _tag: "Success" });
 	expect(await app.run({ op: "query", topic: "a", since: 0 })).toMatchObject({
-		success: { items: [{ seq: 4, topic: "a/new" }] },
+		success: { items: [{ seq: 6, topic: "a/new" }] },
 	});
 	expect(await app.run({ op: "query", topic: "c", since: 0 })).toMatchObject({
 		success: {
 			items: [
 				{ seq: 1, topic: "c/child" },
-				{ seq: 3, topic: "c" },
-				{ seq: 5, topic: "c" },
+				{ seq: 4, topic: "c" },
+				{ seq: 7, topic: "c" },
 			],
 		},
 	});
-	await app.sql("DELETE FROM events WHERE seq IN (1,3)");
+	await app.sql("DELETE FROM events WHERE seq IN (1,4)");
 	await app.run({ op: "append", epoch: "again", batch: original });
 	await app.run({ op: "append", epoch: "again", batch: move });
 	expect(await app.sql("SELECT seq,topic FROM events ORDER BY seq")).toEqual([
 		{ seq: 2, topic: "ab/child" },
-		{ seq: 4, topic: "a/new" },
-		{ seq: 5, topic: "c" },
+		{ seq: 3, topic: null },
+		{ seq: 5, topic: null },
+		{ seq: 6, topic: "a/new" },
+		{ seq: 7, topic: "c" },
+		{ seq: 8, topic: null },
 	]);
 	expect(await app.sql("SELECT state,seq FROM topic_moves ORDER BY seq")).toEqual([
-		{ state: "completed", seq: 3 },
-		{ state: "completed", seq: 5 },
+		{ state: "completed", seq: 4 },
+		{ state: "completed", seq: 7 },
 	]);
 }, 15000);
 
@@ -288,7 +293,7 @@ it("rejects unprepared and malformed moves and rolls routing back with publicati
 		"CREATE TRIGGER fail_move BEFORE INSERT ON events WHEN NEW.seq=2 BEGIN SELECT RAISE(ABORT,'injected'); END",
 	);
 	expect(await app.run({ op: "append", batch })).toMatchObject({ _tag: "Failure" });
-	expect(await app.sql("SELECT topic FROM events")).toEqual([{ topic: "a/child" }]);
+	expect(await app.sql("SELECT topic FROM events ORDER BY seq")).toEqual([{ topic: "a/child" }, { topic: null }]);
 	expect(await app.sql("SELECT state,seq FROM topic_moves")).toEqual([{ state: "pages_published", seq: null }]);
 	expect(await app.run({ op: "state" })).toMatchObject({ success: { published_through: 1, pending_id: "move" } });
 	await app.sql("DROP TRIGGER fail_move");
@@ -320,7 +325,10 @@ it("backfills legacy routing without altering pending state or original event by
 	await app.sql("DROP TABLE public_paths");
 	await app.sql("PRAGMA user_version=12");
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
-	expect(await app.sql("SELECT topic FROM events")).toEqual([{ topic: "project/thread" }]);
+	expect(await app.sql("SELECT topic FROM events ORDER BY seq")).toEqual([
+		{ topic: "project/thread" },
+		{ topic: null },
+	]);
 	expect(await app.sql("SELECT event FROM events")).toEqual(before);
 	expect(await app.sql("SELECT * FROM seq")).toEqual(pending);
 	expect(await app.run({ op: "query", topic: "project", since: 0 })).toMatchObject({ success: { items: [event(1)] } });
@@ -347,8 +355,9 @@ it("migrates indexed projections without changing routed topics, JSON bytes or p
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
 	expect(await app.sql("SELECT seq,transaction_id,event,topic FROM events")).toEqual(before);
 	expect(await app.sql("SELECT * FROM seq")).toEqual(pending);
-	expect(await app.sql("SELECT type,actor,instance,level,topic FROM events")).toEqual([
+	expect(await app.sql("SELECT type,actor,instance,level,topic FROM events ORDER BY seq")).toEqual([
 		{ type: "message.created", actor: "rahul", instance: null, level: "info", topic: "moved/thread" },
+		{ type: "seq.reserved", actor: "boot", instance: null, level: "info", topic: null },
 	]);
 	expect(
 		await app.run({ op: "query", since: 0, topic: "moved", types: ["message.*"], agent: "rahul", level: "info" }),
@@ -371,7 +380,7 @@ it("publishes an app-owned move with long historical routing and recovers withou
 				{ seq: 1, topic: destination + "/" + "z".repeat(198) },
 				{ seq: 2, topic: destination },
 			],
-			cursor: 2,
+			cursor: 3,
 		},
 	});
 	expect(await app.sql("SELECT id FROM topic_moves")).toEqual([]);

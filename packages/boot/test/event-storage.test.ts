@@ -99,7 +99,7 @@ it("reports protected excess and refuses new admission while leaving pending row
 		admission: { _tag: "Failure", failure: { code: "event_storage_over_budget" } },
 	});
 	expect(await app.sql("SELECT * FROM seq")).toEqual(before);
-	expect(await app.sql("SELECT count(*) AS count FROM events")).toEqual([{ count: 12 }]);
+	expect(await app.sql("SELECT count(*) AS count FROM events")).toEqual([{ count: 13 }]);
 	await app.run({ op: "abort", transaction: "pending" });
 	expect(await app.prune()).toMatchObject({ status: { status: "within_budget" }, admission: { _tag: "Success" } });
 }, 15000);

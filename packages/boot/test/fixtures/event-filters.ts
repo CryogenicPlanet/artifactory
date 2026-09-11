@@ -74,7 +74,7 @@ const main = Effect.gen(function* () {
 		});
 		assert.equal((yield* query({ types: ["absent"] })).cursor, 6);
 		yield* events.abort(pending.transaction, "attempt");
-		assert.equal((yield* query({ types: ["absent"] })).cursor, 8);
+		assert.equal((yield* query({ types: ["absent"] })).cursor, 9);
 		// Verify the actual compiled query uses an index for every selective common filter.
 		for (const [input, index] of [
 			[{ agent: "codex" }, "events_actor_seq"],
@@ -107,7 +107,7 @@ const main = Effect.gen(function* () {
 				assert.ok(!text.includes("json_extract"));
 			}
 		}
-		for (const since of [7, 8]) {
+		for (const since of [8, 9]) {
 			const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
 			const page = yield* query({ topic: "a" }, 1, since).pipe(
 				Effect.provideService(Statement.CurrentTransformer, (statement) =>
@@ -118,8 +118,8 @@ const main = Effect.gen(function* () {
 					}),
 				),
 			);
-			assert.equal(page.cursor, 8);
-			assert.equal(statements.length, since === 8 ? 0 : 1);
+			assert.equal(page.cursor, 9);
+			assert.equal(statements.length, since === 9 ? 0 : 1);
 			for (const [text, parameters] of statements) {
 				const plan = yield* sql
 					.unsafe(`EXPLAIN QUERY PLAN ${text}`, parameters)
@@ -128,8 +128,8 @@ const main = Effect.gen(function* () {
 			}
 		}
 		// Missing optional fields and JSON null project identically; routing remains independent.
-		yield* sql`INSERT INTO events(seq,event,topic) VALUES(9,'{}','routed')`;
-		assert.deepEqual(yield* sql`SELECT type,actor,instance,level,topic FROM events WHERE seq=9`, [
+		yield* sql`INSERT INTO events(seq,event,topic) VALUES(10,'{}','routed')`;
+		assert.deepEqual(yield* sql`SELECT type,actor,instance,level,topic FROM events WHERE seq=10`, [
 			{ type: null, actor: null, instance: null, level: null, topic: "routed" },
 		]);
 		yield* Console.log("event filters and indexes verified");

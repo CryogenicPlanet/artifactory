@@ -80,11 +80,11 @@ const program = Effect.gen(function* () {
 			const page = yield* events.query({ since: 0, limit: 10 });
 			assert.deepEqual(
 				page.items.map((event) => event.type),
-				["lock.acquired", "lock.released"],
+				["seq.reserved", "lock.acquired", "lock.released"],
 			);
 			assert.deepEqual(
 				page.items.map((event) => event.seq),
-				[3, 4],
+				[3, 4, 5],
 			);
 		} else if (scenario === "generation") {
 			const row = yield* generations.reserve("server.js");

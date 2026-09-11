@@ -1,4 +1,4 @@
-import { Context, Deferred, Effect, Layer, Ref, Schema } from "effect";
+import { Clock, Context, Deferred, Effect, Layer, Ref, Schema } from "effect";
 import { SqlClient, type Statement } from "effect/unstable/sql";
 import type { EventStorageRejected } from "./event-storage.ts";
 import type { StorageRejected } from "./storage-headroom.ts";
@@ -228,10 +228,26 @@ const make = Effect.fn("Events")(function* (
 				}
 				if (current.pending_id !== null) return yield* new EventError({ code: "publication_pending" });
 				const to = current.next + count - 1;
-				if (!Number.isSafeInteger(to + 1)) return yield* new EventError({ code: "sequence_exhausted" });
+				if (!Number.isSafeInteger(to + 2)) return yield* new EventError({ code: "sequence_exhausted" });
 				if (purpose === "mutation") yield* admitReservation;
 				yield* sql`INSERT INTO event_batches VALUES(${transaction},${attempt},${current.next},${to},'pending')`;
-				yield* sql`UPDATE seq SET next=${to + 1},pending_id=${transaction},pending_attempt=${attempt},pending_from=${current.next},pending_to=${to} WHERE singleton=1`;
+				const reserved = encode({
+					seq: to + 1,
+					at: yield* Clock.currentTimeMillis,
+					type: "seq.reserved",
+					level: "info",
+					actor: "boot",
+					instance: null,
+					generation: 0,
+					request_id: null,
+					topic: null,
+					message_id: null,
+					payload: { transaction, attempt, from: current.next, to, purpose },
+				});
+				// The diagnostic follows the app range and stays behind its publication fence.
+				// NULL transaction identity keeps it outside immutable app-batch replay validation.
+				yield* sql`INSERT INTO events(seq,transaction_id,event,topic) VALUES(${to + 1},NULL,${reserved},NULL)`;
+				yield* sql`UPDATE seq SET next=${to + 2},pending_id=${transaction},pending_attempt=${attempt},pending_from=${current.next},pending_to=${to} WHERE singleton=1`;
 				return { transaction, from: current.next, to };
 			}),
 		);

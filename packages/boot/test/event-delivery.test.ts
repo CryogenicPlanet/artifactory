@@ -69,12 +69,16 @@ it("withholds the publication gap, filters before pagination, resumes without sk
 	const waiting = app.get("/_boot/events?since=0&topic=project&wait=2&limit=1").then(json);
 	await delay(150);
 	expect((await app.post("/_boot/seq/abort", { transaction: "pending" }, true)).status).toBe(204);
-	expect(await waiting).toMatchObject({ items: [{ seq: 4 }], cursor: 4, timed_out: false, drained: false });
-	expect(await json(await app.get("/api/events?since=0&limit=1"))).toMatchObject({ items: [{ seq: 3 }], cursor: 3 });
-	expect(await json(await app.get("/api/events?since=3&limit=1"))).toMatchObject({ items: [{ seq: 4 }], cursor: 4 });
+	expect(await waiting).toMatchObject({ items: [{ seq: 5 }], cursor: 5, timed_out: false, drained: false });
+	expect(await json(await app.get("/api/events?since=0&limit=1"))).toMatchObject({
+		items: [{ seq: 2, type: "seq.reserved" }],
+		cursor: 2,
+	});
+	expect(await json(await app.get("/api/events?since=2&limit=1"))).toMatchObject({ items: [{ seq: 4 }], cursor: 4 });
+	expect(await json(await app.get("/api/events?since=4&limit=1"))).toMatchObject({ items: [{ seq: 5 }], cursor: 5 });
 	expect(
 		await json(await app.get("/api/events?since=0&types=http.*", { headers: { "x-test-human": "1" } })),
-	).toMatchObject({ items: [{ seq: 2 }] });
+	).toMatchObject({ items: [{ seq: 3 }] });
 }, 10000);
 
 it("wait excludes own messages, advances empty cursor, and omitted since starts at the published fence", async (test) => {
