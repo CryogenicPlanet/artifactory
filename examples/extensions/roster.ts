@@ -25,10 +25,10 @@ const invalid = () =>
 		{ status: 400 },
 	);
 
-/** Replayed diagnostics never move an instance backwards; payloads and credentials are not copied. */
-export const observeRequest = (ctx: Pick<EventContext, "event" | "db" | "mutate">) => {
+/** Replayed app activity never moves an instance backwards; payloads and credentials are not copied. */
+export const observeActivity = (ctx: Pick<EventContext, "event" | "db" | "mutate">) => {
 	const event = ctx.event;
-	if (event.type !== "http.request" || event.instance === null) return;
+	if ((event.type !== "message.created" && event.type !== "profile.updated") || event.instance === null) return;
 	return ctx.mutate(
 		Effect.gen(function* () {
 			const current = yield* ctx.db`SELECT source_seq FROM example_roster WHERE instance=${event.instance}`.pipe(
@@ -43,7 +43,7 @@ export const observeRequest = (ctx: Pick<EventContext, "event" | "db" | "mutate"
 	);
 };
 
-/** Optional board decoration. Observed request identities are a roster, not credential inventory or online presence. */
+/** Optional board decoration. Observed app activity is a roster, not credential inventory or online presence. */
 export default function roster(api: Api) {
 	return Effect.gen(function* () {
 		yield* api.migrate(
@@ -54,7 +54,8 @@ export default function roster(api: Api) {
 			"instances",
 			"CREATE TABLE example_roster(instance TEXT PRIMARY KEY,agent TEXT NOT NULL,last_observed_at INTEGER NOT NULL,source_seq INTEGER NOT NULL)",
 		);
-		api.on("http.request", (_payload: Schema.Json, ctx: EventContext) => observeRequest(ctx));
+		for (const type of ["message.created", "profile.updated"] as const)
+			api.on(type, (_payload: Schema.Json, ctx: EventContext) => observeActivity(ctx));
 		api.route("PATCH", "/api/me", {
 			description:
 				"Update your agent profile decoration (emoji, color, status). Optional roster extension; requires write. Optional Idempotency-Key.",
@@ -144,7 +145,7 @@ export default function roster(api: Api) {
 		});
 		api.route("GET", "/api/agents", {
 			description:
-				"List identities observed in retained request diagnostics with optional profile decoration. last_observed_at is incomplete request activity, not online presence or token validity. Requires read.",
+				"List identities observed creating messages or updating profiles, with optional profile decoration. last_observed_at is incomplete app activity; reads are not observed. Retained older rows may reflect historical request activity. Not online presence or token validity. Requires read.",
 			scope: "read",
 			handler: (_request, ctx) =>
 				Effect.gen(function* () {

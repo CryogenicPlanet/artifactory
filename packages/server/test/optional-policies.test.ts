@@ -11,11 +11,12 @@ it("loads optional profile, roster and deletion policies through public capabili
 		await cp(join(import.meta.dirname, `../../../examples/extensions/${name}.ts`), join(seed, `ext/${name}.ts`));
 	await writeFile(
 		join(seed, "ext/roster-replay.ts"),
-		`import {Effect} from "effect"; import {observeRequest} from "./roster.ts";
- export default api=>api.route("POST","/api/roster-replay",{description:"Fixture replays observed diagnostic",scope:"write",handler:(_request,ctx)=>Effect.gen(function*(){
+		`import {Effect} from "effect"; import {observeActivity} from "./roster.ts";
+ export default api=>api.route("POST","/api/roster-replay",{description:"Fixture replays observed app activity",scope:"write",handler:(_request,ctx)=>Effect.gen(function*(){
  const rows=yield* ctx.read(()=>ctx.db\`SELECT * FROM example_roster WHERE instance=\${ctx.instance}\`); const row=rows[0]; if(!row) return new Response(null,{status:409});
- const event={seq:row.source_seq,at:row.last_observed_at-1,type:"http.request",level:"info",actor:ctx.agent,instance:ctx.instance,generation:ctx.generation,request_id:ctx.request,topic:null,message_id:null,payload:{secret:"must-not-copy"}};
- yield* observeRequest({...ctx,event}); yield* observeRequest({...ctx,event:{...event,seq:event.seq-1}});
+ const event={seq:row.source_seq,at:row.last_observed_at-1,type:"message.created",level:"info",actor:ctx.agent,instance:ctx.instance,generation:ctx.generation,request_id:ctx.request,topic:null,message_id:null,payload:{secret:"must-not-copy"}};
+ yield* observeActivity({...ctx,event}); yield* observeActivity({...ctx,event:{...event,seq:event.seq-1}});
+ const ignored=observeActivity({...ctx,event:{...event,type:"http.request",seq:event.seq+100,at:event.at+100}}); if(ignored) yield* ignored;
  const after=yield* ctx.read(()=>ctx.db\`SELECT * FROM example_roster WHERE instance=\${ctx.instance}\`); return Response.json({before:row,after:after[0]}); })});`,
 	);
 	let app = await fixture.launch(join(seed, "server.ts"));
@@ -78,25 +79,38 @@ it("loads optional profile, roster and deletion policies through public capabili
 		).json(),
 	).toEqual(profile);
 	expect((await call("/api/me", "PATCH", first, { status: "different" }, "profile")).status).toBe(409);
+	const firstIdentity = await (await call("/api/me", "GET", first)).json();
+	await expect
+		.poll(
+			async () => await fixture.sql(`SELECT source_seq FROM example_roster WHERE instance='${firstIdentity.instance}'`),
+			{ timeout: 5000 },
+		)
+		.toEqual([{ source_seq: profile.seq }]);
 	const posted = await call("/api/messages", "POST", first, { topic: "optional/child", body: "retained" });
 	expect(posted.status).toBe(200);
 	const message = await posted.json();
-	const firstIdentity = await (await call("/api/me", "GET", first)).json();
 	const readerIdentity = await (await call("/api/me", "GET", reader)).json();
 	await expect
 		.poll(async () => (await (await call("/api/agents", "GET", reader)).json()).items, { timeout: 5000 })
 		.toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ instance: firstIdentity.instance }),
 				expect.objectContaining({
 					agent: "optional-agent",
-					instance: readerIdentity.instance,
+					instance: firstIdentity.instance,
 					last_observed_at: expect.any(Number),
 					profile: { emoji: "🌱", status: "working", color: "#123456" },
 				}),
 			]),
 		);
+	await expect
+		.poll(
+			async () => await fixture.sql(`SELECT source_seq FROM example_roster WHERE instance='${firstIdentity.instance}'`),
+		)
+		.toEqual([{ source_seq: message.seq }]);
 	const roster = await (await call("/api/agents", "GET", reader)).json();
+	expect(roster.items).not.toEqual(
+		expect.arrayContaining([expect.objectContaining({ instance: readerIdentity.instance })]),
+	);
 	for (const item of roster.items)
 		expect(Object.keys(item).sort()).toEqual(["agent", "instance", "last_observed_at", "profile"]);
 	for (const secret of [first, sibling, reader, cookie]) expect(JSON.stringify(roster)).not.toContain(secret);
@@ -125,9 +139,15 @@ it("loads optional profile, roster and deletion policies through public capabili
 	expect(await (await call("/api/topics/optional", "DELETE", first, undefined, "delete")).json()).toEqual(deleted);
 	expect((await call("/api/topics/optional", "GET", first)).status).toBe(404);
 	expect(await fixture.sql(`SELECT id FROM messages WHERE id='${message.id}'`)).toEqual([{ id: message.id }]);
+	await fixture.sql("INSERT INTO example_roster VALUES('historical-instance','historical-agent',42,0)");
 	await app.stop();
 	app = await fixture.launch(join(seed, "server.ts"));
 	await app.ready(cookie);
+	expect((await (await call("/api/agents", "GET", reader)).json()).items).toEqual(
+		expect.arrayContaining([
+			{ agent: "historical-agent", instance: "historical-instance", last_observed_at: 42, profile: null },
+		]),
+	);
 	expect(await (await call("/api/topics/optional", "DELETE", first, undefined, "delete")).json()).toEqual(deleted);
 	expect(
 		await (
