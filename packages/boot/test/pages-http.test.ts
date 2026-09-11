@@ -409,18 +409,27 @@ const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
 				{ timeout: 5000 },
 			)
 			.toMatchObject({ held: "ready" });
-		expect((await app.call(target, { method: "PUT", body: "must not race rename" })).status).toBe(503);
-		expect(
-			(
-				await app.call(`${app.url}/api/revert`, {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ path: "pages/original/file.txt" }),
-				})
-			).status,
-		).toBe(503);
+		const cancelled = new AbortController();
+		test.onTestFinished(() => cancelled.abort());
+		const waiting = [
+			app.call(target, { method: "PUT", body: "must not race rename", signal: cancelled.signal }),
+			app.call(`${app.url}/api/revert`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ path: "pages/original/file.txt" }),
+				signal: cancelled.signal,
+			}),
+		].map((promise) =>
+			promise.then(
+				() => "responded",
+				() => "cancelled",
+			),
+		);
+		await delay(100);
 		expect(await env.sql("SELECT * FROM source_batches ORDER BY id")).toEqual(history);
 		expect(await env.sql("SELECT * FROM source_changes")).toEqual([]);
+		cancelled.abort();
+		expect(await Promise.all(waiting)).toEqual(["cancelled", "cancelled"]);
 		await writeFile(join(env.root, "data/pages/move-release"), "release");
 		expect((await move).status).toBe(200);
 		expect(await readFile(join(env.root, "data/pages/destination/file.txt"), "utf8")).toBe(

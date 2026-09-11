@@ -140,15 +140,33 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 					cutover: coordinator,
 					// App filesystem effects reserve first; raw journals stay outside that interval.
 					withPagePublication: (effect) =>
-						supervisor.operationGate.withPermit(
-							child.channelGate.withPermit(
-								Effect.gen(function* () {
-									if ((yield* recoveryIntents(sql)).count > 0 || (yield* events.state).pending_id !== null)
-										return yield* new SourceRejected({ code: "publication_pending", path: "recovery" });
-									return yield* effect;
-								}),
-							),
-						),
+						Effect.gen(function* () {
+							while (true) {
+								const admitted = yield* supervisor.operationGate.withPermit(
+									child.channelGate.withPermit(
+										Effect.gen(function* () {
+											if ((yield* Ref.get(phase))._tag !== "Ready" || (yield* recoveryIntents(sql)).count > 0)
+												return yield* new SourceRejected({ code: "publication_pending", path: "recovery" });
+											const state = yield* events.state;
+											if (state.pending_id !== null)
+												return { _tag: "Waiting" as const, fence: state.published_through };
+											return { _tag: "Published" as const, value: yield* effect };
+										}),
+									),
+								);
+								if (admitted._tag === "Published") return admitted.value;
+								// Append needs the channel gate; crashed-child reconciliation needs the operation gate.
+								// Release both while waiting, then recheck before capturing any source proposal.
+								yield* events
+									.changed(admitted.fence)
+									.pipe(
+										Effect.catchTag(
+											"EventError",
+											() => new SourceRejected({ code: "publication_pending", path: "recovery" }),
+										),
+									);
+							}
+						}),
 				},
 			},
 		);
