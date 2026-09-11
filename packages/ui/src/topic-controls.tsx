@@ -1,7 +1,8 @@
 import { Effect, Schema } from "effect";
 import { useId, useState } from "react";
 import { type BoardError } from "./board-api.ts";
-import { saveTopic, type TopicMutation } from "./topic-control-api.ts";
+import type { TopicMutation } from "@comms/protocol";
+import { useBoardClient } from "./board-client.tsx";
 
 export function TopicControls({
 	path,
@@ -14,8 +15,9 @@ export function TopicControls({
 	readonly meta: Schema.JsonObject;
 	readonly archived: boolean;
 	readonly parentArchived?: boolean;
-	readonly onSaved: (topic: TopicMutation) => void;
+	readonly onSaved: (topic: typeof TopicMutation.Type) => void;
 }) {
+	const { saveTopic } = useBoardClient();
 	const fieldId = useId();
 	const [draft, setDraft] = useState(() => JSON.stringify(meta, null, 2));
 	const [dirty, setDirty] = useState(false);

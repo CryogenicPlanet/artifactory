@@ -1,11 +1,12 @@
+import { useBoardClient } from "./board-client.tsx";
 import { BoardLayout } from "./board-layout.tsx";
 import { topicHref } from "./board-api.ts";
-import { getMe, profileHref } from "./profile-api.ts";
+import { profileHref } from "./profile-api.ts";
 import { AccountControls } from "./account-controls.tsx";
 import { useLoad } from "./use-load.ts";
 
 export function ProfileLink() {
-	const { value: me } = useLoad(getMe);
+	const { value: me } = useLoad(useBoardClient().me);
 	return me ? (
 		<a className="nav-home" href={profileHref(me.agent)}>
 			Your account
@@ -14,7 +15,7 @@ export function ProfileLink() {
 }
 
 export function Profile({ agent }: { readonly agent: string }) {
-	const { value: me, error, loading, reload } = useLoad(getMe);
+	const { value: me, error, loading, reload } = useLoad(useBoardClient().me);
 	const own = me?.agent === agent;
 	return (
 		<BoardLayout

@@ -1,15 +1,19 @@
 import { useMemo, useState } from "react";
-import { getMessageHistory } from "./board-api.ts";
+import { useBoardClient } from "./board-client.tsx";
 import { useLoad } from "./use-load.ts";
 import { Message } from "./message.tsx";
 import { ReferencedMessage } from "./referenced-message.tsx";
 
 export function MessageHistory({ path, onClose }: { readonly path: string; readonly onClose: () => void }) {
+	const client = useBoardClient();
 	const [position, setPosition] = useState<{ readonly since: number; readonly previous: readonly number[] }>({
 		since: 0,
 		previous: [],
 	});
-	const request = useMemo(() => getMessageHistory(path, position.since), [path, position.since]);
+	const request = useMemo(
+		() => client.messages({ topic: path, since: position.since, limit: 100, mark: "0" }),
+		[client, path, position.since],
+	);
 	const { value, error, loading, reload } = useLoad(request);
 	const page = loading || error ? undefined : value;
 	return (

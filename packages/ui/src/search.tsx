@@ -2,9 +2,11 @@ import { Effect } from "effect";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { validTopic, type BoardMessage } from "./board-api.ts";
 import { Message } from "./message.tsx";
-import { searchMessages, type MessageFilters } from "./search-api.ts";
+import { useBoardClient } from "./board-client.tsx";
+type MessageFilters = { readonly q: string; readonly topic: string; readonly tag: string; readonly agent: string };
 
 export function Search({ path, onActive }: { readonly path: string; readonly onActive: (active: boolean) => void }) {
+	const client = useBoardClient();
 	const [q, setQ] = useState("");
 	const [topic, setTopic] = useState(path);
 	const [tag, setTag] = useState("");
@@ -30,20 +32,33 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 		setLoading(true);
 		setError("");
 		void Effect.runPromise(
-			searchMessages(filters, since).pipe(
-				Effect.match({
-					onSuccess: (result) => {
-						setItems((previous) => (since === 0 ? result.items : [...previous, ...result.items]));
-						setCursor(result.cursor);
-						setMore(result.items.length === 100);
-						setLoading(false);
-					},
-					onFailure: (failure) => {
-						setError(failure.message);
-						setLoading(false);
-					},
-				}),
-			),
+			client
+				.read(
+					client.messages({
+						since,
+						limit: 100,
+						recursive: "1",
+						mark: "0",
+						...(filters.q ? { q: filters.q } : {}),
+						...(filters.topic ? { topic: filters.topic } : {}),
+						...(filters.tag ? { tag: filters.tag } : {}),
+						...(filters.agent ? { agent: filters.agent } : {}),
+					}),
+				)
+				.pipe(
+					Effect.match({
+						onSuccess: (result) => {
+							setItems((previous) => (since === 0 ? result.items : [...previous, ...result.items]));
+							setCursor(result.cursor);
+							setMore(result.items.length === 100);
+							setLoading(false);
+						},
+						onFailure: (failure) => {
+							setError(failure.message);
+							setLoading(false);
+						},
+					}),
+				),
 			{ signal: controller.signal },
 		).catch(() => {});
 	};

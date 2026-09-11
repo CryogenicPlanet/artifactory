@@ -1,6 +1,7 @@
+import { useBoardClient } from "./board-client.tsx";
 import { Effect, Random } from "effect";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { sendMessage, validTopic, type BoardMessage, type PendingMessage } from "./board-api.ts";
+import { validTopic, type BoardMessage, type PendingMessage } from "./board-api.ts";
 
 export function Composer({
 	path,
@@ -11,6 +12,7 @@ export function Composer({
 	readonly sessionExpired: boolean;
 	readonly onSent: (message: BoardMessage) => void;
 }) {
+	const { sendMessage } = useBoardClient();
 	const [topic, setTopic] = useState(path);
 	const [body, setBody] = useState("");
 	const [pending, setPending] = useState<PendingMessage | null>(null);

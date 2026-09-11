@@ -1,7 +1,10 @@
 import { BoardLayout } from "./board-layout.tsx";
+import { useVisible } from "./use-visible.ts";
+import { Atom } from "effect/unstable/reactivity";
+import { useBoardClient } from "./board-client.tsx";
 import { Effect } from "effect";
 import { useMemo, useState } from "react";
-import { getTopic, topicHref, validTopic, type BoardMessage } from "./board-api.ts";
+import { topicHref, validTopic, type BoardMessage } from "./board-api.ts";
 import { Message } from "./message.tsx";
 import { Markdown } from "./markdown.tsx";
 import { ReferencedMessage } from "./referenced-message.tsx";
@@ -30,24 +33,28 @@ export function App() {
 	return agent === null ? <Board /> : <Profile agent={agent} />;
 }
 function Board() {
+	const client = useBoardClient();
+	const visible = useVisible();
 	const [path] = useState(currentPath);
 	const [showArchived, setShowArchived] = useState(false);
 	const [browsingHistory, setBrowsingHistory] = useState(false);
 	const [searching, setSearching] = useState(false);
-	const request = useMemo(
-		() =>
-			path === null
-				? Effect.succeed(null)
-				: Effect.all(
-						{
-							root: getTopic("", showArchived, path === "" && !searching && !browsingHistory),
-							topic: path === "" ? Effect.succeed(null) : getTopic(path, showArchived, !searching && !browsingHistory),
-						},
-						{ concurrency: "unbounded" },
-					).pipe(Effect.map(({ root, topic }) => ({ root, topic: topic ?? root }))),
-		[path, showArchived, searching, browsingHistory],
-	);
-	const { value, error, loading, reload, update } = useLoad(request, path !== null);
+	const request = useMemo(() => {
+		if (path === null) return Atom.make(Effect.succeed(null));
+		const root = client.topic("", showArchived, visible && path === "" && !searching && !browsingHistory);
+		const topic = path === "" ? root : client.topic(path, showArchived, visible && !searching && !browsingHistory);
+		const read = Atom.make((get) =>
+			Effect.all(
+				{ root: get.result(root, { suspendOnWaiting: true }), topic: get.result(topic, { suspendOnWaiting: true }) },
+				{ concurrency: "unbounded" },
+			),
+		);
+		return Atom.readable(read.read, (refresh) => {
+			refresh(root);
+			if (topic !== root) refresh(topic);
+		});
+	}, [client, path, showArchived, searching, browsingHistory, visible]);
+	const { value, error, loading, reload, update } = useLoad(request);
 	const root = value?.root;
 	const topic = value?.topic;
 	const onSent = (message: BoardMessage) => {
@@ -271,7 +278,7 @@ function Board() {
 									<section className="mb-8" aria-label="Messages">
 										<div className="section-heading">
 											<h2>{path ? "Messages" : "Recent messages"}</h2>
-											<span>Updates every 10s</span>
+											<span>Live updates</span>
 										</div>
 										{topic.messages.length === 0 ? (
 											<div className="empty">

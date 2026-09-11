@@ -2,39 +2,21 @@ import { RegistryContext, useAtomValue, useAtomRefresh } from "@effect/atom-reac
 import { Effect, Option } from "effect";
 import { Atom, AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useContext, useEffect, useState } from "react";
-import { BoardError } from "./board-api.ts";
-
-// Atom descriptions hold no results; visibility listeners live in the mounted registry.
-const visible = Atom.make((get) => {
-	const changed = () => get.setSelf(document.visibilityState === "visible");
-	document.addEventListener("visibilitychange", changed);
-	get.addFinalizer(() => document.removeEventListener("visibilitychange", changed));
-	return document.visibilityState === "visible";
-});
+import { boardFailure } from "./board-api.ts";
 
 /** The mounted registry owns read results, refresh and cancellation; forms own their drafts. */
-export function useLoad<A>(
-	request: Effect.Effect<A, BoardError> | Atom.Atom<AsyncResult.AsyncResult<A, BoardError>>,
-	poll = false,
-) {
+export function useLoad<A, E>(request: Effect.Effect<A, E> | Atom.Atom<AsyncResult.AsyncResult<A, E>>) {
 	const registry = useContext(RegistryContext);
 	const [atoms] = useState(() => {
-		const input = Atom.make({ request, poll });
+		const input = Atom.make({ request });
 		const read = Atom.make((get) => {
 			const current = get(input).request;
 			return (Atom.isAtom(current) ? get.result(current, { suspendOnWaiting: true }) : current).pipe(
-				Effect.catchDefect(() =>
-					Effect.fail(new BoardError({ status: 0, message: "This view could not load. Try refreshing." })),
-				),
+				Effect.catchCause((cause) => Effect.fail(boardFailure(cause))),
 			);
 		});
-		const refreshed = Atom.withRefresh(read, "10 seconds");
 		const result = Atom.writable(
-			(get) => {
-				const state = get(read);
-				// Start the interval only after completion: a queued read must not be canceled by polling.
-				return !state.waiting && get(input).poll && get(visible) ? get(refreshed) : state;
-			},
+			(get) => get(read),
 			(context, change: (previous: A | undefined) => A | undefined) => {
 				const previous = context.get(result);
 				const value = change(Option.getOrUndefined(AsyncResult.value(previous)));
@@ -49,8 +31,8 @@ export function useLoad<A>(
 		return { input, result };
 	});
 	useEffect(() => {
-		registry.set(atoms.input, { request, poll });
-	}, [registry, atoms, request, poll]);
+		registry.set(atoms.input, { request });
+	}, [registry, atoms, request]);
 	const state = useAtomValue(atoms.result);
 	const reload = useAtomRefresh(atoms.result);
 	const update = useCallback(

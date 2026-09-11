@@ -1,20 +1,17 @@
 import { BoardLayout } from "./board-layout.tsx";
-import { DateTime, Effect } from "effect";
+import { DateTime } from "effect";
 
 import { useLoad } from "./use-load.ts";
-import { getEditLock, getExtensions } from "./extension-api.ts";
-
-const extensionRequests = Effect.all(
-	{ extensions: getExtensions.pipe(Effect.result), lock: getEditLock.pipe(Effect.result) },
-	{ concurrency: "unbounded" },
-);
+import { useBoardClient } from "./board-client.tsx";
 
 export function Extensions() {
-	const { value, loading, reload } = useLoad(extensionRequests, true);
-	const items = value?.extensions._tag === "Success" ? value.extensions.success : undefined;
-	const error = value?.extensions._tag === "Failure" ? value.extensions.failure : null;
-	const lock = value?.lock._tag === "Success" ? value.lock.success : undefined;
-	const lockError = value?.lock._tag === "Failure" ? value.lock.failure : null;
+	const client = useBoardClient();
+	const { value: items, error, loading, reload: reloadExtensions } = useLoad(client.extensions);
+	const { value: lock, error: lockError, reload: reloadLock } = useLoad(client.lock);
+	const reload = () => {
+		reloadExtensions();
+		reloadLock();
+	};
 	return (
 		<BoardLayout
 			navigation={
@@ -34,7 +31,7 @@ export function Extensions() {
 						<a href="/">Board</a> / Extensions
 					</nav>
 					<h1>Extensions</h1>
-					<p>What is loaded in the current generation. Updates every 10s.</p>
+					<p>What is loaded in the current generation. Updates with server events.</p>
 				</div>
 				<button type="button" className="quiet" onClick={reload} disabled={loading}>
 					{loading ? "Refreshing…" : "Refresh"}

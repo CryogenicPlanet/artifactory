@@ -1,10 +1,13 @@
+import { Atom } from "effect/unstable/reactivity";
+import { useBoardClient } from "./board-client.tsx";
 import { Effect } from "effect";
 import { useEffect, useMemo, useState } from "react";
-import { getMessageBySequence, type BoardMessage } from "./board-api.ts";
+import { BoardError, type BoardMessage } from "./board-api.ts";
 import { useLoad } from "./use-load.ts";
 import { Message } from "./message.tsx";
 
 export function ReferencedMessage({ visible }: { readonly visible: readonly BoardMessage[] }) {
+	const client = useBoardClient();
 	const [seq] = useState(() => {
 		const value = new URLSearchParams(window.location.search).get("message");
 		const parsed = value && /^[1-9][0-9]*$/.test(value) ? Number(value) : 0;
@@ -12,8 +15,23 @@ export function ReferencedMessage({ visible }: { readonly visible: readonly Boar
 	});
 	const displayed = visible.some((item) => item.seq === seq);
 	const request = useMemo(
-		() => (!seq || displayed ? Effect.succeed(null) : getMessageBySequence(seq)),
-		[seq, displayed, visible],
+		() =>
+			Atom.make((get) =>
+				!seq || displayed
+					? Effect.succeed(null)
+					: get
+							.result(client.messages({ since: seq - 1, limit: 1, mark: "0" }, true), { suspendOnWaiting: true })
+							.pipe(
+								Effect.flatMap((result) =>
+									result.items[0]?.seq === seq
+										? Effect.succeed(result.items[0])
+										: Effect.fail(
+												new BoardError({ status: 404, message: `Message #${seq} is unavailable or deleted.` }),
+											),
+								),
+							),
+			),
+		[client, seq, displayed, visible],
 	);
 	const { value: message, error } = useLoad(request);
 	useEffect(() => {
