@@ -1,4 +1,6 @@
 /* oxlint-disable effecttsgo/global-date -- Opt-in real-process acceptance measures monotonic HTTP latency. */
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -24,6 +26,7 @@ it.skipIf(process.env.COMMS_CUTOVER_ACCEPTANCE !== "1")(
 		await app.setup();
 		const cookie = await app.login();
 		await app.ready(cookie);
+		const bunVersion = (await promisify(execFile)("bun", ["--version"])).stdout.trim();
 		const records: Array<{
 			phase: string;
 			method: string;
@@ -122,6 +125,11 @@ it.skipIf(process.env.COMMS_CUTOVER_ACCEPTANCE !== "1")(
 				const outcome = Schema.decodeUnknownSync(Swap)(await response.json());
 				swaps.push({ phase: name, ms: performance.now() - started, outcome });
 				expect(outcome.status).toBe(name === "bad-edit" ? "failed" : "live");
+				if (name !== "bad-edit") {
+					expect(typeof outcome.freeze_ms).toBe("number");
+					expect(Number.isFinite(outcome.freeze_ms)).toBe(true);
+					expect(outcome.freeze_ms).toBeGreaterThanOrEqual(0);
+				}
 			}
 			phase = "after";
 			await delay(500);
@@ -134,6 +142,8 @@ it.skipIf(process.env.COMMS_CUTOVER_ACCEPTANCE !== "1")(
 		const sorted = records.map((record) => record.ms).sort((a, b) => a - b);
 		const summary = {
 			runtime: process.version,
+			child_runtime: `Bun ${bunVersion}`,
+			runtime_mode: "Source boot fixture launching actual server.ts kernel; not a compiled production-image benchmark",
 			requests: records.length,
 			acknowledged_posts: accepted.length,
 			observed_refusals: records.filter((record) => record.status !== 200),
