@@ -54,7 +54,7 @@ const main = Effect.gen(function* () {
 					yield* events.writeBoot(input.event);
 					return "ok";
 				case "diagnostics":
-					return yield* events.diagnostics({ ...input, limit: input.limit ?? 100 });
+					return yield* events.diagnostics({ ...input, limit: input.limit ?? 100 }, true);
 				case "query":
 					return yield* events.query({
 						...input,

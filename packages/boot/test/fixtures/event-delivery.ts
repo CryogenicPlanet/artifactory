@@ -35,14 +35,14 @@ const main = Effect.gen(function* () {
 			const request = yield* HttpServerRequest.HttpServerRequest;
 			const store: Events["Service"] = {
 				...events,
-				diagnostics: (input) =>
+				diagnostics: (input, includeFailure) =>
 					Effect.gen(function* () {
 						yield* Ref.update(reads, (n) => n + 1);
 						if (request.headers["x-block-query"]) {
 							yield* Ref.update(blockedReads, (n) => n + 1);
 							yield* Deferred.await(releaseQuery).pipe(Effect.ensuring(Ref.update(blockedReads, (n) => n - 1)));
 						}
-						return yield* events.diagnostics(input);
+						return yield* events.diagnostics(input, includeFailure);
 					}),
 				query: (input) =>
 					Effect.gen(function* () {
@@ -89,6 +89,10 @@ const main = Effect.gen(function* () {
 				yield* gate.withPermit(Ref.set(attempts, []));
 				return HttpServerResponse.empty();
 			}
+			if (request.url === "/failed-generation") {
+				yield* sql`INSERT INTO generations(n,entry_file,status,started_at,error,stderr) VALUES(1,'server.ts','failed',1,'private error','private stderr')`;
+				return HttpServerResponse.empty();
+			}
 			if (request.url === "/emit") {
 				const event = yield* Schema.decodeUnknownEffect(EventRecord)(yield* request.json);
 				yield* events.writeBoot(event);
@@ -107,7 +111,11 @@ const main = Effect.gen(function* () {
 									agent: "codex",
 									kind: request.headers["x-test-human"] ? "human" : "agent",
 									label: "test",
-									scopes: request.headers["x-no-read"] ? ["read"] : ["read", "fs"],
+									scopes: request.headers["x-no-read"]
+										? []
+										: request.headers["x-read-only"]
+											? ["read"]
+											: ["read", "fs"],
 									expiresAt: (yield* Clock.currentTimeMillis) + (request.headers["x-short-expiry"] ? 300 : 60000),
 								},
 					gate,

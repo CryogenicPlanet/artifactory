@@ -68,7 +68,7 @@ it("public diagnostics expose only bounded recovery events and reject applicatio
 	});
 	expect((await app.get("/api/events?since=0")).status).toBe(404);
 	for (const query of [
-		"wait=1",
+		"wait=61",
 		"types=generation.*",
 		"topic=project",
 		"since=0&since=1",
@@ -78,7 +78,7 @@ it("public diagnostics expose only bounded recovery events and reject applicatio
 	])
 		expect((await app.get(`/_boot/events?${query}`)).status, query).toBe(400);
 	expect((await app.get("/_boot/events", { headers: { "x-no-read": "1" } })).status).toBe(403);
-	expect((await app.get("/_boot/events", { headers: { "x-test-human": "1", "x-no-read": "1" } })).status).toBe(200);
+	expect((await app.get("/_boot/events", { headers: { "x-test-human": "1" } })).status).toBe(200);
 	const privatePage = await app.get("/_boot/events?since=0&types=message.*", {
 		headers: { "x-boot-secret": "fixture-secret" },
 	});
@@ -163,4 +163,43 @@ it("sequence fence requires the current child secret and exact host without forw
 	expect((await app.get("/_boot/agents", { headers })).status).toBe(404);
 	await app.post("/retire", {});
 	expect((await app.get("/_boot/seq", { headers })).status).toBe(403);
+});
+
+it("read-scoped boot waits survive a stuck app fence without exposing private failure detail", async (test) => {
+	const app = await launch(test);
+	await app.post("/failed-generation", {});
+	expect((await app.post("/_boot/seq/reserve", { transaction: "stuck", count: 1 }, true)).status).toBe(200);
+	const headers = { "x-read-only": "1" };
+	const response = await app.get("/_boot/events?since=2&wait=2", { headers });
+	const waiting = response.json();
+	await app.post("/emit", event({ type: "generation.failed", payload: {} }));
+	expect(await waiting).toMatchObject({
+		items: [{ seq: 3, type: "generation.failed" }],
+		cursor: 3,
+		timed_out: false,
+		drained: false,
+	});
+	const read = await (await app.get("/_boot/events?since=0", { headers })).text();
+	expect(read).not.toContain("private stderr");
+	expect(read).not.toContain("private error");
+	const privileged = await json(await app.get("/_boot/events?since=0"));
+	expect(privileged).toMatchObject({ items: [{ current_failure: { stderr: "private stderr" } }] });
+	expect(
+		await json(await app.get("/_boot/events?since=0", { headers: { "x-boot-secret": "fixture-secret" } })),
+	).toMatchObject({ items: [], cursor: 0 });
+});
+
+it("boot event waits stop on revocation and captured expiry before delivering new diagnostics", async (test) => {
+	const app = await launch(test);
+	const issued = await (await app.post("/token", {})).json();
+	for (const headers of [{ authorization: `Bearer ${issued.token}` }, { "x-short-expiry": "1" }]) {
+		const cursor = await json(await app.get("/_boot/events?limit=1"));
+		if (typeof cursor !== "object" || cursor === null || !("cursor" in cursor)) throw Error("Missing cursor");
+		const response = await app.get(`/_boot/events?since=${cursor.cursor}&wait=2`, { headers });
+		const waiting = response.json();
+		if (headers.authorization) await app.post("/revoke", {});
+		else await delay(450);
+		await app.post("/emit", event({ type: "lock.released", payload: { marker: "must not deliver" } }));
+		expect(await waiting).toMatchObject({ items: [], drained: true, timed_out: false });
+	}
 });

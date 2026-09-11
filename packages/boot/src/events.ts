@@ -96,13 +96,14 @@ const make = Effect.fn("Events")(function* (
 		const previous = yield* Ref.getAndSet(signal, next);
 		yield* Deferred.succeed(previous, undefined);
 	});
-	const changed = (after: number) =>
+	const changed = (after: number, diagnostics = false) =>
 		Effect.gen(function* () {
 			while (true) {
 				// Capture the signal before reading SQL so a commit between read and wait cannot be missed.
 				const pending = yield* Ref.get(signal);
 				if (yield* Ref.get(stopped)) return yield* new EventError({ code: "events_unavailable" });
-				const current = (yield* state).published_through;
+				const sequence = yield* state;
+				const current = diagnostics ? sequence.next - 1 : sequence.published_through;
 				if (current > after) return current;
 				yield* Deferred.await(pending);
 			}
@@ -261,7 +262,7 @@ const make = Effect.fn("Events")(function* (
 					}),
 				)
 				.pipe(Effect.ensuring(notify)),
-		diagnostics: (input: { readonly since?: number; readonly limit: number }) =>
+		diagnostics: (input: { readonly since?: number; readonly limit: number }, includeFailure = false) =>
 			sql.withTransaction(
 				Effect.gen(function* () {
 					// This cursor belongs only to recovery diagnostics: app publication may be stuck.
@@ -288,7 +289,7 @@ const make = Effect.fn("Events")(function* (
 						decode(row.event).pipe(
 							Effect.map((event) => ({
 								...event,
-								...(row.error === null
+								...(!includeFailure || row.error === null
 									? {}
 									: {
 											current_failure: {

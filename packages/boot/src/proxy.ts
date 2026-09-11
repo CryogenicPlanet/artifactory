@@ -40,7 +40,7 @@ POST /_boot/db/backup  Capture a consistent app backup (human or fs scope).
 POST /_boot/db/restore  Human-only database restore with a fresh db.restore assertion.
 POST /_boot/restart {}  Human session and fresh boot.restart assertion; exits for the external supervisor to restart.
 POST /_boot/reset {}  Human-only source reset to image seed with a fresh app.reset assertion; data and pages stay current.
-GET /_boot/events?limit=100  Read recent boot recovery events; optional since cursor.
+GET /_boot/events?limit=100  Read boot recovery events with read scope; optional since and wait=0..60.
 
 Source snapshots and restart recovery are active. Child crashes retry their snapshot three times,
 then try older known-good snapshots. Human passkey setup and login are available at /setup and /auth/login.
@@ -223,7 +223,7 @@ export const proxy = Effect.gen(function* () {
 					child.channelGate,
 					child.traffic.route,
 					authenticate(auth, request).pipe(
-						Effect.map((current) => current.kind === "human" || current.scopes.includes("fs")),
+						Effect.map((current) => current.scopes.includes("read")),
 						Effect.orElseSucceed(() => false),
 					),
 				);

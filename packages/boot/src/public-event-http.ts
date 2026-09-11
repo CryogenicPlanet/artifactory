@@ -10,28 +10,31 @@ const integer = (value: string | null, fallback: number, maximum: number) => {
 	return Number.isSafeInteger(number) && number <= maximum ? number : null;
 };
 
-/** Private child transport retains wait compatibility for saved generations.
- * New editable callers wait through the sequence signal; this is never public event browsing. */
+/** One bounded delivery engine serves recovery reads and private child event queries.
+ * The selected reader and signal retain their distinct authorization and cursor boundaries. */
 export const publicEventResponse = (
 	request: HttpServerRequest.HttpServerRequest,
 	identity: VerifiedIdentity | null,
 	query: Events["Service"]["query"],
 	changed: Events["Service"]["changed"],
+	recovery = false,
 ) =>
 	Effect.gen(function* () {
 		const url = new URL(request.url, "http://localhost");
 		const params = url.searchParams;
-		const allowed = [
-			"since",
-			"limit",
-			"topic",
-			"types",
-			"agent",
-			"instance",
-			"level",
-			"wait",
-			...(identity === null ? ["request_actor", "exclude_message_instance"] : []),
-		];
+		const allowed = recovery
+			? ["since", "limit", "wait"]
+			: [
+					"since",
+					"limit",
+					"topic",
+					"types",
+					"agent",
+					"instance",
+					"level",
+					"wait",
+					...(identity === null ? ["request_actor", "exclude_message_instance"] : []),
+				];
 		if (
 			url.search.length > 4096 ||
 			[...params.keys()].some((key) => !allowed.includes(key) || params.getAll(key).length !== 1)

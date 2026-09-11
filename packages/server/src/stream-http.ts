@@ -41,8 +41,7 @@ export const streamHandlers = (api: typeof Api, extension: ExtensionApi) =>
 					const first = yield* ctx.events.query(input);
 					const pages = Stream.unfold(first, (page) =>
 						Effect.gen(function* () {
-							if (page.items.length === 0) yield* ctx.events.changed(page.cursor);
-							const next = yield* ctx.events.query({ ...input, since: page.cursor });
+							const next = yield* ctx.events.query({ ...input, since: page.cursor, wait: 60 });
 							return [next.items, next] as const;
 						}),
 					).pipe(Stream.flatMap((items) => Stream.fromIterable(items)));

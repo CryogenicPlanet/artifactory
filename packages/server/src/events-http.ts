@@ -1,6 +1,6 @@
 import { EventPage } from "@comms/protocol/events";
 import type { CoreApi } from "@comms/protocol";
-import { Clock, Effect, Layer, Schema, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { refusal } from "./conversation-request.ts";
@@ -29,27 +29,14 @@ export const eventsHandlers = (api: typeof CoreApi, extension: ExtensionApi) =>
 						...(ctx.kind === "agent" ? { requestActor: ctx.agent } : {}),
 						...(wait > 0 ? { excludeMessageInstance: ctx.instance } : {}),
 					};
-					let current = yield* ctx.events.query(input);
+					const current = yield* ctx.events.query(input);
 					const headers = { "cache-control": "no-store", "x-accel-buffering": "no" };
 					if (current.items.length > 0 || wait === 0) return HttpServerResponse.jsonUnsafe(current, { headers });
-					const deadline = (yield* Clock.currentTimeMillis) + wait * 1000;
-					const poll = Effect.gen(function* () {
-						while (true) {
-							yield* ctx.events.changed(current.cursor);
-							current = yield* ctx.events.query({ ...input, since: current.cursor });
-							if (current.items.length > 0) return current;
-						}
-					});
 					const drained = () => ({ ...current, items: [], timed_out: false, drained: true });
-					const result = Effect.gen(function* () {
-						return yield* poll.pipe(
-							Effect.raceFirst(ctx.drained.pipe(Effect.map(drained))),
-							Effect.timeoutOrElse({
-								duration: Math.max(0, deadline - (yield* Clock.currentTimeMillis)),
-								orElse: () => Effect.succeed({ ...current, timed_out: true }),
-							}),
-						);
-					}).pipe(Effect.catchCause(() => Effect.succeed(drained())));
+					const result = ctx.events.query({ ...input, since: current.cursor, wait }).pipe(
+						Effect.raceFirst(ctx.drained.pipe(Effect.map(drained))),
+						Effect.catchCause(() => Effect.succeed(drained())),
+					);
 					const encoder = new TextEncoder();
 					return HttpServerResponse.stream(
 						Stream.merge(
