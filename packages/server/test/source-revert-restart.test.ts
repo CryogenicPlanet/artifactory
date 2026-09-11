@@ -29,11 +29,11 @@ it.for(["app-accepted", "page-journal"] as const)(
 		}\n${needle}`,
 			),
 		);
-		// Exercise the admission race deterministically: this refusal precedes journal admission.
+		// Refuse once inside both publication gates, before the queued event check or journal admission.
 		if (boundary === "page-journal") {
 			const indexPath = join(fixture.root, "packages/boot/src/index.ts");
 			const index = await readFile(indexPath, "utf8");
-			const admission = "if ((yield* recoveryIntents(sql)).count > 0 || (yield* events.state).pending_id !== null)";
+			const admission = 'if ((yield* Ref.get(phase))._tag !== "Ready" || (yield* recoveryIntents(sql)).count > 0)';
 			expect(index.split(admission)).toHaveLength(2);
 			const refused = join(fixture.root, "undo-refused");
 			await writeFile(

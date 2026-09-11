@@ -11,7 +11,7 @@ it("preserves a published background message after boot dies immediately after r
 	const marker = join(fixture.root, "write-after-rollback");
 	const receipt = join(fixture.root, "background-receipt.json");
 	const server = await readFile(join(seed, "server.ts"), "utf8");
-	const trigger = 'if ((yield* Ref.get(lifecycle.state)) === "live") {';
+	const trigger = 'if ((yield* Ref.get(lifecycle.state)) !== "live") return;';
 	const background = `${trigger}
 										const fs = yield* FileSystem.FileSystem;
 										if ((yield* fs.exists(${JSON.stringify(marker)})) && !(yield* fs.exists(${JSON.stringify(receipt)}))) {
@@ -21,13 +21,22 @@ it("preserves a published background message after boot dies immediately after r
 											yield* fs.writeFileString(${JSON.stringify(receipt + ".tmp")}, JSON.stringify(message));
 											yield* fs.rename(${JSON.stringify(receipt + ".tmp")}, ${JSON.stringify(receipt)});
 										}`;
-	expect(server).toContain(trigger);
+	expect(server.split(trigger)).toHaveLength(2);
+	// Relay work is signaled now: wake the instrumented live job deterministically
+	// after activation instead of depending on an idle maintenance tick.
+	const transition = "yield* Ref.set(extensionState, extensions.changeState);";
+	expect(server.split(transition)).toHaveLength(2);
 	await writeFile(
 		join(seed, "server.ts"),
 		server
 			.replace("type Messages,", "Messages,")
-			.replace("\tConfig,", "\tConfig,\n\tFileSystem,")
-			.replace(trigger, background),
+			.replace("type FileSystem,", "FileSystem,")
+			.replace(trigger, background)
+			.replace(
+				transition,
+				`yield* Ref.set(extensionState, (state) => extensions.changeState(state).pipe(
+				Effect.andThen(state === "live" ? publication.wake : Effect.void)));`,
+			),
 	);
 
 	// Instrument only a disposable boot copy: hold the exact crash window without
@@ -40,7 +49,7 @@ it("preserves a published background message after boot dies immediately after r
 	await mkdir(join(fixture.root, "packages/server"), { recursive: true });
 	await symlink(join(import.meta.dirname, "../node_modules"), join(fixture.root, "packages/server/node_modules"));
 	const cutover = await readFile(join(boot, "src/cutover.ts"), "utf8");
-	const restarted = "if (prior) yield* start(prior.generation);";
+	const restarted = "if (prior) yield* restartGeneration(prior.generation);";
 	expect(cutover.split(restarted)).toHaveLength(2);
 	await writeFile(
 		join(boot, "src/cutover.ts"),
