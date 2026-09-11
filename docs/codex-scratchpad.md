@@ -2,17 +2,25 @@
 
 This is the handoff and remaining-work ledger for Codex. Implementation resumed with explicit owner authorization after the review landed. This records integrated changes, active isolated work and remaining requirements; worker reports alone are not completion claims.
 
-## Active completion goal — 2026-09-11
+## Current base completion — second-pass review
 
-**New controlling review:** owner explicitly requested [second-pass comment5637214197](https://github.com/CryogenicPlanet/artifactory/pull/1#issuecomment-5637214197). Read `docs/pr-1/second-pass-5d96c1d.md` and updated items25–31 in `pr-comments.md`. These add real requirements; earlier narrow audits are not completion claims. Database PRs and prepared database work remain paused.
+The owner-requested [PR #1 second-pass review](https://github.com/CryogenicPlanet/artifactory/pull/1#issuecomment-5637214197), including items 25–31, controls current work. **Base first:** PRs #2–4 and prepared migration/remote-client work remain paused and unintegrated. Finishing this review precedes the rest of the build plan; no merge or deployment is implied.
 
-Current root `d9224e7` locally integrates shared bootRoute/Origin policy, remaining Tailwind conversion, readonly SQL subprocess cancellation, controlled cron ownership acceptance and an opt-in cutover measurement. Check/build and fresh reviews pass. Full actualNode22.22.3/two-worker suite passes717tests across179files in514.26s at `/tmp/comms-base-final-full.log`; one opt-in measurement test/file is skipped. Measurement and temporary two-agent workflow remain unrun. This accepts the integrated changes, not the new second-pass requirements. Last pushed `5c3834f` passes712/712177files in Linux34618631417, image and actualQEMU34618631321. Earlier854e18c HTTP507 cause remains unknown.
+Production is frozen at `e04bd03` for combined acceptance. The parent reports root check/build passing on that source. Integrated second-pass changes include mention punctuation and subtree-only marks, isolated extension conflicts and declared disabled errors, safe freeze finalizers and a 60-second admission queue, sampled storage admission, page publication waiting outside reservation gates, page/board errors and CSP, lowercase new enrollment labels with legacy identity preservation, retained installer downloads, protected extension tables, fresh-store retired-table removal, authenticated source repair after failed recovery, cooperative read deadlines with cleanup escalation, signal-driven drain/relevant-event waits, public subscription/capability boundaries and typed topic parameters. Guide corrections are prepared separately. Individual focused tests and reviews support these changes; they are not a final combined full-suite result.
 
-Second-pass isolated lanes: mention punctuation/OR read marks; extension collision isolation/error declaration; freeze finalizers/queue budget; sampled storage admission; pages errors/board CSP; lowercase enrollment/persistent build cache/human constant. Read-only recovery/legacy-intent and server signal/ctx.read audits precede those changes. Parent alone integrates; no test subprocesses run beside the parent full suite. BootRoute and SQL read findings already have current local fixes, but newer findings remain open. Boot size12,194lines/95files remains above the approximate target.
+**Latest completed full local suite:** `d9224e7`, actual Node 22.22.3 with two workers, 717 passed across 179 files in 514.26s (`/tmp/comms-base-final-full.log`), with one opt-in measurement skipped. That run predates this second-pass wave. A new full run at `e04bd03` is in progress at `/tmp/comms-second-pass-final-full.log`; do not infer its outcome from this checkpoint. Cutover measurement and the temporary two-agent workflow remain unrun.
 
-Protected documents changed externally during this continuation: `pr-comments.md` was revised and `second-pass-5d96c1d.md` added. Neither was edited by this work. Preserve all current owner files; new inventory `/tmp/comms-base-owner-hashes-second-pass.json` supplements, never replaces, prior inventories.
+**Latest reported Linux gap:** `bbb4da9` finished 716 passed, one failed and one skipped. The SQL fixture exceeded its 30-second aggregate while issuing 43 requests. Test-only `7e1501c` separates failure stress from bounded-query assertions, retains the same 30-second deadline, and passes its three focused cases. This does not establish the historical timeout's cause. The earlier `854e18c` first-message HTTP507 before QEMU reboot also remains unexplained; later green runs do not diagnose it. Final pushed-head Linux, image and QEMU acceptance remain required.
 
-The owner requested finishing review changes, then completing the build plan against the spec. The broader goal remains active. **Base first:** the owner explicitly paused advancement of PRs #2–4 and later database work until PR #1 is finished. Prepared database commits remain preserved and unintegrated.
+Fresh app stores no longer create retired reaction tables; existing historical data and receipts remain preserved. Legacy boot topic-move cleanup detects old tables only during startup compatibility, requires positive owner closure before reconciliation, and removes them only after proven completion. Ambiguous tree/receipt/partial-table evidence remains preserved and refuses with `409 topic_move_recovery_required`; ordinary live paths use app-owned moves. Final boot line/file counts await the parent's inventory after integration. The approximate 7,250-line target remains unmet; compatibility and recovery guarantees must not be deleted to meet it.
+
+Readonly SQL uses scoped subprocess cancellation; synchronous SQL writes still rely on whole-child keeper/watchdog recovery. Cooperative read cleanup escalation is not a hard wall-time guarantee for arbitrary synchronous code. Request diagnostics remain intentionally lossy. Native installation/iOS and physical power-loss behavior remain untested; ordinary process-group closure excludes escaped/adversarial sessions. Do not claim every review comment is resolved.
+
+The parent reports 18 current protected owner files. Preserve `SPEC.md`, `docs/tech.md`, `docs/database.md` and `docs/pr-1/`. The second-pass inventory `/tmp/comms-base-owner-hashes-second-pass.json` supplements original inventories; owner revisions are not agent edits. Older 16/17-file counts below describe their checkpoints, not today's file set. Original provenance and frozen handoff hashes remain historical evidence; never replace newer files with those snapshots.
+
+## Historical checkpoints — superseded
+
+Everything below records earlier states and evidence. “Current”, “latest”, “remaining” and worker instructions in these historical records apply only to their named checkpoint; the leading section and build plan control present work. All four original frozen handoffs were later integrated after hash verification. Do not restart or reapply historical lanes.
 
 Owner-file preservation: 15 of the original 16 files still match `/tmp/comms-takeover-owner-hashes.json`. The owner revised `docs/database.md` and added `docs/pr-1/stack-review-2b3e365.md`; both are preserved. The current 17-file inventory is `/tmp/comms-base-owner-hashes-854e18c.json`. The original inventory remains unchanged. Earlier claims that all 16 still matched at `854e18c` were incorrect.
 
@@ -30,7 +38,7 @@ Image acceptance passed at `c4ecc7d` ([job103275910537](https://github.com/Cryog
 
 Integrated base review work: all four frozen handoffs were hash-verified and composed against newer code; startup/admission renames were not reapplied. Human reset/undo preserves messages, pages and identities, borrows edit ownership with revalidation, and retains exact durable replay outcomes. Actionable errors, canonical token/proof fields, optional deletion/profile/observed-roster examples, signed settings, bounded receipts, physical event accounting, artifact retention, standalone workspace preparation, rehearsal reports/rollback, generated AtomHttpApi/scoped SSE, immutable recovery UI, PWA, development page polling, System mirror, seq.reserved diagnostics, request tracing and bounded Logger export are integrated. Linux UID/store-layout/keeper recovery and QEMU acceptance are implemented.
 
-Final named cleanup shares commit-time authority and exact hex redaction; uses typed cutover values with partial recovery state; consolidates six schema modules while preserving SQL bytes/order and fixture setup. Fresh reviews found no blockers. Boot is12,206 production lines across93TypeScriptfiles; approximate7,250 target remains unmet. Generic bootRoute/Origin table is intentionally unimplemented: routes retain distinct human/bearer/Origin and commit-time reauthorization boundaries. Existing helpers share credentials, bodies, proof decoding and failures. Row decoding and directory sync are now in the verified local cleanup above; do not claim all review suggestions are resolved.
+Final named cleanup shares commit-time authority and exact hex redaction; uses typed cutover values with partial recovery state; consolidates six schema modules while preserving SQL bytes/order and fixture setup. Fresh reviews found no blockers. Boot is12,206 production lines across93TypeScriptfiles; approximate7,250 target remains unmet. At that historical checkpoint the generic bootRoute/Origin table had not yet been implemented (subsequently integrated by d9224e7): routes retain distinct human/bearer/Origin and commit-time reauthorization boundaries. Existing helpers share credentials, bodies, proof decoding and failures. Row decoding and directory sync are now in the verified local cleanup above; do not claim all review suggestions are resolved.
 
 Validation caveats: intermediate `57b961f` local run had709/711 with two initial startup failures, before edit actions. Exact pair9/9 and final full711/711 pass; original cause remains unconfirmed. Safe last-status/stderr diagnostics retain evidence without deadline changes. Linux `c4ecc7d` had707/711: three raw page setup503s and one legitimate late System message race. Test-only corrections scope the cursor topic and retry only503+publication_pending+retriable:true for2s. A controlled150msreservation proves refusal before page bytes/history/journal changes; originalLinux503bodies were not captured, so historical cause is not proven. These corrections now pass all712Linux tests. Logs remain in `/tmp/comms-linux-34603394894-clean.log` and `/tmp/comms-linux-34605177692-clean.log`.
 
@@ -97,7 +105,7 @@ Remaining work and reusable handoffs:
 
 The applied coherent manifests are `/var/folders/2j/z4115t_51pv7sxxrq1_j7_xh0000gn/T/comms-core-restore-wave-vockzoo9/handoff` (156 paths, `93d1d005f53b7d1c8c0058338c6beabd5eb34a3c9f7562eb5f9959ed48ecfcd0`) and `/var/folders/2j/z4115t_51pv7sxxrq1_j7_xh0000gn/T/comms-boot-policy-wave-2jx_n79s/handoff` (95 paths, `796f0e5ed671bb364ff74e67b012617d7143a142c0f46207c8cda693b473605c`). Their NOTES distinguish final accepted runs from superseded failure logs. Never blindly apply an old beforeimage over this checkpoint.
 
-## Latest checkpoint: direction correction
+## Historical checkpoint: direction correction
 
 The pushed PR head is `297967650e28770dacf817a94f6d015fed70cb28`. The current uncommitted checkout additionally contains the 30-path SSE/preparation/metrics handoff, 11 Linux fixture corrections and deployment documentation. Exact-root check/build pass, and the full retained suite passes **519/519 tests across 136 files**, 390.17 seconds, using actual Node 22 and two workers (`/tmp/comms-later-linux-root-tests.log`). This is local regression evidence, not architecture completion or Linux acceptance.
 
@@ -131,7 +139,7 @@ Older checkpoint descriptions below are historical; this section controls curren
 
 The checkpoint includes signed database restore, whole-source generation restore, topic move coordination, typed source history and direct-source watching, plus earlier authentication, conversation, UI and extension work. Several of these mechanisms are now explicitly selected for removal or relocation. Do not finish the old plan blindly.
 
-## Current integration and validation
+## Historical integration and validation
 
 The last pushed checkpoint above is historical. The following review changes are committed in `f2bec7b` (fixtures), `6e9a98e` (reactions) and `c6f2a14` (boot reduction and diagnostics):
 
@@ -172,7 +180,7 @@ Raw SQL callers own domain/projection maintenance; legitimate editable migration
 
 Topic move (30 paths, 59 focused tests), SQL (21 paths, 36 focused tests), and backup scheduling/copy (33 paths, 37 focused tests) now have frozen reviewed handoffs; an isolated next-wave integrator is composing them with storage. These worker counts are not combined acceptance. The SQL wave also retires a child after transaction-finalizer uncertainty, preserving reservations and keeper proof; combined SQL protections must include the new topic-page continuation table. Physical event retention, app-owned SSE and preparation-cache simplification have separate bounded workers. No strict physical-file event quota is claimed from SQLite DELETE: reclaimed B-tree pages remain reusable inside the shared database file.
 
-## Active parallel work and integration boundaries
+## Historical parallel work and integration boundaries
 
 All writers use isolated copies. The parent alone integrates frozen before/after manifests into this checkout and preserves owner-owned spec/review files.
 
@@ -209,7 +217,7 @@ Current frozen handoff pointers (temporary recovery aids, not durable artifacts)
 
 Older SQL, automatic-mark and extension-route attempts may be selectively reused by their current owners. They are not independently mergeable against the new shared mutation/API contracts.
 
-## Ranked review checklist
+## Historical ranked review checklist
 
 Numbers match the owner's review. None of these is marked complete merely because an earlier worker implemented part of it.
 
@@ -261,7 +269,7 @@ Missing retained capabilities: signed boot restart, metrics, combined generation
 
 Owner clarification: reset app to seed replaces **source only**, preserving messages, pages and identities. This authorizes source recovery, not a data wipe. Settings still need a narrow supported contract rather than exposing the arbitrary boot settings table, which also holds recovery metadata.
 
-## Execution order
+## Historical execution order
 
 1. Re-read owner decisions and current checkout; identify new review comments/deltas and preserve unrelated edits. Confirm what remains relevant among the isolated fixes. Do not automatically restart all old workers.
 2. Establish the retained recovery baseline and correct its known failures. Keep a clear distinction between fixture updates and production fixes; record the actual full-suite result.
