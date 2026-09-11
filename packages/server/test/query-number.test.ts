@@ -11,7 +11,7 @@ it("decodes bounded numeric queries while preserving omitted cursors and schema 
 	const message = await (
 		await app.post("/api/messages", { topic: "numbers/child", body: "numeric boundary" }, cookie)
 	).json();
-	const omitted = await (await get("/api/messages?mark=0")).json();
+	const omitted = await (await get("/api/messages?mark=0&topic=numbers/child")).json();
 	expect(omitted).toMatchObject({ items: [], timed_out: false, drained: false });
 	expect(omitted.cursor).toBeGreaterThanOrEqual(message.seq);
 	const history = await (await get("/api/messages?since=0&limit=1&wait=0&mark=0&topic=numbers/child")).json();
