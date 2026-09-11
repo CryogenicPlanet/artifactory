@@ -4,7 +4,6 @@ import { SqlClient } from "effect/unstable/sql";
 export class SourceRejected extends Schema.TaggedError<SourceRejected>()("SourceRejected", {
 	code: Schema.Literals([
 		"invalid_path",
-		"watcher_baseline_missing",
 		"topic_deleted",
 		"topic_archived",
 		"path_conflict",

@@ -8,16 +8,14 @@ import { parseStorageVolume, readStorageVolume } from "../src/storage-volume.ts"
 
 describe("storage volume", () => {
 	it("converts Linux allocation units and preserves zero available space", () => {
-		expect(parseStorageVolume("linux", "4096 100 0 80 20\n")).toEqual({
+		expect(parseStorageVolume("linux", "4096 100 0\n")).toEqual({
 			status: "available",
 			capacity_bytes: 409600,
 			available_bytes: 0,
-			total_inodes: 80,
-			available_inodes: 20,
 		});
 	});
 
-	it("reads macOS POSIX df blocks without inventing inode counts", () => {
+	it("reads macOS POSIX df blocks", () => {
 		expect(
 			parseStorageVolume(
 				"darwin",
@@ -27,23 +25,20 @@ describe("storage volume", () => {
 			status: "available",
 			capacity_bytes: 102400,
 			available_bytes: 40960,
-			total_inodes: null,
-			available_inodes: null,
 		});
 	});
 
 	it("rejects malformed, inconsistent, unsafe or oversized measurements", () => {
 		for (const output of [
 			"",
-			"0 100 20 80 20",
-			"4096 100 -1 80 20",
-			"4096 100 101 80 20",
-			"4096 100 20 80 81",
-			"4096 9007199254740991 1 80 20",
-			"4096 1 0 9007199254740992 1",
-			"4096 100 20 80",
-			"4096 100 20 80 20 extra",
-			"4096 100 20 80 20\nextra",
+			"0 100 20",
+			"4096 100 -1",
+			"4096 100 101",
+			"4096 9007199254740991 1",
+			"4096 9007199254740992 0",
+			"4096 100",
+			"4096 100 20 extra",
+			"4096 100 20\nextra",
 			"1".repeat(4097),
 		]) {
 			expect(parseStorageVolume("linux", output)).toEqual({ status: "unavailable", reason: "measurement_failed" });

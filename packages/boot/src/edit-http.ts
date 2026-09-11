@@ -11,6 +11,7 @@ import type { SourceFiles } from "./source-files.ts";
 import { SourceRejected } from "./source-schema.ts";
 
 export interface Editing {
+	readonly writable: boolean;
 	readonly source: SourceFiles["Service"];
 	readonly lock: EditLock["Service"];
 	readonly cutover: Cutover;
@@ -49,8 +50,11 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 		if (!identity.scopes.includes("fs")) return yield* new AuthError({ code: "scope_required" });
 		const editing = yield* Ref.get(store);
 		if (!editing) return errorResponse("editing_unavailable", 503);
+		if (!editing.writable && (request.method !== "GET" || !route.startsWith("/_boot/fs/")))
+			return errorResponse("editing_unavailable", 503);
 		return yield* Effect.gen(function* () {
-			const known = (yield* editing.lock.inspect).value;
+			// Failed recovery permits committed-source diagnostics, without lock expiry or staged-overlay mutation.
+			const known = editing.writable ? (yield* editing.lock.inspect).value : null;
 			const owner = (): Ownership => ({ id: known?.id ?? "", family: identity.id });
 			const authoritative = <A, E, R>(operation: Effect.Effect<A, E, R>) =>
 				Effect.gen(function* () {

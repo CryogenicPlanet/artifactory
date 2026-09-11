@@ -6,8 +6,6 @@ export type StorageVolume =
 			readonly status: "available";
 			readonly capacity_bytes: number;
 			readonly available_bytes: number;
-			readonly total_inodes: number | null;
-			readonly available_inodes: number | null;
 	  }
 	| {
 			readonly status: "unavailable";
@@ -26,9 +24,9 @@ export const parseStorageVolume = (platform: string, output: string): StorageVol
 	const fields = (platform === "linux" ? lines[0] : lines[1])?.trim().split(/\s+/);
 	if (!fields || lines.length !== (platform === "linux" ? 1 : 2)) return unavailable();
 	const raw = platform === "linux" ? fields : ["1024", fields[1], fields[3]];
-	if (raw.length !== (platform === "linux" ? 5 : 3)) return unavailable();
+	if (raw.length !== 3) return unavailable();
 	if (raw.some((value) => value === undefined || !/^\d+$/.test(value))) return unavailable();
-	const [size, blocks, available, inodes, freeInodes] = raw.map(Number);
+	const [size, blocks, available] = raw.map(Number);
 	if (size === undefined || blocks === undefined || available === undefined) return unavailable();
 	if (raw.some((value) => !Number.isSafeInteger(Number(value)))) return unavailable();
 	const capacity = size * blocks;
@@ -36,15 +34,13 @@ export const parseStorageVolume = (platform: string, output: string): StorageVol
 	if (size <= 0 || capacity <= 0 || !Number.isSafeInteger(capacity) || !Number.isSafeInteger(free)) {
 		return unavailable();
 	}
-	if (free > capacity || (inodes !== undefined && freeInodes !== undefined && freeInodes > inodes)) {
+	if (free > capacity) {
 		return unavailable();
 	}
 	return {
 		status: "available",
 		capacity_bytes: capacity,
 		available_bytes: free,
-		total_inodes: inodes ?? null,
-		available_inodes: freeInodes ?? null,
 	};
 };
 
@@ -63,7 +59,7 @@ export const readStorageVolume = (
 				const child = yield* spawner.spawn(
 					ChildProcess.make(
 						platform === "linux" ? "/usr/bin/stat" : "/bin/df",
-						platform === "linux" ? ["-f", "-c", "%S %b %a %c %d", "--", directory] : ["-kP", "--", directory],
+						platform === "linux" ? ["-f", "-c", "%S %b %a", "--", directory] : ["-kP", "--", directory],
 						{
 							env: { LC_ALL: "C" },
 							stdin: "ignore",

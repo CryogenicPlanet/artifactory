@@ -96,7 +96,6 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			readonly release?: boolean;
 			readonly check?: boolean;
 			readonly undo?: UndoSelection;
-			readonly watcher?: boolean;
 		} = {},
 	) =>
 		supervisor.operationGate.withPermit(
@@ -105,14 +104,11 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					if (!(yield* Ref.get(ready)) || (yield* recoveryIntents(sql)).count > 0)
 						return yield* new ChildError({ code: "cutover_recovery_required" });
 					yield* supervisor.assertClosure;
-					const proposal = yield* options.watcher
-						? sources.prepareWatcher(owner)
-						: options.undo === undefined
-							? sources.prepare(owner)
-							: options.undo.generation !== undefined
-								? sources.prepareGeneration(owner, options.undo)
-								: sources.prepareUndo(owner, options.undo);
-					if (proposal === null) return { status: "unchanged", generation: null, lock: (yield* lock.inspect).value };
+					const proposal = yield* options.undo === undefined
+						? sources.prepare(owner)
+						: options.undo.generation !== undefined
+							? sources.prepareGeneration(owner, options.undo)
+							: sources.prepareUndo(owner, options.undo);
 					let candidate: ActiveChild | null = null;
 					let generation: Generation | null = null;
 
@@ -229,15 +225,6 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							yield* closePrior;
 						}
 						yield* activate(candidate, "live");
-						yield* sources
-							.adoptWatcherBaseline(path.join(materialized, "app"))
-							.pipe(
-								Effect.catch(() =>
-									Effect.logWarning(
-										"Watcher baseline could not be verified; acquire the source lock and reload through the API to retry",
-									),
-								),
-							);
 						yield* finish(owner, true, options.release ?? false);
 						yield* sql`DELETE FROM cutover WHERE singleton=1`;
 						return {

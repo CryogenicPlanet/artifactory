@@ -6,7 +6,6 @@ import { sourceIO, validSourcePath } from "./source-io.ts";
 import { sourceJournal, type UndoSelection } from "./source-journal.ts";
 import type { TreeEntry } from "./source-tree-publication.ts";
 import { SourceRejected, type Change, type Write } from "./source-schema.ts";
-import { initializeSourceBaseline, sourceObservation, type Observation } from "./source-observation.ts";
 import { copySource } from "./snapshots.ts";
 
 interface Proposal {
@@ -14,7 +13,6 @@ interface Proposal {
 	readonly owner: Ownership | null;
 	readonly agent: string;
 	readonly changes: readonly Change[];
-	readonly observed?: Observation;
 	readonly tree?: boolean;
 }
 export interface Anchor {
@@ -32,7 +30,6 @@ const make = (dataDirectory: string) =>
 		const sql = yield* SqlClient.SqlClient;
 		const io = yield* sourceIO(dataDirectory);
 		const journal = yield* sourceJournal(io);
-		const observer = yield* sourceObservation(dataDirectory);
 		const semaphore = yield* Semaphore.make(1);
 		const prepared = yield* Ref.make<Proposal | null>(null);
 		const pageMoveReady = (id?: string) =>
@@ -232,27 +229,6 @@ const make = (dataDirectory: string) =>
 				),
 			proposalPaths: (id: string) =>
 				guard(Effect.map(proposal(id), (value) => value.changes.map((change) => change.path))),
-			adoptWatcherBaseline: (expectedDirectory: string) =>
-				guard(
-					initializeSourceBaseline(dataDirectory, expectedDirectory).pipe(
-						Effect.provideService(SqlClient.SqlClient, sql),
-					),
-				),
-			observe: guard(observer.capture),
-			prepareWatcher: (owner: Ownership) =>
-				guard(
-					Effect.uninterruptible(
-						Effect.gen(function* () {
-							yield* available;
-							const observed = yield* observer.capture;
-							if (observed.changes.length === 0) return null;
-							const id = yield* crypto.randomUUIDv4;
-							const holder = (yield* lock.pin(owner)).value;
-							yield* Ref.set(prepared, { id, owner, agent: holder.agent, changes: observed.changes, observed });
-							return id;
-						}),
-					),
-				),
 			prepare: (owner: Ownership) => guard(prepare(owner)),
 			prepareGeneration: (owner: Ownership, selection: UndoSelection) =>
 				guard(
@@ -348,25 +324,6 @@ const make = (dataDirectory: string) =>
 					Effect.gen(function* () {
 						const value = yield* proposal(id);
 						if (value.owner) yield* pinned(value.owner);
-						if (value.observed) {
-							yield* observer.validate(value.observed);
-							return yield* Effect.uninterruptible(
-								Effect.gen(function* () {
-									const batch = yield* journal.recordObserved(
-										{
-											id,
-											lock_id: value.owner?.id ?? null,
-											agent: value.agent,
-											at: (yield* DateTime.nowAsDate).getTime(),
-											state: "published",
-										},
-										value.changes,
-									);
-									yield* Ref.set(prepared, null);
-									return batch;
-								}),
-							);
-						}
 						yield* Effect.uninterruptible(
 							Effect.gen(function* () {
 								yield* sql.withTransaction(
@@ -417,14 +374,6 @@ const make = (dataDirectory: string) =>
 								value.changes.map((change) => ({ ...change, before: { content: null, sha: null, mode: null } })),
 								id,
 							);
-							return directory;
-						}
-						if (value.observed) {
-							for (const name of value.observed.directories)
-								yield* fs.makeDirectory(path.join(directory, name), { recursive: true });
-							const target = yield* sourceIO(directory);
-							for (const [index, file] of value.observed.files.entries())
-								yield* target.replace(file.path, file.image, `${id}-${index}`);
 							return directory;
 						}
 						const source = path.join(yield* fs.realPath(dataDirectory), "app");

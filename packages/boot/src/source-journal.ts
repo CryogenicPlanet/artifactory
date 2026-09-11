@@ -142,6 +142,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 		generation: Schema.optional(Schema.Int),
 	});
 	const Binding = Schema.fromJsonString(Schema.Struct({ request: Schema.String, selected: Selected }));
+	// Keep legacy watcher baseline rows out of implicit undo; their retained history stays readable.
 	const select = (selection: UndoSelection) =>
 		Effect.gen(function* () {
 			if (selection.generation !== undefined)
@@ -299,14 +300,5 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 			).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ path: Schema.String })))));
 			return rows.length > 0 && rows.every((row) => row.path.startsWith("pages/"));
 		});
-	const recordObserved = (batch: typeof Batch.Type, changes: readonly Change[]) =>
-		sql.withTransaction(
-			Effect.gen(function* () {
-				yield* ready;
-				yield* sql`INSERT INTO source_batches ${sql.insert({ ...batch, state: "published" })}`;
-				yield* recordVersions(batch, changes);
-				return batch.id;
-			}),
-		);
-	return { ready, begin, recover, history, previous, undo, treeUndo, selectUndo, targetsPages, recordObserved };
+	return { ready, begin, recover, history, previous, undo, treeUndo, selectUndo, targetsPages };
 });

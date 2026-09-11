@@ -1,6 +1,5 @@
 import { DateTime, Effect, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { backupDrill } from "./backup-drill.ts";
 import { scheduledBackup } from "./scheduled-backup.ts";
 import type { Supervisor } from "./supervisor.ts";
 
@@ -8,7 +7,6 @@ import type { Supervisor } from "./supervisor.ts";
 export const storageMaintenance = Effect.fn("storageMaintenance")(function* (supervisor: Supervisor) {
 	const sql = yield* SqlClient.SqlClient;
 	const capture = (yield* scheduledBackup(supervisor)).capture;
-	const drill = (yield* backupDrill(supervisor)).run;
 	const due = (key: string, interval: number, now: number) =>
 		sql.withTransaction(
 			Effect.gen(function* () {
@@ -29,10 +27,6 @@ export const storageMaintenance = Effect.fn("storageMaintenance")(function* (sup
 		yield* Effect.gen(function* () {
 			if (yield* due("backup.hourly_attempt_at", 60 * 60 * 1000, now)) yield* capture;
 		}).pipe(Effect.catchCause(() => Effect.logWarning("Scheduled backup failed; retrying next hour")));
-		yield* Effect.gen(function* () {
-			if ((yield* sql`SELECT id FROM backups LIMIT 1`).length === 0) return;
-			if (yield* due("backup.drill_attempt_at", 7 * 24 * 60 * 60 * 1000, now)) yield* drill;
-		}).pipe(Effect.catchCause(() => Effect.logWarning("Backup drill failed; retrying next week")));
 	});
 	const run = Effect.gen(function* () {
 		while (true) {

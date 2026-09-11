@@ -21,7 +21,6 @@ import { enrollmentRoute } from "./enrollment-http.ts";
 import { eventRoute, type EventStore } from "./event-http.ts";
 import type { RequestEvents } from "./request-events.ts";
 import type { PublicPages } from "./public-pages.ts";
-import type { StorageUsage } from "./storage-usage.ts";
 import type { SupervisedChild } from "./supervisor.ts";
 
 const help = `comms local development bootloader
@@ -88,7 +87,6 @@ export const proxy = (
 	backups: BackupStore,
 	restores: DatabaseRestoreStore,
 	moves: TopicMoveStore,
-	storage: Ref.Ref<StorageUsage>,
 ) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
@@ -214,7 +212,6 @@ export const proxy = (
 							child: safeState,
 							source_recovery_error: yield* Ref.get(child.sourceError),
 							traffic: yield* child.traffic.state,
-							storage: yield* Ref.get(storage),
 							last_good: lastGood,
 						}),
 					);

@@ -127,7 +127,12 @@ it(
 		expect((await authenticated(`${app.url}/api/lock`, { method: "POST", body: "{}" })).status).toBe(200);
 		const source = await readFile(join(seed, "server.ts"), "utf8");
 		expect(
-			(await authenticated(`${app.url}/api/fs/app/server.ts?reload=0`, { method: "PUT", body: source })).status,
+			(
+				await authenticated(`${app.url}/api/fs/app/server.ts?reload=0`, {
+					method: "PUT",
+					body: `${source}\n// staged repair`,
+				})
+			).status,
 		).toBe(200);
 		const reload = await authenticated(`${app.url}/api/reload`, { method: "POST", body: "{}" });
 		expect(reload.status).toBe(503);
@@ -135,12 +140,34 @@ it(
 		expect(await sql("comms.db", "SELECT epoch FROM kernel_writer")).toEqual(epoch);
 		expect(await sql("boot.db", "SELECT cutover_in_flight FROM edit_lock")).toEqual([{ cutover_in_flight: 0 }]);
 		await stop(app.handle);
+		await sql("boot.db", "UPDATE edit_lock SET expires=0");
+		const lockBefore = await sql("boot.db", "SELECT * FROM edit_lock");
+		const stagedBefore = await sql("boot.db", "SELECT lock_id,path,hex(content) AS content,sha,at,mode FROM staging");
 		const restarted = await launch();
 		await expect
 			.poll(async () => (await state(restarted.url)).child.error, { timeout: 8000 })
 			.toContain("child_closure_unproven");
 		expect((await fetch(`${restarted.url}/_boot`)).status).toBe(200);
-		expect((await authenticated(`${restarted.url}/api/fs/app/server.ts`)).status).toBe(200);
+		const inspected = await authenticated(`${restarted.url}/api/fs/app/server.ts`);
+		expect(inspected.status).toBe(200);
+		expect(await inspected.text()).toBe(source);
+		for (const path of ["app/", "app/server.ts?history=1"])
+			expect((await authenticated(`${restarted.url}/api/fs/${path}`)).status).toBe(200);
+		for (const [path, method, body] of [
+			["fs/app/server.ts?reload=0", "PUT", "refused source mutation"],
+			["fs/pages/diagnostic.md", "PUT", "refused page mutation"],
+			["lock", "POST", "{}"],
+			["lock", "DELETE", null],
+			["lock?break=1", "DELETE", "{}"],
+			["reload", "POST", "{}"],
+			["revert", "POST", "{}"],
+		] as const)
+			expect((await authenticated(`${restarted.url}/api/${path}`, { method, body })).status).toBe(503);
+		expect(await sql("boot.db", "SELECT * FROM edit_lock")).toEqual(lockBefore);
+		expect(await sql("boot.db", "SELECT lock_id,path,hex(content) AS content,sha,at,mode FROM staging")).toEqual(
+			stagedBefore,
+		);
+		expect(await readFile(join(data, "app/server.ts"), "utf8")).toBe(source);
 		expect(await attempts()).toEqual([{ opened: 1, closed: 0 }]);
 		expect(await sql("comms.db", "SELECT epoch FROM kernel_writer")).toEqual(epoch);
 		expect(alive(owner.pid)).toBe(true);

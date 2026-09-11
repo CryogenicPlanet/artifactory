@@ -156,6 +156,10 @@ describe("durable boot generations in real Bun and SQLite", () => {
 		await writeFile(join(env.data, "app/message.ts"), "invalid source !!!");
 		await writeFile(join(env.data, "app/content.txt"), "mutable-content");
 		await rm(env.seed, { recursive: true });
+		// Shell edits neither reserve a new generation nor create an automatic history batch.
+		await delay(1250);
+		expect((await first.history()).items).toHaveLength(1);
+		expect(await sql(env.data, "SELECT * FROM source_batches")).toEqual([]);
 		expect(await (await first.fetch(first.url)).json()).toEqual({
 			message: "original",
 			content: "snapshot-content",

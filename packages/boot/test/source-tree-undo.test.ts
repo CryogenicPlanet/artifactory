@@ -242,6 +242,40 @@ describe("structural source history undo", () => {
 		expect(await env.sql("SELECT COUNT(*) AS n FROM source_batches WHERE state='published'")).toEqual([{ n: 2 }]);
 		expect(await env.sql("SELECT * FROM source_changes")).toEqual([]);
 	});
+	it("keeps legacy watcher history restorable while excluding its baseline from implicit undo", async (test) => {
+		const before: readonly Entry[] = [
+			{ path: "app", content: null, directory: true },
+			{ path: "app/file", content: "original" },
+		];
+		const env = await fixture(test, before);
+		const baseline = publication(await env.call({ op: "publish", desired: before }));
+		await env.sql(`INSERT INTO settings(key,value) VALUES('source.watcher_baseline','${baseline.batch}')`);
+		expect(await env.call({ op: "plan", selection: {} })).toEqual({ error: "batch_missing", path: "latest" });
+		const edit = publication(
+			await env.call({
+				op: "publish",
+				desired: [
+					{ path: "app", content: null, directory: true },
+					{ path: "app/file", content: null, directory: true },
+					{ path: "app/file/child", content: "legacy watcher edit" },
+				],
+			}),
+		);
+		await env.sql(`UPDATE versions SET agent='watcher' WHERE batch='${edit.batch}'`);
+		const history = await env.sql("SELECT * FROM versions ORDER BY id");
+		expect(await env.call({ op: "plan", selection: {} })).toEqual(
+			await env.call({ op: "plan", selection: { batch: edit.batch } }),
+		);
+		expect(await env.sql("SELECT * FROM versions ORDER BY id")).toEqual(history);
+		expect(await env.call({ op: "tree_undo", selection: { batch: edit.batch } })).toMatchObject({
+			batch: expect.any(String),
+		});
+		await assertTree(env.root, before);
+		expect(await env.sql("SELECT value FROM settings WHERE key='source.watcher_baseline'")).toEqual([
+			{ value: baseline.batch },
+		]);
+	});
+
 	it("leaves ordinary file-only history on its existing undo path", async (test) => {
 		const env = await fixture(test, [
 			{ path: "app", content: null, directory: true },

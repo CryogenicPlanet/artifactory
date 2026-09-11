@@ -20,8 +20,8 @@ const statusSchema = Schema.Struct({
 	traffic: Schema.Struct({ frozen: Schema.Boolean, admitted: Schema.Int, queued: Schema.Int }),
 });
 
-/** Accelerates only a disposable boot copy; all capture/drill/process behavior stays real. */
-export async function storageFixture(test: TestContext, failDrillClosure = false) {
+/** Accelerates only a disposable boot copy; all capture/process behavior stays real. */
+export async function storageFixture(test: TestContext) {
 	const fixture = await conversation(test);
 	const execute = promisify(execFile);
 	const sql = async (statement: string, store = "comms.db") => {
@@ -52,7 +52,7 @@ export async function storageFixture(test: TestContext, failDrillClosure = false
 		index.replace(
 			initialize,
 			`${initialize}\nconst maintenanceSql = yield* SqlClient.SqlClient;
-  yield* maintenanceSql\`INSERT OR IGNORE INTO settings(key,value) VALUES('backup.hourly_attempt_at','4102444800000'),('backup.drill_attempt_at','4102444800000')\`;`,
+  yield* maintenanceSql\`INSERT OR IGNORE INTO settings(key,value) VALUES('backup.hourly_attempt_at','4102444800000')\`;`,
 		),
 	);
 	const maintenancePath = join(boot, "src/storage-maintenance.ts");
@@ -83,34 +83,13 @@ export async function storageFixture(test: TestContext, failDrillClosure = false
 			)
 			.replace(endReload, ")));\n\tconst optionsSource = options;"),
 	);
-	if (failDrillClosure) {
-		const drillPath = join(boot, "src/backup-drill.ts");
-		const drill = await readFile(drillPath, "utf8");
-		const retire = "yield* supervisor.retire(child);";
-		expect(drill.split(retire)).toHaveLength(2);
-		await writeFile(
-			drillPath,
-			drill.replace(
-				retire,
-				`yield* child.process.stop; yield* fs.writeFileString(child.receipt, "invalid closure proof"); ${retire}`,
-			),
-		);
-	}
 	const launch = () =>
 		fixture.launch(join(import.meta.dirname, "../../src/server.ts"), join(boot, "test/fixtures/launcher.ts"));
-	const force = (kind: "hourly" | "drill" | "both") =>
-		sql(
-			`UPDATE settings SET value='0' WHERE key ${kind === "both" ? "IN ('backup.hourly_attempt_at','backup.drill_attempt_at')" : `='backup.${kind === "hourly" ? "hourly" : "drill"}_attempt_at'`}`,
-			"boot.db",
-		);
+	const force = (kind: "hourly") =>
+		sql(`UPDATE settings SET value='0' WHERE key='backup.${kind}_attempt_at'`, "boot.db");
 	const backups = async () =>
 		Schema.decodeUnknownSync(backupRows)(
 			await sql("SELECT id,path,reason,published_through,generation FROM backups ORDER BY taken_at,id", "boot.db"),
-		);
-	const drills = () =>
-		sql(
-			"SELECT json_extract(event,'$.payload.ok') ok FROM events WHERE json_extract(event,'$.type')='backup.drill' ORDER BY seq",
-			"boot.db",
 		);
 	const status = async (url: string, cookie: string) =>
 		Schema.decodeUnknownSync(statusSchema)(await (await fetch(`${url}/_boot/status`, { headers: { cookie } })).json());
@@ -118,5 +97,5 @@ export async function storageFixture(test: TestContext, failDrillClosure = false
 		const before = Number(await readFile(tick, "utf8").catch(() => "0"));
 		await expect.poll(async () => Number(await readFile(tick, "utf8").catch(() => "0"))).toBeGreaterThan(before);
 	};
-	return { ...fixture, sql, launch, force, backups, drills, status, cycle, reloadWaiting };
+	return { ...fixture, sql, launch, force, backups, status, cycle, reloadWaiting };
 }

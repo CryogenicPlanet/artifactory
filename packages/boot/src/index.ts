@@ -27,8 +27,6 @@ import { topicMove, type TopicMove } from "./topic-move.ts";
 import { moveRecovery } from "./topic-move-recovery.ts";
 import { layer as topicPageMoveLayer } from "./topic-page-move.ts";
 import { layer as kernelBootLayer } from "./kernel-boot.ts";
-import { storageUsage } from "./storage-usage.ts";
-import { watchSource } from "./source-watcher.ts";
 import { storageMaintenance } from "./storage-maintenance.ts";
 import { databaseRestore, type DatabaseRestore } from "./database-restore.ts";
 import { supervise } from "./supervisor.ts";
@@ -45,7 +43,6 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const publicPages = yield* Ref.make<PublicPages["Service"] | null>(null);
 	const backups = yield* Ref.make<BackupInventory | null>(null);
 	const requests = yield* requestEvents(events);
-	const storage = yield* storageUsage(options.dataDirectory);
 	const moves = yield* Ref.make<TopicMove | null>(null);
 	const sourceServices = sourceLayer(options.dataDirectory).pipe(Layer.provideMerge(editLockLayer));
 	const movePagesServices = topicPageMoveLayer(options.dataDirectory).pipe(Layer.provideMerge(sourceServices));
@@ -54,7 +51,6 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	yield* Effect.gen(function* () {
 		yield* validateAuthConfig(options.auth);
 		yield* fs.makeDirectory(options.dataDirectory, { recursive: true, mode: 0o700 });
-		yield* storage.run.pipe(Effect.forkScoped);
 		return yield* Effect.gen(function* () {
 			yield* initializeBootSchema;
 			yield* retainEvents.pipe(Effect.forkScoped);
@@ -88,20 +84,20 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 								Effect.andThen(source._tag === "Success" ? (yield* EditLock).recover : Effect.void),
 								Effect.exit,
 							);
+				yield* Ref.set(editing, {
+					writable: recovered._tag === "Success",
+					source: yield* SourceFiles,
+					lock: yield* EditLock,
+					cutover: coordinator,
+					pages: yield* PublicPages,
+				});
 				if (recovered._tag === "Failure") {
 					yield* Ref.set(child.sourceError, Cause.pretty(recovered.cause).replace(/[a-f0-9]{64}/g, "[redacted]"));
 					yield* fail(recovered.cause);
 				} else {
-					yield* Ref.set(editing, {
-						source: yield* SourceFiles,
-						lock: yield* EditLock,
-						cutover: coordinator,
-						pages: yield* PublicPages,
-					});
 					yield* Ref.set(publicPages, yield* PublicPages);
 					yield* run.pipe(Effect.catchCause(fail), Effect.forkScoped);
 					yield* (yield* storageMaintenance(supervisor)).run.pipe(Effect.forkScoped);
-					yield* watchSource(options.dataDirectory, coordinator).pipe(Effect.forkScoped);
 				}
 				return yield* Effect.never;
 			}).pipe(
@@ -141,7 +137,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	yield* HttpRouter.add(
 		"*",
 		"/*",
-		proxy(child, auth, options.auth, events, editing, publicPages, requests, backups, restores, moves, storage.current),
+		proxy(child, auth, options.auth, events, editing, publicPages, requests, backups, restores, moves),
 	).pipe((routes) => HttpRouter.serve(routes, { disableLogger: true }), Layer.build);
 	return yield* Effect.never;
 });
