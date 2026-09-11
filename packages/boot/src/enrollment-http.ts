@@ -8,7 +8,7 @@ import { assertionProof, humanSession, authFailure, authErrorResponse, body } fr
 import { AddPasskey, DeletePasskey } from "./passkey-management-schema.ts";
 import { MintBinding } from "./token-mint-schema.ts";
 import { DatabaseRestoreInput, databaseRestoreParams, GenerationRestoreParams } from "./database-restore-schema.ts";
-import { BreakLock } from "./lock-break-schema.ts";
+import { BreakLock } from "./lock-break.ts";
 import { RevokeFamily } from "./refresh-schema.ts";
 import { EnrollmentDecision } from "./enrollment-schema.ts";
 import { approvalClient, approvalPage } from "./enrollment-page.ts";

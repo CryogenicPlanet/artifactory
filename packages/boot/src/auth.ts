@@ -38,8 +38,7 @@ import { canonicalSourceReset, validSeedDigest } from "./source-reset-schema.ts"
 import { makeTokenMint } from "./token-mint.ts";
 import { canonicalMint, validMint, type MintBinding } from "./token-mint-schema.ts";
 import { makeTokens } from "./tokens.ts";
-import { makeLockBreak } from "./lock-break.ts";
-import { canonicalLockBreak, validLockId, type BreakLock } from "./lock-break-schema.ts";
+import { makeLockBreak, canonicalLockBreak, validLockId, type BreakLock } from "./lock-break.ts";
 import { canonicalRevocation, validFamily, type RevokeFamily } from "./refresh-schema.ts";
 import { canonicalDecision, validDecision, type EnrollmentDecision } from "./enrollment-schema.ts";
 

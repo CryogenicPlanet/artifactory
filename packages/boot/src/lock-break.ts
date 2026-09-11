@@ -4,7 +4,12 @@ import { SqlClient } from "effect/unstable/sql";
 import { AuthError } from "./auth.ts";
 import { EditLock, EditRejected } from "./edit-lock.ts";
 import type { AssertionProof } from "./enrollment.ts";
-import { validLockId, type BreakLock } from "./lock-break-schema.ts";
+
+export const BreakLock = Schema.Struct({ id: Schema.String });
+export type BreakLock = typeof BreakLock.Type;
+export const validLockId = (id: string) =>
+	/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id);
+export const canonicalLockBreak = (params: BreakLock) => `{"id":"${params.id}"}`;
 
 /** Fresh proof, live session, observed lock and audit event share the boot transaction. */
 export const makeLockBreak = <E, R>(

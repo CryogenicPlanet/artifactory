@@ -12,7 +12,7 @@ import type { Cutover } from "./cutover.ts";
 import type { BootMetrics } from "./metrics.ts";
 import { EditAuthority, EditRejected, type EditLock, type Ownership } from "./edit-lock.ts";
 import type { VerifiedIdentity } from "./enrollment.ts";
-import { BreakLock } from "./lock-break-schema.ts";
+import { BreakLock } from "./lock-break.ts";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { SourceFiles } from "./source-files.ts";
 import { SourceRejected } from "./source-schema.ts";
