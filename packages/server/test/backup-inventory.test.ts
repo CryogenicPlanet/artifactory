@@ -141,7 +141,7 @@ it("paginates timestamp ties by stable keysets and strictly validates bounded qu
 		expect((await fetch(`${app.url}/_boot/db/backups${query}`, { headers: { cookie } })).status, query).toBe(400);
 }, 20000);
 
-it("keeps inventory available while the app is down without creating files or changing backup and event state", async (test) => {
+it("keeps inventory available while the app is down without creating files or changing backup and non-request event state", async (test) => {
 	const fixture = await conversation(test),
 		app = await fixture.launch();
 	await app.setup();
@@ -154,20 +154,20 @@ it("keeps inventory available while the app is down without creating files or ch
 		.poll(
 			async () => {
 				const response = await fetch(`${down.url}/_boot/status`, { headers: { cookie } });
-				return Schema.decodeUnknownSync(Schema.Struct({ child: Schema.Struct({ state: Schema.String }) }))(
-					await response.json(),
-				).child.state;
+				return Schema.decodeUnknownSync(
+					Schema.Struct({ child: Schema.Struct({ state: Schema.String, attempt: Schema.Int }) }),
+				)(await response.json()).child;
 			},
 			{ timeout: 5000 },
 		)
-		.toBe("failed");
+		.toMatchObject({ state: "failed", attempt: 3 });
 	await fixture.sql(
 		"INSERT INTO backups(id,path,reason,bytes,taken_at) VALUES ('missing','/private/unavailable.db','pre-flip',999,1)",
 		"boot.db",
 	);
 	const before = await fixture.sql("SELECT * FROM backups ORDER BY id", "boot.db");
-	const events = await fixture.sql("SELECT * FROM events ORDER BY seq", "boot.db");
-	const sequence = await fixture.sql("SELECT * FROM seq", "boot.db");
+	// The listener records diagnostics for these reads; inventory must not create backup or lifecycle events.
+	const events = await fixture.sql("SELECT * FROM events WHERE type != 'http.request' ORDER BY seq", "boot.db");
 	const files = (await readdir(fixture.root, { recursive: true })).sort();
 	for (let attempt = 0; attempt < 3; attempt++) {
 		const response = await fetch(`${down.url}/_boot/db/backups`, { headers: { cookie } });
@@ -175,8 +175,9 @@ it("keeps inventory available while the app is down without creating files or ch
 		expect(Schema.decodeUnknownSync(inventory)(await response.json()).items.map((row) => row.id)).toEqual(["missing"]);
 	}
 	expect(await fixture.sql("SELECT * FROM backups ORDER BY id", "boot.db")).toEqual(before);
-	expect(await fixture.sql("SELECT * FROM events ORDER BY seq", "boot.db")).toEqual(events);
-	expect(await fixture.sql("SELECT * FROM seq", "boot.db")).toEqual(sequence);
+	expect(await fixture.sql("SELECT * FROM events WHERE type != 'http.request' ORDER BY seq", "boot.db")).toEqual(
+		events,
+	);
 	expect((await readdir(fixture.root, { recursive: true })).sort()).toEqual(files);
 	expect((await fetch(`${down.url}/api/messages`, { headers: { cookie } })).status).toBe(503);
 }, 20000);
