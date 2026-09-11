@@ -69,6 +69,7 @@ export default api=>{
 		"partial",
 		"standup.ts",
 		"subscriptions",
+		"system.ts",
 		"zz-package",
 	]);
 	expect(statuses).toContainEqual(
