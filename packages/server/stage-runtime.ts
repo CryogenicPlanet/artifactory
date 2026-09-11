@@ -18,6 +18,6 @@ Effect.gen(function* () {
 		yield* fs.copy(path.join(protocol, file), path.join(target, "protocol", file));
 	const ui = path.resolve(server, "../ui");
 	yield* fs.makeDirectory(path.join(target, "ui"));
-	for (const file of ["src", "index.html", "vite.config.ts"])
+	for (const file of ["src", "public", "index.html", "vite.config.ts"])
 		yield* fs.copy(path.join(ui, file), path.join(target, "ui", file));
 }).pipe(Effect.provide(BunServices.layer), BunRuntime.runMain);

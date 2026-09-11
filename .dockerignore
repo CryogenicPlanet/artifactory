@@ -26,6 +26,8 @@
 !packages/server/stage-runtime.ts
 !packages/server/runtime/
 !packages/server/runtime/**
+!packages/ui/public/
+!packages/ui/public/**
 !packages/ui/index.html
 !packages/ui/vite.config.ts
 **/.env
