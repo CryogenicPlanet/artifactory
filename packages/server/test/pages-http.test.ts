@@ -1,7 +1,8 @@
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
+import { pagePublicationQueue } from "./fixtures/page-publication-queue.ts";
 
 it("serves private Markdown with raw links, highlighting, conditional diagrams and explicit Tailwind", async (test) => {
 	const fixture = await conversation(test);
@@ -184,7 +185,7 @@ it("merges page-only topic directories without manufacturing messages or changin
 }, 20000);
 
 it("hides deleted page ancestry at the published fence while retaining raw filesystem repair", async (test) => {
-	const fixture = await conversation(test);
+	const fixture = await pagePublicationQueue(test);
 	for (const topic of ["gone", "gone/page-only", "gone/deep", "gone-other"]) {
 		await mkdir(join(fixture.root, "pages", topic), { recursive: true });
 		await writeFile(join(fixture.root, "pages", topic, "readme.md"), `# ${topic}`);
@@ -206,9 +207,10 @@ it("hides deleted page ancestry at the published fence while retaining raw files
 		).status,
 	).toBe(200);
 	const get = (path: string) => fetch(app.url + path, { headers: { cookie } });
-	const write = (path: string, method: string) =>
+	const write = (path: string, method: string, signal?: AbortSignal) =>
 		fetch(app.url + path, {
 			method,
+			...(signal ? { signal } : {}),
 			headers: { cookie, origin: "https://comms.test" },
 			...(method === "PUT" ? { body: "replacement" } : {}),
 		});
@@ -217,10 +219,38 @@ it("hides deleted page ancestry at the published fence while retaining raw files
 		`UPDATE topics SET deleted_at=1,updated_seq=999999,previous=json_object('meta',json(meta),'archived_at',archived_at,'deleted_at',NULL) WHERE path='gone'`,
 	);
 	expect((await get("/p/gone/deep/readme.md?raw=1")).status).toBe(200);
-	await fixture.sql(`UPDATE seq SET pending_id='held'`, "boot.db");
-	expect((await write("/api/fs/pages/gone/deep/readme.md", "PUT")).status).toBe(503);
+	const controller = new AbortController();
+	test.onTestFinished(() => controller.abort());
+	await fixture.hold();
+	const mutation = app.post("/api/messages", { topic: "publication-held", body: "held publication" }, cookie).then(
+		(response) => response.status,
+		() => 0,
+	);
+	await expect.poll(fixture.reserved).not.toBe("");
+	let completed = false;
+	const pending = write("/api/fs/pages/gone/deep/readme.md", "PUT", controller.signal).then(
+		(response) => {
+			completed = true;
+			return response.status;
+		},
+		() => {
+			completed = true;
+			return 0;
+		},
+	);
+	try {
+		await expect.poll(fixture.waiting).toBe("waiting");
+		expect(completed).toBe(false);
+		for (const table of ["versions", "source_batches", "source_changes"])
+			expect(await fixture.sql(`SELECT * FROM ${table}`, "boot.db")).toEqual([]);
+		expect(await readFile(join(fixture.root, "pages/gone/deep/readme.md"), "utf8")).toBe("# gone/deep");
+	} finally {
+		await fixture.release();
+	}
+	expect(await mutation).toBe(200);
+	expect(await pending).toBe(200);
+	expect(await readFile(join(fixture.root, "pages/gone/deep/readme.md"), "utf8")).toBe("replacement");
 	await fixture.sql(`UPDATE topics SET updated_seq=0,previous=NULL WHERE path='gone'`);
-	await fixture.sql(`UPDATE seq SET pending_id=NULL`, "boot.db");
 	for (const path of [
 		"/p/gone/",
 		"/p/gone/readme.md",

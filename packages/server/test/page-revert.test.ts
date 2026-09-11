@@ -5,6 +5,7 @@ import { readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
+import { pagePublicationQueue } from "./fixtures/page-publication-queue.ts";
 
 // Background app mutations can reserve between calls; retry only the explicit refusal before publication.
 const pagePublication = async (send: () => Promise<Response>) => {
@@ -192,47 +193,49 @@ it("reauthenticates held page undo bodies and refuses page symlinks before journ
 	expect(await fixture.sql("SELECT COUNT(*) AS n FROM versions", "boot.db")).toEqual(versionsBefore);
 }, 15000);
 
-it("refuses a raw page write before journaling while an app publication is reserved", async (test) => {
-	const fixture = await conversation(test),
+it("queues a raw page write without journaling until app publication completes", async (test) => {
+	const fixture = await pagePublicationQueue(test),
 		app = await fixture.launch();
 	await app.setup();
 	const cookie = await app.login();
 	await app.ready(cookie);
-	const put = () =>
-		fetch(`${app.url}/api/fs/pages/reserved.md`, {
-			method: "PUT",
-			headers: { cookie, origin: "https://comms.test" },
-			body: "written only after release",
-		});
-	// Claim only an idle allocator, without replacing a real in-flight app reservation.
-	await expect
-		.poll(() =>
-			fixture.sql(
-				"UPDATE seq SET pending_id='page-fixture-held' WHERE pending_id IS NULL RETURNING pending_id",
-				"boot.db",
-			),
-		)
-		.toEqual([{ pending_id: "page-fixture-held" }]);
+	const controller = new AbortController();
+	test.onTestFinished(() => controller.abort());
+	await fixture.hold();
+	const mutation = app.post("/api/messages", { topic: "reserved", body: "held publication" }, cookie).then(
+		(response) => response.status,
+		() => 0,
+	);
+	await expect.poll(fixture.reserved).not.toBe("");
+	let completed = false;
+	const pending = fetch(`${app.url}/api/fs/pages/reserved.md`, {
+		method: "PUT",
+		headers: { cookie, origin: "https://comms.test" },
+		body: "written only after release",
+		signal: controller.signal,
+	}).then(
+		(response) => {
+			completed = true;
+			return response.status;
+		},
+		() => {
+			completed = true;
+			return 0;
+		},
+	);
 	try {
-		const response = await put();
-		const body = await response.json();
-		expect(response.status, JSON.stringify(body)).toBe(503);
-		expect(body).toMatchObject({ error: { code: "publication_pending", retriable: true } });
+		await expect.poll(fixture.waiting).toBe("waiting");
+		expect(completed).toBe(false);
 		for (const table of ["versions", "source_batches", "source_changes"])
 			expect(await fixture.sql(`SELECT * FROM ${table}`, "boot.db")).toEqual([]);
 		await expect(readFile(join(fixture.root, "pages/reserved.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-		// A valid app reservation may outlive the former five-attempt (80ms) fixture budget.
-		const released = delay(150).then(() =>
-			fixture.sql("UPDATE seq SET pending_id=NULL WHERE pending_id='page-fixture-held'", "boot.db"),
-		);
-		try {
-			const accepted = await pagePublication(put);
-			expect(accepted.status, await accepted.clone().text()).toBe(200);
-		} finally {
-			await released;
-		}
 	} finally {
-		await fixture.sql("UPDATE seq SET pending_id=NULL WHERE pending_id='page-fixture-held'", "boot.db");
+		await fixture.release();
 	}
+	expect(await mutation).toBe(200);
+	expect(await pending).toBe(200);
 	expect(await readFile(join(fixture.root, "pages/reserved.md"), "utf8")).toBe("written only after release");
+	expect(await fixture.sql("SELECT COUNT(*) count FROM versions WHERE path='pages/reserved.md'", "boot.db")).toEqual([
+		{ count: 1 },
+	]);
 }, 15000);
