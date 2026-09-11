@@ -47,8 +47,17 @@ export const liveEvents = Effect.gen(function* () {
 			),
 		);
 	}).pipe(Effect.scoped, Effect.provide(FetchHttpClient.layer));
+	// A brief offline interval need not fail fetch's existing stream. Reconnect explicitly on online
+	// so bytes missed during that interval are replayed from the last processed event.
+	const online = Effect.callback<void>((resume) => {
+		const connected = () => resume(Effect.void);
+		window.addEventListener("online", connected);
+		return Effect.sync(() => window.removeEventListener("online", connected));
+	});
 	while (true) {
-		yield* connect.pipe(Effect.catchCause(() => Reactivity.invalidate(["board", "extensions", "identity"])));
+		yield* Effect.raceFirst(connect, online).pipe(
+			Effect.catchCause(() => Reactivity.invalidate(["board", "extensions", "identity"])),
+		);
 		yield* Effect.sleep("2 seconds");
 	}
 });
