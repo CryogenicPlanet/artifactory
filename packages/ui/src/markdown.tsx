@@ -1,6 +1,5 @@
 import { Marked } from "marked";
 import { createElement, useMemo, type ReactNode } from "react";
-import "./markdown.css";
 
 export const messageHref = (seq: number) => `/?message=${seq}#message-${seq}`;
 const escape = (text: string) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
@@ -16,13 +15,33 @@ const referenceText = (text: string): ReactNode =>
 	text.split(/((?<![\w/#])#[1-9][0-9]*(?![\w]))/u).map((part, index) => {
 		const seq = /^#[1-9][0-9]*$/.test(part) ? Number(part.slice(1)) : 0;
 		return Number.isSafeInteger(seq) && seq > 0 ? (
-			<a key={index} href={messageHref(seq)}>
+			<a className="text-[#376b36] underline underline-offset-[3px]" key={index} href={messageHref(seq)}>
 				{part}
 			</a>
 		) : (
 			part
 		);
 	});
+
+// Static classes for the renderer's allowlisted elements; no typography plugin is needed.
+const markdownClasses: Readonly<Record<string, string>> = {
+	p: "my-2.5",
+	h1: "mt-[18px] mb-2 text-[16px] leading-[1.2] font-[650] tracking-normal",
+	h2: "mt-[18px] mb-2 text-[16px] font-[650] tracking-normal",
+	h3: "mt-[18px] mb-2 text-[16px] font-[650] tracking-normal",
+	h4: "mt-[18px] mb-2 text-[16px] font-[650] tracking-normal",
+	h5: "mt-[18px] mb-2 text-[16px] font-[650] tracking-normal",
+	h6: "mt-[18px] mb-2 text-[16px] font-[650] tracking-normal",
+	ul: "my-2.5 list-disc pl-6",
+	ol: "my-2.5 list-decimal pl-6",
+	blockquote: "my-2.5 border-l-[3px] border-[#dae5d2] pl-[14px] text-[#68705f]",
+	code: "rounded-[3px] bg-[#eef1e9] px-1 py-0.5 text-[12px]",
+	pre: "my-2.5 overflow-x-auto rounded-md bg-[#eef1e9] p-3 whitespace-pre [&_code]:p-0",
+	table: "my-2.5 block border-collapse overflow-x-auto",
+	th: "border border-[#d8ded5] px-2.5 py-1.5 text-left",
+	td: "border border-[#d8ded5] px-2.5 py-1.5 text-left",
+	hr: "my-4 border-0 border-t border-[#d8ded5]",
+};
 
 /** Untrusted Markdown becomes React nodes; raw HTML stays text and images require a click. */
 export function Markdown({ body, base = "/" }: { readonly body: string; readonly base?: string }) {
@@ -53,13 +72,25 @@ export function Markdown({ body, base = "/" }: { readonly body: string; readonly
 				.map((child, index) => render(child, index, references && !["code", "pre", "a"].includes(tag)));
 			if (tag === "a")
 				return (
-					<a key={key} href={safeHref(node.getAttribute("href") ?? "", base)} rel="noreferrer">
+					<a
+						className="text-[#376b36] underline underline-offset-[3px]"
+						key={key}
+						href={safeHref(node.getAttribute("href") ?? "", base)}
+						rel="noreferrer"
+					>
 						{children}
 					</a>
 				);
 			if (tag === "input")
 				return (
-					<input key={key} type="checkbox" checked={node.hasAttribute("checked")} disabled aria-label="Task status" />
+					<input
+						className="mr-1.5"
+						key={key}
+						type="checkbox"
+						checked={node.hasAttribute("checked")}
+						disabled
+						aria-label="Task status"
+					/>
 				);
 			if (
 				![
@@ -92,11 +123,17 @@ export function Markdown({ body, base = "/" }: { readonly body: string; readonly
 				return children;
 			return createElement(
 				tag,
-				{ key, ...(tag === "ol" ? { start: Number(node.getAttribute("start") ?? 1) } : {}) },
+				{
+					key,
+					className: markdownClasses[tag],
+					...(tag === "ol" ? { start: Number(node.getAttribute("start") ?? 1) } : {}),
+				},
 				...children,
 			);
 		};
 		return Array.from(document.body.childNodes, (node, index) => render(node, index));
 	}, [body, base]);
-	return <div className="markdown">{content}</div>;
+	return (
+		<div className="text-[13px] leading-[1.85] wrap-anywhere [&>:first-child]:mt-0 [&>:last-child]:mb-0">{content}</div>
+	);
 }

@@ -40,7 +40,7 @@ export function ReferencedMessage({ visible }: { readonly visible: readonly Boar
 	if (!seq || displayed) return null;
 	return (
 		<section aria-label="Referenced message" className="mb-8">
-			<div className="section-heading">
+			<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
 				<h2>Referenced message #{seq}</h2>
 			</div>
 			{message && !error ? (

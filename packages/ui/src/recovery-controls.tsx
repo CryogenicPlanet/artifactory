@@ -55,11 +55,21 @@ export function RecoveryControls({
 			</p>
 			<div className="flex flex-wrap gap-3">
 				{lock && (
-					<button type="button" disabled={busy || pending !== null} onClick={() => run("break")}>
+					<button
+						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+						type="button"
+						disabled={busy || pending !== null}
+						onClick={() => run("break")}
+					>
 						Break lock with passkey
 					</button>
 				)}
-				<button type="button" disabled={busy || pending !== null} onClick={() => run("revert")}>
+				<button
+					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+					type="button"
+					disabled={busy || pending !== null}
+					onClick={() => run("revert")}
+				>
 					{pending ? "Undo requested — check boot diagnostics" : "Revert last source change"}
 				</button>
 			</div>

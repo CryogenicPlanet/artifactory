@@ -83,9 +83,10 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 			<details>
 				<summary>Search messages</summary>
 				<form onSubmit={submit}>
-					<label>
+					<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]">
 						Words or phrases
 						<input
+							className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
 							value={q}
 							onChange={(event) => setQ(event.target.value)}
 							maxLength={512}
@@ -93,22 +94,29 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 						/>
 					</label>
 					<div className="mt-3 grid gap-2.5 min-[651px]:grid-cols-[2fr_1fr_1fr]">
-						<label>
+						<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]">
 							Search topic
 							<input
+								className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
 								value={topic}
 								onChange={(event) => setTopic(event.target.value)}
 								maxLength={200}
 								placeholder="All topics"
 							/>
 						</label>
-						<label>
+						<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]">
 							Tag
-							<input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="Any tag" />
+							<input
+								className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
+								value={tag}
+								onChange={(event) => setTag(event.target.value)}
+								placeholder="Any tag"
+							/>
 						</label>
-						<label>
+						<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]">
 							Author
 							<input
+								className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
 								value={agent}
 								onChange={(event) => setAgent(event.target.value)}
 								maxLength={64}
@@ -116,24 +124,32 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 							/>
 						</label>
 					</div>
-					<p className="field-hint">
+					<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
 						Filters combine. Topic includes subtopics and archives. Words and quoted phrases search message bodies.
 					</p>
-					<button type="submit" disabled={loading}>
+					<button
+						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+						type="submit"
+						disabled={loading}
+					>
 						{loading ? "Searching…" : "Search"}
 					</button>
 				</form>
 			</details>
 			{error && (
-				<p className="notice error" role="alert">
+				<p
+					className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mb-5 p-5 "
+					role="alert"
+				>
 					{error}
 				</p>
 			)}
 			{applied && (
 				<div className="mt-6" aria-label="Search results">
-					<div className="section-heading">
+					<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
 						<h2>Search results</h2>
 						<button
+							className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
 							type="button"
 							onClick={() => {
 								request.current?.abort();
@@ -146,7 +162,7 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 							Back to conversation
 						</button>
 					</div>
-					<p className="field-hint">
+					<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
 						{items.length} shown, oldest first. Search again to include new messages and edits.
 					</p>
 					{items.map((message) => (
@@ -155,12 +171,21 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 					{!loading && !error && items.length === 0 && <p role="status">No messages match these filters.</p>}
 					{loading && <p role="status">Loading results…</p>}
 					{error && (
-						<button type="button" onClick={() => load(applied, items.length ? cursor : 0)}>
+						<button
+							className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+							type="button"
+							onClick={() => load(applied, items.length ? cursor : 0)}
+						>
 							Retry search
 						</button>
 					)}
 					{more && !error && (
-						<button type="button" disabled={loading} onClick={() => load(applied, cursor)}>
+						<button
+							className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+							type="button"
+							disabled={loading}
+							onClick={() => load(applied, cursor)}
+						>
 							More results
 						</button>
 					)}

@@ -64,9 +64,10 @@ export function AccountTokens() {
 	};
 	return (
 		<section className="mt-8 text-[13px]" aria-labelledby="account-tokens-heading">
-			<div className="section-heading">
+			<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
 				<h2 id="account-tokens-heading">Agent access</h2>
 				<button
+					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
 					type="button"
 					disabled={busy}
 					onClick={() => {
@@ -77,7 +78,7 @@ export function AccountTokens() {
 					Refresh tokens
 				</button>
 			</div>
-			<p className="field-hint">
+			<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
 				Revoking an instance ends access for every token in its family, including refreshed tokens.
 			</p>
 			{families?.items.map((family) => (
@@ -95,6 +96,7 @@ export function AccountTokens() {
 						<small>{family.family}</small>
 					</div>
 					<button
+						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
 						type="button"
 						disabled={busy || family.revoked}
 						onClick={() =>
@@ -111,7 +113,9 @@ export function AccountTokens() {
 					</button>
 				</article>
 			))}
-			{families && !families.items.length && <p className="field-hint">No issued agent tokens.</p>}
+			{families && !families.items.length && (
+				<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">No issued agent tokens.</p>
+			)}
 			<form
 				className="rounded-[10px] border border-[#dfe5d8] bg-white p-[17px] min-[651px]:p-[22px] mt-[18px] [&_h3]:text-sm [&_fieldset]:mb-4 [&_fieldset]:min-w-0 [&_button]:mt-[14px]"
 				onSubmit={(event) => {
@@ -120,10 +124,15 @@ export function AccountTokens() {
 				}}
 			>
 				<h3>Create agent tokens</h3>
-				<p className="field-hint">Read access is included. Confirm the identity and permissions with your passkey.</p>
+				<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
+					Read access is included. Confirm the identity and permissions with your passkey.
+				</p>
 				<fieldset disabled={busy || pending !== null || pair !== null}>
-					<label htmlFor="token-agent">Agent name</label>
+					<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="token-agent">
+						Agent name
+					</label>
 					<input
+						className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
 						id="token-agent"
 						required
 						maxLength={64}
@@ -132,8 +141,11 @@ export function AccountTokens() {
 						onChange={(event) => setAgent(event.target.value)}
 						placeholder="codex"
 					/>
-					<label htmlFor="token-label">Instance label</label>
+					<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="token-label">
+						Instance label
+					</label>
 					<input
+						className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
 						id="token-label"
 						required
 						maxLength={100}
@@ -142,19 +154,36 @@ export function AccountTokens() {
 						onChange={(event) => setLabel(event.target.value)}
 						placeholder="macbook"
 					/>
-					<label className="flex items-center gap-[9px]">
-						<input type="checkbox" checked={write} onChange={(event) => setWrite(event.target.checked)} /> Write
-						messages and topics
+					<label className="mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c] flex items-center gap-[9px]">
+						<input
+							className="disabled:opacity-75"
+							type="checkbox"
+							checked={write}
+							onChange={(event) => setWrite(event.target.checked)}
+						/>{" "}
+						Write messages and topics
 					</label>
-					<label className="flex items-center gap-[9px]">
-						<input type="checkbox" checked={fs} onChange={(event) => setFs(event.target.checked)} /> Edit source and
-						pages
+					<label className="mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c] flex items-center gap-[9px]">
+						<input
+							className="disabled:opacity-75"
+							type="checkbox"
+							checked={fs}
+							onChange={(event) => setFs(event.target.checked)}
+						/>{" "}
+						Edit source and pages
 					</label>
-					<label className="flex items-center gap-[9px]">
-						<input type="checkbox" checked={long} onChange={(event) => setLong(event.target.checked)} /> Long-lived:
-						access 7 days, refresh 90 days
+					<label className="mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c] flex items-center gap-[9px]">
+						<input
+							className="disabled:opacity-75"
+							type="checkbox"
+							checked={long}
+							onChange={(event) => setLong(event.target.checked)}
+						/>{" "}
+						Long-lived: access 7 days, refresh 90 days
 					</label>
-					<p className="field-hint">Default: access 24 hours, refresh 30 days.</p>
+					<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
+						Default: access 24 hours, refresh 30 days.
+					</p>
 				</fieldset>
 				{pending && (
 					<p role="status">
@@ -163,7 +192,11 @@ export function AccountTokens() {
 					</p>
 				)}
 				{!pair && (
-					<button type="submit" disabled={busy}>
+					<button
+						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+						type="submit"
+						disabled={busy}
+					>
 						{busy ? "Waiting for confirmation…" : pending ? "Retry token request" : "Create with passkey"}
 					</button>
 				)}
@@ -174,18 +207,43 @@ export function AccountTokens() {
 							These secrets are shown only here. Closing this view removes them from the page; they cannot be retrieved
 							from the token list.
 						</p>
-						<label htmlFor="token-access">Access token</label>
-						<textarea id="token-access" readOnly value={pair.access} autoComplete="off" spellCheck={false} />
-						<label htmlFor="token-refresh">Refresh token</label>
-						<textarea id="token-refresh" readOnly value={pair.refresh} autoComplete="off" spellCheck={false} />
-						<button type="button" onClick={() => setPair(null)}>
+						<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="token-access">
+							Access token
+						</label>
+						<textarea
+							className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c] min-h-[125px] resize-y"
+							id="token-access"
+							readOnly
+							value={pair.access}
+							autoComplete="off"
+							spellCheck={false}
+						/>
+						<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="token-refresh">
+							Refresh token
+						</label>
+						<textarea
+							className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c] min-h-[125px] resize-y"
+							id="token-refresh"
+							readOnly
+							value={pair.refresh}
+							autoComplete="off"
+							spellCheck={false}
+						/>
+						<button
+							className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+							type="button"
+							onClick={() => setPair(null)}
+						>
 							I saved them — hide tokens
 						</button>
 					</div>
 				)}
 			</form>
 			{(error ?? loadError) && (
-				<div className="notice" role="alert">
+				<div
+					className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mb-5 p-5"
+					role="alert"
+				>
 					{(error ?? loadError)?.message}
 					{(error ?? loadError)?.status === 401 && (
 						<p>

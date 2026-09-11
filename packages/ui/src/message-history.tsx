@@ -20,9 +20,13 @@ export function MessageHistory({ path, onClose }: { readonly path: string; reado
 		<>
 			{page && <ReferencedMessage visible={page.items} />}
 			<section className="mb-8" aria-label="Message history">
-				<div className="section-heading">
+				<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
 					<h2>Message history</h2>
-					<button type="button" onClick={onClose}>
+					<button
+						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+						type="button"
+						onClick={onClose}
+					>
 						Back to latest
 					</button>
 				</div>
@@ -30,9 +34,16 @@ export function MessageHistory({ path, onClose }: { readonly path: string; reado
 					Page {position.previous.length + 1}, oldest first. Return to latest for live updates.
 				</p>
 				{error ? (
-					<div className="notice error" role="alert">
+					<div
+						className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mb-5 p-5 "
+						role="alert"
+					>
 						<p>{error.message}</p>
-						<button type="button" onClick={reload}>
+						<button
+							className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+							type="button"
+							onClick={reload}
+						>
 							Retry history
 						</button>
 					</div>
@@ -46,8 +57,9 @@ export function MessageHistory({ path, onClose }: { readonly path: string; reado
 						{page.items.length < 100 && <p role="status">You have reached the end of this topic’s history.</p>}
 					</>
 				)}
-				<div className="section-heading">
+				<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
 					<button
+						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
 						type="button"
 						disabled={position.previous.length === 0}
 						onClick={() => {
@@ -58,6 +70,7 @@ export function MessageHistory({ path, onClose }: { readonly path: string; reado
 						Previous page
 					</button>
 					<button
+						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
 						type="button"
 						disabled={page === undefined || page.items.length < 100}
 						onClick={() => {

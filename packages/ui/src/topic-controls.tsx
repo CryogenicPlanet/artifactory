@@ -71,11 +71,14 @@ export function TopicControls({
 					mutate({ meta: parsed.success });
 				}}
 			>
-				<label htmlFor={fieldId}>Metadata</label>
-				<p className="field-hint" id={`${fieldId}-hint`}>
+				<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor={fieldId}>
+					Metadata
+				</label>
+				<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]" id={`${fieldId}-hint`}>
 					Save replaces all metadata. Omitted keys are removed. Setting public to true makes this topic’s pages public.
 				</p>
 				<textarea
+					className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c] min-h-[125px] resize-y"
 					id={fieldId}
 					aria-describedby={`${fieldId}-hint`}
 					aria-invalid={invalid}
@@ -90,24 +93,36 @@ export function TopicControls({
 					}}
 				/>
 				{invalid && <p role="alert">Enter a valid JSON object, such as {`{"status":"doing"}`}.</p>}
-				<button type="submit" disabled={disabled || archived}>
+				<button
+					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+					type="submit"
+					disabled={disabled || archived}
+				>
 					Save metadata
 				</button>
 			</form>
 			<div className="mt-5 border-t border-[#e3e8df] pt-2">
-				<p className="field-hint">
+				<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
 					{parentArchived
 						? "A parent topic is archived. Unarchive the parent before changing this topic."
 						: archived
 							? "This topic is archived. Unarchive it to write messages or edit metadata."
 							: "Archiving makes this topic and its subtopics read-only and hides them from unread counts."}
 				</p>
-				<button type="button" disabled={disabled} onClick={() => mutate({ archived: !archived })}>
+				<button
+					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+					type="button"
+					disabled={disabled}
+					onClick={() => mutate({ archived: !archived })}
+				>
 					{archived ? "Unarchive topic" : "Archive topic"}
 				</button>
 			</div>
 			{error && (
-				<div className="notice" role="alert">
+				<div
+					className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mb-5 p-5"
+					role="alert"
+				>
 					<p>{error.message}</p>
 					{error.status === 401 && (
 						<a href="/auth/login" target="_blank" rel="noreferrer">
@@ -117,14 +132,18 @@ export function TopicControls({
 					{uncertain && (
 						<>
 							<p>The change may have saved. Reload and check this topic before making another change.</p>
-							<button type="button" onClick={() => window.location.reload()}>
+							<button
+								className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+								type="button"
+								onClick={() => window.location.reload()}
+							>
 								Reload topic
 							</button>
 						</>
 					)}
 				</div>
 			)}
-			<p className="field-hint" role="status">
+			<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]" role="status">
 				{busy ? "Saving…" : saved}
 			</p>
 		</details>

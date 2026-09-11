@@ -10,18 +10,26 @@ export function AccountSettings() {
 	const { value, error, loading, reload, update } = useLoad(getSettings);
 	return (
 		<section className="mt-8 text-[13px]" aria-labelledby="account-settings-heading">
-			<div className="section-heading">
+			<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
 				<h2 id="account-settings-heading">Board settings</h2>
-				<button type="button" disabled={loading} onClick={reload}>
+				<button
+					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+					type="button"
+					disabled={loading}
+					onClick={reload}
+				>
 					Refresh settings
 				</button>
 			</div>
-			<p className="field-hint">
+			<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
 				Changes require a fresh passkey confirmation. Public paths expose exact app routes without sign-in; child paths
 				are not included.
 			</p>
 			{error && (
-				<div className="notice" role="alert">
+				<div
+					className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mb-5 p-5"
+					role="alert"
+				>
 					{error.message}
 					{error.status === 401 && (
 						<p>
@@ -136,8 +144,11 @@ function SettingsForm({
 			</p>
 			<fieldset disabled={busy || pending !== null}>
 				<legend>Event retention (days)</legend>
-				<label htmlFor="settings-http-days">Request diagnostics</label>
+				<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="settings-http-days">
+					Request diagnostics
+				</label>
 				<input
+					className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
 					id="settings-http-days"
 					type="number"
 					min={1}
@@ -146,8 +157,14 @@ function SettingsForm({
 					value={httpDays}
 					onChange={(event) => setHttpDays(event.target.value)}
 				/>
-				<label htmlFor="settings-other-days">Other events</label>
+				<label
+					className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]"
+					htmlFor="settings-other-days"
+				>
+					Other events
+				</label>
 				<input
+					className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
 					id="settings-other-days"
 					type="number"
 					min={1}
@@ -157,8 +174,11 @@ function SettingsForm({
 					onChange={(event) => setOtherDays(event.target.value)}
 				/>
 				<h3>Storage limits (% of volume)</h3>
-				<label htmlFor="settings-backup">Backups</label>
+				<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="settings-backup">
+					Backups
+				</label>
 				<input
+					className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
 					id="settings-backup"
 					type="number"
 					min={0}
@@ -168,8 +188,11 @@ function SettingsForm({
 					value={backup}
 					onChange={(event) => setBackup(event.target.value)}
 				/>
-				<label htmlFor="settings-events">Events</label>
+				<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="settings-events">
+					Events
+				</label>
 				<input
+					className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
 					id="settings-events"
 					type="number"
 					min={0}
@@ -179,8 +202,11 @@ function SettingsForm({
 					value={events}
 					onChange={(event) => setEvents(event.target.value)}
 				/>
-				<label htmlFor="settings-headroom">Reserved free space</label>
+				<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="settings-headroom">
+					Reserved free space
+				</label>
 				<input
+					className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
 					id="settings-headroom"
 					type="number"
 					min={5}
@@ -190,9 +216,14 @@ function SettingsForm({
 					value={headroom}
 					onChange={(event) => setHeadroom(event.target.value)}
 				/>
-				<p className="field-hint">Reserve at least 5% free space. All three percentages must total less than 100%.</p>
-				<label htmlFor="settings-paths">Public app paths — one exact path per line</label>
+				<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
+					Reserve at least 5% free space. All three percentages must total less than 100%.
+				</p>
+				<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="settings-paths">
+					Public app paths — one exact path per line
+				</label>
 				<textarea
+					className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c] min-h-[125px] resize-y"
 					id="settings-paths"
 					rows={5}
 					value={paths}
@@ -200,13 +231,13 @@ function SettingsForm({
 					spellCheck={false}
 					placeholder="/public-report"
 				/>
-				<p className="field-hint">
+				<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
 					At most 128 unique paths, each starting with /. No wildcards, encoded paths, queries, fragments, or
 					boot/auth/page routes. An empty list makes no additional app paths public.
 				</p>
 			</fieldset>
 			{(changed || pending) && (
-				<div className="notice">
+				<div className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mt-[15px] mb-0 p-[13px]">
 					<p>
 						{pending
 							? "This attempt may have completed. Retry the exact signed attempt or compare refreshed settings before starting a new confirmation."
@@ -218,10 +249,16 @@ function SettingsForm({
 						{current.storage.event_percent}%, free space {current.storage.headroom_percent}%.
 					</p>
 					<p>Current public paths: {current.public_paths.length ? current.public_paths.join(", ") : "none"}.</p>
-					<button type="button" disabled={busy || readBlocked} onClick={refresh}>
+					<button
+						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+						type="button"
+						disabled={busy || readBlocked}
+						onClick={refresh}
+					>
 						Read current settings
 					</button>{" "}
 					<button
+						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
 						type="button"
 						disabled={busy || readBlocked || (pending !== null && current === pending.observed)}
 						onClick={() => {
@@ -235,12 +272,19 @@ function SettingsForm({
 					</button>
 				</div>
 			)}
-			<button type="submit" disabled={busy || readBlocked || (!pending && (!valid || changed))}>
+			<button
+				className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+				type="submit"
+				disabled={busy || readBlocked || (!pending && (!valid || changed))}
+			>
 				{busy ? "Waiting…" : pending ? "Retry exact signed attempt" : "Save with passkey"}
 			</button>
 			{message && <p role="status">{message}</p>}
 			{error && (
-				<div className="notice" role="alert">
+				<div
+					className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mt-[15px] mb-0 p-[13px]"
+					role="alert"
+				>
 					{error.message}
 				</div>
 			)}

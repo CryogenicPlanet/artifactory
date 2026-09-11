@@ -17,42 +17,62 @@ export function Extensions() {
 		<BoardLayout
 			navigation={
 				<>
-					<a className="nav-home" href="/">
+					<a
+						className="my-[3px] flex shrink-0 items-center gap-2 rounded-md px-[9px] py-1.5 text-xs whitespace-nowrap min-[651px]:px-2.5 min-[651px]:py-[9px] min-[651px]:text-[13px] min-[651px]:whitespace-normal"
+						href="/"
+					>
 						All topics
 					</a>
-					<a className="nav-home bg-[#e3ebdd] font-semibold text-[#36532e]" aria-current="page" href="/ext">
+					<a
+						className="my-[3px] flex shrink-0 items-center gap-2 rounded-md px-[9px] py-1.5 text-xs whitespace-nowrap min-[651px]:px-2.5 min-[651px]:py-[9px] min-[651px]:text-[13px] min-[651px]:whitespace-normal bg-[#e3ebdd] font-semibold text-[#36532e]"
+						aria-current="page"
+						href="/ext"
+					>
 						Extensions
 					</a>
 				</>
 			}
 		>
-			<header className="page-header">
+			<header className="mb-[30px] flex items-start justify-between gap-4 min-[651px]:mb-10 min-[651px]:items-center [&_p]:mt-2.5 [&_p]:text-xs [&_p]:leading-[1.6] [&_p]:text-[#7b8176] min-[651px]:[&_p]:text-[13px]">
 				<div>
 					<nav className="mb-2.5 text-[11px] wrap-anywhere text-[#858b80] min-[651px]:mb-4" aria-label="Breadcrumb">
 						<a href="/">Board</a> / Extensions
 					</nav>
-					<h1>Extensions</h1>
+					<h1 className="text-[26px] leading-[1.2] font-[650] tracking-[-0.9px] wrap-anywhere min-[651px]:text-[30px]">
+						Extensions
+					</h1>
 					<p>What is loaded in the current generation. Updates with server events.</p>
 				</div>
-				<button type="button" className="quiet" onClick={reload} disabled={loading}>
+				<button
+					type="button"
+					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] disabled:cursor-default disabled:opacity-50 shrink-0 bg-transparent text-[12px] text-[#68705f]"
+					onClick={reload}
+					disabled={loading}
+				>
 					{loading ? "Refreshing…" : "Refresh"}
 				</button>
 			</header>
 			{error && (
-				<div className="notice error" role="alert">
+				<div
+					className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mb-5 p-5 "
+					role="alert"
+				>
 					<p>{error.message}</p>
 					{error.status === 401 && <a href="/auth/login">Sign in with a passkey</a>}
 				</div>
 			)}
 			{loading && items === undefined && !error && (
-				<p className="empty" role="status">
+				<p
+					className="px-2.5 py-[35px] text-center text-[13px] leading-[1.7] text-[#858c7c] [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-medium [&_h2]:text-[#5e6857] [&_h3]:mb-2 [&_h3]:text-base [&_h3]:font-medium [&_h3]:text-[#5e6857] [&_a]:underline [&_a]:underline-offset-[3px]"
+					role="status"
+				>
 					Loading extensions…
 				</p>
 			)}
 			{items !== undefined && !error && (
 				<section aria-label="Loaded extensions">
 					{items.length === 0 && (
-						<p className="empty">
+						<p className="px-2.5 py-[35px] text-center text-[13px] leading-[1.7] text-[#858c7c] [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-medium [&_h2]:text-[#5e6857] [&_h3]:mb-2 [&_h3]:text-base [&_h3]:font-medium [&_h3]:text-[#5e6857] [&_a]:underline [&_a]:underline-offset-[3px]">
 							No extensions are installed. <a href="/p/docs/extensions.md">Read the extension guide</a> to add one.
 						</p>
 					)}

@@ -73,12 +73,15 @@ export function Composer({
 	};
 	return (
 		<form className="rounded-[10px] border border-[#dfe5d8] bg-white p-[17px] min-[651px]:p-[22px]" onSubmit={submit}>
-			<div className="section-heading">
+			<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
 				<h2>Write a message</h2>
 				<span>Markdown welcome</span>
 			</div>
-			<label htmlFor="message-topic">Topic</label>
+			<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="message-topic">
+				Topic
+			</label>
 			<input
+				className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
 				id="message-topic"
 				name="topic"
 				value={topic}
@@ -92,11 +95,14 @@ export function Composer({
 				}}
 				aria-describedby="topic-hint"
 			/>
-			<p className="field-hint" id="topic-hint">
+			<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]" id="topic-hint">
 				Use a path like project/thread. New topics are created with your first message.
 			</p>
-			<label htmlFor="message-body">Message</label>
+			<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="message-body">
+				Message
+			</label>
 			<textarea
+				className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c] min-h-[125px] resize-y"
 				id="message-body"
 				name="body"
 				value={body}
@@ -111,7 +117,10 @@ export function Composer({
 				}}
 			/>
 			{(error || needsCheck) && (
-				<div className="notice error" role="alert">
+				<div
+					className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mt-[15px] mb-0 p-[13px] "
+					role="alert"
+				>
 					<p>{needsCheck ? "A previous attempt may already be saved." : error}</p>
 					<p>
 						{needsCheck
@@ -128,6 +137,7 @@ export function Composer({
 					{needsCheck && (
 						<div className="mt-3 flex flex-wrap gap-2">
 							<button
+								className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
 								type="button"
 								onClick={() => {
 									setPending(null);
@@ -140,6 +150,7 @@ export function Composer({
 								I found it — clear draft
 							</button>
 							<button
+								className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
 								type="button"
 								onClick={() => {
 									setPending(null);
@@ -160,7 +171,7 @@ export function Composer({
 				</span>
 				<button
 					type="submit"
-					className="primary"
+					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold disabled:cursor-default disabled:opacity-50 text-[13px] border-[#4c6840] bg-[#4c6840] text-white [&:not(:disabled):hover]:bg-[#3c5631] [&:not(:disabled):hover]:text-white"
 					disabled={needsCheck || sending || (!pending && (!validTopic(topic) || !body.trim()))}
 				>
 					{sending ? "Sending…" : pending ? "Retry message" : "Post message"}
