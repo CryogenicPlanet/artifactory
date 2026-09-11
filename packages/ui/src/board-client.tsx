@@ -1,6 +1,6 @@
 import { Api } from "@comms/protocol";
 import { RegistryContext, useAtomMount } from "@effect/atom-react";
-import { Effect, type Schema } from "effect";
+import { Clock, Effect, type Schema } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { Atom, AtomHttpApi, AtomRegistry, type AsyncResult } from "effect/unstable/reactivity";
 import { createContext, useContext, useState, type ReactNode } from "react";
@@ -31,11 +31,14 @@ const makeClient = (registry: AtomRegistry.AtomRegistry) => {
 			Atom.make((get) =>
 				getEditLock.pipe(
 					Effect.tap((lock) =>
-						Effect.sync(() => {
+						Effect.gen(function* () {
 							if (lock === null || lock.cutover_in_flight) return;
-							// Expiry is observed on reads; no server event is emitted until a request touches the lock.
-							const timer = setTimeout(() => get.refreshSelf(), Math.max(1, lock.expires - Date.now() + 1));
-							get.addFinalizer(() => clearTimeout(timer));
+							// Expiry is observed on reads; the atom scope cancels this one-shot refresh on disposal.
+							const now = yield* Clock.currentTimeMillis;
+							yield* Effect.sleep(Math.max(1, lock.expires - now + 1)).pipe(
+								Effect.andThen(Effect.sync(() => get.refreshSelf())),
+								Effect.forkScoped,
+							);
 						}),
 					),
 				),
