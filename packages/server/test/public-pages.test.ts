@@ -14,24 +14,40 @@ it("opens only exact opted-in page topics and filters anonymous directory listin
 	await app.setup();
 	const cookie = await app.login();
 	await app.ready(cookie);
+	// Anonymous policy deliberately returns 503 while unrelated publication/recovery is pending.
+	// Retry only reads; the separate pending-policy test below still requires that immediate refusal.
+	const readPage = async (path: string, init?: RequestInit) => {
+		let response = await fetch(app.url + path, init);
+		await expect
+			.poll(
+				async () => {
+					if (response.status === 503) {
+						await response.arrayBuffer();
+						response = await fetch(app.url + path, init);
+					}
+					return response.status;
+				},
+				{ timeout: 3000 },
+			)
+			.not.toBe(503);
+		return response;
+	};
 	for (const topic of ["guide", "guide/yes", "guide/no", "guide-other"])
 		expect((await app.post("/api/messages", { topic, body: "private conversation" }, cookie)).status).toBe(200);
-	expect((await fetch(app.url + "/p/guide/readme.md")).status).toBe(401);
+	expect((await readPage("/p/guide/readme.md")).status).toBe(401);
 	await fixture.sql(`UPDATE topics SET meta='{"public":true}' WHERE path IN ('guide','guide/yes')`);
-	const response = await fetch(app.url + "/p/guide/readme.md");
+	const response = await readPage("/p/guide/readme.md");
 	expect(response.status).toBe(200);
 	expect(await response.text()).toContain("<h1>guide</h1>");
-	expect(await (await fetch(app.url + "/p/guide/readme.md?raw=1")).text()).toBe("# guide");
-	const head = await fetch(app.url + "/p/guide/readme.md", { method: "HEAD" });
+	expect(await (await readPage("/p/guide/readme.md?raw=1")).text()).toBe("# guide");
+	const head = await readPage("/p/guide/readme.md", { method: "HEAD" });
 	expect(head.status).toBe(200);
 	expect(await head.text()).toBe("");
-	expect(Buffer.from(await (await fetch(app.url + "/p/guide/asset.bin")).arrayBuffer())).toEqual(
-		Buffer.from([0, 1, 255]),
-	);
-	const listing = await (await fetch(app.url + "/p/guide/")).text();
+	expect(Buffer.from(await (await readPage("/p/guide/asset.bin")).arrayBuffer())).toEqual(Buffer.from([0, 1, 255]));
+	const listing = await (await readPage("/p/guide/")).text();
 	expect(listing).toContain("guide/yes/");
 	expect(listing).not.toContain("guide/no/");
-	expect((await fetch(app.url + "/p/guide", { redirect: "manual" })).status).toBe(302);
+	expect((await readPage("/p/guide", { redirect: "manual" })).status).toBe(302);
 	for (const path of [
 		"/p/",
 		"/p/guide/no/readme.md",
@@ -39,19 +55,17 @@ it("opens only exact opted-in page topics and filters anonymous directory listin
 		"/api/topics/guide",
 		"/api/messages?topic=guide",
 	])
-		expect((await fetch(app.url + path)).status, path).toBe(401);
+		expect((await readPage(path)).status, path).toBe(401);
 	expect((await fetch(app.url + "/p/guide/readme.md", { method: "POST" })).status).toBe(401);
-	expect((await fetch(app.url + "/p/guide/readme.md", { headers: { authorization: "Bearer invalid" } })).status).toBe(
-		401,
-	);
+	expect((await readPage("/p/guide/readme.md", { headers: { authorization: "Bearer invalid" } })).status).toBe(401);
 	await writeFile(join(fixture.root, "pages", "guide", "index.md"), "# Public index");
-	expect(await (await fetch(app.url + "/p/guide/")).text()).toContain("<h1>Public index</h1>");
+	expect(await (await readPage("/p/guide/")).text()).toContain("<h1>Public index</h1>");
 	await fixture.sql(`UPDATE topics SET meta='{"public":false}' WHERE path='guide'`);
-	expect((await fetch(app.url + "/p/guide/readme.md")).status).toBe(401);
-	expect((await fetch(app.url + "/p/guide/yes/readme.md")).status).toBe(200);
+	expect((await readPage("/p/guide/readme.md")).status).toBe(401);
+	expect((await readPage("/p/guide/yes/readme.md")).status).toBe(200);
 	for (const meta of ['{"public":"true"}', '{"public":1}', "{}"]) {
 		await fixture.sql(`UPDATE topics SET meta='${meta}' WHERE path='guide'`);
-		expect((await fetch(app.url + "/p/guide/readme.md")).status).toBe(401);
+		expect((await readPage("/p/guide/readme.md")).status).toBe(401);
 	}
 }, 20000);
 
