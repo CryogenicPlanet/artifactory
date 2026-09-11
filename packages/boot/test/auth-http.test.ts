@@ -53,11 +53,14 @@ async function launch(test: TestContext, mode = "normal") {
 	});
 	let url = "";
 	await expect
-		.poll(() => {
-			if (processHandle.exitCode !== null) throw new Error(JSON.stringify(launcherOutput(output)));
-			url = /Listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(output)?.[1] ?? "";
-			return url;
-		})
+		.poll(
+			() => {
+				if (processHandle.exitCode !== null) throw new Error(JSON.stringify(launcherOutput(output)));
+				url = /Listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(output)?.[1] ?? "";
+				return url;
+			},
+			{ timeout: 5000 },
+		)
 		.not.toBe("");
 	phase = "setup";
 	await expect.poll(async () => (await fetch(`${url}/setup`)).status).toBe(200);

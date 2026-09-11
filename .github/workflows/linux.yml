@@ -55,4 +55,5 @@ jobs:
           --maxWorkers=1 --reporter=verbose
           -t 'forwards upload chunks before the request finishes|creates a passkey and a protected session, forwards verified identity, and logs out|recovers process death at replacement boundary 0 idempotently from its own journal'
       - name: Boot and server recovery tests
-        run: bun run test packages/boot/test packages/server/test --maxWorkers=4
+        # Each file launches Bun processes; four workers exceeded measured fixture budgets on this runner.
+        run: bun run test packages/boot/test packages/server/test --maxWorkers=2

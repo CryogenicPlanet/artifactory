@@ -120,6 +120,8 @@ describe("recoverable source publication", () => {
 	});
 	it.for([0, 1, 2])(
 		"recovers process death at replacement boundary %i idempotently from its own journal",
+		// Nine sequential Bun launches reached recovery only after 5s in Linux CI.
+		{ timeout: 15000 },
 		async (at, test) => {
 			const env = await fixture(test);
 			await env.crash(at, [
@@ -257,43 +259,47 @@ describe("recoverable source publication", () => {
 		]);
 	});
 
-	it.for([0, 1, 2])("recovers a page batch undo after process death at replacement %i", async (at, test) => {
-		const env = await fixture(test);
-		await env.call({
-			op: "publish",
-			writes: [
-				{ path: "pages/topic/a.md", content: "before a", mode: 0o600 },
-				{ path: "pages/topic/b.md", content: "before b", mode: 0o640 },
-			],
-		});
-		const changed = receipt(
+	it.for([0, 1, 2])(
+		"recovers a page batch undo after process death at replacement %i",
+		{ timeout: 15000 },
+		async (at, test) => {
+			const env = await fixture(test);
 			await env.call({
 				op: "publish",
 				writes: [
-					{ path: "pages/topic/a.md", content: "after a", mode: 0o644 },
-					{ path: "pages/topic/b.md", content: "after b", mode: 0o644 },
+					{ path: "pages/topic/a.md", content: "before a", mode: 0o600 },
+					{ path: "pages/topic/b.md", content: "before b", mode: 0o640 },
 				],
-			}),
-		);
-		await env.sql(
-			"INSERT INTO edit_lock (singleton,id,holder_family,agent,since,expires,ttl_seconds,note) VALUES (1,'other','other-family','other',0,9999999999999,900,'busy')",
-		);
-		await env.crash(at, [], changed.batch);
-		expect(await env.call({ op: "read", path: "pages/topic/a.md" })).toMatchObject({ error: "publication_pending" });
-		expect(await env.sql("SELECT COUNT(*) AS n FROM source_changes")).toEqual([{ n: 2 }]);
-		await env.call({ op: "recover" });
-		for (const [name, mode] of [
-			["a", 0o600],
-			["b", 0o640],
-		] as const) {
-			expect(await readFile(join(env.root, `pages/topic/${name}.md`), "utf8")).toBe(`before ${name}`);
-			expect((await stat(join(env.root, `pages/topic/${name}.md`))).mode & 0o777).toBe(mode);
-		}
-		expect(await env.sql("SELECT id FROM edit_lock")).toEqual([{ id: "other" }]);
-		expect(await env.sql("SELECT COUNT(*) AS n FROM versions")).toEqual([{ n: 6 }]);
-		expect(await env.call({ op: "recover" })).toEqual({ batch: null, syncs: [] });
-		expect(await env.sql("SELECT * FROM source_changes")).toEqual([]);
-	});
+			});
+			const changed = receipt(
+				await env.call({
+					op: "publish",
+					writes: [
+						{ path: "pages/topic/a.md", content: "after a", mode: 0o644 },
+						{ path: "pages/topic/b.md", content: "after b", mode: 0o644 },
+					],
+				}),
+			);
+			await env.sql(
+				"INSERT INTO edit_lock (singleton,id,holder_family,agent,since,expires,ttl_seconds,note) VALUES (1,'other','other-family','other',0,9999999999999,900,'busy')",
+			);
+			await env.crash(at, [], changed.batch);
+			expect(await env.call({ op: "read", path: "pages/topic/a.md" })).toMatchObject({ error: "publication_pending" });
+			expect(await env.sql("SELECT COUNT(*) AS n FROM source_changes")).toEqual([{ n: 2 }]);
+			await env.call({ op: "recover" });
+			for (const [name, mode] of [
+				["a", 0o600],
+				["b", 0o640],
+			] as const) {
+				expect(await readFile(join(env.root, `pages/topic/${name}.md`), "utf8")).toBe(`before ${name}`);
+				expect((await stat(join(env.root, `pages/topic/${name}.md`))).mode & 0o777).toBe(mode);
+			}
+			expect(await env.sql("SELECT id FROM edit_lock")).toEqual([{ id: "other" }]);
+			expect(await env.sql("SELECT COUNT(*) AS n FROM versions")).toEqual([{ n: 6 }]);
+			expect(await env.call({ op: "recover" })).toEqual({ batch: null, syncs: [] });
+			expect(await env.sql("SELECT * FROM source_changes")).toEqual([]);
+		},
+	);
 
 	it("retains the page undo journal if history commit fails and finishes it once on restart", async (test) => {
 		const env = await fixture(test);
