@@ -1,5 +1,5 @@
 import { recoveryIntents } from "./recovery-intents.ts";
-import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
+import { Crypto, DateTime, Effect, FileSystem, Path, Ref } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
 import { artifactRetention } from "./artifact-retention.ts";
@@ -47,12 +47,10 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 				)
 					return yield* new ChildError({ code: "backup_live_child_required" });
 				let closed = false;
-				let releaseSafe = false;
 				let canResume = false;
 				let created: string | null = null;
 				const retire = Effect.gen(function* () {
-					yield* Ref.set(supervisor.current, null);
-					yield* Ref.set(supervisor.child.traffic.route, null);
+					yield* supervisor.withdraw;
 					if (!closed) {
 						yield* supervisor.retire(active).pipe(Effect.provideContext(context));
 						closed = true;
@@ -61,31 +59,9 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 				const restart = Effect.gen(function* () {
 					yield* retire;
 					// start reconciles the authoritative store, never a saved database.
-					yield* supervisor.start(active.generation).pipe(
-						Effect.provideContext(context),
-						Effect.onError((cause) =>
-							Effect.gen(function* () {
-								const error = Cause.findError(cause);
-								if (cause.reasons.length !== 1 || error._tag !== "Success" || !Schema.is(ChildError)(error.success))
-									return;
-								const closure = yield* supervisor.assertClosure.pipe(Effect.result);
-								if (closure._tag === "Failure") return;
-								// start retired its failed candidate; remove any partially activated route.
-								yield* Ref.set(supervisor.current, null);
-								yield* Ref.set(supervisor.child.traffic.route, null);
-								releaseSafe = true;
-							}),
-						),
-					);
+					yield* supervisor.restart(active.generation).pipe(Effect.provideContext(context));
 				});
-				yield* Effect.addFinalizer(() =>
-					Effect.gen(function* () {
-						if (!releaseSafe) return;
-						const closure = yield* supervisor.assertClosure.pipe(Effect.result);
-						if (closure._tag === "Success") yield* supervisor.child.traffic.release;
-					}),
-				);
-				yield* supervisor.child.traffic.freeze;
+				yield* supervisor.freeze;
 				const result = yield* Effect.gen(function* () {
 					const frozen = yield* active.process.control("frozen").pipe(Effect.exit);
 					if (frozen._tag === "Failure") yield* retire;
@@ -134,9 +110,7 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 				// Cancellation and failed controls are not lifecycle acknowledgements. Restoration must
 				// finish before the gate is released; an unproven closure deliberately leaves traffic frozen.
 				yield* supervisor.assertClosure;
-				yield* canResume ? active.process.control("live").pipe(Effect.catch(() => restart)) : restart;
-				releaseSafe = true;
-				yield* supervisor.child.traffic.release;
+				yield* canResume ? supervisor.resume(active).pipe(Effect.provideContext(context)) : restart;
 				if (result._tag === "Failure") {
 					// A failed commit response may still have registered the file. Only remove an
 					// uncataloged copy; failed cleanup is logged and must not refreeze a healthy child.

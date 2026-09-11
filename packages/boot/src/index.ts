@@ -132,9 +132,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 								// Restore may have activated a child before a later recovery step failed.
 								// Withdraw its route and prove closure before selecting any authoritative store again.
 								const active = yield* Ref.get(supervisor.current);
-								yield* Ref.set(child.traffic.route, null);
+								yield* supervisor.withdraw;
 								if (active) yield* supervisor.retire(active);
-								yield* Ref.set(supervisor.current, null);
 								yield* supervisor.recoverClosure;
 								yield* (yield* Generations).recover;
 								if (isolated) yield* migrateAppStore({ dataDirectory: options.dataDirectory, filename: appFilename });

@@ -49,7 +49,7 @@ it("preserves a published background message after boot dies immediately after r
 	await mkdir(join(fixture.root, "packages/server"), { recursive: true });
 	await symlink(join(import.meta.dirname, "../node_modules"), join(fixture.root, "packages/server/node_modules"));
 	const cutover = await readFile(join(boot, "src/cutover.ts"), "utf8");
-	const restarted = "if (prior) yield* restartGeneration(prior.generation);";
+	const restarted = "if (prior) yield* start(prior.generation);";
 	expect(cutover.split(restarted)).toHaveLength(2);
 	await writeFile(
 		join(boot, "src/cutover.ts"),

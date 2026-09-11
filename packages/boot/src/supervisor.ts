@@ -60,6 +60,10 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		if (yield* Ref.get(closureUnproven)) return yield* new ChildError({ code: "child_closure_unproven" });
 	});
 	const routing = yield* traffic;
+	// Only lifecycle operations withdraw routing or reopen admission. A missing route
+	// is not evidence that the authoritative store is safe to resume.
+	const withdraw = Ref.set(routing.route, null).pipe(Effect.andThen(Ref.set(current, null)));
+	const release = routing.requests.release.pipe(Effect.andThen(routing.release));
 	const status = yield* Ref.make<ChildStatus>({
 		state: "starting",
 		generation: null,
@@ -237,6 +241,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			if (!alreadyWatching) yield* watch(value).pipe(Effect.catchCause(fail), Effect.forkIn(processScope));
 			yield* Ref.update(tried, (values) => ({ ...values, [value.generation.n]: 0 }));
 			yield* (yield* Generations).list.pipe(Effect.flatMap((rows) => Ref.set(history, rows)));
+			yield* release;
 		});
 	const start = (generation: Generation) =>
 		Effect.gen(function* () {
@@ -259,6 +264,25 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			}
 			return value;
 		});
+	const restart = (generation: Generation) =>
+		start(generation).pipe(
+			Effect.onError((cause) =>
+				Effect.gen(function* () {
+					const error = Cause.findError(cause);
+					if (cause.reasons.length !== 1 || error._tag !== "Success" || !Schema.is(ChildError)(error.success)) return;
+					if ((yield* assertClosure.pipe(Effect.result))._tag === "Failure") return;
+					// start positively retired its failed candidate. Queued requests may now
+					// receive unavailable, but never reach a partially activated child.
+					yield* withdraw;
+					yield* release;
+				}),
+			),
+		);
+	const resume = (active: ActiveChild) =>
+		active.process.control("live").pipe(
+			Effect.catch(() => withdraw.pipe(Effect.andThen(retire(active)), Effect.andThen(restart(active.generation)))),
+			Effect.andThen(release),
+		);
 	const recover = Effect.gen(function* () {
 		const generations = yield* Generations;
 		const choices = yield* prepareGeneration(options);
@@ -343,6 +367,11 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		fail,
 		operationGate,
 		current,
+		withdraw,
+		freeze: routing.freeze,
+		release,
+		resume,
+		restart,
 		assertClosure,
 		// Caller owns operationGate and has retired any current child before retrying startup.
 		recoverClosure: Effect.gen(function* () {

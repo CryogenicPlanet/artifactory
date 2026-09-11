@@ -88,6 +88,20 @@ const main = Effect.gen(function* () {
 		let closureFailed = false;
 		const supervisor: Supervisor = {
 			current,
+			withdraw: Ref.set(routing.route, null).pipe(Effect.andThen(Ref.set(current, null))),
+			freeze: routing.freeze,
+			release: routing.release,
+			resume: (value) => value.process.control("live").pipe(Effect.andThen(routing.release)),
+			restart: () =>
+				supervisor.start(generation).pipe(
+					Effect.onError((cause) => {
+						const error = Cause.findError(cause);
+						return cause.reasons.length === 1 && error._tag === "Success" && Schema.is(ChildError)(error.success)
+							? supervisor.withdraw.pipe(Effect.andThen(routing.release))
+							: Effect.void;
+					}),
+					Effect.tap(() => routing.release),
+				),
 			operationGate: yield* Semaphore.make(1),
 			callback: "http://localhost",
 			run: Effect.never,

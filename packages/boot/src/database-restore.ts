@@ -93,14 +93,6 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 		...(record.failure ? { error: record.failure } : {}),
 	});
 	const stop = (active: ActiveChild) => supervisor.retire(active).pipe(Effect.provideContext(context));
-	const unroute = Effect.gen(function* () {
-		yield* Ref.set(supervisor.current, null);
-		yield* Ref.set(supervisor.child.traffic.route, null);
-	});
-	const release = Effect.gen(function* () {
-		yield* supervisor.child.traffic.requests.release;
-		yield* supervisor.child.traffic.release;
-	});
 	const selectGeneration = (record: DatabaseRestoreRequest) =>
 		Effect.gen(function* () {
 			const n =
@@ -214,7 +206,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					}),
 				).pipe(Effect.exit);
 				if (accepted._tag === "Failure") {
-					yield* unroute;
+					yield* supervisor.withdraw;
 					yield* stop(candidate);
 					return yield* Effect.failCause(accepted.cause);
 				}
@@ -295,7 +287,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				const prior = yield* Ref.get(supervisor.current);
 				let priorClosed = false;
 				const close = Effect.gen(function* () {
-					yield* unroute;
+					yield* supervisor.withdraw;
 					if (prior && !priorClosed) {
 						yield* stop(prior);
 						priorClosed = true;
@@ -326,7 +318,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 						yield* prepareRestoreGeneration(yield* read(record.proof_id), target.path, supervisor).pipe(
 							Effect.provideContext(preparationContext),
 						);
-					yield* supervisor.child.traffic.freeze;
+					yield* supervisor.freeze;
 					if (prior) yield* prior.process.control("frozen").pipe(Effect.catch(() => close));
 					yield* supervisor.child.traffic.drained.pipe(Effect.timeout("5 seconds"));
 					yield* recovery.prepare(prior?.attempt.epoch ?? (yield* freshEpoch));
@@ -392,11 +384,11 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					Effect.tapCause(() =>
 						Effect.gen(function* () {
 							const active = yield* Ref.get(supervisor.current);
-							yield* unroute;
+							yield* supervisor.withdraw;
 							if (active) yield* stop(active);
 						}),
 					),
-					Effect.ensuring(release),
+					Effect.ensuring(supervisor.release),
 				);
 			}).pipe(
 				Effect.uninterruptible,

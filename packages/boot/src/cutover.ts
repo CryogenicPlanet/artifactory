@@ -62,7 +62,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 	const stop = (value: ActiveChild) => supervisor.retire(value).pipe(Effect.provideContext(context));
 	const activate = (value: ActiveChild, state: "accepted" | "live") =>
 		supervisor.activate(value, state).pipe(Effect.provideContext(context));
-	const start = (generation: Generation) => supervisor.start(generation).pipe(Effect.provideContext(context));
+	const start = (generation: Generation) => supervisor.restart(generation).pipe(Effect.provideContext(context));
 	const restore = (record: typeof Record.Type) =>
 		Effect.gen(function* () {
 			if (!record.backup) return yield* new ChildError({ code: "cutover_backup_missing" });
@@ -138,37 +138,6 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						),
 					);
 				}
-				let ownsFreeze = false;
-				let releaseSafe = false;
-				const restartGeneration = (generation: Generation) =>
-					start(generation).pipe(
-						Effect.onError((cause) =>
-							Effect.gen(function* () {
-								const error = Cause.findError(cause);
-								if (cause.reasons.length !== 1 || error._tag !== "Success" || !Schema.is(ChildError)(error.success))
-									return;
-								// start retires failed candidates, but partial activation may leave stale routing.
-								const closure = yield* supervisor.assertClosure.pipe(Effect.result);
-								if (closure._tag === "Failure") return;
-								yield* Ref.set(supervisor.current, null);
-								yield* Ref.set(supervisor.child.traffic.route, null);
-								releaseSafe = true;
-							}),
-						),
-					);
-				const freeze = Effect.gen(function* () {
-					releaseSafe = false;
-					ownsFreeze = true;
-					yield* supervisor.child.traffic.freeze;
-				});
-				yield* Effect.addFinalizer(() =>
-					Effect.gen(function* () {
-						// Failed restoration or unproven closure deliberately retains admission.
-						if (!ownsFreeze || !releaseSafe) return;
-						const closure = yield* supervisor.assertClosure.pipe(Effect.result);
-						if (closure._tag === "Success") yield* supervisor.child.traffic.release;
-					}),
-				);
 				// Partial progress is retained for failure recovery; perform uses non-null local values.
 				const rollback: { generation: Generation | null; candidate: ActiveChild | null; priorClosed: boolean } = {
 					generation: null,
@@ -243,7 +212,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						.launch(generation, recovery.filename, "candidate")
 						.pipe(Effect.provideContext(context));
 					rollback.candidate = candidate;
-					yield* freeze;
+					yield* supervisor.freeze;
 					const frozenAt = (yield* DateTime.nowAsDate).getTime();
 					let priorFrozen = false;
 					yield* Effect.gen(function* () {
@@ -311,8 +280,6 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					);
 
 					yield* activate(candidate, "accepted");
-					releaseSafe = true;
-					yield* supervisor.child.traffic.release;
 					const freezeMs = (yield* DateTime.nowAsDate).getTime() - frozenAt;
 					if (prior && !rollback.priorClosed) {
 						yield* prior.process.control("draining").pipe(Effect.ignore);
@@ -357,45 +324,39 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						: (yield* generations.list).find((item) => item.n === failedGeneration?.n && item.good === 1)?.n;
 				if (acceptedGeneration !== undefined) {
 					// Accepted data is never restored: public acknowledged writes may already exist.
-					yield* freeze;
-					yield* Ref.set(supervisor.current, null);
-					yield* Ref.set(supervisor.child.traffic.route, null);
+					yield* supervisor.freeze;
+					yield* supervisor.withdraw;
 					if (failedCandidate) yield* stop(failedCandidate);
 					yield* closePrior;
 					const selected = (yield* generations.list).find((item) => item.n === acceptedGeneration);
 					if (!selected) return yield* new ChildError({ code: "accepted_snapshot_missing" });
-					yield* restartGeneration(selected);
-					releaseSafe = true;
+					yield* start(selected);
 					yield* finish(owner, true, request.release ?? false);
 					yield* sql`DELETE FROM cutover WHERE singleton=1`;
-					yield* supervisor.child.traffic.release;
 					return { generation: selected.n, status: "live", lock: (yield* lock.inspect).value };
 				}
 				if (failedCandidate) yield* stop(failedCandidate);
 				if (persisted) {
-					yield* Ref.set(supervisor.current, null);
-					yield* Ref.set(supervisor.child.traffic.route, null);
+					yield* supervisor.withdraw;
 					yield* closePrior;
 					yield* restore(persisted);
 					// Restarted live jobs may publish immediately; recovery must never restore over them.
 					yield* sql`DELETE FROM cutover WHERE singleton=1`;
-					if (prior) yield* restartGeneration(prior.generation);
+					if (prior) yield* start(prior.generation);
 				} else if (prior) {
 					const restart = Effect.gen(function* () {
-						yield* Ref.set(supervisor.current, null);
-						yield* Ref.set(supervisor.child.traffic.route, null);
+						yield* supervisor.withdraw;
 						yield* closePrior;
 						// No backup checkpoint exists: reconcile the authoritative store.
-						yield* restartGeneration(prior.generation);
+						yield* start(prior.generation);
 					});
-					yield* rollback.priorClosed ? restart : prior.process.control("live").pipe(Effect.catch(() => restart));
+					yield* rollback.priorClosed ? restart : supervisor.resume(prior).pipe(Effect.provideContext(context));
 				}
-				releaseSafe = true;
+				if (!prior) yield* supervisor.release;
 				// Source publication may have committed even when its completion response failed.
 				yield* sources.recover;
 				yield* sources.discard(proposal);
 				yield* finish(owner, false);
-				yield* supervisor.child.traffic.release;
 				if (failedGeneration) yield* generations.failed(failedGeneration.n, error, stderr);
 				yield* refresh;
 				if (
