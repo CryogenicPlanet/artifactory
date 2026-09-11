@@ -9,6 +9,7 @@ import { Profile, ProfileLink } from "./profile.tsx";
 import { getMe, profilePath } from "./profile-api.ts";
 import { Search } from "./search.tsx";
 import { TopicControls } from "./topic-controls.tsx";
+import { MessageHistory } from "./message-history.tsx";
 import { Composer } from "./composer.tsx";
 
 const currentPath = () => {
@@ -34,6 +35,7 @@ function Board() {
 	const [loading, setLoading] = useState(true);
 	const [refresh, setRefresh] = useState(0);
 	const [showArchived, setShowArchived] = useState(false);
+	const [browsingHistory, setBrowsingHistory] = useState(false);
 	const [searching, setSearching] = useState(false);
 	const [currentInstance, setCurrentInstance] = useState<string | null>(null);
 	useEffect(() => {
@@ -74,6 +76,7 @@ function Board() {
 		setRefresh((value) => value + 1);
 	};
 	const onSent = (message: BoardMessage) => {
+		setBrowsingHistory(false);
 		if (path === "" || path === message.topic)
 			setTopic(
 				(previous) =>
@@ -280,7 +283,15 @@ function Board() {
 									</section>
 								)}
 								<Search path={path} onActive={setSearching} currentInstance={currentInstance} />
-								{!searching && (
+								{!searching && browsingHistory && (
+									<MessageHistory
+										path={path}
+										disabled={topic.archived_by !== null}
+										currentInstance={currentInstance}
+										onClose={() => setBrowsingHistory(false)}
+									/>
+								)}
+								{!searching && !browsingHistory && (
 									<>
 										<ReferencedMessage visible={topic.messages} currentInstance={currentInstance} />
 										<section className="conversation" aria-label="Messages">
@@ -305,7 +316,16 @@ function Board() {
 													/>
 												))
 											)}
-											{topic.messages.length >= 100 && <p className="history-note">Showing the latest 100 messages.</p>}
+											{topic.messages.length >= 100 && (
+												<div className="history-note">
+													<p>Showing the latest 100 messages.</p>
+													{path !== "" && (
+														<button type="button" onClick={() => setBrowsingHistory(true)}>
+															Browse message history
+														</button>
+													)}
+												</div>
+											)}
 										</section>
 									</>
 								)}

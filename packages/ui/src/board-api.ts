@@ -118,3 +118,16 @@ export const getMessageBySequence = (seq: number) =>
 			Effect.fail(new BoardError({ status: 0, message: "The board returned an unreadable message." })),
 		),
 	);
+
+export const getMessageHistory = (path: string, since: number) => {
+	const url = new URL("/api/messages", window.location.origin);
+	url.searchParams.set("topic", path);
+	url.searchParams.set("since", String(since));
+	url.searchParams.set("limit", "100");
+	return json(HttpClientRequest.get(url.href)).pipe(
+		Effect.flatMap(Schema.decodeUnknownEffect(Schema.Struct({ items: Schema.Array(Message), cursor: Schema.Int }))),
+		Effect.catchTag("SchemaError", () =>
+			Effect.fail(new BoardError({ status: 0, message: "The board returned unreadable history. Try again." })),
+		),
+	);
+};
