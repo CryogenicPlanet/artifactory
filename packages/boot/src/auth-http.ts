@@ -1,3 +1,4 @@
+import { humanAgent } from "./human-agent.ts";
 import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { requestBytes } from "./request-bytes.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
@@ -78,7 +79,7 @@ const policy = {
 	},
 	invalid_request: {
 		status: 400,
-		hint: "Correct the JSON body and query using the documented authentication operation.",
+		hint: "Correct the JSON body and query using the documented authentication operation. New enrollment hosts and token labels must be 1–64 lowercase letters, digits, dot, underscore or hyphen, starting with a letter or digit.",
 	},
 	last_passkey: { status: 409, hint: "Register another passkey before deleting the last registered key." },
 	origin_invalid: {
@@ -227,7 +228,7 @@ export const authenticate = (auth: Auth["Service"], request: HttpServerRequest.H
 		const token = sessionToken(request);
 		if (!token) return yield* new AuthError({ code: "session_invalid" });
 		const session = yield* auth.authenticateSession(token);
-		return { ...session, kind: "human" as const, agent: "rahul", label: "human", scopes: ["read", "write", "fs"] };
+		return { ...session, kind: "human" as const, agent: humanAgent, label: "human", scopes: ["read", "write", "fs"] };
 	});
 
 export const humanSession = (auth: Auth["Service"], request: HttpServerRequest.HttpServerRequest) =>

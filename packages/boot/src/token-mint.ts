@@ -1,3 +1,4 @@
+import { humanAgent } from "./human-agent.ts";
 import { authSecrets, refuse, canonicalProof } from "./auth-primitives.ts";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -23,7 +24,6 @@ export const makeTokenMint = <E, R>(
 			mutex.withPermit(
 				sql.withTransaction(
 					Effect.gen(function* () {
-						if (!validMint(params)) return yield* refuse("invalid_request");
 						const sessionHash = yield* hash(sessionSecret);
 						const liveSession = Effect.gen(function* () {
 							const now = yield* Clock.currentTimeMillis;
@@ -87,6 +87,8 @@ export const makeTokenMint = <E, R>(
 							yield* liveSession;
 							return pair;
 						}
+						// Existing exact receipts remain replayable under their original label grammar.
+						if (!validMint(params)) return yield* refuse("invalid_request");
 						yield* verify(params, proof);
 						yield* liveSession;
 						const issuedAt = yield* Clock.currentTimeMillis;
@@ -134,7 +136,7 @@ export const makeTokenMint = <E, R>(
 							at: issuedAt,
 							type: "token.minted",
 							level: "info",
-							actor: "rahul",
+							actor: humanAgent,
 							instance: family,
 							generation: 0,
 							request_id: null,

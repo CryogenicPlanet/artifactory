@@ -1,3 +1,4 @@
+import { humanAgent } from "./human-agent.ts";
 import { committed, captureRefusal } from "./auth-primitives.ts";
 import { Clock, Effect, Result, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -30,7 +31,7 @@ export const makeLockBreak = <E, R>(
 						const session = yield* sql`SELECT id FROM sessions WHERE id=${sessionId} AND expires_at>${now}`;
 						if (!session.length) return yield* new AuthError({ code: "session_invalid" });
 						const outcome = yield* lock
-							.breakLock(params.id, { agent: "rahul", instance: sessionId })
+							.breakLock(params.id, { agent: humanAgent, instance: sessionId })
 							.pipe(captureRefusal(Schema.is(EditRejected)));
 						return outcome;
 					}).pipe(

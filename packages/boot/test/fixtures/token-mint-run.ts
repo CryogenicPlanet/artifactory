@@ -1,9 +1,11 @@
+import { authSecrets } from "../../src/auth-primitives.ts";
+import { sealMintReceipt } from "../../src/refresh-receipt.ts";
 import { layer as durableEventsLayer } from "../../src/events.ts";
 /* oxlint-disable effecttsgo/node-builtin-import */
 import assert from "node:assert/strict";
 import { BunServices } from "@effect/platform-bun";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
-import { Clock, Console, Effect, FileSystem, Layer, Schema } from "effect";
+import { Clock, Console, Crypto, Effect, FileSystem, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Auth, layer } from "../../src/auth.ts";
 import { authentication } from "../../src/auth-http.ts";
@@ -11,7 +13,7 @@ import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 import { layer as eventsLayer } from "../../src/events.ts";
 import { TokenPair } from "../../src/refresh-schema.ts";
-import { MintBinding } from "../../src/token-mint-schema.ts";
+import { MintBinding, MintReceipt, canonicalMint } from "../../src/token-mint-schema.ts";
 import { fails, tokenSession } from "./token-session.ts";
 
 const editLockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
@@ -67,11 +69,15 @@ const run = Effect.gen(function* () {
 		long_lived: false,
 		...(scenario === "natural-retry" ? {} : { idempotency_key: "retry" }),
 	};
+	for (const label of ["Uppercase", "host/name", "a".repeat(65), "", ".host"])
+		yield* fails(auth.startMintAssertion({ ...params, label }), "invalid_request");
 	const started = yield* auth.startMintAssertion(params);
 	const proof = yield* Schema.decodeUnknownEffect(authentication)({
 		id: started.id,
 		response: device.assertion(started.options.challenge, 3),
 	});
+	for (const label of ["Uppercase", "a".repeat(65)])
+		yield* fails(auth.mintTokens({ ...params, label }, proof, session.id, session.token), "invalid_request");
 	const mint = auth
 		.mintTokens(params, proof, session.id, session.token)
 		.pipe(Effect.provideService(Clock.Clock, fixture.clock));
@@ -139,6 +145,29 @@ const run = Effect.gen(function* () {
 	]);
 	for (const secret of [pair.access, pair.refresh, session.token]) assert.ok(!storage.includes(secret));
 	assert.deepEqual(yield* sql`SELECT last_used_at FROM tokens`, [{ last_used_at: null }, { last_used_at: null }]);
+	if (scenario === "legacy-label") {
+		// Reconstruct an old issued receipt without applying new-input rules to stored identities.
+		const legacyParams = { ...params, label: "Legacy-Host" };
+		const legacyPair = { ...pair, label: legacyParams.label };
+		const receipt = (yield* sql`SELECT * FROM mint_receipts`.pipe(
+			Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(MintReceipt))),
+		))[0];
+		assert.ok(receipt);
+		const { hash } = authSecrets(yield* Crypto.Crypto);
+		const sealed = yield* sealMintReceipt(
+			session.token,
+			{ ...receipt, request_hash: yield* hash(canonicalMint(legacyParams)) },
+			legacyPair,
+		);
+		yield* sql`UPDATE tokens SET label=${legacyParams.label}`;
+		yield* sql`DELETE FROM mint_receipts`;
+		yield* sql`INSERT INTO mint_receipts ${sql.insert(sealed)}`;
+		assert.deepEqual(yield* auth.mintTokens(legacyParams, proof, session.id, session.token), legacyPair);
+		assert.equal((yield* auth.authenticateAccess(pair.access)).label, legacyParams.label);
+		assert.equal((yield* auth.refreshTokens(pair.refresh)).label, legacyParams.label);
+		assert.equal((yield* sql`SELECT * FROM events WHERE json_extract(event,'$.type')='token.minted'`).length, 1);
+		return;
+	}
 	if (scenario === "corruption") {
 		const before = yield* sql`SELECT * FROM mint_receipts`;
 		for (const change of [

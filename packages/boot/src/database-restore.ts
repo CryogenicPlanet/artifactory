@@ -1,3 +1,4 @@
+import { humanAgent } from "./human-agent.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
 import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -167,7 +168,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 									at: (yield* DateTime.nowAsDate).getTime(),
 									type: "db.restored",
 									level: "info",
-									actor: "rahul",
+									actor: humanAgent,
 									instance: record.session_id,
 									generation: generation.n,
 									request_id: null,
@@ -191,7 +192,11 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 							);
 							// The journal and acceptance commit together; disposal is registered before interruption can observe a proposal.
 							yield* Effect.acquireUseRelease(
-								sources.prepareTrustedTree({ id: record.lock_id, family: record.lock_family }, selectedSource, "rahul"),
+								sources.prepareTrustedTree(
+									{ id: record.lock_id, family: record.lock_family },
+									selectedSource,
+									humanAgent,
+								),
 								(proposal) =>
 									sources.publishWithAcceptance(
 										proposal,

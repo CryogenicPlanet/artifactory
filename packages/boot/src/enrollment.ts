@@ -1,3 +1,4 @@
+import { humanAgent } from "./human-agent.ts";
 import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { Clock, Crypto, Effect, Schema, Struct, type Semaphore } from "effect";
@@ -72,10 +73,10 @@ export const makeEnrollment = <E, R>(
 			Effect.gen(function* () {
 				if (
 					!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(input.name) ||
-					input.name === "rahul" ||
+					input.name === humanAgent ||
 					input.name === "boot" ||
 					!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(input.kind) ||
-					!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/.test(input.host)
+					!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(input.host)
 				)
 					return yield* refuse("invalid_request");
 				const id = `e_${yield* random}`,
@@ -114,7 +115,7 @@ export const makeEnrollment = <E, R>(
 								at: now,
 								type: params.decision === "approve" ? "enrollment.approved" : "enrollment.denied",
 								level: "info",
-								actor: "rahul",
+								actor: humanAgent,
 								instance: null,
 								generation: 0,
 								request_id: null,

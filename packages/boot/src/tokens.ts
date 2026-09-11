@@ -1,3 +1,4 @@
+import { humanAgent } from "./human-agent.ts";
 import { decodeRows } from "./decode-rows.ts";
 import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
@@ -86,7 +87,7 @@ export const makeTokens = <E, R>(
 						const session = yield* sql`SELECT id FROM sessions WHERE id=${sessionId} AND expires_at>${now}`;
 						if (!session.length) return yield* refuse("session_invalid");
 						yield* expireRefreshReceipts(sql, now);
-						return yield* revoke(params.family, "rahul", "human", now);
+						return yield* revoke(params.family, humanAgent, "human", now);
 					}).pipe(captureRefusal(Schema.is(AuthError))),
 				),
 			);

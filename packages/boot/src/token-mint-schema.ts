@@ -1,3 +1,4 @@
+import { humanAgent } from "./human-agent.ts";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Scope } from "./enrollment-schema.ts";
@@ -13,8 +14,8 @@ export const MintBinding = Schema.Struct({ ...MintToken.fields, idempotency_key:
 export type MintBinding = typeof MintBinding.Type;
 export const validMint = (input: MintBinding) =>
 	/^[a-z0-9][a-z0-9._-]{0,63}$/.test(input.agent) &&
-	!["rahul", "boot"].includes(input.agent) &&
-	/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/.test(input.label) &&
+	![humanAgent, "boot"].includes(input.agent) &&
+	/^[a-z0-9][a-z0-9._-]{0,63}$/.test(input.label) &&
 	input.scopes.length > 0 &&
 	new Set(input.scopes).size === input.scopes.length &&
 	(input.idempotency_key === undefined || /^[\x20-\x7e]{1,128}$/.test(input.idempotency_key));

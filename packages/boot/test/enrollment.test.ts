@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
 
-for (const scenario of ["proof", "rollback", "collection", "denial", "migration"]) {
+for (const scenario of ["proof", "rollback", "collection", "denial", "migration", "legacy-label"]) {
 	test(`enrollment: ${scenario}`, async ({ onTestFinished }) => {
 		const directory = await mkdtemp(join(tmpdir(), "comms-enrollment-"));
 		onTestFinished(() => rm(directory, { recursive: true, force: true }));

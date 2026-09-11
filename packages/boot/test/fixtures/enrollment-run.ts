@@ -256,6 +256,15 @@ const run = Effect.gen(function* () {
 			}),
 			{ mode: 0o600 },
 		);
+	} else if (scenario === "legacy-label") {
+		yield* sql`UPDATE enrollments SET host='Legacy-Host' WHERE id=${enrollment.id}`;
+		assert.equal((yield* auth.enrollmentInfo(enrollment.id)).host, "Legacy-Host");
+		yield* auth.decideEnrollment(params, yield* proof());
+		const pair = yield* auth.collectEnrollment(enrollment.id, enrollment.device_secret);
+		assert.ok(pair.status === "collected");
+		assert.equal(pair.label, "Legacy-Host");
+		assert.equal((yield* auth.authenticateAccess(pair.access)).label, "Legacy-Host");
+		assert.equal((yield* auth.refreshTokens(pair.refresh)).label, "Legacy-Host");
 	} else if (scenario === "denial") {
 		const deny: EnrollmentDecision = { ...params, decision: "deny", scopes: [] };
 		yield* fails(auth.startEnrollmentAssertion({ ...deny, scopes: ["fs"] }), "invalid_request");
@@ -265,6 +274,10 @@ const run = Effect.gen(function* () {
 		yield* sql`UPDATE enrollments SET expires_at=0 WHERE id=${expired.id}`;
 		yield* fails(auth.collectEnrollment(expired.id, expired.device_secret), "enrollment_expired");
 		assert.equal((yield* sql`SELECT * FROM tokens`).length, 0);
+		for (const host of ["Uppercase", "host/name", "a".repeat(65), "", ".host"])
+			yield* fails(auth.createEnrollment({ name: "codex", kind: "codex", host }), "invalid_request");
+		const valid = yield* auth.createEnrollment({ name: "codex", kind: "codex", host: "a".repeat(64) });
+		assert.equal((yield* auth.enrollmentInfo(valid.id)).host, "a".repeat(64));
 		for (const name of ["rahul", "boot", "Bad Name"])
 			yield* fails(auth.createEnrollment({ name, kind: "codex", host: "laptop" }), "invalid_request");
 	}

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
 
-for (const scenario of ["rollback", "corruption", "concurrent", "natural-retry"]) {
+for (const scenario of ["rollback", "corruption", "concurrent", "natural-retry", "legacy-label"]) {
 	test(`human mint: ${scenario}`, async ({ onTestFinished }) => {
 		const directory = await mkdtemp(join(tmpdir(), "comms-mint-"));
 		onTestFinished(() => rm(directory, { recursive: true, force: true }));
