@@ -66,21 +66,32 @@ for (const kind of ["create", "read", "topic"])
 		const app = await fixture.launch(join(seed, "server.ts"));
 		await app.setup();
 		const cookie = await app.login();
+		// Failed is also visible between retries; inspect rollback only after all three attempts finish.
 		await expect
 			.poll(
 				async () => {
 					const value = await (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json();
-					return value.child.state;
+					return { state: value.child.state, attempt: value.child.attempt };
 				},
 				{ timeout: 20000 },
 			)
-			.toBe("failed");
+			.toEqual({ state: "failed", attempt: 3 });
 		for (const table of ["messages", "topics", "outbox", "mutation_batches", "idempotency"])
 			expect(await fixture.sql(`SELECT COUNT(*) count FROM ${table}`)).toEqual([{ count: 0 }]);
 		expect(await fixture.sql("SELECT type FROM events WHERE type != 'http.request' ORDER BY seq", "boot.db")).toEqual([
 			{ type: "generation.starting" },
 			{ type: "generation.failed" },
+			{ type: "generation.starting" },
+			{ type: "generation.failed" },
+			{ type: "generation.starting" },
+			{ type: "generation.failed" },
 		]);
+		expect(
+			await fixture.sql(
+				"SELECT json_extract(event,'$.payload.reason') AS reason, json_extract(event,'$.payload.attempts') AS attempts FROM events WHERE type='generation.failed' ORDER BY seq DESC LIMIT 1",
+				"boot.db",
+			),
+		).toEqual([{ reason: "startup_failures", attempts: 3 }]);
 	}, 25000);
 
 it("rehearses a WAL-inclusive SQLite clone without changing live rows, epoch or sequence allocator", async (test) => {
