@@ -41,7 +41,7 @@ const seedAgent = async (data: string, name: string) => {
 	return { id, headers: { authorization: `Bearer ${token}` } };
 };
 
-it("records only the verified child request and redacts query, bodies, credentials and forged identities", async (test) => {
+it("records child requests and authentication refusals without query, body, credential or forged identity contents", async (test) => {
 	const app = await launch(test);
 	await expect.poll(async () => (await app.state()).state).toBe("live");
 	const response = await app.fetch(`${app.url}/echo?token=query-secret`, {
@@ -77,7 +77,10 @@ it("records only the verified child request and redacts query, bodies, credentia
 	await query();
 	await query();
 	await delay(100);
-	expect((await query()).items).toHaveLength(1);
+	expect((await query()).items).toHaveLength(3);
+	const refused = (await query()).items.filter((event) => event.payload.status === 401);
+	expect(refused).toHaveLength(2);
+	for (const event of refused) expect(event).toMatchObject({ actor: "boot", instance: null, generation: 0 });
 	const failed = await app.fetch(`${app.url}/disconnect`);
 	expect(failed.status).toBe(503);
 	await failed.text();
@@ -211,3 +214,51 @@ it("finishes HTTP response and traffic cleanup while its diagnostic writer waits
 	await (await fetch(`${url}/request`)).text();
 	await expect.poll(stats).toMatchObject({ written: 258 });
 }, 7000);
+
+it("records boot auth and enrollment failures and app-down replies once without feed self-logging", async (test) => {
+	const app = await launch(test, "exit");
+	await expect.poll(async () => (await app.state()).state, { timeout: 10000 }).toBe("failed");
+	const query = async () => decode(await (await app.fetch(`${app.url}/api/events?since=0&types=http.request`)).json());
+	for (const path of ["/_boot/auth/login/verify", "/auth/enroll", "/auth/refresh"]) {
+		const response = await fetch(`${app.url}${path}?secret=query-secret`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-comms-agent": "forged",
+				"x-comms-assertion": "assertion-secret",
+			},
+			body: JSON.stringify({ name: "forged", secret: "body-secret" }),
+		});
+		expect(response.status).toBeGreaterThanOrEqual(400);
+		await response.text();
+	}
+	const unavailable = await app.fetch(`${app.url}/echo`, { headers: { "x-boot-secret": "forged-secret" } });
+	expect(unavailable.status).toBe(503);
+	await unavailable.text();
+	await expect.poll(async () => (await query()).items.length).toBe(4);
+	const logged = (await query()).items;
+	for (const event of logged.filter((event) => event.payload.path !== "/echo"))
+		expect(event).toMatchObject({ actor: "boot", instance: null, generation: 0, payload: { outcome: "completed" } });
+	expect(logged.find((event) => event.payload.path === "/echo")).toMatchObject({
+		actor: "rahul",
+		instance: app.id,
+		generation: 0,
+		payload: { status: 503 },
+	});
+	expect(new Set(logged.map((event) => event.request_id)).size).toBe(4);
+	for (const secret of ["query-secret", "body-secret", "assertion-secret", "forged", app.cookie])
+		expect(JSON.stringify(logged)).not.toContain(secret);
+	for (const path of [
+		"/health",
+		"/_boot/status",
+		"/_boot/metrics",
+		"/api/events",
+		"/_boot/events",
+		"/api/stream",
+		"/_boot/seq",
+		"/_kernel/ping",
+	])
+		await (await app.fetch(`${app.url}${path}`)).text();
+	await delay(100);
+	expect((await query()).items).toHaveLength(4);
+}, 15000);

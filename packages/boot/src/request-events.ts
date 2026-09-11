@@ -27,6 +27,8 @@ export const requestEvents = (events: Events["Service"]) =>
 		}) =>
 			Effect.gen(function* () {
 				let status = 503;
+				let identity = input.identity;
+				let generation = input.generation;
 				yield* Effect.addFinalizer((exit) =>
 					Effect.gen(function* () {
 						const interrupted = exit._tag === "Failure" && Cause.hasInterruptsOnly(exit.cause);
@@ -34,9 +36,9 @@ export const requestEvents = (events: Events["Service"]) =>
 							at: yield* Clock.currentTimeMillis,
 							type: "http.request",
 							level: status >= 500 || exit._tag === "Failure" ? "error" : "info",
-							actor: input.identity?.agent ?? "boot",
-							instance: input.identity?.id ?? null,
-							generation: input.generation,
+							actor: identity?.agent ?? "boot",
+							instance: identity?.id ?? null,
+							generation,
 							request_id: input.requestId,
 							topic: null,
 							message_id: null,
@@ -52,6 +54,11 @@ export const requestEvents = (events: Events["Service"]) =>
 					}),
 				);
 				return {
+					attribute: (verified: VerifiedIdentity | null, selectedGeneration: number) =>
+						Effect.sync(() => {
+							identity = verified;
+							generation = selectedGeneration;
+						}),
 					status: (value: number) =>
 						Effect.sync(() => {
 							status = value;

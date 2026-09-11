@@ -87,315 +87,329 @@ export const proxy = Effect.gen(function* () {
 	const started = yield* Clock.monotonicTimeNanos;
 	const url = new URL(request.url, "http://localhost");
 	const path = url.pathname;
-	const publicResponse = yield* publicRoute;
-	if (publicResponse) return publicResponse;
-	if (
-		request.headers["x-boot-secret"] !== undefined ||
+	const crypto = yield* Crypto.Crypto;
+	const requestId = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
+	// Polls and the child protocol must not manufacture events that wake themselves.
+	const excluded =
+		["/health", "/_boot/status", "/_boot/metrics", "/api/events", "/_boot/events", "/api/stream"].includes(path) ||
+		path === "/_kernel" ||
+		path.startsWith("/_kernel/") ||
 		path.startsWith("/_boot/seq") ||
-		path === "/_boot/events/append"
-	) {
-		const internal = yield* eventRoute(
-			events,
-			child.attempts,
-			null,
-			child.channelGate,
-			child.traffic.route,
-			Effect.succeed(true),
-			captures,
-		);
-		if (internal) return internal;
-	}
-	if ((yield* Ref.get(phase))._tag === "Stopping") return authErrorResponse("boot_unavailable", 503);
-	const restarted = yield* restartRoute(auth, authConfig, restart);
-	if (restarted) return restarted;
-	const authResponse = yield* authRoute(auth, authConfig);
-	if (authResponse) return authResponse;
-	const passkeyResponse = yield* passkeyManagementRoute(auth, authConfig);
-	if (passkeyResponse) return passkeyResponse;
-	const enrollmentResponse = yield* enrollmentRoute(auth, authConfig);
-	if (enrollmentResponse) return enrollmentResponse;
-	const backupResponse = yield* backupRoute(auth, backups, captures, authConfig);
-	if (backupResponse) return backupResponse;
-	const restored = yield* databaseRestoreRoute(restores, auth, authConfig);
-	if (restored) return restored;
-	const accountResponse = yield* accountRoute(auth);
-	if (accountResponse) return accountResponse;
-	const mintResponse = yield* tokenMintRoute(auth, authConfig);
-	if (mintResponse) return mintResponse;
-	const tokenResponse = yield* tokenRoute(auth, authConfig);
-	if (tokenResponse) return tokenResponse;
-	const explicitCredential =
-		request.headers.authorization !== undefined ||
-		(request.headers.cookie ?? "").split(";").some((part) => part.trim().startsWith(`${sessionCookie}=`));
-	const anonymousPage =
-		(request.method === "GET" || request.method === "HEAD") && path.startsWith("/p/") && !explicitCredential;
-	// Restore clears and rebuilds grants. Wait before deciding whether an anonymous page is public.
-	const pageAdmission = anonymousPage ? yield* child.traffic.requests.awaitDestination.pipe(Effect.result) : null;
-	if (pageAdmission?._tag === "Failure") return authErrorResponse("boot_unavailable", 503);
-	let publicPage: string | null = null;
-	if (anonymousPage) {
-		if ((yield* Ref.get(phase))._tag === "Ready") {
-			const result = yield* publicPages.check(path).pipe(Effect.result);
-			if (result._tag === "Failure") return authErrorResponse("boot_unavailable", 503);
-			publicPage = result.success;
-		}
-	}
-	const isPublic =
-		(request.method === "GET" || request.method === "HEAD") &&
-		([
-			"/init",
-			"/init.md",
-			"/.well-known/agent.json",
-			"/page-assets/markdown.css",
-			"/page-assets/highlight.css",
-			"/page-assets/mermaid.js",
-			"/page-assets/mermaid-init.js",
-			"/page-assets/tailwind.js",
-		].includes(path) ||
-			publicPage !== null);
-	return yield* authFailure(
-		Effect.gen(function* () {
-			let identity = !isPublic || explicitCredential ? yield* authenticate(auth, request) : null;
-			if (
-				identity?.kind === "human" &&
-				!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
-				request.headers.origin !== authConfig.expectedOrigin
-			)
-				return yield* new AuthError({ code: "origin_invalid" });
-			const expires = (response: HttpServerResponse.HttpServerResponse) =>
-				identity
-					? HttpServerResponse.setHeader(response, "x-comms-token-expires", String(identity.expiresAt))
-					: response;
-			if (identity) {
-				const edited = yield* editRoute(
-					{ ...editing, writable: (yield* Ref.get(phase))._tag === "Ready" },
-					auth,
-					identity,
-					child.metrics,
-					restores,
-				);
-				if (edited) return expires(edited);
-			}
-			const eventResponse = yield* eventRoute(
-				events,
-				child.attempts,
-				identity,
-				child.channelGate,
-				child.traffic.route,
-				authenticate(auth, request).pipe(
-					Effect.map((current) => current.scopes.includes("read")),
-					Effect.orElseSucceed(() => false),
-				),
-			);
-			if (eventResponse) return expires(eventResponse);
-			if (
-				["/_boot/status", "/_boot/metrics", "/_boot/generations", "/api/generations"].includes(path) &&
-				identity?.kind !== "human" &&
-				!identity?.scopes.includes("fs")
-			)
-				return yield* new AuthError({ code: "scope_required" });
-			if (path === "/_boot/metrics") {
-				if (request.method !== "GET")
-					return expires(
-						HttpServerResponse.empty({ status: 405, headers: { allow: "GET", "cache-control": "no-store" } }),
-					);
-				return expires(
-					HttpServerResponse.text(yield* child.metrics.render((yield* child.traffic.state).queued), {
-						contentType: "text/plain; version=0.0.4; charset=utf-8",
-						headers: { "cache-control": "no-store" },
-					}),
-				);
-			}
-			let destination = yield* Ref.get(child.traffic.route);
-			const state = yield* Ref.get(child.status);
-			const safeState = { ...state, stderr: state.stderr.replace(/[a-f0-9]{64}/g, "[redacted]") };
-			const generations = yield* Ref.get(child.generations);
-			const lastGood = generations.find((generation) => generation.good === 1)?.n ?? null;
-			if (path === "/_boot/status" && request.method === "GET") {
-				return expires(
-					HttpServerResponse.jsonUnsafe({
-						mode: "local-development",
-						authenticated: true,
-						child: safeState,
-						source_recovery_error: yield* Ref.get(child.sourceError),
-						traffic: yield* child.traffic.state,
-						last_good: lastGood,
-					}),
-				);
-			}
-			if ((path === "/_boot/generations" || path === "/api/generations") && request.method === "GET") {
-				return expires(HttpServerResponse.jsonUnsafe({ items: generations, last_good: lastGood }));
-			}
-			if (
-				path === "/_boot" ||
-				path.startsWith("/_boot/") ||
-				reserved.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
-			) {
-				return expires(
-					HttpServerResponse.jsonUnsafe(
-						{
-							error: {
-								code: "not_implemented",
-								message: "This boot route is not implemented.",
-								hint: "GET /_boot lists available routes.",
-								retriable: false,
-							},
-						},
-						{ status: 501 },
-					),
-				);
-			}
-			const unavailable = () =>
-				HttpServerResponse.jsonUnsafe(
-					{
-						error: {
-							code: "app_unavailable",
-							message: "The server child is unavailable.",
-							hint: "GET /_boot/status and /_boot/generations for diagnostics. GET /_boot explains local recovery.",
-							retriable: true,
-						},
-						...(identity?.kind === "human" || identity?.scopes.includes("fs")
-							? { child: safeState, last_good: lastGood }
-							: {}),
-					},
-					{ status: 503 },
-				);
-			const requestAdmission = pageAdmission ?? (yield* child.traffic.requests.awaitDestination.pipe(Effect.result));
-			if (requestAdmission._tag === "Failure") return expires(unavailable());
-			if (requestAdmission.success.waited && identity) identity = yield* authenticate(auth, request);
-			if (publicPage !== null && !identity) {
-				// Admission can wait across a database replacement. Recheck its current grants under the request lease.
-				const checked = yield* (
-					(yield* Ref.get(phase))._tag === "Ready" ? publicPages.check(path) : Effect.succeed(null)
-				).pipe(Effect.result);
-				if (checked._tag === "Failure") return authErrorResponse("boot_unavailable", 503);
-				publicPage = checked.success;
-				if (publicPage === null) return authErrorResponse("credential_required", 401);
-			}
-			destination = requestAdmission.success.destination;
-			if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
-				const admitted = yield* child.traffic.awaitDestination;
-				destination = admitted.destination;
-				if (admitted.waited) identity = yield* authenticate(auth, request);
-			}
-			if (!destination) return expires(unavailable());
-			const connectionHeaders = new Set(
-				(request.headers.connection ?? "")
-					.toLowerCase()
-					.split(",")
-					.map((name) => name.trim()),
-			);
-			const headers = Object.fromEntries(
-				Object.entries(request.headers).filter(
-					([name]) =>
-						!hopHeaders.includes(name) &&
-						!connectionHeaders.has(name) &&
-						!name.startsWith("x-comms-") &&
-						!name.startsWith("x-forwarded-") &&
-						!["host", "authorization", "cookie", "x-boot-secret", "forwarded", "content-length"].includes(name),
-				),
-			);
-			const crypto = yield* Crypto.Crypto;
-			const requestId = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
-			let outgoing = HttpClientRequest.make(request.method)(
-				`http://127.0.0.1:${destination?.port}${path}${url.search}`,
-				{
-					headers: {
-						...headers,
-						...(request.headers["x-comms-init"] && /^[a-f0-9]{64}$/.test(request.headers["x-comms-init"])
-							? { "x-comms-init": request.headers["x-comms-init"] }
-							: {}),
-						...(publicPage !== null && !identity ? { "x-comms-public-page": publicPage } : {}),
-						"x-boot-secret": destination.secret,
-						"x-comms-request-id": requestId,
-						...(identity
-							? {
-									"x-comms-agent": identity.agent,
-									"x-comms-auth-kind": identity.kind,
-									"x-comms-instance": identity.id,
-									"x-comms-scopes": identity.scopes.join(","),
-									"x-comms-label": identity.label,
-									"x-comms-token-expires": String(identity.expiresAt),
-								}
-							: {}),
-					},
-				},
-			);
-			if (
-				request.method !== "GET" &&
-				request.method !== "HEAD" &&
-				((request.headers["content-length"] !== undefined && request.headers["content-length"] !== "0") ||
-					request.headers["transfer-encoding"] !== undefined)
-			)
-				outgoing = outgoing.pipe(
-					HttpClientRequest.bodyStream(request.stream, { contentType: headers["content-type"] ?? "" }),
-				);
-			const client = yield* HttpClient.HttpClient;
-			const observed = yield* requests({
+		path.startsWith("/_boot/events/") ||
+		(path === "/_boot/db/backup" && request.headers["x-boot-secret"] !== undefined);
+	const observed = excluded
+		? null
+		: yield* requests({
 				started,
 				method: request.method,
 				path,
-				identity,
-				generation: destination.generation,
+				identity: null,
+				generation: 0,
 				requestId,
 			});
-			return yield* client.execute(outgoing).pipe(
-				Effect.map((response) => {
-					const connection = new Set(
-						(response.headers.connection ?? "")
-							.toLowerCase()
-							.split(",")
-							.map((name) => name.trim()),
+	return yield* Effect.gen(function* () {
+		const publicResponse = yield* publicRoute;
+		if (publicResponse) return publicResponse;
+		if (
+			request.headers["x-boot-secret"] !== undefined ||
+			path.startsWith("/_boot/seq") ||
+			path === "/_boot/events/append"
+		) {
+			const internal = yield* eventRoute(
+				events,
+				child.attempts,
+				null,
+				child.channelGate,
+				child.traffic.route,
+				Effect.succeed(true),
+				captures,
+			);
+			if (internal) return internal;
+		}
+		if ((yield* Ref.get(phase))._tag === "Stopping") return authErrorResponse("boot_unavailable", 503);
+		const restarted = yield* restartRoute(auth, authConfig, restart);
+		if (restarted) return restarted;
+		const authResponse = yield* authRoute(auth, authConfig);
+		if (authResponse) return authResponse;
+		const passkeyResponse = yield* passkeyManagementRoute(auth, authConfig);
+		if (passkeyResponse) return passkeyResponse;
+		const enrollmentResponse = yield* enrollmentRoute(auth, authConfig);
+		if (enrollmentResponse) return enrollmentResponse;
+		const backupResponse = yield* backupRoute(auth, backups, captures, authConfig);
+		if (backupResponse) return backupResponse;
+		const restored = yield* databaseRestoreRoute(restores, auth, authConfig);
+		if (restored) return restored;
+		const accountResponse = yield* accountRoute(auth);
+		if (accountResponse) return accountResponse;
+		const mintResponse = yield* tokenMintRoute(auth, authConfig);
+		if (mintResponse) return mintResponse;
+		const tokenResponse = yield* tokenRoute(auth, authConfig);
+		if (tokenResponse) return tokenResponse;
+		const explicitCredential =
+			request.headers.authorization !== undefined ||
+			(request.headers.cookie ?? "").split(";").some((part) => part.trim().startsWith(`${sessionCookie}=`));
+		const anonymousPage =
+			(request.method === "GET" || request.method === "HEAD") && path.startsWith("/p/") && !explicitCredential;
+		// Restore clears and rebuilds grants. Wait before deciding whether an anonymous page is public.
+		const pageAdmission = anonymousPage ? yield* child.traffic.requests.awaitDestination.pipe(Effect.result) : null;
+		if (pageAdmission?._tag === "Failure") return authErrorResponse("boot_unavailable", 503);
+		let publicPage: string | null = null;
+		if (anonymousPage) {
+			if ((yield* Ref.get(phase))._tag === "Ready") {
+				const result = yield* publicPages.check(path).pipe(Effect.result);
+				if (result._tag === "Failure") return authErrorResponse("boot_unavailable", 503);
+				publicPage = result.success;
+			}
+		}
+		const isPublic =
+			(request.method === "GET" || request.method === "HEAD") &&
+			([
+				"/init",
+				"/init.md",
+				"/.well-known/agent.json",
+				"/page-assets/markdown.css",
+				"/page-assets/highlight.css",
+				"/page-assets/mermaid.js",
+				"/page-assets/mermaid-init.js",
+				"/page-assets/tailwind.js",
+			].includes(path) ||
+				publicPage !== null);
+		return yield* authFailure(
+			Effect.gen(function* () {
+				let identity = !isPublic || explicitCredential ? yield* authenticate(auth, request) : null;
+				if (observed) yield* observed.attribute(identity, 0);
+				if (
+					identity?.kind === "human" &&
+					!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
+					request.headers.origin !== authConfig.expectedOrigin
+				)
+					return yield* new AuthError({ code: "origin_invalid" });
+				const expires = (response: HttpServerResponse.HttpServerResponse) =>
+					identity
+						? HttpServerResponse.setHeader(response, "x-comms-token-expires", String(identity.expiresAt))
+						: response;
+				if (identity) {
+					const edited = yield* editRoute(
+						{ ...editing, writable: (yield* Ref.get(phase))._tag === "Ready" },
+						auth,
+						identity,
+						child.metrics,
+						restores,
 					);
-					const converted = HttpServerResponse.fromClientResponse(response);
-					const responseHeaders = Object.fromEntries(
-						Object.entries(response.headers).filter(
-							([name]) =>
-								!hopHeaders.includes(name) &&
-								!connection.has(name) &&
-								name !== "x-boot-secret" &&
-								(!name.startsWith("x-comms-") || ["x-comms-init-version", "x-comms-init-stale"].includes(name)) &&
-								name !== "set-cookie",
+					if (edited) return expires(edited);
+				}
+				const eventResponse = yield* eventRoute(
+					events,
+					child.attempts,
+					identity,
+					child.channelGate,
+					child.traffic.route,
+					authenticate(auth, request).pipe(
+						Effect.map((current) => current.scopes.includes("read")),
+						Effect.orElseSucceed(() => false),
+					),
+				);
+				if (eventResponse) return expires(eventResponse);
+				if (
+					["/_boot/status", "/_boot/metrics", "/_boot/generations", "/api/generations"].includes(path) &&
+					identity?.kind !== "human" &&
+					!identity?.scopes.includes("fs")
+				)
+					return yield* new AuthError({ code: "scope_required" });
+				if (path === "/_boot/metrics") {
+					if (request.method !== "GET")
+						return expires(
+							HttpServerResponse.empty({ status: 405, headers: { allow: "GET", "cache-control": "no-store" } }),
+						);
+					return expires(
+						HttpServerResponse.text(yield* child.metrics.render((yield* child.traffic.state).queued), {
+							contentType: "text/plain; version=0.0.4; charset=utf-8",
+							headers: { "cache-control": "no-store" },
+						}),
+					);
+				}
+				let destination = yield* Ref.get(child.traffic.route);
+				const state = yield* Ref.get(child.status);
+				const safeState = { ...state, stderr: state.stderr.replace(/[a-f0-9]{64}/g, "[redacted]") };
+				const generations = yield* Ref.get(child.generations);
+				const lastGood = generations.find((generation) => generation.good === 1)?.n ?? null;
+				if (path === "/_boot/status" && request.method === "GET") {
+					return expires(
+						HttpServerResponse.jsonUnsafe({
+							mode: "local-development",
+							authenticated: true,
+							child: safeState,
+							source_recovery_error: yield* Ref.get(child.sourceError),
+							traffic: yield* child.traffic.state,
+							last_good: lastGood,
+						}),
+					);
+				}
+				if ((path === "/_boot/generations" || path === "/api/generations") && request.method === "GET") {
+					return expires(HttpServerResponse.jsonUnsafe({ items: generations, last_good: lastGood }));
+				}
+				if (
+					path === "/_boot" ||
+					path.startsWith("/_boot/") ||
+					reserved.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
+				) {
+					return expires(
+						HttpServerResponse.jsonUnsafe(
+							{
+								error: {
+									code: "not_implemented",
+									message: "This boot route is not implemented.",
+									hint: "GET /_boot lists available routes.",
+									retriable: false,
+								},
+							},
+							{ status: 501 },
 						),
 					);
-					if (converted.body._tag !== "Stream")
-						return HttpServerResponse.empty({ status: response.status, headers: responseHeaders });
-					let body = converted.body.stream;
-					const credential = identity;
-					if (credential && responseHeaders["content-type"]?.split(";")[0]?.trim() === "text/event-stream") {
-						// Authentication remains at the credential boundary even when the app owns the stream.
-						body = body.pipe(
-							Stream.takeWhileEffect(() =>
-								authenticate(auth, request).pipe(
-									Effect.map((current) => current.scopes.includes("read")),
-									Effect.timeout("2 seconds"),
-									Effect.orElseSucceed(() => false),
-								),
-							),
-							Stream.interruptWhen(
-								Effect.gen(function* () {
-									yield* Effect.sleep(Math.max(0, credential.expiresAt - (yield* Clock.currentTimeMillis)));
-								}),
+				}
+				const unavailable = () =>
+					HttpServerResponse.jsonUnsafe(
+						{
+							error: {
+								code: "app_unavailable",
+								message: "The server child is unavailable.",
+								hint: "GET /_boot/status and /_boot/generations for diagnostics. GET /_boot explains local recovery.",
+								retriable: true,
+							},
+							...(identity?.kind === "human" || identity?.scopes.includes("fs")
+								? { child: safeState, last_good: lastGood }
+								: {}),
+						},
+						{ status: 503 },
+					);
+				const requestAdmission = pageAdmission ?? (yield* child.traffic.requests.awaitDestination.pipe(Effect.result));
+				if (requestAdmission._tag === "Failure") return expires(unavailable());
+				if (requestAdmission.success.waited && identity) identity = yield* authenticate(auth, request);
+				if (publicPage !== null && !identity) {
+					// Admission can wait across a database replacement. Recheck its current grants under the request lease.
+					const checked = yield* (
+						(yield* Ref.get(phase))._tag === "Ready" ? publicPages.check(path) : Effect.succeed(null)
+					).pipe(Effect.result);
+					if (checked._tag === "Failure") return authErrorResponse("boot_unavailable", 503);
+					publicPage = checked.success;
+					if (publicPage === null) return authErrorResponse("credential_required", 401);
+				}
+				destination = requestAdmission.success.destination;
+				if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+					const admitted = yield* child.traffic.awaitDestination;
+					destination = admitted.destination;
+					if (admitted.waited) identity = yield* authenticate(auth, request);
+				}
+				if (!destination) return expires(unavailable());
+				const connectionHeaders = new Set(
+					(request.headers.connection ?? "")
+						.toLowerCase()
+						.split(",")
+						.map((name) => name.trim()),
+				);
+				const headers = Object.fromEntries(
+					Object.entries(request.headers).filter(
+						([name]) =>
+							!hopHeaders.includes(name) &&
+							!connectionHeaders.has(name) &&
+							!name.startsWith("x-comms-") &&
+							!name.startsWith("x-forwarded-") &&
+							!["host", "authorization", "cookie", "x-boot-secret", "forwarded", "content-length"].includes(name),
+					),
+				);
+				if (observed) yield* observed.attribute(identity, destination.generation);
+				let outgoing = HttpClientRequest.make(request.method)(
+					`http://127.0.0.1:${destination?.port}${path}${url.search}`,
+					{
+						headers: {
+							...headers,
+							...(request.headers["x-comms-init"] && /^[a-f0-9]{64}$/.test(request.headers["x-comms-init"])
+								? { "x-comms-init": request.headers["x-comms-init"] }
+								: {}),
+							...(publicPage !== null && !identity ? { "x-comms-public-page": publicPage } : {}),
+							"x-boot-secret": destination.secret,
+							"x-comms-request-id": requestId,
+							...(identity
+								? {
+										"x-comms-agent": identity.agent,
+										"x-comms-auth-kind": identity.kind,
+										"x-comms-instance": identity.id,
+										"x-comms-scopes": identity.scopes.join(","),
+										"x-comms-label": identity.label,
+										"x-comms-token-expires": String(identity.expiresAt),
+									}
+								: {}),
+						},
+					},
+				);
+				if (
+					request.method !== "GET" &&
+					request.method !== "HEAD" &&
+					((request.headers["content-length"] !== undefined && request.headers["content-length"] !== "0") ||
+						request.headers["transfer-encoding"] !== undefined)
+				)
+					outgoing = outgoing.pipe(
+						HttpClientRequest.bodyStream(request.stream, { contentType: headers["content-type"] ?? "" }),
+					);
+				const client = yield* HttpClient.HttpClient;
+
+				return yield* client.execute(outgoing).pipe(
+					Effect.map((response) => {
+						const connection = new Set(
+							(response.headers.connection ?? "")
+								.toLowerCase()
+								.split(",")
+								.map((name) => name.trim()),
+						);
+						const converted = HttpServerResponse.fromClientResponse(response);
+						const responseHeaders = Object.fromEntries(
+							Object.entries(response.headers).filter(
+								([name]) =>
+									!hopHeaders.includes(name) &&
+									!connection.has(name) &&
+									name !== "x-boot-secret" &&
+									(!name.startsWith("x-comms-") || ["x-comms-init-version", "x-comms-init-stale"].includes(name)) &&
+									name !== "set-cookie",
 							),
 						);
-					}
-					const forwarded = HttpServerResponse.empty({
-						status: response.status,
-						cookies: connection.has("set-cookie") ? Cookies.empty : Cookies.remove(response.cookies, sessionCookie),
-					}).pipe(
-						HttpServerResponse.setBody(HttpBody.stream(body, responseHeaders["content-type"] ?? "")),
-						HttpServerResponse.setHeaders(responseHeaders),
-					);
-					return responseHeaders["content-type"] === undefined
-						? HttpServerResponse.removeHeader(forwarded, "content-type")
-						: forwarded;
-				}),
-				Effect.orElseSucceed(unavailable),
-				Effect.tap((response) => observed.status(response.status)),
-				Effect.map(expires),
-			);
-		}),
-	);
+						if (converted.body._tag !== "Stream")
+							return HttpServerResponse.empty({ status: response.status, headers: responseHeaders });
+						let body = converted.body.stream;
+						const credential = identity;
+						if (credential && responseHeaders["content-type"]?.split(";")[0]?.trim() === "text/event-stream") {
+							// Authentication remains at the credential boundary even when the app owns the stream.
+							body = body.pipe(
+								Stream.takeWhileEffect(() =>
+									authenticate(auth, request).pipe(
+										Effect.map((current) => current.scopes.includes("read")),
+										Effect.timeout("2 seconds"),
+										Effect.orElseSucceed(() => false),
+									),
+								),
+								Stream.interruptWhen(
+									Effect.gen(function* () {
+										yield* Effect.sleep(Math.max(0, credential.expiresAt - (yield* Clock.currentTimeMillis)));
+									}),
+								),
+							);
+						}
+						const forwarded = HttpServerResponse.empty({
+							status: response.status,
+							cookies: connection.has("set-cookie") ? Cookies.empty : Cookies.remove(response.cookies, sessionCookie),
+						}).pipe(
+							HttpServerResponse.setBody(HttpBody.stream(body, responseHeaders["content-type"] ?? "")),
+							HttpServerResponse.setHeaders(responseHeaders),
+						);
+						return responseHeaders["content-type"] === undefined
+							? HttpServerResponse.removeHeader(forwarded, "content-type")
+							: forwarded;
+					}),
+					Effect.orElseSucceed(unavailable),
+					Effect.map(expires),
+				);
+			}),
+		);
+	}).pipe(Effect.tap((response) => (observed ? observed.status(response.status) : Effect.void)));
 });
 
 /** Immutable liveness/help and control-path exclusion work before the store can open. */
