@@ -1,85 +1,74 @@
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Effect, Schema } from "effect";
-import { SqlClient } from "effect/unstable/sql";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import { Effect, Path, Schema, Stream, Semaphore } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ErrorEnvelope } from "@comms/protocol/errors";
 import { BootChannel, KernelError } from "./boot-channel.ts";
-import { sqlRows } from "./sql-result.ts";
+import { sqlInput, type SqlInput } from "./sql-input.ts";
+import { ReadRequest, ReadResponse } from "./sql-read-wire.ts";
 
-export const SqlInput = Schema.Struct({
-	sql: Schema.String,
-	params: Schema.optionalKey(Schema.Array(Schema.Union([Schema.String, Schema.Finite, Schema.Null]))),
-});
-export const sqlInput = (input: typeof SqlInput.Type) =>
-	Effect.gen(function* () {
-		if (
-			input.sql.trim().length === 0 ||
-			new TextEncoder().encode(input.sql).byteLength > 16384 ||
-			(input.params?.length ?? 0) > 100 ||
-			input.params?.some(
-				(value) =>
-					typeof value === "number" &&
-					(!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))),
-			)
-		)
-			return yield* new KernelError({ code: "input_invalid" });
-		// No parser: separators, comments and NUL are deliberately unsupported, including inside SQL literals.
-		if (/;|--|\/\*|\*\/|\0/.test(input.sql)) return yield* new KernelError({ code: "sql_unsupported" });
-	});
-
-// SQLite compilation errors identify an unsupported query shape; unavailable stores must stay retriable.
-const compilationError = Schema.is(Schema.Struct({ code: Schema.Literal("SQLITE_ERROR") }));
-const statementError = Schema.is(
-	Schema.Struct({ code: Schema.Literals(["SQLITE_ERROR", "SQLITE_RANGE", "SQLITE_MISMATCH", "SQLITE_TOOBIG"]) }),
-);
-const nativeMessage = Schema.is(Schema.Struct({ message: Schema.String }));
-const bindingError = (cause: unknown) =>
-	nativeMessage(cause) && /^SQLite query expected \d+ values, received \d+$/.test(cause.message);
-export const sqlQueryFailure = (error: SqlError) =>
-	bindingError(error.reason.cause) ||
-	statementError(error.reason.cause) ||
-	["ConstraintError", "UniqueViolation"].includes(error.reason._tag)
-		? new KernelError({ code: "sql_query_invalid" })
-		: error;
-
-/** Let SQLite compile the SELECT wrapper; do not depend on its internal EXPLAIN opcodes. */
-export const queryShape = (input: typeof SqlInput.Type) =>
-	Effect.gen(function* () {
-		yield* sqlInput(input);
-		if (/^SELECT\b/i.test(input.sql.trim())) return true;
-		if (!/^WITH\b/i.test(input.sql.trim())) return false;
-		const boot = yield* BootChannel;
-		return yield* Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			return yield* sql.unsafe(`EXPLAIN SELECT * FROM (${input.sql}\n) LIMIT 201`, input.params ?? []).pipe(
-				Effect.as(true),
-				Effect.catchIf(
-					(error) => compilationError(error.reason.cause),
-					// Do not compile the write here: retained results must replay even if a
-					// later schema repair removed the statement's original target.
-					() => Effect.succeed(false),
-				),
-				Effect.mapError(sqlQueryFailure),
+/** A disposable readonly process keeps native SQLite execution off the serving event loop. */
+const inspectSql = (input: typeof SqlInput.Type, allowRead: boolean) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			yield* sqlInput(input);
+			const boot = yield* BootChannel;
+			const path = yield* Path.Path;
+			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+			const relative = import.meta.url.endsWith(".ts") ? "./sql-read-worker.ts" : "./kernel/sql-read-worker.js";
+			const entry = yield* path.fromFileUrl(new URL(relative, import.meta.url));
+			const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(ReadRequest))({
+				filename: boot.filename,
+				allowRead,
+				input,
+			});
+			if (new TextEncoder().encode(encoded).byteLength > 70000)
+				return yield* new KernelError({ code: "input_invalid" });
+			const child = yield* spawner.spawn(
+				ChildProcess.make(process.execPath, [entry], {
+					env: {},
+					detached: false,
+					stdin: Stream.make(new TextEncoder().encode(encoded)),
+					stdout: "pipe",
+					stderr: "ignore",
+					killSignal: "SIGKILL",
+				}),
 			);
-		}).pipe(
-			Effect.provide(
-				SqliteClient.layer({ filename: boot.filename, readonly: true, disableWAL: true, busyTimeout: "100 millis" }),
-			),
-		);
-	});
-/** Physical committed-row inspection; deliberately does not promise a publication cursor. */
-export const readSql = (input: typeof SqlInput.Type) =>
-	Effect.gen(function* () {
-		yield* sqlInput(input);
-		const boot = yield* BootChannel;
-		return yield* Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			const rows = yield* sql
-				.unsafe<Record<string, unknown>>(`SELECT * FROM (${input.sql}\n) LIMIT 201`, input.params ?? [])
-				.pipe(Effect.provideService(SqlClient.SafeIntegers, true), Effect.mapError(sqlQueryFailure));
-			return yield* sqlRows(rows);
-		}).pipe(
-			Effect.provide(
-				SqliteClient.layer({ filename: boot.filename, readonly: true, disableWAL: true, busyTimeout: "100 millis" }),
-			),
-		);
-	});
+			// Reap before responding or releasing the request scope. Same process group lets the app keeper close an orphan.
+			yield* Effect.addFinalizer(() =>
+				Effect.gen(function* () {
+					if (yield* child.isRunning) yield* child.kill({ killSignal: "SIGKILL" }).pipe(Effect.exit);
+					yield* child.exitCode.pipe(Effect.exit);
+				}).pipe(Effect.orDie),
+			);
+			const output = yield* child.stdout.pipe(
+				Stream.decodeText(),
+				Stream.runFoldEffect(
+					() => "",
+					(text, chunk) =>
+						new TextEncoder().encode(text + chunk).byteLength > 131072
+							? Effect.die("SQL worker response exceeded limit")
+							: Effect.succeed(text + chunk),
+				),
+			);
+			if ((yield* child.exitCode) !== 0) return yield* Effect.die("SQL read worker failed");
+			const response = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ReadResponse))(output);
+			if (Schema.is(ErrorEnvelope)(response)) return yield* Effect.fail(response);
+			return response;
+		}),
+	);
+
+/** One handler group owns two readers; waiting for a slot shares the total read budget. */
+export const makeSqlReader = Effect.gen(function* () {
+	const slots = yield* Semaphore.make(2);
+	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+	return (input: typeof SqlInput.Type, allowRead: boolean) =>
+		slots
+			.withPermit(
+				inspectSql(input, allowRead).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
+			)
+			.pipe(
+				Effect.timeoutOrElse({
+					duration: "3 seconds",
+					orElse: () => Effect.fail(new KernelError({ code: "sql_query_timeout" })),
+				}),
+			);
+});

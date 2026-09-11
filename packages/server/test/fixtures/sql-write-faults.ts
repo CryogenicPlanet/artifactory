@@ -12,7 +12,7 @@ import { initialize } from "../../src/ext/core/schema.ts";
 import { Messages, layer as messagesLayer } from "../../src/ext/core/messages.ts";
 import { Topics, layer as topicsLayer } from "../../src/ext/core/topics.ts";
 import { Pages, PageRejected, layer as pagesLayer } from "../../src/ext/core/pages.ts";
-import { readSql } from "../../src/kernel/sql-read.ts";
+import { makeSqlReader } from "../../src/kernel/sql-read.ts";
 
 const program = Effect.gen(function* () {
 	const [root, mode = "append-before"] = process.argv.slice(2);
@@ -83,6 +83,13 @@ const program = Effect.gen(function* () {
 				yield* initialize;
 				return yield* Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
+					const inspect = yield* makeSqlReader;
+					const readSql = (input: { sql: string; params: string[] }) =>
+						inspect(input, true).pipe(
+							Effect.flatMap((result) =>
+								result.kind === "read" ? Effect.succeed(result.result) : Effect.die("Expected read query"),
+							),
+						);
 					const messages = yield* Messages;
 					const pages = yield* Pages;
 					const fs = yield* FileSystem.FileSystem;

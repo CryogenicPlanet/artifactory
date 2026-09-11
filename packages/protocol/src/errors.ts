@@ -133,6 +133,11 @@ export const policy = {
 		message: "This SQL operation is not supported.",
 		hint: "Use one supported data or schema statement. Transaction control, PRAGMA, attachments, triggers, temporary objects and recovery tables are unavailable. Remove comments and semicolons; bind literal text as parameters.",
 	},
+	sql_query_timeout: {
+		status: 408,
+		message: "The readonly SQL query exceeded its execution budget.",
+		hint: "Reduce query cost or add an index before trying again. The isolated reader was stopped; the application remains available.",
+	},
 	sql_query_invalid: {
 		status: 400,
 		message: "The SQL statement, parameters or returned values are invalid.",

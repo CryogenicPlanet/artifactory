@@ -9,7 +9,7 @@ import { makeOutboxRelay } from "./outbox.ts";
 import { makeMutate } from "./mutate.ts";
 import { recordOperationalEvent, type OperationalEvent } from "./operational-events.ts";
 import { writeSql } from "./sql-write.ts";
-import type { SqlInput } from "./sql-read.ts";
+import type { SqlInput } from "./sql-input.ts";
 import type { Identity } from "./identity.ts";
 
 /** One instance owns all app mutation, read and outbox serialization, including extension jobs. */

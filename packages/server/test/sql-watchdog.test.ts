@@ -14,7 +14,7 @@ const statusSchema = Schema.Struct({
 });
 const ownersSchema = Schema.Array(Schema.Struct({ id: Schema.String, receipt: Schema.String }));
 
-it("retires a SQLite aggregate that blocks the app while preserving boot access, keeper proof and acknowledged writes", async (test) => {
+it("retires a synchronous SQLite write aggregate while preserving boot access, keeper proof and acknowledged writes", async (test) => {
 	const fixture = await conversation(test);
 	const app = await fixture.launch();
 	await app.setup();
@@ -35,12 +35,15 @@ it("retires a SQLite aggregate that blocks the app while preserving boot access,
 	const posted = await app.post("/api/messages", input, cookie, "before-sql-hang");
 	expect(posted.status).toBe(200);
 	const message: unknown = await posted.json();
+	await fixture.sql("CREATE TABLE watchdog_work(value INTEGER)");
 	let settled = false;
 	// The aggregate consumes the recursive input before emitting its sole row, bypassing the output row cap.
 	const pending = fetch(`${app.url}/api/sql`, {
 		method: "POST",
 		headers: { cookie, origin: "https://comms.test", "content-type": "application/json" },
-		body: JSON.stringify({ sql: "WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v+1 FROM n) SELECT sum(v) FROM n" }),
+		body: JSON.stringify({
+			sql: "WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v+1 FROM n) INSERT INTO watchdog_work SELECT sum(v) FROM n",
+		}),
 		signal: AbortSignal.timeout(30000),
 	}).then(
 		async (response) => {
@@ -74,6 +77,7 @@ it("retires a SQLite aggregate that blocks the app while preserving boot access,
 	expect(await fixture.sql(`SELECT closed FROM child_attempts WHERE id='${owner.id}'`, "boot.db")).toEqual([
 		{ closed: 1 },
 	]);
+	expect(await fixture.sql("SELECT * FROM watchdog_work")).toEqual([]);
 	const failedStatus = await pending;
 	expect(failedStatus === null || failedStatus >= 500).toBe(true);
 	expect(await (await app.post("/api/messages", input, cookie, "before-sql-hang")).json()).toEqual(message);
