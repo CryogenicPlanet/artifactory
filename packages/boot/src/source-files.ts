@@ -310,12 +310,13 @@ const make = (dataDirectory: string) =>
 						return yield* prepareTree(owner, yield* io.inventory(), yield* io.inventory(sourceDirectory), agent);
 					}),
 				),
-			prepareGeneration: (owner: Ownership, selection: UndoSelection) =>
+			prepareGeneration: (owner: Ownership, selection: UndoSelection, coordinatorAgent?: string) =>
 				guard(
 					Effect.uninterruptibleMask((restore) =>
 						Effect.gen(function* () {
 							yield* available;
-							if ((yield* lock.overlay(owner)).value.length > 0)
+							if (coordinatorAgent !== undefined) yield* pinned(owner);
+							if (coordinatorAgent === undefined && (yield* lock.overlay(owner)).value.length > 0)
 								return yield* new EditRejected({
 									code: "staging_not_empty",
 									holder: (yield* lock.inspect).value,
@@ -340,16 +341,17 @@ const make = (dataDirectory: string) =>
 										),
 									),
 							);
-							return yield* prepareTree(owner, before, desired);
+							return yield* prepareTree(owner, before, desired, coordinatorAgent);
 						}),
 					),
 				),
-			prepareUndo: (owner: Ownership, selection: string | UndoSelection) =>
+			prepareUndo: (owner: Ownership, selection: string | UndoSelection, coordinatorAgent?: string) =>
 				guard(
 					Effect.gen(function* () {
 						yield* available;
 						const overlay = yield* lock.overlay(owner);
-						if (overlay.value.length > 0)
+						if (coordinatorAgent !== undefined) yield* pinned(owner);
+						if (coordinatorAgent === undefined && overlay.value.length > 0)
 							return yield* new EditRejected({
 								code: "staging_not_empty",
 								holder: (yield* lock.inspect).value,
@@ -363,7 +365,7 @@ const make = (dataDirectory: string) =>
 							const retained = before.filter(
 								(entry) => !tree.roots.some((root) => entry.path === root || entry.path.startsWith(`${root}/`)),
 							);
-							return yield* prepareTree(owner, before, [...retained, ...tree.entries]);
+							return yield* prepareTree(owner, before, [...retained, ...tree.entries], coordinatorAgent);
 						}
 						const writes = yield* journal.undo(input);
 						if (writes.some((write) => !write.path.startsWith("app/")))
@@ -371,7 +373,12 @@ const make = (dataDirectory: string) =>
 								code: "invalid_path",
 								path: writes.find((write) => !write.path.startsWith("app/"))?.path ?? "",
 							});
-						yield* capture(writes);
+						const changes = yield* capture(writes);
+						if (coordinatorAgent !== undefined) {
+							const id = yield* crypto.randomUUIDv4;
+							yield* Ref.set(prepared, { id, owner, agent: coordinatorAgent, changes, coordinatorOwned: true });
+							return id;
+						}
 						if (writes.some((write) => write.content !== null))
 							yield* headroom.check(writes.reduce((bytes, write) => bytes + (write.content?.byteLength ?? 0), 0));
 						yield* lock.stageBatch(owner, writes, { requireEmpty: true });

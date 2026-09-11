@@ -12,7 +12,7 @@ import type { ApplicationSource } from "./application.ts";
 import { ChildAttempts } from "./child-attempts.ts";
 import { ChildError } from "./child-process.ts";
 import { Events } from "./events.ts";
-import { EditLock, type Ownership } from "./edit-lock.ts";
+import { EditLock, EditRejected, type Ownership } from "./edit-lock.ts";
 import { Generations, type Generation } from "./generations.ts";
 import type { UndoSelection } from "./source-journal.ts";
 import { SourceFiles } from "./source-files.ts";
@@ -108,6 +108,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			readonly release?: boolean;
 			readonly check?: boolean;
 			readonly undo?: UndoSelection;
+			readonly coordinatorAgent?: string;
 			readonly revertRequest?: string;
 			readonly trustedSource?: { readonly directory: string; readonly agent: string };
 		} = {},
@@ -125,8 +126,8 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					: options.undo === undefined
 						? sources.prepare(owner)
 						: options.undo.generation !== undefined
-							? sources.prepareGeneration(owner, options.undo)
-							: sources.prepareUndo(owner, options.undo);
+							? sources.prepareGeneration(owner, options.undo, options.coordinatorAgent)
+							: sources.prepareUndo(owner, options.undo, options.coordinatorAgent);
 				if (!options.check) {
 					const started = yield* Clock.monotonicTimeNanos;
 					yield* Effect.addFinalizer(() =>
@@ -376,6 +377,34 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			}),
 		).pipe(Effect.uninterruptible);
 	const optionsSource = options;
+	// The durable reset_pin marker also protects a human undo borrowing an editor's overlay.
+	const withBorrowedLock = <A, E, R>(note: string, operation: (owner: Ownership) => Effect.Effect<A, E, R>) =>
+		Effect.gen(function* () {
+			const acquired = yield* sql.withTransaction(
+				Effect.gen(function* () {
+					const current = (yield* lock.inspect).value;
+					const held =
+						current ??
+						(yield* lock.acquire(`boot:source:${yield* crypto.randomUUIDv4}`, "boot", {
+							note,
+						})).value;
+					const owner = { id: held.id, family: held.holder_family };
+					yield* lock.pin(owner, current ? 1 : 2);
+					return owner;
+				}),
+			);
+			return yield* operation(acquired).pipe(
+				Effect.ensuring(
+					Effect.gen(function* () {
+						// Retain a pin if recovery owns it; startup resolves its journal before lock cleanup.
+						if ((yield* recoveryIntents(sql)).count > 0) return;
+						const current = (yield* lock.inspect).value;
+						if (current?.id !== acquired.id) return;
+						if (current.cutover_in_flight) yield* lock.finish(acquired, { succeeded: false });
+					}).pipe(Effect.orDie),
+				),
+			);
+		});
 	const reset = <E, R>(authorize: (digest: string) => Effect.Effect<void, E, R>, agent: string) =>
 		supervisor.operationGate.withPermit(
 			Effect.scoped(
@@ -385,40 +414,43 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					yield* supervisor.assertClosure;
 					const seed = yield* seedSource(optionsSource);
 					yield* authorize(seed.digest);
-					const acquired = yield* sql.withTransaction(
-						Effect.gen(function* () {
-							const current = (yield* lock.inspect).value;
-							const held =
-								current ??
-								(yield* lock.acquire(`boot:reset:${yield* crypto.randomUUIDv4}`, "boot", {
-									note: "Reset source to seed",
-								})).value;
-							const owner = { id: held.id, family: held.holder_family };
-							yield* lock.pin(owner, current ? 1 : 2);
-							return { owner, borrowed: current !== null };
-						}),
-					);
-					return yield* performReload(acquired.owner, {
-						trustedSource: { directory: seed.directory, agent },
-						release: !acquired.borrowed,
-					}).pipe(
-						Effect.ensuring(
-							Effect.gen(function* () {
-								// Retain a pin if recovery owns it; startup resolves its journal before lock cleanup.
-								if ((yield* recoveryIntents(sql)).count > 0) return;
-								const current = (yield* lock.inspect).value;
-								if (current?.id !== acquired.owner.id) return;
-								if (current.cutover_in_flight) yield* lock.finish(acquired.owner, { succeeded: false });
-							}).pipe(Effect.orDie),
-						),
+					return yield* withBorrowedLock("Reset source to seed", (owner) =>
+						performReload(owner, { trustedSource: { directory: seed.directory, agent } }),
 					);
 				}),
 			).pipe(Effect.uninterruptible),
 		);
+	const revertHuman = <E, R>(
+		selection: UndoSelection,
+		identity: { readonly id: string; readonly agent: string },
+		expectedLock: string | undefined,
+		authorize: Effect.Effect<void, E, R>,
+		revertRequest?: string,
+	) =>
+		supervisor.operationGate.withPermit(
+			Effect.scoped(
+				Effect.gen(function* () {
+					yield* authorize;
+					if (!(yield* Ref.get(ready)) || (yield* recoveryIntents(sql)).count > 0)
+						return yield* new ChildError({ code: "cutover_recovery_required" });
+					yield* supervisor.assertClosure;
+					const held = (yield* lock.inspect).value;
+					if (!held) return yield* new EditRejected({ code: "lock_required", holder: null, transitions: [] });
+					const reloadOptions = { undo: selection, ...(revertRequest === undefined ? {} : { revertRequest }) };
+					if (held.holder_family === identity.id)
+						return yield* performReload({ id: expectedLock ?? "", family: identity.id }, reloadOptions);
+					return yield* withBorrowedLock("Human source revert", (owner) =>
+						performReload(owner, { ...reloadOptions, coordinatorAgent: identity.agent }),
+					);
+				}),
+			).pipe(Effect.uninterruptible),
+		);
+
 	return {
 		reload: (owner: Ownership, reloadOptions?: Parameters<typeof performReload>[1]) =>
 			supervisor.operationGate.withPermit(performReload(owner, reloadOptions)),
 		reset,
+		revertHuman,
 		seedDigest: Effect.scoped(seedSource(optionsSource).pipe(Effect.map((seed) => seed.digest))),
 		recover,
 	};

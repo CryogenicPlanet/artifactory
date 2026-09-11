@@ -144,6 +144,18 @@ export const editRoute = (
 					Effect.gen(function* () {
 						const currentLock = revertRequest === undefined ? known : (yield* editing.lock.inspect).value;
 						const owner = (): Ownership => ({ id: currentLock?.id ?? "", family: identity.id });
+						if (identity.kind === "human" && !(yield* editing.source.undoTargetsPages(undo)))
+							return HttpServerResponse.jsonUnsafe(
+								yield* authoritative(
+									editing.cutover.revertHuman(
+										undo,
+										identity,
+										currentLock?.id,
+										Effect.asVoid(humanSession(auth, request)),
+										revertRequest,
+									),
+								),
+							);
 						if (input.generation !== undefined) {
 							if (!currentLock)
 								return yield* new EditRejected({ code: "lock_required", holder: null, transitions: [] });
