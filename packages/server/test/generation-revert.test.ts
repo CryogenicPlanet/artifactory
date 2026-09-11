@@ -262,6 +262,11 @@ it("recreates a missing editable app tree while its saved generation continues s
 }, 25000);
 
 it("keeps source and live writes intact when generation dependency preparation fails and permits a repaired retry", async (test) => {
+	const started = performance.now();
+	const phases: Array<{ phase: string; at_ms: number }> = [];
+	const phase = (name: string) => phases.push({ phase: name, at_ms: Math.round(performance.now() - started) });
+	test.onTestFinished(() => Effect.runPromise(Console.error("Generation preparation retry phases", phases)));
+	phase("setup_start");
 	const fixture = await conversation(test);
 	const seed = join(fixture.root, "preparation-seed");
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
@@ -269,11 +274,14 @@ it("keeps source and live writes intact when generation dependency preparation f
 	const lockfile = await readFile(join(import.meta.dirname, "../runtime/bun.lock"), "utf8");
 	await writeFile(join(seed, "package.json"), manifest);
 	await writeFile(join(seed, "bun.lock"), lockfile);
+	phase("seed_copied");
 	const app = await fixture.launch(join(seed, "server.ts"));
 	await app.setup();
 	const cookie = await app.login();
 	// Cold runtime dependency preparation installs, copies and fsyncs the complete tree.
+	phase("initial_preparation_wait");
 	await app.ready(cookie, 60000);
+	phase("initial_live");
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 	const original = await readFile(join(fixture.root, "app/server.ts"), "utf8");
 	const retained = join(fixture.root, "gen/1/source");
@@ -310,7 +318,9 @@ it("keeps source and live writes intact when generation dependency preparation f
 	expect(
 		(await app.post("/api/messages", { topic: "preparation", body: "before failed preparation" }, cookie)).status,
 	).toBe(200);
+	phase("invalid_lock_revert_start");
 	const failed = await app.post("/api/revert", { generation: 1 }, cookie);
+	phase("invalid_lock_revert_response");
 	expect(failed.status).toBe(200);
 	expect(await failed.json()).toMatchObject({ status: "failed", lock: { cutover_in_flight: 0 } });
 	expect(await readFile(join(fixture.root, "app/server.ts"), "utf8")).toBe(original);
@@ -322,10 +332,13 @@ it("keeps source and live writes intact when generation dependency preparation f
 	expect(
 		(await app.post("/api/messages", { topic: "preparation", body: "after failed preparation" }, cookie)).status,
 	).toBe(200);
+	phase("failed_preparation_assertions_complete");
 	await writeFile(join(retained, "package.json"), manifest);
 	await writeFile(join(retained, "bun.lock"), lockfile);
 	await refreshProvenance();
+	phase("repaired_revert_start");
 	expect(await (await app.post("/api/revert", { generation: 1 }, cookie)).json()).toMatchObject({ status: "live" });
+	phase("repaired_revert_response");
 	expect(await readFile(join(fixture.root, "app/candidate-only.txt"), "utf8")).toBe(
 		"must not publish before preparation",
 	);
@@ -334,6 +347,7 @@ it("keeps source and live writes intact when generation dependency preparation f
 		{ body: "after failed preparation" },
 	]);
 	await app.ready(cookie);
+	phase("assertions_complete");
 }, 60000);
 
 it("refuses missing, malformed or aliased source provenance and missing retained source without changing editable bytes", async (test) => {
