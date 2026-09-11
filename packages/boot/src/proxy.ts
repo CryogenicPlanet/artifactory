@@ -173,11 +173,10 @@ export const proxy = Effect.gen(function* () {
 		if (pageAdmission?._tag === "Failure") return authErrorResponse("boot_unavailable", 503);
 		let publicPage: string | null = null;
 		if (anonymousPage) {
-			if ((yield* Ref.get(phase))._tag === "Ready") {
-				const result = yield* publicPages.check(path).pipe(Effect.result);
-				if (result._tag === "Failure") return authErrorResponse("boot_unavailable", 503);
-				publicPage = result.success;
-			}
+			if ((yield* Ref.get(phase))._tag !== "Ready") return authErrorResponse("boot_unavailable", 503);
+			const result = yield* publicPages.check(path).pipe(Effect.result);
+			if (result._tag === "Failure") return authErrorResponse("boot_unavailable", 503);
+			publicPage = result.success;
 		}
 		const configuredPublic =
 			!explicitCredential &&
@@ -310,9 +309,8 @@ export const proxy = Effect.gen(function* () {
 				if (requestAdmission.success.waited && identity) identity = yield* authenticate(auth, request);
 				if (publicPage !== null && !identity) {
 					// Admission can wait across a database replacement. Recheck its current grants under the request lease.
-					const checked = yield* (
-						(yield* Ref.get(phase))._tag === "Ready" ? publicPages.check(path) : Effect.succeed(null)
-					).pipe(Effect.result);
+					if ((yield* Ref.get(phase))._tag !== "Ready") return authErrorResponse("boot_unavailable", 503);
+					const checked = yield* publicPages.check(path).pipe(Effect.result);
 					if (checked._tag === "Failure") return authErrorResponse("boot_unavailable", 503);
 					publicPage = checked.success;
 					if (publicPage === null) return authErrorResponse("credential_required", 401);

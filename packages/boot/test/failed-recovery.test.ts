@@ -215,3 +215,59 @@ it("closes a restore-activated child before retrying a later startup failure wit
 	expect(await env.sql("SELECT COUNT(*) AS count FROM child_attempts WHERE closed=0")).toEqual([{ count: 1 }]);
 	expect(await env.sql("SELECT COUNT(*) AS count FROM generations")).toEqual([{ count: 1 }]);
 }, 30000);
+
+it("returns retriable anonymous page refusal during recovery without relaxing explicit credentials or grants", async (test) => {
+	const env = await fixture(test);
+	const first = await env.start();
+	await mkdir(join(env.root, "data/pages/public"));
+	await writeFile(join(env.root, "data/pages/public/index.md"), "public content");
+	await env.sql("INSERT INTO public_paths(path) VALUES('public')");
+	expect((await fetch(`${first.url}/p/public/index.md`)).status).toBe(200);
+	expect((await fetch(`${first.url}/p/index.md`)).status).toBe(401);
+	await first.stop();
+	const receipt = join(env.root, "data/attempts/late-owner.closed");
+	await env.sql(
+		`INSERT INTO child_attempts(id,generation,receipt,opened,closed) VALUES('late-owner',1,'${receipt}',1,0)`,
+	);
+	await writeFile(join(env.root, "observe-retry"), "observe");
+	const restarted = await env.start(false);
+	await expect
+		.poll(() => readFile(join(env.root, "retry-entered"), "utf8").catch(() => ""), { timeout: 5000 })
+		.toBe("entered");
+	expect(await restarted.status()).toMatchObject({ child: { state: "starting" } });
+	const unavailable = async () => {
+		for (const path of ["/p/public/index.md", "/p/index.md", "/p/missing.md"]) {
+			const response = await fetch(`${restarted.url}${path}`);
+			expect(response.status).toBe(503);
+			const body: unknown = await response.json();
+			expect(body).toEqual({
+				error: { code: "boot_unavailable", message: expect.any(String), hint: expect.any(String), retriable: true },
+			});
+		}
+		expect((await fetch(`${restarted.url}/p/public/index.md`, { method: "HEAD" })).status).toBe(503);
+		for (const headers of [{ authorization: "Bearer invalid" }, { cookie: "__Host-comms_session=invalid" }])
+			expect((await fetch(`${restarted.url}/p/public/index.md`, { headers })).status).toBe(401);
+		expect((await fetch(`${restarted.url}/p/public/index.md`, { method: "POST" })).status).toBe(401);
+		expect((await fetch(`${restarted.url}/_boot/status`)).status).toBe(401);
+	};
+	await unavailable();
+	await expect.poll(restarted.status, { timeout: 12000 }).toMatchObject({ child: { state: "failed" } });
+	await unavailable();
+	await writeFile(receipt, "late-owner");
+	expect(
+		(
+			await restarted.call(`${restarted.url}/_boot/lock`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: "{}",
+			})
+		).status,
+	).toBe(200);
+	await expect
+		.poll(async () => (await fetch(`${restarted.url}/p/public/index.md`)).status, { timeout: 10000 })
+		.toBe(200);
+	expect((await fetch(`${restarted.url}/p/index.md`)).status).toBe(401);
+	expect(
+		(await fetch(`${restarted.url}/p/public/index.md`, { headers: { authorization: "Bearer invalid" } })).status,
+	).toBe(401);
+}, 30000);
