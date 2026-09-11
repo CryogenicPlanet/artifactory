@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
-for (const scenario of ["binding", "transaction", "http", "schema", "late-session"])
+for (const scenario of ["binding", "transaction", "http", "schema", "late-session", "retention"])
 	test(`signed settings: ${scenario}`, async ({ onTestFinished }) => {
 		const directory = await mkdtemp(join(tmpdir(), "comms-settings-"));
 		onTestFinished(() => rm(directory, { recursive: true, force: true }));

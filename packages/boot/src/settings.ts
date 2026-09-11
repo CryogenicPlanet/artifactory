@@ -8,6 +8,7 @@ import { Settings, SettingsChange, canonicalSettings, readSettings, readPublicPa
 
 const Receipt = Schema.Struct({
 	session: Schema.String,
+	expires_at: Schema.Int,
 	binding: Schema.String,
 	proof: Schema.String,
 	result: Settings,
@@ -37,10 +38,35 @@ export const makeSettings = <E, R>(
 							);
 							const liveSession = Effect.gen(function* () {
 								const now = yield* Clock.currentTimeMillis;
-								if (!(yield* sql`SELECT id FROM sessions WHERE id=${session} AND expires_at>${now}`).length)
-									return yield* refuse("session_invalid");
+								const row = (yield* sql`SELECT expires_at FROM sessions WHERE id=${session} AND expires_at>${now}`.pipe(
+									Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ expires_at: Schema.Int })))),
+								))[0];
+								if (!row) return yield* refuse("session_invalid");
+								return row.expires_at;
 							});
-							yield* liveSession;
+							const expires_at = yield* liveSession;
+							const now = yield* Clock.currentTimeMillis;
+							// Advance a durable bounded key window; live receipts cannot starve expired ones later in the range.
+							const cursorRow = (yield* sql`SELECT value FROM settings WHERE key='settings.receipt_cursor'`.pipe(
+								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ value: Schema.String })))),
+							))[0];
+							const cursor = cursorRow?.value ?? "settings.receipt:";
+							const window = (after: string) =>
+								sql`SELECT key FROM settings WHERE key>${after} AND key>='settings.receipt:' AND key<'settings.receipt;' ORDER BY key LIMIT 256`.pipe(
+									Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ key: Schema.String })))),
+								);
+							let candidates = yield* window(cursor);
+							if (candidates.length === 0 && cursor !== "settings.receipt:")
+								candidates = yield* window("settings.receipt:");
+							const first = candidates[0]?.key;
+							const last = candidates.at(-1)?.key;
+							if (first !== undefined && last !== undefined) {
+								yield* sql`DELETE FROM settings WHERE key>=${first} AND key<=${last}
+ AND CASE WHEN json_valid(value) THEN json_extract(value,'$.expires_at') END <= ${now}
+ AND NOT EXISTS (SELECT 1 FROM sessions WHERE id=CASE WHEN json_valid(value) THEN json_extract(value,'$.session') END AND expires_at>${now})`;
+							}
+							const nextCursor = last ?? "settings.receipt:";
+							yield* sql`INSERT INTO settings(key,value) VALUES ('settings.receipt_cursor',${nextCursor}) ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
 							const binding = canonicalSettings(params, session);
 							const digest = yield* hash(canonicalProof(proof));
 							const key = `settings.receipt:${yield* hash(proof.id)}`;
@@ -68,7 +94,7 @@ export const makeSettings = <E, R>(
 								const encoded = JSON.stringify(value);
 								yield* sql`INSERT INTO settings (key,value) VALUES (${name},${encoded}) ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
 							}
-							const receipt = JSON.stringify({ session, binding, proof: digest, result });
+							const receipt = JSON.stringify({ session, expires_at, binding, proof: digest, result });
 							yield* sql`INSERT INTO settings (key,value) VALUES (${key},${receipt})`;
 							yield* events.writeBoot({
 								at: yield* Clock.currentTimeMillis,

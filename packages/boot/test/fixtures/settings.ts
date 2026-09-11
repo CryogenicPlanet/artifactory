@@ -92,6 +92,22 @@ const run = Effect.gen(function* () {
 		);
 		yield* auth.logout(session.token);
 		yield* fails(auth.changeSettings(params, proof, session.id), "session_invalid");
+	} else if (scenario === "retention") {
+		const firstProof = yield* proofFor();
+		yield* auth.changeSettings(params, firstProof, session.id);
+		yield* sql`UPDATE settings SET value=json_set(value,'$.expires_at',0) WHERE key LIKE 'settings.receipt:%'`;
+		// Even a stale receipt timestamp must not remove an active session's accepted response.
+		assert.equal((yield* auth.changeSettings(params, firstProof, session.id)).revision, 1);
+		yield* sql`UPDATE sessions SET expires_at=0 WHERE id=${session.id}`;
+		const login = yield* auth.startLogin;
+		const nextSession = yield* auth.finishLogin(login.id, device.assertion(login.options.challenge, ++counter));
+		const next = { revision: 1, patch: { public_paths: ["/later"] } };
+		const proof = yield* proofFor(next, nextSession.id);
+		const accepted = yield* auth.changeSettings(next, proof, nextSession.id);
+		assert.equal((yield* sql`SELECT * FROM settings WHERE key LIKE 'settings.receipt:%'`).length, 1);
+		assert.deepEqual(yield* auth.changeSettings(next, proof, nextSession.id), accepted);
+		yield* fails(auth.changeSettings(params, firstProof, nextSession.id), "challenge_invalid");
+		assert.equal((yield* auth.settings).revision, 2);
 	} else if (scenario === "transaction") {
 		const proof = yield* proofFor();
 		yield* sql`CREATE TRIGGER fail_receipt BEFORE INSERT ON settings WHEN NEW.key LIKE 'settings.receipt:%' BEGIN SELECT RAISE(ABORT,'disk failed'); END`;
@@ -100,6 +116,12 @@ const run = Effect.gen(function* () {
 		assert.equal((yield* sql`SELECT * FROM auth_challenges WHERE id=${proof.id}`).length, 1);
 		assert.equal((yield* sql`SELECT * FROM events WHERE type='settings.changed'`).length, 0);
 		yield* sql`DROP TRIGGER fail_receipt`;
+		yield* sql`CREATE TRIGGER fail_event BEFORE INSERT ON events WHEN NEW.type='settings.changed' BEGIN SELECT RAISE(ABORT,'event failed'); END`;
+		yield* fails(auth.changeSettings(params, proof, session.id));
+		assert.equal((yield* auth.settings).revision, 0);
+		assert.equal((yield* sql`SELECT * FROM settings WHERE key LIKE 'settings.receipt:%'`).length, 0);
+		assert.equal((yield* sql`SELECT * FROM auth_challenges WHERE id=${proof.id}`).length, 1);
+		yield* sql`DROP TRIGGER fail_event`;
 		const results = yield* Effect.all(
 			[auth.changeSettings(params, proof, session.id), auth.changeSettings(params, proof, session.id)],
 			{ concurrency: "unbounded" },

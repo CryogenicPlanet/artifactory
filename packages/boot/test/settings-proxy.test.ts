@@ -31,4 +31,9 @@ test("configured public paths preserve auth floors and are revoked without resta
 	expect((await fetch(`${app.url}/health`)).status).toBe(200);
 	expect((await fetch(`${app.url}/_boot`)).status).toBe(200);
 	expect((await app.fetch(`${app.url}/_boot/status`)).status).toBe(200);
+	await set("event_retention", '{"http_request_days":7,"other_days":30}');
+	await set("public_paths", "[]");
+	await app.fetch(`${app.url}/crash`);
+	await expect.poll(async () => (await app.state()).state).toBe("failed");
+	expect((await app.fetch(`${app.url}/_boot/settings`)).status).toBe(200);
 });
