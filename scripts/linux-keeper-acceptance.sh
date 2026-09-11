@@ -34,7 +34,7 @@ const db = new Database("/data/boot.db");
 db.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE private_probe(value TEXT)");
 db.query("INSERT INTO private_probe VALUES (?)").run("retained WAL identity");
 writeFileSync("/data/private-writer.pid", String(process.pid));
-setInterval(() => {}, 1000);
+setInterval(() => { if (!(db instanceof Database)) throw new Error("database lifetime lost"); }, 1000);
 JS
 docker exec --detach "$container" setpriv --reuid=1000 --regid=1000 --groups=1003 bun /tmp/private-writer.js
 tries=0
@@ -48,14 +48,22 @@ private_files() {
     done
 }
 private_files
+# The writer performs no SQL after its ready marker. Capture that stable legacy
+# main/WAL/SHM set; this tests sidecar permissions, not crash-sidecar persistence.
+docker exec "$container" sh -ec 'mkdir -m 700 /data/legacy-crash; cp /data/boot.db /data/boot.db-wal /data/boot.db-shm /data/legacy-crash/; cp /data/legacy-crash/boot.db /data/legacy-crash/main-only.db'
+docker exec "$container" bun -e 'import {Database} from "bun:sqlite"; const db=new Database("/data/legacy-crash/main-only.db",{readonly:true});if(db.query("SELECT count(*) AS n FROM sqlite_master WHERE name=?").get("private_probe").n!==0)throw new Error("legacy fixture must require WAL");db.close();'
 docker exec "$container" sh -ec 'kill -KILL "$(cat /data/private-writer.pid)"'
-# Simulate permissions left by the former flat, single-UID image. No editable
-# process has been launched in this disposable container yet.
-docker exec "$container" chmod 0644 /data/boot.db /data/boot.db-wal /data/boot.db-shm
+tries=0
+while docker exec "$container" sh -ec 'kill -0 "$(cat /data/private-writer.pid)"' 2>/dev/null; do
+    tries=$((tries+1)); test "$tries" -lt 100; sleep 0.1
+done
+# No editable process has been launched. Restore the captured fixture only after
+# its producer exits; retain strict checks even if this runtime removes sidecars.
+docker exec "$container" sh -ec 'cp /data/legacy-crash/boot.db /data/legacy-crash/boot.db-wal /data/legacy-crash/boot.db-shm /data/; chmod 0644 /data/boot.db /data/boot.db-wal /data/boot.db-shm'
 docker exec "$container" /usr/local/bin/bun /opt/comms/packages/boot/dist/deployment-layout.js
 private_files
 docker exec --user 1000:1000 "$container" bun -e 'import {Database} from "bun:sqlite"; const db=new Database("/data/boot.db");if(db.query("SELECT value FROM private_probe").get().value!=="retained WAL identity")process.exit(1);db.close();'
-printf '%s\n' 'Passed fresh and legacy crash WAL privacy with retained committed data.'
+printf '%s\n' 'Passed fresh WAL privacy and a captured legacy WAL fixture with retained committed data.'
 # The editable process checks its actual kernel identity, then spawns an ordinary
 # SQLite writer in its inherited process group. No escaped sessions are claimed.
 docker exec -i "$container" sh -c 'cat > /data/gen/1/source/probe.js' <<'JS'
