@@ -179,7 +179,14 @@ it("requires read and write, isolates ownership, and excludes boot request diagn
 			),
 		);
 	await expect.poll(async () => (await auditRows()).length).toBe(3);
-	// A deliverable app event proves the worker progressed past the excluded boot requests.
+	// Public messages from either actor remain deliverable; request diagnostics do not.
+	const otherMarker = await call("/api/messages", other.access, "POST", {
+		topic: "delivery-privacy",
+		body: "another agent public message",
+	});
+	expect(otherMarker.status).toBe(200);
+	const otherMessage = Schema.decodeUnknownSync(Schema.Struct({ seq: Schema.Int }))(await otherMarker.json());
+	// The later marker proves the worker progressed past both messages and the excluded requests.
 	const marker = await call("/api/messages", owner.access, "POST", {
 		topic: "delivery-privacy",
 		body: "application event still delivered",
@@ -194,9 +201,9 @@ it("requires read and write, isolates ownership, and excludes boot request diagn
 				)[0]?.cursor ?? 0,
 		)
 		.toBeGreaterThanOrEqual(message.seq);
-	expect(target.received.map((item) => item.body.event.seq)).toContain(message.seq);
+	expect(target.received.find((item) => item.body.event.seq === otherMessage.seq)?.body.event.actor).toBe("claude");
+	expect(target.received.find((item) => item.body.event.seq === message.seq)?.body.event.actor).toBe("codex");
 	expect(target.received.every((item) => item.body.event.type === "message.created")).toBe(true);
-	expect(target.received.every((item) => item.body.event.actor === "codex")).toBe(true);
 	expect(
 		(
 			await fetch(app.url + `/api/subscriptions/${subscription.id}`, {
