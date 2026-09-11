@@ -1,5 +1,5 @@
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Context, Effect, FileSystem, Layer, Schema } from "effect";
+import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { type Batch, Events, EventError, EventRecord } from "./events.ts";
 
@@ -10,13 +10,15 @@ export interface RecoveryHooks<E, R> {
 const noMoves: RecoveryHooks<EventError, never> = { beforeAppend: () => Effect.void, afterResolve: Effect.void };
 
 /** Narrow shared SQL contract. Domain schema remains owned by editable server code. */
-const make = (filename: string, hooks: RecoveryHooks<EventError, never>) =>
+const make = (filename: string, hooks: RecoveryHooks<EventError, never>, dataDirectory?: string) =>
 	Effect.gen(function* () {
 		const bootSql = yield* SqlClient.SqlClient;
 		const events = yield* Events;
 		const fs = yield* FileSystem.FileSystem;
+		const path = yield* Path.Path;
 		return {
 			filename,
+			dataDirectory: dataDirectory ?? path.dirname(filename),
 			prepare: (epoch: string, rejectedAttempt?: string) =>
 				Effect.gen(function* () {
 					const marker = yield* bootSql`SELECT value FROM settings WHERE key='app_store_initialized'`;
@@ -114,20 +116,28 @@ const make = (filename: string, hooks: RecoveryHooks<EventError, never>) =>
 export class AppRecovery extends Context.Service<AppRecovery, Effect.Success<ReturnType<typeof make>>>()(
 	"comms/boot/AppRecovery",
 ) {}
-export const layer = <E = EventError, R = never>(filename: string, hooks?: RecoveryHooks<E, R>) =>
+export const layer = <E = EventError, R = never>(
+	filename: string,
+	hooks?: RecoveryHooks<E, R>,
+	dataDirectory?: string,
+) =>
 	Layer.effect(
 		AppRecovery,
 		Effect.gen(function* () {
-			if (!hooks) return yield* make(filename, noMoves);
+			if (!hooks) return yield* make(filename, noMoves, dataDirectory);
 			const context = yield* Effect.context<R>();
 			const close = <A>(effect: Effect.Effect<A, E, R>) =>
 				effect.pipe(
 					Effect.provideContext(context),
 					Effect.mapError(() => new EventError({ code: "topic_move_recovery_required" })),
 				);
-			return yield* make(filename, {
-				beforeAppend: (batch) => close(hooks.beforeAppend(batch)),
-				afterResolve: close(hooks.afterResolve),
-			});
+			return yield* make(
+				filename,
+				{
+					beforeAppend: (batch) => close(hooks.beforeAppend(batch)),
+					afterResolve: close(hooks.afterResolve),
+				},
+				dataDirectory,
+			);
 		}),
 	);

@@ -33,8 +33,8 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 	const crypto = yield* Crypto.Crypto;
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
-	const retention = yield* artifactRetention(path.dirname(recovery.filename));
-	const headroom = yield* storageHeadroom(path.dirname(recovery.filename));
+	const retention = yield* artifactRetention(recovery.dataDirectory);
+	const headroom = yield* storageHeadroom(recovery.dataDirectory);
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const preparationContext = yield* Effect.context<Effect.Services<ReturnType<typeof prepareRestoreGeneration>>>();
 	const ready = yield* Ref.make(false);
@@ -52,14 +52,14 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BackupRecord))),
 			);
 			const row = rows[0];
-			const directory = path.join(path.dirname(recovery.filename), "backups");
+			const directory = path.join(recovery.dataDirectory, "backups");
 			if (
 				!row ||
 				row.published_through === null ||
 				row.published_through < 0 ||
 				row.path !== path.join(directory, `${id}.db`) ||
 				(yield* fs.realPath(row.path)) !==
-					path.join(yield* fs.realPath(path.dirname(recovery.filename)), "backups", `${id}.db`) ||
+					path.join(yield* fs.realPath(recovery.dataDirectory), "backups", `${id}.db`) ||
 				(yield* fs.stat(row.path)).type !== "File"
 			)
 				return yield* new ChildError({ code: "restore_backup_invalid" });
@@ -186,7 +186,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 						else {
 							if (!record.lock_id || !record.lock_family)
 								return yield* new ChildError({ code: "restore_record_missing" });
-							const selectedSource = yield* generationSource(path.dirname(recovery.filename), generation.n).pipe(
+							const selectedSource = yield* generationSource(recovery.dataDirectory, generation.n).pipe(
 								Effect.provideContext(preparationContext),
 							);
 							// The journal and acceptance commit together; disposal is registered before interruption can observe a proposal.
@@ -326,7 +326,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					yield* supervisor.child.traffic.drained.pipe(Effect.timeout("5 seconds"));
 					yield* recovery.prepare(prior?.attempt.epoch ?? (yield* freshEpoch));
 					const id = yield* crypto.randomUUIDv4;
-					const directory = path.join(path.dirname(recovery.filename), "backups");
+					const directory = path.join(recovery.dataDirectory, "backups");
 					yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
 					const filename = path.join(directory, `${id}.db`);
 					const fence = (yield* events.state).published_through;

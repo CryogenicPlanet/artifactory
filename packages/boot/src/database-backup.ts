@@ -22,8 +22,8 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const crypto = yield* Crypto.Crypto;
-	const retention = yield* artifactRetention(path.dirname(recovery.filename));
-	const headroom = yield* storageHeadroom(path.dirname(recovery.filename));
+	const retention = yield* artifactRetention(recovery.dataDirectory);
+	const headroom = yield* storageHeadroom(recovery.dataDirectory);
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const capture = <E = never>(options: {
 		readonly reason: "hourly" | "manual";
@@ -73,7 +73,7 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 					canResume = !closed;
 					const published = (yield* events.state).published_through;
 					const id = yield* crypto.randomUUIDv4;
-					const directory = path.join(path.dirname(recovery.filename), "backups");
+					const directory = path.join(recovery.dataDirectory, "backups");
 					yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
 					const saved = path.join(directory, `${id}.db`);
 					created = saved;

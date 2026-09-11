@@ -27,7 +27,7 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 	const events = yield* Events;
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
-	const root = path.dirname(recovery.filename);
+	const root = recovery.dataDirectory;
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const source = (yield* generations.list).find((item) => item.n === record.source_generation && item.good === 1);
 	if (!source) return yield* new ChildError({ code: "restore_snapshot_missing" });
