@@ -25,12 +25,7 @@ export const sourceTreeIO = Effect.fn("sourceTreeIO")(function* (
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const crypto = yield* Crypto.Crypto;
-	const sync = (name: string) =>
-		Effect.scoped(
-			Effect.gen(function* () {
-				yield* (yield* fs.open(name)).sync;
-			}),
-		);
+	const sync = (name: string) => Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
 	const scan = Effect.fn("sourceTreeIO.inventory")(function* (
 		sourceDirectory?: string,
 		temporaryPaths: readonly string[] = [],

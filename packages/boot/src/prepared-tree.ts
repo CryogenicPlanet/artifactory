@@ -87,9 +87,5 @@ export const syncPreparedTree = Effect.fn("syncPreparedTree")(function* (
 	if ((yield* fs.stat(root)).type === "Directory") {
 		for (const name of yield* fs.readDirectory(root)) yield* syncPreparedTree(path.join(root, name));
 	}
-	yield* Effect.scoped(
-		Effect.gen(function* () {
-			yield* (yield* fs.open(root)).sync;
-		}),
-	);
+	yield* Effect.scoped(fs.open(root).pipe(Effect.flatMap((file) => file.sync)));
 });

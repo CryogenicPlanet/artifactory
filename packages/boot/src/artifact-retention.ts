@@ -33,12 +33,7 @@ export const artifactRetention = (directory: string) =>
 		const sql = yield* SqlClient.SqlClient;
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
-		const sync = (name: string) =>
-			Effect.scoped(
-				Effect.gen(function* () {
-					yield* (yield* fs.open(name)).sync;
-				}),
-			);
+		const sync = (name: string) => Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
 		const remove = (root: string, relative: string, recursive: boolean) =>
 			Effect.gen(function* () {
 				// Check each ancestor, including a dangling symlink, without traversing contents.

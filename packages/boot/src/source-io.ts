@@ -37,12 +37,7 @@ export const sourceIO = Effect.fn("sourceIO")(function* (dataDirectory: string) 
 			sha: content === null ? null : Buffer.from(yield* crypto.digest("SHA-256", content)).toString("hex"),
 		};
 	});
-	const sync = (directory: string) =>
-		Effect.scoped(
-			Effect.gen(function* () {
-				yield* (yield* fs.open(directory)).sync;
-			}),
-		);
+	const sync = (directory: string) => Effect.scoped(fs.open(directory).pipe(Effect.flatMap((file) => file.sync)));
 	const resolve = Effect.fn("sourceIO.resolve")(function* (
 		name: string,
 		createParents = false,

@@ -23,12 +23,7 @@ const make = (filename: string) =>
 				return (counts[0]?.page_count ?? 0) * (sizes[0]?.page_size ?? 0);
 			}).pipe(Effect.provide(SqliteClient.layer({ filename, disableWAL: true }))),
 		);
-		const sync = (name: string) =>
-			Effect.scoped(
-				Effect.gen(function* () {
-					yield* (yield* fs.open(name)).sync;
-				}),
-			);
+		const sync = (name: string) => Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
 		return {
 			estimatedBytes,
 			clone: (destination: string) =>
