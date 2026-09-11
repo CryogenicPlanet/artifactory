@@ -40,7 +40,7 @@ export const extensionCapabilities = Effect.gen(function* () {
 							yield* Ref.update(lifecycle.mutations, (count) => count + 1);
 						}),
 					),
-					() => Ref.update(lifecycle.mutations, (count) => count - 1),
+					() => Ref.update(lifecycle.mutations, (count) => count - 1).pipe(Effect.andThen(lifecycle.activityChanged)),
 				);
 				return yield* effect;
 			}).pipe(Effect.scoped, Effect.provideService(Lifecycle, lifecycle));

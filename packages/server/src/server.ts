@@ -190,6 +190,7 @@ const server = Effect.gen(function* () {
 										? Effect.gen(function* () {
 												yield* Ref.update(lifecycle.requests, (count) => count - 1);
 												if (mutation) yield* Ref.update(lifecycle.mutations, (count) => count - 1);
+												yield* lifecycle.activityChanged;
 											})
 										: Effect.void,
 							);
@@ -295,15 +296,15 @@ const server = Effect.gen(function* () {
 						const transitioned = yield* transitionTo(body.action).pipe(Effect.result);
 						if (transitioned._tag === "Failure") return HttpServerResponse.empty({ status: 503 });
 					} else {
-						const transitioned = yield* transitionTo(body.action).pipe(Effect.result);
-						if (transitioned._tag === "Failure") return HttpServerResponse.empty({ status: 503 });
-						while (
-							(yield* Ref.get(lifecycle.mutations)) !== 0 ||
-							(body.action === "draining" && (yield* Ref.get(lifecycle.requests)) !== 0)
-						)
-							yield* Effect.sleep("10 millis");
-						const idle = yield* Ref.get(quiesce);
-						if (idle) yield* idle;
+						const action = body.action;
+						const completed = yield* Effect.gen(function* () {
+							yield* transitionTo(action);
+							yield* lifecycle.awaitIdle(action === "draining");
+							const idle = yield* Ref.get(quiesce);
+							if (idle) yield* idle;
+						}).pipe(Effect.timeout("4 seconds"), Effect.result);
+						// Timeout is not closure proof. Boot retains its keeper/watchdog fallback.
+						if (completed._tag === "Failure") return HttpServerResponse.empty({ status: 503 });
 					}
 					return HttpServerResponse.jsonUnsafe({
 						state: yield* Ref.get(lifecycle.state),

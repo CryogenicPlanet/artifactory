@@ -8,12 +8,28 @@ const make = Effect.gen(function* () {
 	const configured = yield* Config.String("STATE").pipe(Config.withDefault("starting"));
 	const initial: State =
 		configured === "rehearsal" ? "rehearsal" : configured === "candidate" ? "candidate" : "starting";
+	const mutations = yield* Ref.make(0);
+	const requests = yield* Ref.make(0);
+	const changed = yield* Ref.make(yield* Deferred.make<void>());
 	return {
 		initial,
 		state: yield* Ref.make<State>(initial),
 		drained: yield* Deferred.make<void>(),
-		mutations: yield* Ref.make(0),
-		requests: yield* Ref.make(0),
+		mutations,
+		requests,
+		activityChanged: Effect.gen(function* () {
+			const previous = yield* Ref.getAndSet(changed, yield* Deferred.make<void>());
+			yield* Deferred.succeed(previous, undefined);
+		}).pipe(Effect.uninterruptible),
+		awaitIdle: (includeRequests: boolean) =>
+			Effect.gen(function* () {
+				while (true) {
+					// Capture before checking counts: completion between check and await cannot be missed.
+					const signal = yield* Ref.get(changed);
+					if ((yield* Ref.get(mutations)) === 0 && (!includeRequests || (yield* Ref.get(requests)) === 0)) return;
+					yield* Deferred.await(signal);
+				}
+			}),
 		healthy: yield* Ref.make(false),
 		gate: yield* Semaphore.make(1),
 	};

@@ -138,6 +138,11 @@ export const policy = {
 		message: "This SQL operation is not supported.",
 		hint: "Use one supported data or schema statement. Transaction control, PRAGMA, attachments, triggers, temporary objects and recovery tables are unavailable. Remove comments and semicolons; bind literal text as parameters.",
 	},
+	read_snapshot_timeout: {
+		status: 408,
+		message: "The published read exceeded its cooperative execution budget.",
+		hint: "Shorten the read callback and avoid waiting for external work inside a read snapshot. The operation was interrupted and snapshot cleanup completed before this response.",
+	},
 	sql_query_timeout: {
 		status: 408,
 		message: "The readonly SQL query exceeded its execution budget.",

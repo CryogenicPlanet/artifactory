@@ -1,7 +1,7 @@
-import { Context, Effect, Option, type Semaphore } from "effect";
+import { Cause, Context, Effect, Option, Ref, type Semaphore } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { KernelError } from "./boot-channel.ts";
-import { assertWriterHealthy } from "./lifecycle.ts";
+import { assertWriterHealthy, poisonUncertainWriter } from "./lifecycle.ts";
 import { assertSqlPublished } from "./sql-publication.ts";
 import { HealthProbe } from "./health-probe.ts";
 
@@ -25,16 +25,22 @@ export const makeReadSnapshot =
 				Option.isNone(yield* Effect.serviceOption(HealthProbe))
 			)
 				return yield* new KernelError({ code: "input_invalid" });
-			const snapshot = sql.withTransaction(
-				Effect.gen(function* () {
-					yield* sql`SELECT epoch FROM kernel_writer`;
-					const ceiling = (yield* fence).published_through;
-					if (Option.isNone(yield* Effect.serviceOption(HealthProbe))) yield* assertSqlPublished(sql, epoch, ceiling);
-					return yield* read(ceiling).pipe(Effect.provideService(ReadFence, ceiling));
-				}),
-			);
+			const snapshot = sql
+				.withTransaction(
+					Effect.gen(function* () {
+						yield* sql`SELECT epoch FROM kernel_writer`;
+						const ceiling = (yield* fence).published_through;
+						if (Option.isNone(yield* Effect.serviceOption(HealthProbe))) yield* assertSqlPublished(sql, epoch, ceiling);
+						return yield* read(ceiling).pipe(Effect.provideService(ReadFence, ceiling));
+					}),
+				)
+				.pipe(
+					Effect.onExit((exit) =>
+						exit._tag === "Failure" && Cause.hasDies(exit.cause) ? poisonUncertainWriter(exit.cause) : Effect.void,
+					),
+				);
 			if (Option.isSome(yield* Effect.serviceOption(HealthProbe))) return yield* snapshot;
-			return yield* mutex.withPermit(
+			const operation = mutex.withPermit(
 				Effect.gen(function* () {
 					yield* assertWriterHealthy;
 					// Ordinary versioned rows retain their published image. Path rewrites do not.
@@ -42,6 +48,20 @@ export const makeReadSnapshot =
 						yield* sql`SELECT seq FROM outbox WHERE shipped_at IS NULL AND json_extract(event,'$.type') IN ('topic.moved','topic.pages_moved') LIMIT 1`;
 					if (moving.length) yield* relay;
 					return yield* snapshot;
+				}),
+			);
+			const interrupted = yield* Ref.make<Cause.Cause<Effect.Error<typeof operation>> | null>(null);
+			return yield* operation.pipe(
+				// The timeout race awaits cleanup but discards its exit. Retain defects before returning a timeout.
+				Effect.onExit((exit) => (exit._tag === "Failure" ? Ref.set(interrupted, exit.cause) : Effect.void)),
+				Effect.timeoutOrElse({
+					duration: "3 seconds",
+					orElse: () =>
+						Effect.gen(function* () {
+							const cause = yield* Ref.get(interrupted);
+							if (cause && !Cause.hasInterruptsOnly(cause)) return yield* Effect.failCause(cause);
+							return yield* new KernelError({ code: "read_snapshot_timeout" });
+						}),
 				}),
 			);
 		});
