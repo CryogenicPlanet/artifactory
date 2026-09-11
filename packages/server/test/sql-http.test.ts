@@ -1,9 +1,25 @@
+import { cp, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { expect, it, type TestContext } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
 it("inspects physical committed rows with scoped read authority and documents the bounded SQL subset", async (test) => {
-	const fixture = await conversation(test),
-		app = await fixture.launch();
+	const fixture = await conversation(test);
+	const seed = join(fixture.root, "admission-seed");
+	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
+	const marker = join(fixture.root, "reader-started");
+	const worker = join(seed, "kernel/sql-read-worker.ts");
+	const source = (await readFile(worker, "utf8")).replace("Console, Effect,", "Console, Effect, FileSystem,");
+	const needle = "const stdio = yield* Stdio.Stdio;";
+	expect(source.split(needle)).toHaveLength(2);
+	await writeFile(
+		worker,
+		source.replace(
+			needle,
+			`${needle}\nyield* (yield* FileSystem.FileSystem).writeFileString(${JSON.stringify(marker)}, "started");`,
+		),
+	);
+	const app = await fixture.launch(join(seed, "server.ts"));
 	await app.setup();
 	const cookie = await app.login();
 	await app.ready(cookie);
@@ -67,7 +83,23 @@ it("inspects physical committed rows with scoped read authority and documents th
 		`UPDATE tokens SET scopes='["write"]' WHERE family=(SELECT family FROM tokens WHERE agent='sql' LIMIT 1)`,
 		"boot.db",
 	);
+	await rm(marker);
+	for (const sql of ["SELECT 1", "WITH value(v) AS (SELECT 1) SELECT v FROM value"])
+		expect((await bearerQuery(sql)).status).toBe(403);
+	await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+	await fixture.sql(
+		`UPDATE tokens SET scopes='["fs"]' WHERE family=(SELECT family FROM tokens WHERE agent='sql' LIMIT 1)`,
+		"boot.db",
+	);
+	await fixture.sql("CREATE TABLE admission_write(value INTEGER)");
 	expect((await bearerQuery("SELECT 1")).status).toBe(403);
+	await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+	expect((await bearerQuery("WITH value(v) AS (SELECT 1) SELECT v FROM value")).status).toBe(403);
+	expect(await readFile(marker, "utf8")).toBe("started");
+	expect(
+		(await bearerQuery("WITH value(v) AS (SELECT 7) INSERT INTO admission_write SELECT v FROM value")).status,
+	).toBe(200);
+	expect(await fixture.sql("SELECT value FROM admission_write")).toEqual([{ value: 7 }]);
 	const result = await query("SELECT 1 AS n");
 	expect(result.headers.get("cache-control")).toBe("no-store");
 	expect(await result.json()).toEqual({ rows: [{ n: 1 }], truncated: false });

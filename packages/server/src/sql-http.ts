@@ -35,11 +35,15 @@ export const sqlHandlers = (api: typeof SystemApi) =>
 					Effect.gen(function* () {
 						yield* sqlInput(payload);
 						const permission = yield* identity("read").pipe(Effect.result);
+						if (permission._tag === "Failure") {
+							if (/^SELECT\b/i.test(payload.sql.trim())) return yield* permission.failure;
+							// WITH needs compilation to distinguish reads from fs-authorized writes.
+							if (/^WITH\b/i.test(payload.sql.trim())) yield* identity("fs");
+						}
 						// Obvious writes and their durable replays must not queue behind readonly work.
 						const inspected = /^(SELECT|WITH)\b/i.test(payload.sql.trim())
 							? yield* inspectSql(payload, permission._tag === "Success")
 							: { kind: "write" as const };
-						if (inspected.kind === "read" && permission._tag === "Failure") return yield* permission.failure;
 						const result =
 							inspected.kind === "read"
 								? inspected.result
