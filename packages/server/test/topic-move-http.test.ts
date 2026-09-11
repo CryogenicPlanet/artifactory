@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
@@ -130,12 +131,30 @@ it("isolates pending page moves and hides ownership markers after completion", a
 	const cookie = await app.login();
 	await app.ready(cookie);
 	const get = (path: string) => fetch(app.url + path, { headers: { cookie } });
-	const put = (path: string, body: string) =>
-		fetch(app.url + path, {
-			method: "PUT",
-			headers: { cookie, origin: "https://comms.test" },
-			body,
+	const put = async (path: string, body: string) => {
+		const send = () =>
+			fetch(app.url + path, {
+				method: "PUT",
+				headers: { cookie, origin: "https://comms.test" },
+				body,
+			});
+		const pending = Schema.Struct({
+			error: Schema.Struct({ code: Schema.Literals(["publication_pending"]), retriable: Schema.Literals([true]) }),
 		});
+		let response = await send();
+		// Live system diagnostics can hold an app reservation briefly. Only this explicit
+		// pre-journal refusal is safe to retry; uncertain writes and other errors are not retried.
+		await expect
+			.poll(
+				async () => {
+					if (response.status === 503 && Schema.is(pending)(await response.clone().json())) response = await send();
+					return response.status;
+				},
+				{ timeout: 2000, interval: 20 },
+			)
+			.toBe(200);
+		return response;
+	};
 	await fixture.sql(
 		"CREATE TRIGGER reject_completion BEFORE INSERT ON outbox WHEN json_extract(NEW.event,'$.type')='topic.pages_moved' BEGIN SELECT RAISE(ABORT,'test completion failure'); END",
 	);
@@ -149,7 +168,8 @@ it("isolates pending page moves and hides ownership markers after completion", a
 		const page = await get(`/p/${path}`);
 		expect(page.status, path).toBe(503);
 		expect(await page.json()).toMatchObject({ error: { code: "pages_move_pending", retriable: true } });
-		expect((await put(`/api/fs/pages/${path}`, "explicit raw repair")).status, path).toBe(200);
+		const repaired = await put(`/api/fs/pages/${path}`, "explicit raw repair");
+		expect(repaired.status, `${path}: ${await repaired.clone().text()}`).toBe(200);
 	}
 	expect(await (await get("/p/unrelated/file.txt")).text()).toBe("unrelated bytes");
 	expect((await put("/api/fs/pages/unrelated/file.txt", "still writable")).status).toBe(200);

@@ -53,7 +53,7 @@ describe("on-demand quiesced backups", () => {
 		expect(await run(test, "success")).toMatchObject({
 			outcome: "Success",
 			calls: ["frozen", "live"],
-			rows: [{ reason: "hourly", generation: 1, published_through: 1 }],
+			rows: [{ reason: "hourly", generation: 1, published_through: 2 }],
 			saved: { records: [{ value: "acknowledged WAL write" }], epoch: { epoch: "original" } },
 			epoch: { epoch: "original" },
 			current: "original",

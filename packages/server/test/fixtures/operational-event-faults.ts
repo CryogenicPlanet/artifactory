@@ -90,11 +90,19 @@ const program = Effect.gen(function* () {
 					assert.equal((yield* sql`SELECT seq FROM outbox`).length, 0);
 					assert.equal((yield* sql`SELECT key FROM idempotency WHERE kind='ext.loaded'`).length, 1);
 					const delivered = yield* events.query({ since: 0, limit: 100 });
-					assert.deepEqual(delivered.items, [retry]);
+					assert.deepEqual(
+						delivered.items.filter((event) => event.type === "ext.loaded"),
+						[retry],
+					);
+					assert.equal(
+						delivered.items.filter((event) => event.type === "seq.reserved").length,
+						mode === "reserve-lost" ? 2 : 1,
+					);
+					assert.equal(delivered.items.length, mode === "reserve-lost" ? 3 : 2);
 					yield* sql`UPDATE kernel_writer SET epoch='replaced'`;
 					const stale = yield* messages.recordEvent({ ...input, transaction: "b".repeat(32) }).pipe(Effect.result);
 					assert.equal(stale._tag, "Failure");
-					assert.deepEqual((yield* events.query({ since: 0, limit: 100 })).items, [retry]);
+					assert.deepEqual((yield* events.query({ since: 0, limit: 100 })).items, delivered.items);
 					assert.equal((yield* sql`SELECT seq FROM outbox`).length, 0);
 					yield* Console.log("OPERATIONAL_EVENT_RECOVERED");
 				}).pipe(

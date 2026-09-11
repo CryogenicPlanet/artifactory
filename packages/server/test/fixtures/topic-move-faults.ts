@@ -305,8 +305,13 @@ const program = Effect.gen(function* () {
 						assert.equal((yield* messages.get(initial.id)).topic, "new/project/child");
 						assert.equal((yield* sql`SELECT seq FROM outbox`).length, 0);
 						const result = yield* move();
-						assert.equal((yield* events.query({ since: 0, limit: 100, types: ["topic.moved"] })).items.length, 1);
-						assert.equal(result.seq, (yield* events.state).published_through);
+						const moved = (yield* events.query({ since: 0, limit: 100, types: ["topic.moved"] })).items;
+						assert.equal(moved.length, 1);
+						assert.equal(moved[0]?.seq, result.seq);
+						assert.equal(result.seq + 1, (yield* events.state).published_through);
+						const audit = (yield* events.query({ since: result.seq, limit: 1 })).items[0];
+						assert.equal(audit?.type, "seq.reserved");
+						assert.equal(audit?.seq, result.seq + 1);
 						return;
 					}
 					const deleted = yield* messages.create(who, { topic: "project/deleted", body: "preserve tombstone" });
