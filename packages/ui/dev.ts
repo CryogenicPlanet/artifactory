@@ -1,6 +1,6 @@
 import { startServer } from "@comms/server";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Effect, Path } from "effect";
+import { Config, Effect, Path } from "effect";
 import { createServer } from "vite";
 
 const dev = Effect.gen(function* () {
@@ -12,7 +12,8 @@ const dev = Effect.gen(function* () {
 	);
 	yield* Effect.tryPromise(() => vite.listen());
 	yield* Effect.sync(() => vite.printUrls());
-	yield* startServer;
+	const uiPort = yield* Config.Port("UI_PORT").pipe(Config.withDefault(5173));
+	return yield* startServer(`http://localhost:${uiPort}`);
 });
 
 dev.pipe(Effect.scoped, Effect.provide(BunServices.layer), BunRuntime.runMain);

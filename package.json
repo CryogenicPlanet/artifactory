@@ -7,7 +7,7 @@
 	"type": "module",
 	"scripts": {
 		"prepare": "effect-tsgo patch --oxlint",
-		"dev": "bun packages/ui/dev.ts",
+		"dev": "bun run --filter @comms/server stage:runtime && bun packages/ui/dev.ts",
 		"check": "bun run format:check && bun run lint && bun run typecheck && bun run check:invariants",
 		"format": "oxfmt --write .",
 		"format:check": "oxfmt --check .",
@@ -15,10 +15,10 @@
 		"typecheck": "tsc --noEmit && bun run --filter '*' check",
 		"check:invariants": "bun scripts/check-invariants.ts",
 		"build": "bun run --filter '*' build",
-		"test": "vitest run --passWithNoTests",
-		"start": "bun packages/server/src/main.ts",
-		"dev:server": "bun packages/server/src/main.ts",
-		"dev:ui": "bun packages/ui/dev.ts"
+		"test": "vitest run",
+		"start": "bun run --filter @comms/server stage:runtime && bun packages/server/src/main.ts",
+		"dev:server": "bun run --filter @comms/server stage:runtime && bun packages/server/src/main.ts",
+		"dev:ui": "bun run --filter @comms/server stage:runtime && bun packages/ui/dev.ts"
 	},
 	"devDependencies": {
 		"@effect/language-service": "0.87.2",

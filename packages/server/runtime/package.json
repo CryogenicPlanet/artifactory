@@ -1,0 +1,19 @@
+{
+	"name": "comms-runtime",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@effect/platform-bun": "4.0.0-rc.113",
+		"@effect/sql-sqlite-bun": "4.0.0-rc.113",
+		"@tailwindcss/vite": "4.3.3",
+		"@vitejs/plugin-react": "5.2.0",
+		"effect": "4.0.0-rc.113",
+		"highlight.js": "11.12.0",
+		"marked": "18.0.12",
+		"react": "19.3.0",
+		"react-dom": "19.3.0",
+		"tailwindcss": "4.3.3",
+		"vite": "8.2.2"
+	}
+}

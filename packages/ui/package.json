@@ -6,14 +6,15 @@
 	"scripts": {
 		"check": "tsc --noEmit",
 		"test": "vitest run --passWithNoTests --root ../.. --dir packages/ui/test",
-		"dev": "bun dev.ts",
+		"dev": "bun ../server/stage-runtime.ts && bun dev.ts",
 		"build": "vite build",
-		"start": "bun dev.ts"
+		"start": "bun ../server/stage-runtime.ts && bun dev.ts"
 	},
 	"dependencies": {
 		"@comms/server": "workspace:*",
 		"@effect/platform-bun": "4.0.0-rc.113",
 		"effect": "4.0.0-rc.113",
+		"marked": "18.0.12",
 		"react": "19.3.0",
 		"react-dom": "19.3.0"
 	},

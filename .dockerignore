@@ -1,0 +1,27 @@
+# Send only build inputs: never local databases, credentials, git or dependencies.
+*
+!Dockerfile
+!package.json
+!bun.lock
+!tsconfig.json
+!tsconfig.base.json
+!packages/
+!packages/boot/
+!packages/server/
+!packages/ui/
+!packages/*/package.json
+!packages/server/stage-migrations.ts
+!packages/*/tsconfig.json
+!packages/*/src/
+!packages/*/src/**
+!packages/server/pages/
+!packages/server/pages/**
+!packages/server/stage-runtime.ts
+!packages/server/runtime/
+!packages/server/runtime/**
+!packages/ui/index.html
+!packages/ui/vite.config.ts
+**/.env
+**/.env.*
+**/node_modules
+**/.DS_Store

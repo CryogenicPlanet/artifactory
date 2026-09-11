@@ -1,0 +1,38 @@
+.profile-summary {
+	display: flex;
+	gap: 14px;
+	align-items: center;
+	margin-bottom: 24px;
+}
+.profile-summary p {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-size: 14px;
+	line-height: 1.7;
+	min-width: 0;
+}
+.profile-summary .avatar {
+	width: 42px;
+	height: 42px;
+	font-size: 20px;
+	overflow: hidden;
+}
+.profile-editor h2 {
+	font-size: 15px;
+	margin: 0 0 6px;
+}
+.profile-editor textarea {
+	min-height: 90px;
+}
+.profile-fields {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 14px;
+}
+.profile-instances {
+	margin-top: 32px;
+}
+.profile-instances strong {
+	font-size: 13px;
+	overflow-wrap: anywhere;
+}
