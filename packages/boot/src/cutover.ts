@@ -1,3 +1,4 @@
+import { seedSource } from "./seed-source.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
 import { Cause, Clock, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -100,267 +101,321 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 		yield* sql`DELETE FROM cutover WHERE singleton=1`;
 		yield* Ref.set(ready, true);
 	});
-	const reload = (
+	const performReload = (
 		owner: Ownership,
 		options: {
 			readonly release?: boolean;
 			readonly check?: boolean;
 			readonly undo?: UndoSelection;
+			readonly trustedSource?: { readonly directory: string; readonly agent: string };
 		} = {},
 	) =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				if (!(yield* Ref.get(ready)) || (yield* recoveryIntents(sql)).count > 0)
+					return yield* new ChildError({ code: "cutover_recovery_required" });
+				yield* supervisor.assertClosure;
+				const current = yield* Ref.get(supervisor.current);
+				yield* retention.prune(yield* headroom.sample, 0, current ? [current.generation.n] : []);
+				yield* headroom.check();
+				const proposal = yield* options.trustedSource
+					? sources.prepareTrustedTree(owner, options.trustedSource.directory, options.trustedSource.agent)
+					: options.undo === undefined
+						? sources.prepare(owner)
+						: options.undo.generation !== undefined
+							? sources.prepareGeneration(owner, options.undo)
+							: sources.prepareUndo(owner, options.undo);
+				if (!options.check) {
+					const started = yield* Clock.monotonicTimeNanos;
+					yield* Effect.addFinalizer(() =>
+						Clock.monotonicTimeNanos.pipe(
+							Effect.flatMap((ended) => supervisor.child.metrics.swap(Number(ended - started) / 1_000_000_000)),
+						),
+					);
+				}
+				let candidate: ActiveChild | null = null;
+				let generation: Generation | null = null;
+
+				const prior = yield* Ref.get(supervisor.current);
+				let priorClosed = false;
+				const closePrior = Effect.gen(function* () {
+					if (prior && !priorClosed) {
+						yield* stop(prior);
+						yield* generations.retired(prior.generation.n);
+						priorClosed = true;
+					}
+				});
+				const perform = Effect.gen(function* () {
+					const materialized = yield* sources.materialize(proposal);
+					generation = yield* generations.reserve(optionsSource.entryFile);
+					const directory = path.join(optionsSource.dataDirectory, "gen");
+					yield* fs.makeDirectory(directory, { recursive: true });
+					const snapshots = yield* Snapshots.pipe(
+						Effect.provide(
+							snapshotsLayer({ sourceDirectory: path.join(materialized, "app"), generationsDirectory: directory }),
+						),
+					);
+					const snapshot = yield* snapshots.create(generation.n);
+					yield* preparation.prepare(snapshot.directory, snapshot.directory);
+					yield* generations.setSnapshot(generation.n, snapshot.directory);
+					generation = { ...generation, snapshot_dir: snapshot.directory };
+					if (!(yield* fs.exists(recovery.filename))) yield* recovery.prepare(yield* freshEpoch);
+					const clone = path.join(materialized, "rehearsal.db");
+					yield* backup.clone(clone);
+					const epoch = yield* freshEpoch;
+					yield* backup.prepareClone(clone, epoch);
+					// Read after cloning: the boot allocator includes pruned events and outstanding reservations.
+					const sequence = (yield* events.state).next;
+					const rehearsed = yield* supervisor
+						.launch(generation, clone, "rehearsal", sequence, epoch)
+						.pipe(Effect.provideContext(context));
+					yield* rehearsed.process.health.pipe(
+						Effect.timeout("30 seconds"),
+						Effect.catchCause((cause) => {
+							const reason = cause.reasons[0];
+							if (cause.reasons.length !== 1 || reason?._tag !== "Fail" || !Schema.is(ChildError)(reason.error))
+								return Effect.failCause(cause);
+							const error = reason.error;
+							return Effect.gen(function* () {
+								return yield* new ChildError({
+									code:
+										(options.undo?.generation !== undefined || options.trustedSource !== undefined) &&
+										Schema.is(ChildError)(error) &&
+										error.code === "health_failed"
+											? "incompatible_schema"
+											: error.code,
+									stderr: yield* Ref.get(rehearsed.process.stderr),
+								});
+							});
+						}),
+						Effect.ensuring(stop(rehearsed).pipe(Effect.orDie)),
+					);
+					yield* generations.rehearsed(generation.n);
+					if (options.check) {
+						yield* sources.discard(proposal);
+						return { generation: generation.n, status: "checked" };
+					}
+					yield* sources.publish(proposal);
+					candidate = yield* supervisor
+						.launch(generation, recovery.filename, "candidate")
+						.pipe(Effect.provideContext(context));
+					yield* supervisor.child.traffic.freeze;
+					const frozenAt = (yield* DateTime.nowAsDate).getTime();
+					let priorFrozen = false;
+					yield* Effect.gen(function* () {
+						// A slow admitted mutation must finish before an unacknowledged freeze
+						// may retire the old owner. The control deadline alone is not a drain.
+						if (prior) {
+							const frozen = yield* prior.process.control("frozen").pipe(Effect.result);
+							priorFrozen = frozen._tag === "Success";
+						}
+						yield* supervisor.child.traffic.drained;
+					}).pipe(
+						Effect.timeoutOrElse({
+							duration: "10 seconds",
+							orElse: () => Effect.fail(new FreezeTimeout({ code: "freeze_timeout" })),
+						}),
+					);
+					yield* Effect.gen(function* () {
+						if (prior && !priorFrozen) yield* closePrior;
+						yield* recovery.prepare(prior?.attempt.epoch ?? (yield* freshEpoch));
+						const id = yield* crypto.randomUUIDv4;
+						const directory = path.join(optionsSource.dataDirectory, "backups");
+						yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
+						const saved = path.join(directory, `${id}.db`);
+						const fence = (yield* events.state).published_through;
+						yield* retention.prune(yield* headroom.sample, yield* backup.estimatedBytes, [
+							...(prior ? [prior.generation.n] : []),
+							...(generation ? [generation.n] : []),
+						]);
+						const bytes = Number(yield* backup.clone(saved));
+						yield* sql.withTransaction(
+							Effect.gen(function* () {
+								yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation) VALUES(${id},${saved},'pre-flip',${bytes},${frozenAt},${fence},${generation?.n ?? null})`;
+								yield* sql`UPDATE generations SET backup_id=${id} WHERE n=${generation?.n ?? 0}`;
+								yield* events.writeBoot({
+									at: frozenAt,
+									type: "backup.taken",
+									level: "info",
+									actor: "boot",
+									instance: null,
+									generation: generation?.n ?? 0,
+									request_id: null,
+									topic: null,
+									message_id: null,
+									payload: { id, reason: "pre-flip", bytes, published_through: fence },
+								});
+								yield* sql`INSERT INTO cutover VALUES(1,${generation?.n ?? 0},${prior?.generation.n ?? null},${id},${owner.id},${owner.family},'working',${candidate?.attempt.epoch ?? null})`;
+							}),
+						);
+					}).pipe(Effect.timeout("30 seconds"));
+					yield* Effect.gen(function* () {
+						if (!candidate || !generation) return yield* Effect.die("Missing candidate");
+						yield* recovery.prepare(candidate.attempt.epoch);
+						yield* supervisor.recordAttempt(candidate, "starting");
+						yield* owners.opened(candidate.id);
+						yield* candidate.process.control("go");
+						yield* candidate.process.health;
+					}).pipe(Effect.timeout("5 seconds"));
+					yield* sql.withTransaction(
+						Effect.gen(function* () {
+							if (!generation) return yield* Effect.die("Missing candidate");
+							yield* generations.healthy(generation.n);
+							yield* sql`UPDATE cutover SET phase='accepted' WHERE singleton=1`;
+						}),
+					);
+
+					if (!candidate) return yield* Effect.die("Missing candidate");
+					yield* activate(candidate, "accepted");
+					yield* supervisor.child.traffic.release;
+					const freezeMs = (yield* DateTime.nowAsDate).getTime() - frozenAt;
+					if (!candidate) return yield* Effect.die("Missing candidate");
+					if (prior && !priorClosed) {
+						yield* prior.process.control("draining").pipe(Effect.ignore);
+						yield* closePrior;
+					}
+					yield* activate(candidate, "live");
+					yield* finish(owner, true, options.release ?? false);
+					yield* sql`DELETE FROM cutover WHERE singleton=1`;
+					return {
+						generation: candidate.generation.n,
+						status: "live",
+						freeze_ms: freezeMs,
+					};
+				});
+				const result = yield* perform.pipe(Effect.interruptible, Effect.exit);
+				const failedGeneration = ((): Generation | null => generation)();
+				if (result._tag === "Success") {
+					yield* refresh;
+					return { ...result.value, lock: (yield* lock.inspect).value };
+				}
+				const failure = Cause.findError(result.cause);
+				const incompatibleSeed =
+					options.trustedSource !== undefined &&
+					result.cause.reasons.length === 1 &&
+					failure._tag === "Success" &&
+					Schema.is(ChildError)(failure.success) &&
+					failure.success.code === "incompatible_schema";
+				const error =
+					Cause.pretty(result.cause).replace(/[a-f0-9]{64}/g, "[redacted]") +
+					(incompatibleSeed ? "; image seed is incompatible with current data; apply a forward source fix" : "");
+				const persisted = yield* read;
+				const failedCandidate = ((): ActiveChild | null => candidate)();
+				const stderr = (
+					failure._tag === "Success" && Schema.is(ChildError)(failure.success)
+						? (failure.success.stderr ?? "")
+						: failedCandidate
+							? yield* Ref.get(failedCandidate.process.stderr)
+							: ""
+				).replace(/[a-f0-9]{64}/g, "[redacted]");
+				const acceptedGeneration =
+					persisted?.phase === "accepted"
+						? persisted.candidate
+						: (yield* generations.list).find((item) => item.n === failedGeneration?.n && item.good === 1)?.n;
+				if (acceptedGeneration !== undefined) {
+					// Accepted data is never restored: public acknowledged writes may already exist.
+					yield* supervisor.child.traffic.freeze;
+					yield* Ref.set(supervisor.current, null);
+					yield* Ref.set(supervisor.child.traffic.route, null);
+					if (failedCandidate) yield* stop(failedCandidate);
+					yield* closePrior;
+					const selected = (yield* generations.list).find((item) => item.n === acceptedGeneration);
+					if (!selected) return yield* new ChildError({ code: "accepted_snapshot_missing" });
+					yield* start(selected);
+					yield* finish(owner, true, options.release ?? false);
+					yield* sql`DELETE FROM cutover WHERE singleton=1`;
+					yield* supervisor.child.traffic.release;
+					return { generation: selected.n, status: "live", lock: (yield* lock.inspect).value };
+				}
+				if (failedCandidate) yield* stop(failedCandidate);
+				if (persisted) {
+					yield* Ref.set(supervisor.current, null);
+					yield* Ref.set(supervisor.child.traffic.route, null);
+					yield* closePrior;
+					yield* restore(persisted);
+					// Restarted live jobs may publish immediately; recovery must never restore over them.
+					yield* sql`DELETE FROM cutover WHERE singleton=1`;
+					if (prior) yield* start(prior.generation);
+				} else if (prior) {
+					const restart = Effect.gen(function* () {
+						yield* Ref.set(supervisor.current, null);
+						yield* Ref.set(supervisor.child.traffic.route, null);
+						yield* closePrior;
+						// No backup checkpoint exists: reconcile the authoritative store.
+						yield* start(prior.generation);
+					});
+					yield* priorClosed ? restart : prior.process.control("live").pipe(Effect.catch(() => restart));
+				}
+				// Source publication may have committed even when its completion response failed.
+				yield* sources.recover;
+				yield* sources.discard(proposal);
+				yield* finish(owner, false);
+				yield* supervisor.child.traffic.release;
+				if (failedGeneration) yield* generations.failed(failedGeneration.n, error, stderr);
+				yield* refresh;
+				if (
+					result.cause.reasons.length === 1 &&
+					failure._tag === "Success" &&
+					(Schema.is(FreezeTimeout)(failure.success) ||
+						Schema.is(StorageRejected)(failure.success) ||
+						Schema.is(ArtifactRetentionRejected)(failure.success))
+				)
+					return yield* failure.success;
+				return {
+					generation: failedGeneration?.n ?? null,
+					status: "failed",
+					error,
+					stderr,
+					lock: (yield* lock.inspect).value,
+				};
+			}),
+		).pipe(Effect.uninterruptible);
+	const optionsSource = options;
+	const reset = <E, R>(authorize: (digest: string) => Effect.Effect<void, E, R>, agent: string) =>
 		supervisor.operationGate.withPermit(
 			Effect.scoped(
 				Effect.gen(function* () {
 					if (!(yield* Ref.get(ready)) || (yield* recoveryIntents(sql)).count > 0)
 						return yield* new ChildError({ code: "cutover_recovery_required" });
 					yield* supervisor.assertClosure;
-					const current = yield* Ref.get(supervisor.current);
-					yield* retention.prune(yield* headroom.sample, 0, current ? [current.generation.n] : []);
-					yield* headroom.check();
-					const proposal = yield* options.undo === undefined
-						? sources.prepare(owner)
-						: options.undo.generation !== undefined
-							? sources.prepareGeneration(owner, options.undo)
-							: sources.prepareUndo(owner, options.undo);
-					if (!options.check) {
-						const started = yield* Clock.monotonicTimeNanos;
-						yield* Effect.addFinalizer(() =>
-							Clock.monotonicTimeNanos.pipe(
-								Effect.flatMap((ended) => supervisor.child.metrics.swap(Number(ended - started) / 1_000_000_000)),
-							),
-						);
-					}
-					let candidate: ActiveChild | null = null;
-					let generation: Generation | null = null;
-
-					const prior = yield* Ref.get(supervisor.current);
-					let priorClosed = false;
-					const closePrior = Effect.gen(function* () {
-						if (prior && !priorClosed) {
-							yield* stop(prior);
-							yield* generations.retired(prior.generation.n);
-							priorClosed = true;
-						}
-					});
-					const perform = Effect.gen(function* () {
-						const materialized = yield* sources.materialize(proposal);
-						generation = yield* generations.reserve(optionsSource.entryFile);
-						const directory = path.join(optionsSource.dataDirectory, "gen");
-						yield* fs.makeDirectory(directory, { recursive: true });
-						const snapshots = yield* Snapshots.pipe(
-							Effect.provide(
-								snapshotsLayer({ sourceDirectory: path.join(materialized, "app"), generationsDirectory: directory }),
-							),
-						);
-						const snapshot = yield* snapshots.create(generation.n);
-						yield* preparation.prepare(snapshot.directory, snapshot.directory);
-						yield* generations.setSnapshot(generation.n, snapshot.directory);
-						generation = { ...generation, snapshot_dir: snapshot.directory };
-						if (!(yield* fs.exists(recovery.filename))) yield* recovery.prepare(yield* freshEpoch);
-						const clone = path.join(materialized, "rehearsal.db");
-						yield* backup.clone(clone);
-						const epoch = yield* freshEpoch;
-						yield* backup.prepareClone(clone, epoch);
-						// Read after cloning: the boot allocator includes pruned events and outstanding reservations.
-						const sequence = (yield* events.state).next;
-						const rehearsed = yield* supervisor
-							.launch(generation, clone, "rehearsal", sequence, epoch)
-							.pipe(Effect.provideContext(context));
-						yield* rehearsed.process.health.pipe(
-							Effect.timeout("30 seconds"),
-							Effect.catchCause((cause) => {
-								const reason = cause.reasons[0];
-								if (cause.reasons.length !== 1 || reason?._tag !== "Fail" || !Schema.is(ChildError)(reason.error))
-									return Effect.failCause(cause);
-								const error = reason.error;
-								return Effect.gen(function* () {
-									return yield* new ChildError({
-										code:
-											options.undo?.generation !== undefined &&
-											Schema.is(ChildError)(error) &&
-											error.code === "health_failed"
-												? "incompatible_schema"
-												: error.code,
-										stderr: yield* Ref.get(rehearsed.process.stderr),
-									});
-								});
-							}),
-							Effect.ensuring(stop(rehearsed).pipe(Effect.orDie)),
-						);
-						yield* generations.rehearsed(generation.n);
-						if (options.check) {
-							yield* sources.discard(proposal);
-							return { generation: generation.n, status: "checked" };
-						}
-						yield* sources.publish(proposal);
-						candidate = yield* supervisor
-							.launch(generation, recovery.filename, "candidate")
-							.pipe(Effect.provideContext(context));
-						yield* supervisor.child.traffic.freeze;
-						const frozenAt = (yield* DateTime.nowAsDate).getTime();
-						let priorFrozen = false;
-						yield* Effect.gen(function* () {
-							// A slow admitted mutation must finish before an unacknowledged freeze
-							// may retire the old owner. The control deadline alone is not a drain.
-							if (prior) {
-								const frozen = yield* prior.process.control("frozen").pipe(Effect.result);
-								priorFrozen = frozen._tag === "Success";
-							}
-							yield* supervisor.child.traffic.drained;
-						}).pipe(
-							Effect.timeoutOrElse({
-								duration: "10 seconds",
-								orElse: () => Effect.fail(new FreezeTimeout({ code: "freeze_timeout" })),
-							}),
-						);
-						yield* Effect.gen(function* () {
-							if (prior && !priorFrozen) yield* closePrior;
-							yield* recovery.prepare(prior?.attempt.epoch ?? (yield* freshEpoch));
-							const id = yield* crypto.randomUUIDv4;
-							const directory = path.join(optionsSource.dataDirectory, "backups");
-							yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
-							const saved = path.join(directory, `${id}.db`);
-							const fence = (yield* events.state).published_through;
-							yield* retention.prune(yield* headroom.sample, yield* backup.estimatedBytes, [
-								...(prior ? [prior.generation.n] : []),
-								...(generation ? [generation.n] : []),
-							]);
-							const bytes = Number(yield* backup.clone(saved));
-							yield* sql.withTransaction(
-								Effect.gen(function* () {
-									yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation) VALUES(${id},${saved},'pre-flip',${bytes},${frozenAt},${fence},${generation?.n ?? null})`;
-									yield* sql`UPDATE generations SET backup_id=${id} WHERE n=${generation?.n ?? 0}`;
-									yield* events.writeBoot({
-										at: frozenAt,
-										type: "backup.taken",
-										level: "info",
-										actor: "boot",
-										instance: null,
-										generation: generation?.n ?? 0,
-										request_id: null,
-										topic: null,
-										message_id: null,
-										payload: { id, reason: "pre-flip", bytes, published_through: fence },
-									});
-									yield* sql`INSERT INTO cutover VALUES(1,${generation?.n ?? 0},${prior?.generation.n ?? null},${id},${owner.id},${owner.family},'working',${candidate?.attempt.epoch ?? null})`;
-								}),
-							);
-						}).pipe(Effect.timeout("30 seconds"));
-						yield* Effect.gen(function* () {
-							if (!candidate || !generation) return yield* Effect.die("Missing candidate");
-							yield* recovery.prepare(candidate.attempt.epoch);
-							yield* supervisor.recordAttempt(candidate, "starting");
-							yield* owners.opened(candidate.id);
-							yield* candidate.process.control("go");
-							yield* candidate.process.health;
-						}).pipe(Effect.timeout("5 seconds"));
-						yield* sql.withTransaction(
+					const seed = yield* seedSource(optionsSource);
+					yield* authorize(seed.digest);
+					const acquired = yield* sql.withTransaction(
+						Effect.gen(function* () {
+							const current = (yield* lock.inspect).value;
+							const held =
+								current ??
+								(yield* lock.acquire(`boot:reset:${yield* crypto.randomUUIDv4}`, "boot", {
+									note: "Reset source to seed",
+								})).value;
+							const owner = { id: held.id, family: held.holder_family };
+							yield* lock.pin(owner, current ? 1 : 2);
+							return { owner, borrowed: current !== null };
+						}),
+					);
+					return yield* performReload(acquired.owner, {
+						trustedSource: { directory: seed.directory, agent },
+						release: !acquired.borrowed,
+					}).pipe(
+						Effect.ensuring(
 							Effect.gen(function* () {
-								if (!generation) return yield* Effect.die("Missing candidate");
-								yield* generations.healthy(generation.n);
-								yield* sql`UPDATE cutover SET phase='accepted' WHERE singleton=1`;
-							}),
-						);
-
-						if (!candidate) return yield* Effect.die("Missing candidate");
-						yield* activate(candidate, "accepted");
-						yield* supervisor.child.traffic.release;
-						const freezeMs = (yield* DateTime.nowAsDate).getTime() - frozenAt;
-						if (!candidate) return yield* Effect.die("Missing candidate");
-						if (prior && !priorClosed) {
-							yield* prior.process.control("draining").pipe(Effect.ignore);
-							yield* closePrior;
-						}
-						yield* activate(candidate, "live");
-						yield* finish(owner, true, options.release ?? false);
-						yield* sql`DELETE FROM cutover WHERE singleton=1`;
-						return {
-							generation: candidate.generation.n,
-							status: "live",
-							freeze_ms: freezeMs,
-						};
-					});
-					const result = yield* perform.pipe(Effect.interruptible, Effect.exit);
-					const failedGeneration = ((): Generation | null => generation)();
-					if (result._tag === "Success") {
-						yield* refresh;
-						return { ...result.value, lock: (yield* lock.inspect).value };
-					}
-					const error = Cause.pretty(result.cause).replace(/[a-f0-9]{64}/g, "[redacted]");
-					const persisted = yield* read;
-					const failedCandidate = ((): ActiveChild | null => candidate)();
-					const failure = Cause.findError(result.cause);
-					const stderr = (
-						failure._tag === "Success" && Schema.is(ChildError)(failure.success)
-							? (failure.success.stderr ?? "")
-							: failedCandidate
-								? yield* Ref.get(failedCandidate.process.stderr)
-								: ""
-					).replace(/[a-f0-9]{64}/g, "[redacted]");
-					const acceptedGeneration =
-						persisted?.phase === "accepted"
-							? persisted.candidate
-							: (yield* generations.list).find((item) => item.n === failedGeneration?.n && item.good === 1)?.n;
-					if (acceptedGeneration !== undefined) {
-						// Accepted data is never restored: public acknowledged writes may already exist.
-						yield* supervisor.child.traffic.freeze;
-						yield* Ref.set(supervisor.current, null);
-						yield* Ref.set(supervisor.child.traffic.route, null);
-						if (failedCandidate) yield* stop(failedCandidate);
-						yield* closePrior;
-						const selected = (yield* generations.list).find((item) => item.n === acceptedGeneration);
-						if (!selected) return yield* new ChildError({ code: "accepted_snapshot_missing" });
-						yield* start(selected);
-						yield* finish(owner, true, options.release ?? false);
-						yield* sql`DELETE FROM cutover WHERE singleton=1`;
-						yield* supervisor.child.traffic.release;
-						return { generation: selected.n, status: "live", lock: (yield* lock.inspect).value };
-					}
-					if (failedCandidate) yield* stop(failedCandidate);
-					if (persisted) {
-						yield* Ref.set(supervisor.current, null);
-						yield* Ref.set(supervisor.child.traffic.route, null);
-						yield* closePrior;
-						yield* restore(persisted);
-						// Restarted live jobs may publish immediately; recovery must never restore over them.
-						yield* sql`DELETE FROM cutover WHERE singleton=1`;
-						if (prior) yield* start(prior.generation);
-					} else if (prior) {
-						const restart = Effect.gen(function* () {
-							yield* Ref.set(supervisor.current, null);
-							yield* Ref.set(supervisor.child.traffic.route, null);
-							yield* closePrior;
-							// No backup checkpoint exists: reconcile the authoritative store.
-							yield* start(prior.generation);
-						});
-						yield* priorClosed ? restart : prior.process.control("live").pipe(Effect.catch(() => restart));
-					}
-					// Source publication may have committed even when its completion response failed.
-					yield* sources.recover;
-					yield* sources.discard(proposal);
-					yield* finish(owner, false);
-					yield* supervisor.child.traffic.release;
-					if (failedGeneration) yield* generations.failed(failedGeneration.n, error, stderr);
-					yield* refresh;
-					if (
-						result.cause.reasons.length === 1 &&
-						failure._tag === "Success" &&
-						(Schema.is(FreezeTimeout)(failure.success) ||
-							Schema.is(StorageRejected)(failure.success) ||
-							Schema.is(ArtifactRetentionRejected)(failure.success))
-					)
-						return yield* failure.success;
-					return {
-						generation: failedGeneration?.n ?? null,
-						status: "failed",
-						error,
-						stderr,
-						lock: (yield* lock.inspect).value,
-					};
+								// Retain a pin if recovery owns it; startup resolves its journal before lock cleanup.
+								if ((yield* recoveryIntents(sql)).count > 0) return;
+								const current = (yield* lock.inspect).value;
+								if (current?.id !== acquired.owner.id) return;
+								if (current.cutover_in_flight) yield* lock.finish(acquired.owner, { succeeded: false });
+							}).pipe(Effect.orDie),
+						),
+					);
 				}),
 			).pipe(Effect.uninterruptible),
 		);
-	const optionsSource = options;
-	return { reload, recover };
+	return {
+		reload: (owner: Ownership, reloadOptions?: Parameters<typeof performReload>[1]) =>
+			supervisor.operationGate.withPermit(performReload(owner, reloadOptions)),
+		reset,
+		seedDigest: Effect.scoped(seedSource(optionsSource).pipe(Effect.map((seed) => seed.digest))),
+		recover,
+	};
 });
 export type Cutover = Effect.Success<ReturnType<typeof cutover>>;

@@ -120,6 +120,7 @@ describe("typed source tree publication", () => {
 			"DROP TABLE topic_page_moves",
 			"DROP TABLE db_restore_requests",
 			"ALTER TABLE generations DROP COLUMN backup_id",
+			"ALTER TABLE edit_lock DROP COLUMN reset_pin",
 			"PRAGMA user_version=12",
 			"INSERT INTO source_batches VALUES ('legacy',NULL,'codex',1,'publishing')",
 			"INSERT INTO source_changes(batch,path,before,before_sha,before_mode,desired,desired_sha,desired_mode) VALUES ('legacy','app/new',NULL,NULL,NULL,X'6E6577','11507a0e2f5e69d5dfa40a62a1bd7b6ee57e6bcd85c67c9b8431b36fff21c437',416)",
@@ -131,7 +132,7 @@ describe("typed source tree publication", () => {
 		expect(await env.sql("SELECT previous_directory,directory FROM versions")).toEqual([
 			{ previous_directory: 0, directory: 0 },
 		]);
-		expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 15 }]);
+		expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 16 }]);
 	});
 
 	it.for(["file to directory", "directory to file"] as const)(

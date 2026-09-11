@@ -1,3 +1,4 @@
+import { SourceResetParams } from "./source-reset-schema.ts";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import { isHttpClientError } from "effect/unstable/http/HttpClientError";
 import { ChildError } from "./child-process.ts";
@@ -58,6 +59,7 @@ export const editRoute = (
 		const url = new URL(request.url, "http://localhost");
 		const route = url.pathname.replace(/^\/api\//, "/_boot/");
 		if (
+			route !== "/_boot/reset" &&
 			route !== "/_boot/lock" &&
 			route !== "/_boot/reload" &&
 			route !== "/_boot/revert" &&
@@ -76,6 +78,18 @@ export const editRoute = (
 					const current = yield* authenticate(auth, request);
 					return yield* operation.pipe(Effect.provideService(EditAuthority, current));
 				});
+			if (route === "/_boot/reset") {
+				if (request.method !== "POST") return errorResponse("method_invalid", 405);
+				if (url.pathname !== "/_boot/reset" || url.search) return errorResponse("unsupported_query", 400);
+				yield* body(SourceResetParams);
+				const session = yield* humanSession(auth, request);
+				const proof = yield* assertionProof(request);
+				return HttpServerResponse.jsonUnsafe(
+					yield* authoritative(
+						editing.cutover.reset((digest) => auth.authorizeSourceReset(digest, proof, session.id), identity.agent),
+					),
+				);
+			}
 			if (route === "/_boot/lock") {
 				if (request.method === "DELETE" && url.search === "?break=1") {
 					const input = yield* body(BreakLock);

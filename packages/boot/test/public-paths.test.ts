@@ -180,6 +180,7 @@ it("adopts an older boot store with an empty grant projection without guessing f
 	);
 	for (const column of columns) await app.sql(`ALTER TABLE events DROP COLUMN ${column.name}`);
 	await app.sql("ALTER TABLE generations DROP COLUMN backup_id");
+	await app.sql("ALTER TABLE edit_lock DROP COLUMN reset_pin");
 	for (const column of ["source_generation", "prior_generation", "source_batch"])
 		await app.sql(`ALTER TABLE db_restore_requests DROP COLUMN ${column}`);
 	await app.sql("PRAGMA user_version=13");

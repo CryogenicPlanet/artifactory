@@ -286,6 +286,7 @@ const run = Effect.gen(function* () {
 			yield* sql`ALTER TABLE source_changes DROP COLUMN desired_directory`;
 			yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;
 			yield* sql`ALTER TABLE versions DROP COLUMN directory`;
+			yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
 			yield* sql`PRAGMA user_version=7`;
 			yield* initializeBootSchema;
 			const after: unknown[] = [];
@@ -294,7 +295,7 @@ const run = Effect.gen(function* () {
 					yield* sql.unsafe(`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : "*"} FROM ${table}`),
 				);
 			assert.deepEqual(after, before);
-			assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 15 }]);
+			assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 16 }]);
 			yield* auth.refreshTokens(original.refresh);
 		}
 	});

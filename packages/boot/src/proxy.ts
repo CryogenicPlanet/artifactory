@@ -34,6 +34,7 @@ GET /_boot/db/backups  Human-only backup catalog.
 POST /_boot/db/backup  Capture a consistent app backup (human or fs scope).
 POST /_boot/db/restore  Human-only database restore with a fresh db.restore assertion.
 POST /_boot/restart {}  Human session and fresh boot.restart assertion; exits for the external supervisor to restart.
+POST /_boot/reset {}  Human-only source reset to image seed with a fresh app.reset assertion; data and pages stay current.
 GET /api/events?since=0&wait=60  Read or wait for published events.
 
 Source snapshots and restart recovery are active. Child crashes retry their snapshot three times,
@@ -134,7 +135,7 @@ export const proxy = Effect.gen(function* () {
 		if (authResponse) return authResponse;
 		const passkeyResponse = yield* passkeyManagementRoute(auth, authConfig);
 		if (passkeyResponse) return passkeyResponse;
-		const enrollmentResponse = yield* enrollmentRoute(auth, authConfig);
+		const enrollmentResponse = yield* enrollmentRoute(auth, authConfig, editing);
 		if (enrollmentResponse) return enrollmentResponse;
 		const backupResponse = yield* backupRoute(auth, backups, captures, authConfig);
 		if (backupResponse) return backupResponse;

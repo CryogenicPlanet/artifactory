@@ -180,6 +180,119 @@ describe("durable edit ownership and staging", () => {
 		}
 	});
 
+	it.for([true, false])("preserves borrowed staging after finalization with succeeded=%s", async (succeeded, test) => {
+		const env = await fixture(test);
+		const lock = await env.acquire({ ttl: 60 });
+		await env.call({ op: "stage", ...owner(lock), content: "unfinished editor bytes" });
+		await env.call({ op: "stage", ...owner(lock), path: "app/deleted.ts", content: null });
+		const before = await env.sql("SELECT * FROM staging ORDER BY path");
+		expect(await env.call({ op: "pin", ...owner(lock), resetPin: 1 })).toMatchObject({
+			value: { id: lock.id, cutover_in_flight: 1, reset_pin: 1 },
+		});
+		await env.sql("UPDATE edit_lock SET expires = 0");
+		expect(await env.call({ op: "finish", ...owner(lock), succeeded, release: true })).toMatchObject({
+			value: { id: lock.id, cutover_in_flight: 0, reset_pin: 0 },
+		});
+		expect(await env.sql("SELECT * FROM staging ORDER BY path")).toEqual(before);
+		const resumed = Schema.decodeUnknownSync(Schema.Struct({ value: Lock }))(await env.call({ op: "inspect" })).value;
+		expect(resumed.expires).toBeGreaterThan(Date.now());
+		// Borrowing is one operation: the editor's next ordinary successful publication consumes its own overlay.
+		await env.call({ op: "pin", ...owner(lock) });
+		await env.call({ op: "finish", ...owner(lock), succeeded: true });
+		expect(await env.sql("SELECT * FROM staging")).toEqual([]);
+	});
+
+	it("recovers a borrowed pin across processes while retaining exact staging and renewing expired ownership", async (test) => {
+		const env = await fixture(test);
+		const lock = await env.acquire({ ttl: 60 });
+		await env.call({ op: "stage", ...owner(lock), content: "unpublished replacement" });
+		await env.call({ op: "stage", ...owner(lock), path: "app/deleted.ts", content: null });
+		const before = await env.sql("SELECT * FROM staging ORDER BY path");
+		await env.call({ op: "pin", ...owner(lock), resetPin: 1 });
+		await env.sql("UPDATE edit_lock SET expires = 0");
+		// Every fixture invocation is a new process: neither a closure nor a service instance retains the borrowing flag.
+		expect(await env.call({ op: "inspect" })).toMatchObject({
+			value: { id: lock.id, cutover_in_flight: 1, reset_pin: 1 },
+		});
+		expect(await env.call({ op: "recover" })).toMatchObject([{ type: "interrupted", staged: [] }]);
+		expect(await env.sql("SELECT * FROM staging ORDER BY path")).toEqual(before);
+		const resumed = Schema.decodeUnknownSync(Schema.Struct({ value: Lock }))(await env.call({ op: "inspect" })).value;
+		expect(resumed).toMatchObject({ id: lock.id, cutover_in_flight: 0, reset_pin: 0 });
+		expect(resumed.expires).toBeGreaterThan(Date.now());
+		expect(await env.call({ op: "recover" })).toEqual([]);
+		expect(await env.sql("SELECT * FROM staging ORDER BY path")).toEqual(before);
+		expect(await env.call({ op: "stage", ...owner(lock), content: "editor resumed" })).toMatchObject({
+			value: { id: lock.id },
+		});
+	});
+
+	it.for([
+		{ action: "break", completion: "finish" },
+		{ action: "revoke", completion: "finish" },
+		{ action: "break", completion: "recover" },
+		{ action: "revoke", completion: "recover" },
+	])("honors a pending $action on a borrowed pin during $completion", async ({ action, completion }, test) => {
+		const env = await fixture(test);
+		const lock = await env.acquire();
+		await env.call({ op: "stage", ...owner(lock) });
+		await env.call({ op: "pin", ...owner(lock), resetPin: 1 });
+		expect(await env.call({ op: action, ...owner(lock) })).toMatchObject({
+			value: { cutover_in_flight: 1, reset_pin: 1 },
+			transitions: [{ deferred: true }],
+		});
+		expect(await env.call({ op: "acquire", family: "other" })).toMatchObject({ error: "cutover_in_flight" });
+		const completed = await env.call({ op: completion, ...owner(lock), succeeded: true });
+		const transition = { type: action === "break" ? "broken" : "revoked", staged: ["app/main.ts"] };
+		expect(completed).toMatchObject(
+			completion === "finish" ? { value: null, transitions: [transition] } : [transition],
+		);
+		expect(await env.sql("SELECT * FROM staging")).toEqual([]);
+		expect(await env.call({ op: "inspect" })).toMatchObject({ value: null });
+	});
+
+	it.for([true, false])(
+		"releases boot-created reset ownership after finalization with succeeded=%s",
+		async (succeeded, test) => {
+			const env = await fixture(test);
+			const lock = await env.acquire({ family: "reset-human" });
+			await env.call({ op: "pin", ...owner(lock), resetPin: 2 });
+			await env.sql("UPDATE edit_lock SET expires = 0");
+			expect(await env.call({ op: "finish", ...owner(lock), succeeded })).toMatchObject({
+				value: null,
+				transitions: [{ type: "released", staged: [] }],
+			});
+			expect(await env.call({ op: "inspect" })).toMatchObject({ value: null });
+			expect((await env.acquire({ family: "next-editor" })).holder_family).toBe("next-editor");
+		},
+	);
+
+	it("drops interrupted boot-created reset ownership on restart", async (test) => {
+		const env = await fixture(test);
+		const lock = await env.acquire({ family: "reset-human" });
+		await env.call({ op: "pin", ...owner(lock), resetPin: 2 });
+		expect(await env.call({ op: "recover" })).toMatchObject([{ type: "interrupted", staged: [] }]);
+		expect(await env.call({ op: "inspect" })).toMatchObject({ value: null });
+		expect((await env.acquire({ family: "next-editor" })).holder_family).toBe("next-editor");
+	});
+
+	it("migrates an ordinary v15 pin without granting borrowed staging preservation", async (test) => {
+		const env = await fixture(test);
+		const lock = await env.acquire();
+		await env.call({ op: "stage", ...owner(lock), content: "legacy pending bytes" });
+		await env.call({ op: "pin", ...owner(lock) });
+		await env.sql("ALTER TABLE edit_lock DROP COLUMN reset_pin");
+		await env.sql("PRAGMA user_version=15");
+		const before = await env.sql("SELECT * FROM staging");
+		await env.call({ op: "init" });
+		expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 16 }]);
+		expect(await env.call({ op: "inspect" })).toMatchObject({
+			value: { id: lock.id, cutover_in_flight: 1, reset_pin: 0 },
+		});
+		expect(await env.sql("SELECT * FROM staging")).toEqual(before);
+		expect(await env.call({ op: "recover" })).toMatchObject([{ type: "interrupted", staged: ["app/main.ts"] }]);
+		expect(await env.sql("SELECT * FROM staging")).toEqual([]);
+	});
+
 	it("rolls back interrupted SQLite staging and rejects noncanonical paths", async (test) => {
 		const env = await fixture(test);
 		const lock = await env.acquire();

@@ -31,10 +31,10 @@ export const initializeBootSchema = Effect.gen(function* () {
 	);
 	const version = versions[0]?.user_version;
 	if (version === undefined) return yield* Effect.die("Missing boot schema version");
-	if (version > 15) return yield* new BootSchemaTooNew({ found: version, supported: 15 });
+	if (version > 16) return yield* new BootSchemaTooNew({ found: version, supported: 16 });
 	yield* sql`PRAGMA journal_mode = WAL`;
 	yield* sql`PRAGMA synchronous = FULL`;
-	if (version === 15) return;
+	if (version === 16) return;
 	yield* sql.withTransaction(
 		Effect.gen(function* () {
 			if (version === 0)
@@ -95,7 +95,9 @@ export const initializeBootSchema = Effect.gen(function* () {
 				yield* sql`ALTER TABLE db_restore_requests ADD COLUMN source_batch TEXT`;
 				yield* sql`UPDATE db_restore_requests SET prior_generation=generation`;
 			}
-			yield* sql`PRAGMA user_version = 15`;
+			if (version < 16)
+				yield* sql`ALTER TABLE edit_lock ADD COLUMN reset_pin INTEGER NOT NULL DEFAULT 0 CHECK(reset_pin IN (0,1,2))`;
+			yield* sql`PRAGMA user_version = 16`;
 		}),
 	);
 });

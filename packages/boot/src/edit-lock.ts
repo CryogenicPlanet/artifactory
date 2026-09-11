@@ -12,6 +12,8 @@ export const Lock = Schema.Struct({
 	ttl_seconds: Schema.Int,
 	note: Schema.String,
 	cutover_in_flight: Schema.Literals([0, 1]),
+	// 0: ordinary editor; 1: borrowed reset pin; 2: boot-owned reset pin.
+	reset_pin: Schema.Literals([0, 1, 2]),
 	pending_release: Schema.NullOr(Schema.Literals(["broken", "revoked"])),
 });
 export type Lock = typeof Lock.Type;
@@ -256,6 +258,7 @@ const make = Effect.gen(function* () {
 						note: options.note ?? lock?.note ?? "",
 						cutover_in_flight: 0,
 						pending_release: null,
+						reset_pin: 0,
 					};
 					yield* sql`INSERT INTO edit_lock ${sql.insert({ singleton: 1, ...value })} ON CONFLICT(singleton) DO UPDATE SET ${sql.update(value)}`;
 					transitions.push({
@@ -295,13 +298,13 @@ const make = Effect.gen(function* () {
 		// Trusted caller only: authentication/assertion verification belongs before these store operations.
 		breakLock: (id: string, actor?: Actor) => releaseTrusted("broken", undefined, id, actor),
 		revokeFamily: (family: string) => releaseTrusted("revoked", family),
-		pin: (owner: Ownership) =>
+		pin: (owner: Ownership, resetPin: 0 | 1 | 2 = 0) =>
 			withLockTransaction<Lock>((lock, _now, transitions) =>
 				Effect.gen(function* () {
 					const error = ownerError(lock, owner, transitions);
 					if (error || !lock) return error ?? reject("lock_required", lock, transitions);
 					if (lock.cutover_in_flight) return reject("cutover_in_flight", lock, transitions);
-					yield* sql`UPDATE edit_lock SET cutover_in_flight = 1 WHERE id = ${lock.id}`;
+					yield* sql`UPDATE edit_lock SET cutover_in_flight = 1, reset_pin = ${resetPin} WHERE id = ${lock.id}`;
 					transitions.push({
 						type: "pinned",
 						lock_id: lock.id,
@@ -310,7 +313,7 @@ const make = Effect.gen(function* () {
 						staged: [],
 						deferred: false,
 					});
-					return { value: { ...lock, cutover_in_flight: 1 }, transitions };
+					return { value: { ...lock, cutover_in_flight: 1, reset_pin: resetPin }, transitions };
 				}),
 			),
 		finish: (owner: Ownership, options: { readonly succeeded: boolean; readonly release?: boolean }) =>
@@ -321,12 +324,16 @@ const make = Effect.gen(function* () {
 						if (error || !lock) return error ?? reject("lock_required", lock, transitions);
 						if (!lock.cutover_in_flight) return reject("not_pinned", lock, transitions);
 						// Success means the coordinator durably published/versioned and accepted this pinned batch.
-						if (options.succeeded) yield* sql`DELETE FROM staging WHERE lock_id = ${lock.id}`;
-						if (lock.pending_release || (options.succeeded && options.release)) {
+						if (options.succeeded && lock.reset_pin !== 1) yield* sql`DELETE FROM staging WHERE lock_id = ${lock.id}`;
+						if (
+							lock.pending_release ||
+							lock.reset_pin === 2 ||
+							(options.succeeded && options.release && lock.reset_pin !== 1)
+						) {
 							transitions.push(yield* drop(lock, lock.pending_release ?? "released"));
 							return { value: null, transitions };
 						}
-						yield* sql`UPDATE edit_lock SET cutover_in_flight = 0, expires = ${now + lock.ttl_seconds * 1000} WHERE id = ${lock.id}`;
+						yield* sql`UPDATE edit_lock SET cutover_in_flight = 0, reset_pin = 0, expires = ${now + lock.ttl_seconds * 1000} WHERE id = ${lock.id}`;
 						transitions.push({
 							type: "finished",
 							lock_id: lock.id,
@@ -335,7 +342,10 @@ const make = Effect.gen(function* () {
 							staged: [],
 							deferred: false,
 						});
-						return { value: { ...lock, cutover_in_flight: 0, expires: now + lock.ttl_seconds * 1000 }, transitions };
+						return {
+							value: { ...lock, cutover_in_flight: 0, reset_pin: 0, expires: now + lock.ttl_seconds * 1000 },
+							transitions,
+						};
 					}),
 				false,
 			),
@@ -343,7 +353,20 @@ const make = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const lock = yield* read;
 				const transitions: Transition[] = [];
-				if (lock?.cutover_in_flight) transitions.push(yield* drop(lock, "interrupted"));
+				if (lock?.cutover_in_flight) {
+					if (lock.reset_pin === 1 && !lock.pending_release) {
+						const now = (yield* DateTime.nowAsDate).getTime();
+						yield* sql`UPDATE edit_lock SET cutover_in_flight=0,reset_pin=0,expires=${now + lock.ttl_seconds * 1000} WHERE id=${lock.id}`;
+						transitions.push({
+							type: "interrupted",
+							lock_id: lock.id,
+							holder_family: lock.holder_family,
+							agent: lock.agent,
+							staged: [],
+							deferred: false,
+						});
+					} else transitions.push(yield* drop(lock, lock.pending_release ?? "interrupted"));
+				}
 				yield* sql`DELETE FROM staging WHERE lock_id NOT IN (SELECT id FROM edit_lock)`;
 				yield* publish(transitions, (yield* DateTime.nowAsDate).getTime());
 				return transitions;

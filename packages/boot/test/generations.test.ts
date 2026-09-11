@@ -316,7 +316,7 @@ await helper.exited;
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 15 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 16 }]);
 		expect(await sql(env.data, "SELECT value FROM settings WHERE key = 'app_seeded'")).toEqual([{ value: "1" }]);
 	}, 15000);
 
@@ -336,7 +336,7 @@ await helper.exited;
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 15 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 16 }]);
 		expect(await sql(env.data, "SELECT value FROM settings WHERE key = 'app_seeded'")).toEqual([{ value: "1" }]);
 		expect(await sql(env.data, "SELECT * FROM edit_lock")).toEqual([]);
 	}, 15000);
@@ -350,6 +350,7 @@ await helper.exited;
 		await sql(env.data, "DROP TABLE auth_challenges");
 		await sql(env.data, "DROP TABLE sessions");
 		await removeSourceSchema(env.data);
+		await sql(env.data, "ALTER TABLE edit_lock DROP COLUMN reset_pin");
 		await sql(env.data, "ALTER TABLE staging DROP COLUMN mode");
 		await sql(env.data, "DROP TABLE public_paths");
 		await sql(env.data, "PRAGMA user_version = 3");
@@ -363,7 +364,7 @@ await helper.exited;
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 15 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 16 }]);
 		expect(await sql(env.data, "SELECT id, holder_family FROM edit_lock")).toEqual([
 			{ id: "saved-lock", holder_family: "family-one" },
 		]);
@@ -380,6 +381,7 @@ await helper.exited;
 		await expect.poll(async () => (await first.state()).child.state).toBe("live");
 		await first.stop();
 		await removeSourceSchema(env.data);
+		await sql(env.data, "ALTER TABLE edit_lock DROP COLUMN reset_pin");
 		await sql(env.data, "ALTER TABLE staging DROP COLUMN mode");
 		await sql(env.data, "INSERT INTO passkeys VALUES ('saved-key','public-key',4,'[]','laptop',12)");
 		await sql(
@@ -393,7 +395,7 @@ await helper.exited;
 		await sql(env.data, "PRAGMA user_version = 4");
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 15 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 16 }]);
 		expect(await sql(env.data, "SELECT id,counter,label FROM passkeys")).toEqual([
 			{ id: "saved-key", counter: 4, label: "laptop" },
 		]);

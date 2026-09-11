@@ -74,19 +74,15 @@ const runCron = <E, R>(_schedule: unknown, run: (at: number) => Effect.Effect<vo
 	);
 	const cutoverPath = join(boot, "src/cutover.ts");
 	const cutover = await readFile(cutoverPath, "utf8");
-	const acquire = "supervisor.operationGate.withPermit(";
-	const endReload = ");\n\tconst optionsSource = options;";
+	const acquire = "supervisor.operationGate.withPermit(performReload(owner, reloadOptions))";
 	expect(cutover.split(acquire)).toHaveLength(2);
-	expect(cutover.split(endReload)).toHaveLength(2);
 	const reloadWaiting = join(fixture.root, "reload-waiting");
 	await writeFile(
 		cutoverPath,
-		cutover
-			.replace(
-				acquire,
-				`fs.writeFileString(${JSON.stringify(reloadWaiting)}, "waiting").pipe(Effect.andThen(${acquire}`,
-			)
-			.replace(endReload, ")));\n\tconst optionsSource = options;"),
+		cutover.replace(
+			acquire,
+			`fs.writeFileString(${JSON.stringify(reloadWaiting)}, "waiting").pipe(Effect.andThen(${acquire}))`,
+		),
 	);
 	const launch = () => fixture.launch(join(server, "server.ts"), join(boot, "test/fixtures/launcher.ts"));
 	const force = (_kind: "hourly") => writeFile(requested, "due");

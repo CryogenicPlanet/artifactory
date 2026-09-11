@@ -1,7 +1,9 @@
+import { SourceResetParams } from "./source-reset-schema.ts";
+import type { Editing } from "./edit-http.ts";
 import { Clock, Effect, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
-import { assertionProof, humanSession, authFailure, body } from "./auth-http.ts";
+import { assertionProof, humanSession, authFailure, authErrorResponse, body } from "./auth-http.ts";
 import { AddPasskey, DeletePasskey } from "./passkey-management-schema.ts";
 import { MintBinding } from "./token-mint-schema.ts";
 import { DatabaseRestoreInput, databaseRestoreParams, GenerationRestoreParams } from "./database-restore-schema.ts";
@@ -11,6 +13,7 @@ import { EnrollmentDecision } from "./enrollment-schema.ts";
 import { approvalClient, approvalPage } from "./enrollment-page.ts";
 
 const challengeInput = Schema.Union([
+	Schema.Struct({ action: Schema.Literal("app.reset"), params: SourceResetParams }),
 	Schema.Struct({ action: Schema.Literal("generation.restore"), params: GenerationRestoreParams }),
 	Schema.Struct({ action: Schema.Literal("boot.restart"), params: Schema.Record(Schema.String, Schema.Never) }),
 	Schema.Struct({ action: Schema.Literal("db.restore"), params: DatabaseRestoreInput }),
@@ -33,7 +36,7 @@ const pageHeaders = Object.freeze({
 	"content-security-policy":
 		"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 });
-export const enrollmentRoute = (auth: Auth["Service"], config: AuthConfig) =>
+export const enrollmentRoute = (auth: Auth["Service"], config: AuthConfig, editing?: Pick<Editing, "cutover">) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const url = new URL(request.url, "http://localhost"),
@@ -88,6 +91,14 @@ export const enrollmentRoute = (auth: Auth["Service"], config: AuthConfig) =>
 							yield* input.action === "passkey.add"
 								? auth.startPasskeyAddAssertion(input.params, session.id)
 								: auth.startPasskeyDeleteAssertion(input.params, session.id),
+						);
+					}
+					if (input.action === "app.reset") {
+						const session = yield* humanSession(auth, request);
+						const editor = editing;
+						if (!editor) return authErrorResponse("boot_unavailable", 503);
+						return HttpServerResponse.jsonUnsafe(
+							yield* auth.startSourceResetAssertion(yield* editor.cutover.seedDigest, session.id),
 						);
 					}
 					if (input.action === "generation.restore") {

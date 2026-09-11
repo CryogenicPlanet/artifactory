@@ -79,6 +79,21 @@ export const sourceTreeIO = Effect.fn("sourceTreeIO")(function* (
 		return entries;
 	});
 	const inventory = (sourceDirectory?: string) => scan(sourceDirectory);
+	// Excluded generated children must not be discovered only after a journal has removed source siblings.
+	const checkTreeRemovals = Effect.fn("sourceTreeIO.checkTreeRemovals")(function* (changes: readonly Change[]) {
+		const root = yield* fs.realPath(dataDirectory);
+		const planned = new Set(changes.map((change) => change.path));
+		for (const change of changes) {
+			if (!change.before.directory || change.desired.directory) continue;
+			const directory = path.join(root, change.path);
+			if (!(yield* fs.exists(directory)) || (yield* fs.stat(directory)).type !== "Directory") continue;
+			if ((yield* fs.realPath(directory)) !== directory)
+				return yield* new SourceRejected({ code: "external_conflict", path: change.path });
+			for (const child of yield* fs.readDirectory(directory))
+				if (!planned.has(`${change.path}/${child}`))
+					return yield* new SourceRejected({ code: "external_conflict", path: `${change.path}/${child}` });
+		}
+	});
 	const publishTree = Effect.fn("sourceTreeIO.publishTree")(function* (changes: readonly Change[], id: string) {
 		const root = yield* fs.realPath(dataDirectory);
 		const planned = new Map(changes.map((change) => [change.path, change]));
@@ -175,5 +190,5 @@ export const sourceTreeIO = Effect.fn("sourceTreeIO")(function* (
 		for (const change of changes) if (change.desired.directory) yield* sync(path.join(root, change.path));
 		yield* sync(root);
 	});
-	return { inventory, publishTree };
+	return { inventory, publishTree, checkTreeRemovals };
 });

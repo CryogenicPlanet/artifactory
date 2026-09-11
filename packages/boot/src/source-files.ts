@@ -167,6 +167,7 @@ const make = (dataDirectory: string) =>
 						before: prior.get(name) ?? absent,
 						desired: next.get(name) ?? absent,
 					}));
+					yield* io.checkTreeRemovals(changes);
 					const id = yield* crypto.randomUUIDv4;
 					const agent = coordinatorAgent ?? (yield* lock.pin(owner)).value.agent;
 					yield* Ref.set(prepared, {
@@ -198,12 +199,13 @@ const make = (dataDirectory: string) =>
 				Effect.gen(function* () {
 					const value = yield* proposal(id);
 					if (value.owner) yield* pinned(value.owner);
+					if (value.tree) yield* io.checkTreeRemovals(value.changes);
 					yield* checkChanges(value.changes);
 					yield* Effect.uninterruptible(
 						Effect.gen(function* () {
 							yield* sql.withTransaction(
 								Effect.gen(function* () {
-									const authority = !value.owner ? Option.getOrNull(yield* Effect.serviceOption(EditAuthority)) : null;
+									const authority = Option.getOrNull(yield* Effect.serviceOption(EditAuthority));
 									if (authority) {
 										const now = (yield* DateTime.nowAsDate).getTime();
 										const active =

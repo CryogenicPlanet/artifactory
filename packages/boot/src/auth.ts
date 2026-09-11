@@ -32,6 +32,7 @@ import {
 	type DatabaseRestore,
 	type GenerationRestore,
 } from "./database-restore-schema.ts";
+import { canonicalSourceReset, validSeedDigest } from "./source-reset-schema.ts";
 import { makeTokenMint } from "./token-mint.ts";
 import { canonicalMint, validMint, type MintBinding } from "./token-mint-schema.ts";
 import { makeTokens } from "./tokens.ts";
@@ -283,7 +284,8 @@ const makeAuth = (config: AuthConfig) =>
 				| "token.mint"
 				| "db.restore"
 				| "generation.restore"
-				| "boot.restart",
+				| "boot.restart"
+				| "app.reset",
 			binding: string,
 		) =>
 			mutex.withPermit(
@@ -375,6 +377,27 @@ const makeAuth = (config: AuthConfig) =>
 				const target = yield* resolveRestoreTarget(params).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 				return yield* startActionAssertion("generation.restore", canonicalGenerationRestore(params, sessionId, target));
 			});
+		const startSourceResetAssertion = (seedDigest: string, sessionId: string) =>
+			validSeedDigest(seedDigest)
+				? startActionAssertion("app.reset", canonicalSourceReset(seedDigest, sessionId))
+				: refuse("invalid_request");
+		const authorizeSourceReset = (seedDigest: string, proof: AssertionProof, sessionId: string) =>
+			mutex.withPermit(
+				committed(
+					sql,
+					Effect.gen(function* () {
+						if (!validSeedDigest(seedDigest)) return yield* refuse("invalid_request");
+						const liveSession = Effect.gen(function* () {
+							const now = yield* Clock.currentTimeMillis;
+							if (!(yield* sql`SELECT id FROM sessions WHERE id=${sessionId} AND expires_at>${now}`).length)
+								return yield* refuse("session_invalid");
+						});
+						yield* liveSession;
+						yield* verifyAssertion(proof.id, proof.response, "app.reset", canonicalSourceReset(seedDigest, sessionId));
+						yield* liveSession;
+					}).pipe(captureRefusal(Schema.is(AuthError))),
+				),
+			);
 		const authorizeDatabaseRestore = yield* makeDatabaseRestoreAuth((params, proof, sessionId, target) => {
 			if ("backup" in params)
 				return verifyAssertion(proof.id, proof.response, "db.restore", canonicalDatabaseRestore(params, sessionId));
@@ -424,6 +447,8 @@ const makeAuth = (config: AuthConfig) =>
 			authorizeRestart,
 			startDatabaseRestoreAssertion,
 			startGenerationRestoreAssertion,
+			startSourceResetAssertion,
+			authorizeSourceReset,
 			authorizeDatabaseRestore,
 			startLockBreakAssertion,
 			breakLock,

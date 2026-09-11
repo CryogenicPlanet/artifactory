@@ -30,6 +30,7 @@ const Input = Schema.Struct({
 	content: Schema.optional(Schema.NullOr(Schema.String)),
 	succeeded: Schema.optional(Schema.Boolean),
 	release: Schema.optional(Schema.Boolean),
+	resetPin: Schema.optional(Schema.Literals([0, 1, 2])),
 });
 const main = Effect.gen(function* () {
 	const filename = process.argv[2];
@@ -59,7 +60,7 @@ const main = Effect.gen(function* () {
 			case "release":
 				return yield* service.release(owner);
 			case "pin":
-				return yield* service.pin(owner);
+				return yield* service.pin(owner, input.resetPin);
 			case "finish":
 				return yield* service.finish(owner, { succeeded: input.succeeded ?? false, release: input.release ?? false });
 			case "break":
