@@ -2,6 +2,7 @@ import { Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { readStoragePolicy } from "./settings-schema.ts";
 import { BackupRecord } from "./backup-metadata.ts";
+import { StorageRejected } from "./storage-headroom.ts";
 import type { StorageVolume } from "./storage-volume.ts";
 
 export class ArtifactRetentionRejected extends Schema.TaggedError<ArtifactRetentionRejected>()(
@@ -81,7 +82,7 @@ export const artifactRetention = (directory: string) =>
 					)
 						return yield* new ArtifactRetentionRejected({ code: "invalid_storage_sample" });
 					if (volume.status !== "available" && requiredBackupBytes > 0)
-						return yield* new ArtifactRetentionRejected({ code: "invalid_storage_sample" });
+						return yield* new StorageRejected({ code: "storage_measurement_failed" });
 					const catalog = yield* sql.withTransaction(
 						Effect.gen(function* () {
 							const generations = yield* sql`SELECT n,snapshot_dir,backup_id FROM generations ORDER BY n`.pipe(

@@ -146,7 +146,16 @@ it("reconciles interrupted unlink-before-catalog deletion on restart and retains
 it("declines unknown capacity for new copies but can prune failed snapshots without it", async (test) => {
 	const app = await store(test);
 	await app.generation(1, "failed", 0, true);
-	expect(await app.prune({ required: 1 })).toMatchObject({ failure: { code: "invalid_storage_sample" } });
+	await app.backup("retained");
+	const catalog = await app.sql("SELECT * FROM backups");
+	expect(await app.prune({ required: 1 })).toMatchObject({
+		failure: { _tag: "StorageRejected", code: "storage_measurement_failed" },
+	});
+	expect(await app.exists("gen/1")).toBe(true);
+	expect(await readFile(join(app.root, "backups/retained.db"), "utf8")).toBe("retained-data");
+	expect(await app.sql("SELECT * FROM backups")).toEqual(catalog);
+	expect(await app.prune({ capacity: 1000, required: 1 })).toMatchObject({ success: { backup_bytes: 100 } });
+	await app.generation(2, "failed", 0, true);
 	expect(await app.prune({})).toMatchObject({ success: { backup_limit_bytes: null, removed_generations: 1 } });
 	expect(await app.exists("gen/1")).toBe(false);
 });
@@ -301,4 +310,16 @@ it("reads changed backup percentages on every pass without evicting recovery evi
 	await app.sql("INSERT INTO cutover VALUES(1,1,2,'two','lock','family','frozen',NULL)");
 	expect(await app.prune({ capacity: 500 })).toMatchObject({ failure: { code: "backup_budget" } });
 	expect(await app.exists("backups/two.db")).toBe(true);
+});
+
+it("keeps invalid copy sizes, capacity and persisted backup sizes distinct from a failed probe", async (test) => {
+	const app = await store(test);
+	await app.backup("invalid");
+	const invalid = { failure: { _tag: "ArtifactRetentionRejected", code: "invalid_storage_sample" } };
+	expect(await app.prune({ required: -1 })).toMatchObject(invalid);
+	expect(await app.prune({ capacity: 0, required: 1 })).toMatchObject(invalid);
+	await app.sql("UPDATE backups SET bytes=-1 WHERE id='invalid'");
+	expect(await app.prune({ capacity: 1000, required: 1 })).toMatchObject(invalid);
+	expect(await readFile(join(app.root, "backups/invalid.db"), "utf8")).toBe("retained-data");
+	expect(await app.sql("SELECT bytes FROM backups WHERE id='invalid'")).toEqual([{ bytes: -1 }]);
 });
