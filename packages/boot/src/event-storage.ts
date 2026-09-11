@@ -15,6 +15,7 @@ type Usage = {
 	readonly retained_database_bytes: number;
 	readonly incremental_reclaim: boolean;
 	readonly limit_bytes: number;
+	readonly event_percent: number;
 	readonly reusable_database_bytes: number;
 	readonly deleted: number;
 };
@@ -113,7 +114,7 @@ export const makeEventStorage = <R>(volume: Effect.Effect<StorageVolume, never, 
 				const measured = yield* measure;
 				const result = yield* sql.withTransaction(
 					Effect.gen(function* () {
-						const usage = { ...measured, limit_bytes: limit, deleted };
+						const usage = { ...measured, limit_bytes: limit, event_percent: policy.event_percent, deleted };
 						if (usage.allocated_bytes <= limit)
 							return { status: "within_budget", ...usage } satisfies EventStorageStatus;
 						yield* Ref.set(state, { status: "over_budget", reason: "pruning_in_progress", ...usage });
@@ -129,7 +130,7 @@ export const makeEventStorage = <R>(volume: Effect.Effect<StorageVolume, never, 
 									? usage.incremental_reclaim
 										? "reclaim_pending"
 										: "reclaim_unavailable"
-									: usage.wal_bytes > 0
+									: usage.wal_bytes > 0 || usage.retained_database_bytes > 0
 										? "reclaim_pending"
 										: "no_prunable_events";
 							return { status: "over_budget", reason, ...usage } satisfies EventStorageStatus;
@@ -155,17 +156,31 @@ export const makeEventStorage = <R>(volume: Effect.Effect<StorageVolume, never, 
 						),
 			),
 		);
+		const status: Effect.Effect<EventStorageStatus> = Effect.gen(function* () {
+			const measured = yield* Ref.get(state);
+			if (measured.status === "unavailable") return measured;
+			const policy = yield* readStoragePolicy.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+			if (policy.event_percent === measured.event_percent) return measured;
+			const unavailable = { status: "unavailable", reason: "policy_changed" } satisfies EventStorageStatus;
+			yield* Ref.set(state, unavailable);
+			return unavailable;
+		}).pipe(
+			Effect.catch(() => {
+				const unavailable = { status: "unavailable", reason: "policy_unavailable" } satisfies EventStorageStatus;
+				return Ref.set(state, unavailable).pipe(Effect.as(unavailable));
+			}),
+		);
 		const admit = Effect.gen(function* () {
-			const status = yield* Ref.get(state);
-			if (status.status !== "within_budget")
+			const current = yield* status;
+			if (current.status !== "within_budget")
 				return yield* new EventStorageRejected({
-					code: status.status === "over_budget" ? "event_storage_over_budget" : "event_storage_unavailable",
+					code: current.status === "over_budget" ? "event_storage_over_budget" : "event_storage_unavailable",
 				});
 		});
 		return {
 			prune,
 			admit,
-			status: Ref.get(state),
+			status,
 			run: prune.pipe(Effect.andThen(Effect.sleep("1 minute")), Effect.forever),
 		};
 	});

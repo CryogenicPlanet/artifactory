@@ -35,7 +35,15 @@ async function store(test: TestContext) {
 		INSERT INTO events(seq,transaction_id,event) SELECT n,NULL,json_set('${JSON.stringify(event(0))}','$.seq',n) FROM numbers`);
 		await sql(`UPDATE seq SET next=${count + 1},published_through=${count}`);
 	};
-	return { root, run, prune, sql, seed, legacy: () => invoke("event-storage", { capacity: 1_000_000, legacy: true }) };
+	return {
+		root,
+		run,
+		prune,
+		sql,
+		seed,
+		policyAfterPrune: (policy: string) => invoke("event-storage", { capacity: 1_000_000, policyAfterPrune: policy }),
+		legacy: () => invoke("event-storage", { capacity: 1_000_000, legacy: true }),
+	};
 }
 const event = (seq: number) => ({
 	seq,
@@ -221,4 +229,17 @@ it("charges the old main-file tail while a reader prevents checkpointing a logic
 	)(result).status;
 	expect(usage.retained_database_bytes).toBeGreaterThan(0);
 	expect(usage.allocated_bytes + usage.other_database_bytes).toBeGreaterThanOrEqual(before);
+});
+
+it("refuses admission immediately after a lower or malformed policy replaces a successful measurement", async (test) => {
+	const app = await store(test);
+	expect(await app.policyAfterPrune('{"backup_percent":20,"event_percent":1,"headroom_percent":5}')).toMatchObject({
+		status: { status: "unavailable", reason: "policy_changed" },
+		admission: { _tag: "Failure", failure: { code: "event_storage_unavailable" } },
+	});
+	await app.sql("DELETE FROM settings WHERE key='storage_policy'");
+	expect(await app.policyAfterPrune("invalid")).toMatchObject({
+		status: { status: "unavailable", reason: "policy_unavailable" },
+		admission: { _tag: "Failure", failure: { code: "event_storage_unavailable" } },
+	});
 });
