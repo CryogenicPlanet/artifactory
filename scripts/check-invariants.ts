@@ -6,13 +6,21 @@ const root = resolve(import.meta.dirname, "..");
 const packages = resolve(root, "packages");
 function checkInvariants() {
 	const failures: string[] = [];
+	const appTables = new Set<string>();
+	// These are shared recovery records, not editable product tables. Keep exceptions table- and file-specific.
+	const recoveryAccess: Readonly<Record<string, ReadonlyArray<string>>> = {
+		"app-recovery.ts": ["kernel_writer", "mutation_batches", "outbox"],
+		"app-backup.ts": ["kernel_writer"],
+		// Startup-only retirement still checks historical committed evidence; it receives no product-table exemption.
+		"legacy-topic-moves.ts": ["mutation_batches", "outbox"],
+	};
 
 	function workspace(path: string) {
 		const local = relative(packages, path);
 		return local.startsWith(`..${sep}`) ? undefined : local.split(sep)[0];
 	}
 
-	function inspect(path: string) {
+	function inspect(path: string, collectTables = false) {
 		const source = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
 		const owner = workspace(path);
 		function checkImport(specifier: string) {
@@ -42,7 +50,7 @@ function checkInvariants() {
 		}
 		// Static ownership guard: interpolation remains opaque; this is not a SQL validator.
 		function checkDomainSql(node: ts.Node, text: string) {
-			if (!relative(root, path).startsWith(`packages${sep}boot${sep}src${sep}`)) return;
+			if (!collectTables && !relative(root, path).startsWith(`packages${sep}boot${sep}src${sep}`)) return;
 			const tokens =
 				text.match(
 					/--[^\n]*|\/\*[\s\S]*?\*\/|"(?:""|[^"])*"|'(?:''|[^'])*'|`(?:``|[^`])*`|\[[^\]]*\]|[a-z_][a-z_0-9]*|[.;(),]/gi,
@@ -53,6 +61,11 @@ function checkInvariants() {
 			const fromDepths = new Set<number>();
 			for (const [index, token] of words.entries()) {
 				const keyword = token.toUpperCase();
+				if (
+					collectTables &&
+					(keyword !== "TABLE" || !words.slice(0, index).some((word) => word.toUpperCase() === "CREATE"))
+				)
+					continue;
 				if (token === "(") depth++;
 				if (token === ")") {
 					fromDepths.delete(depth);
@@ -78,7 +91,12 @@ function checkInvariants() {
 				if (grouped && !/^(SELECT|WITH)$/i.test(words[next] ?? "")) fromDepths.add(depth + grouped);
 				if (words[next + 1] === ".") next += 2;
 				const table = identifier(words[next] ?? "");
-				if (["topics", "messages", "reads", "agents"].includes(table)) {
+				if (collectTables) {
+					if (table && table !== "__interpolation__") appTables.add(table);
+					continue;
+				}
+				const bootFile = relative(resolve(packages, "boot/src"), path);
+				if (appTables.has(table) && !recoveryAccess[bootFile]?.includes(table)) {
 					const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
 					failures.push(`${relative(root, path)}:${line}: boot must not know app domain table ${table}`);
 				}
@@ -91,6 +109,11 @@ function checkInvariants() {
 					node,
 					[node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join(" __interpolation__ "),
 				);
+
+			if (collectTables) {
+				ts.forEachChild(node, visit);
+				return;
+			}
 
 			if (ts.isImportTypeNode(node)) {
 				failures.push(`${relative(root, path)}: use a top-level import type declaration instead of an inline import`);
@@ -111,15 +134,18 @@ function checkInvariants() {
 		visit(source);
 	}
 
-	function walk(directory: string) {
+	function walk(directory: string, collectTables = false) {
 		for (const entry of readdirSync(directory, { withFileTypes: true })) {
 			if (["node_modules", "dist"].includes(entry.name)) continue;
 			const path = resolve(directory, entry.name);
-			if (entry.isDirectory()) walk(path);
-			else if (/\.tsx?$/.test(entry.name)) inspect(path);
+			if (entry.isDirectory()) walk(path, collectTables);
+			else if (/\.tsx?$/.test(entry.name)) inspect(path, collectTables);
 		}
 	}
 
+	walk(resolve(packages, "server/src"), true);
+	// The shared app-store initialization schema is boot-owned on the SQLite base branch.
+	inspect(resolve(packages, "boot/src/app-recovery.ts"), true);
 	walk(packages);
 	if (failures.length > 0) {
 		console.error(failures.join("\n"));
