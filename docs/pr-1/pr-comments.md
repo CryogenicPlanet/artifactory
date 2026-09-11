@@ -304,11 +304,57 @@ Item 21 says event retention is one of two policies boot enforces when the app i
 
 ### 36. Delete `legacy-topic-moves.ts` (proposed, awaiting the third pass)
 
-Item 27 asked for the 228 lines of topic-move machinery to go. They went, and 282 new lines arrived in `legacy-topic-moves.ts`: startup-only recovery of old boot-owned topic-move tables, with a whole-tree hash walk and a page-subtree `fs.rename`, both of which item 21 removed from boot. There are no deployed stores, so there is no legacy data to recover. Recommendation: delete the file, and refuse to start on an old store version with a clear message. The ownership audit does not mention the file in either list.
+Item 27 asked for the 228 lines of topic-move machinery to go. They went, and 282 new lines arrived in `legacy-topic-moves.ts`: startup-only recovery of old boot-owned topic-move tables, with a whole-tree hash walk and a page-subtree `fs.rename`, both of which item 21 removed from boot. There are no deployed stores, so there is no legacy data to recover. Recommendation: delete the file, and refuse to start on an old store version with a clear message. The ownership audit does not mention the file in either list. The third pass confirms it from three dimensions (A-2, B-3, and the claims agent's F4): the file runs on every recovery pass, not only first start, because `index.ts:130` and `:140` sit inside the recovery permit; and its blanket `Effect.mapError` to `topic_move_recovery_required` at `:61` and `:282` turns any transient SQL or filesystem error while reading two tables that never exist into a refused boot.
 
 ### Status at a834e3f, from the ownership check
 
 25, 26 and 29 fixed. 31 is seventeen of eighteen. 27: all four sub-items fixed, size unmet (12,265 lines in 93 files; the scratchpad's 9,361 in 78 matches no counting rule). 28 still open: `supervisor.ts:269` releases the mutation gate only when the failure is a `ChildError`, so a health-probe `TimeoutError` leaves the gate frozen for the process lifetime; the queue-versus-freeze numbers are fixed. 30 partly: lock and revert reopen only if a re-run of recovery succeeds. The scratchpad now says the owner made ownership scope, not line count, the criterion; the ledger's rule is the six jobs, and the line count stays the way we measure it.
+
+## Status after the third pass (2ee17ac, 2026-09-11)
+
+Report: `third-pass-2ee17ac.md`. Five Opus finders, five Opus skeptics, one claims agent; 26 findings confirmed, none refuted; eight of them objected to changes the owner has since decided (items 32 to 34) and are marked superseded in the report. `bun run check` and `bun run build` pass. `bun run test` is **red at the pushed head**: 781 tests, 1 failed, 1 skipped. Boot is 12,265 lines in 93 files, up 59 since the second pass.
+
+| item | status | what remains |
+| --- | --- | --- |
+| 25 mentions and over-marking | partly | Trailing punctuation fixed with tests. The leading side is untouched: `**@codex**`, `"@codex"`, `_@codex_`, `\|@codex\|` extract nothing (A-1). Over-marking has a root case: a query with neither `topic` nor `mentions` marks topic `''`, which `topics.ts:28` treats as an ancestor of every topic, so `GET /api/messages?q=deploy&limit=1` zeroes every unread count for that instance (skeptic, items-25-31). |
+| 26 route collisions | fixed | `templatePattern` folds a terminal `/*` to `/:parameter`; the later extension fails alone; `extension_disabled` declared. |
+| 27 finish the boot cut | partly | Preamble, `rahul` literal and Bun cache done. The 228 deleted lines came back as 282 in `legacy-topic-moves.ts` (item 36). Size 12,265. |
+| 28 freeze gates | partly | Queue budget fixed (one 60 s budget over the 45 s frozen region). Page publication queues. But `75fa8f1` removed the finalizers `4147a1a` added: release now depends on `supervisor.restart`'s compensation, which fires only for a single-reason `ChildError` (`supervisor.ts:269`); `cutover.ts:325` returns frozen on `accepted_snapshot_missing`; `cutover.ts:352` still calls `finish(owner,false)` as a bare last statement; `database-backup.ts` freezes at `:64` with no finalizer. |
+| 29 storage admission | fixed | Out-of-band 1 s sampler with a 5 s staleness cliff; fails closed. |
+| 30 way in after failed recovery | partly | The die is a typed `recovery_intents_conflict`; `GET /_boot/fs` and `GET /_boot/lock` read in the Failed phase; anonymous pages 503. But `POST /_boot/lock` and `POST /_boot/revert` become writable only after `retryRecovery` succeeds (`edit-http.ts:52-62`), and a deterministic recovery failure fails it every time. |
+| 31 smaller items | mostly fixed | 16 of 18. `topics-http.ts:30-40` still re-parses the raw URL for the wildcard route; `/api/events` and `/api/stream` waiters still wake on every diagnostic fence move. |
+| 21 bootloader | partly | Named moves hold; `POST /_boot/restart`, `revert {withDb}`, headroom refusal and the CI table guard are real. Metrics withdrawn (item 34). Size unmet. |
+| 32 to 34 | decided | Implemented in `2ee17ac`, `ba5866b`, `dd3c6e7`; follow-through in item 40. |
+
+## New items from the third pass
+
+### 37. Mentions, third time: the leading delimiter, and the root over-mark
+
+**Comment.** `message-mentions.ts:6` still requires the mention to follow start-of-string, whitespace, `(` or `[`, so a bolded, quoted, italic or table-cell mention delivers to nobody, on a board that renders markdown. Replace the prefix alternation with a lookbehind that excludes only word characters and `@`, and add the four cases to the test. Second, `api.ts:65-68` enables marking with topic `''` for any query that has neither `topic` nor `mentions`, and `read-marks.ts:20` writes that row; `topics.ts:28` reads `''` as covering every topic. A search or a bare `?limit=` must not mark anything: mark only when the query has a topic, and never at `''`.
+
+### 38. The freeze gates, fourth time: unconditional release, and a supervisor that re-enters recovery
+
+**Comment.** Restore the finalizers `4147a1a` added and `75fa8f1` removed, or make the lifecycle release unconditional: every path that freezes (`cutover.ts:208`, `:320`; `database-backup.ts:64`) releases in `Effect.ensuring`, guarded only by proven closure, whatever the failure type. `supervisor.ts:269` must not decide on `ChildError` alone: a `TimeoutError` from the 5 s health probe or a `SqlError` from `generations.healthy` currently leaves the gate frozen with no child. The edit lock has the same shape: `cutover.ts:352` runs `sources.recover`, `sources.discard`, `finish(owner,false)` as bare statements, so a failed journal replay leaves `cutover_in_flight` set. And `supervisor.run` (`:326-331`) idles forever when `current` is null; it should re-enter `recover` under the existing per-generation cap, so one failed restart on a rollback path is not a permanent 503 until a human signs a restart.
+
+### 39. The way in, third time: lock and revert must not wait for recovery to succeed
+
+**Comment.** In the Failed phase a human `POST /_boot/lock` and `POST /_boot/revert` must be admitted whether or not `retryRecovery` succeeds; today `writable` is set only after it returns (`edit-http.ts:52-62`), and a deterministic failure (a legacy refusal, a failing `coordinator.recover`) fails it on every call, including after `POST /_boot/restart`. Admit the write, run recovery afterwards, and report the recovery failure in the response body.
+
+### 40. Item 32 follow-through: the split as decided, in both processes
+
+**Comment.** (a) `GET /_boot/events` is scope `read` and takes `wait=`: `event-http.ts:225` gates it on human-or-`fs`, and the diagnostics branch at `:271-289` has no wait, so an agent cannot wait for `lock.released` while the app is down, which is the one thing the boot surface is for. (b) The app's `/api/events` must not loop on the raw fence and re-query boot over HTTP per wake (`events-http.ts:36-41`, `stream-http.ts:42-47`); boot's channel query already long-polls on the commit signal, so pass `wait=` through and delete the app-side loop. (c) Boot trusts a child-supplied `request_actor` for `http.request` visibility (`public-event-http.ts:33`, `:75-79`); clamp in boot from the identity headers it forwarded, so an extension overriding `/api/events` cannot read every agent's diagnostics. (d) `init.md:33` and `recipes.md:48` still say `/api/events` is boot-served and survives swaps. (e) `kernel-recovery.test.ts:106` fails at head because the seed child fixture has no `/api/events`; fix the fixture. (f) The narrowing added 74 lines to boot; the retained `public-event-http.ts` engine is the child transport and stays, but nothing else should duplicate it.
+
+### 41. An extension can protect a core table it does not own, permanently
+
+**Comment.** `extension-migrations.ts:27` derives the protected table from the statement text of `api.migrate(name, sql, {protect:true})` without checking that the migration created it, and nothing ever deletes from `protected_sql_tables`. `CREATE TABLE IF NOT EXISTS messages(...)` in any extension permanently closes the `fs`-scope `POST /api/sql` write path for `messages`. Register only tables the migration created in the same transaction, and drop the registration when the extension's migrations are removed.
+
+### 42. The health probe must not encode core's product contract
+
+**Comment.** `kernel/health.ts:66-92` posts to `/api/messages`, reads `/api/messages?topic=` and `/api/topics/<path>` and decodes core's response shapes, against the assembled dispatcher. Item 2 allows an extension to override those routes; doing so now fails the health gate and the reload. Probe what the kernel owns: a `kv` round-trip through `ctx.mutate` and `ctx.read`, plus a rollback assertion.
+
+### 43. Smaller items from the third pass
+
+**Comment.** `sql-http.ts:37-42` spawns the reader subprocess before the read-scope check and the check after it is dead code. `decode-rows.ts` exists but 45 raw decode sites remain in 19 boot modules, and the directory-sync helper is copied six times. `topics-http.ts:30-40` re-parses the raw URL for the wildcard route. `read-marks.ts:8-13` exports a dead `effectiveCursor` that still branches on the removed `~inbox`. `subscriptions/response.ts:57` has two identical arms. Two divergent digest examples exist (`examples/extensions/digest.ts` and `packages/server/examples/extensions/digest.ts`); keep one. `public-paths.ts:29-42` refuses child activation when the app marks more than 4,096 pages public or the list exceeds 512 KiB; that is a boot number gating an app policy, so document it in the spec or raise it to a store limit. `scripts/check-invariants.ts:81` guards only four table names; derive the list from the server's schema. The storage sampler answers `storage_measurement_failed` for the first two seconds after boot.
 
 ## Moot after the deletions
 
