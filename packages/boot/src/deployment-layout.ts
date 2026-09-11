@@ -17,8 +17,16 @@ Effect.gen(function* () {
 		yield* fs.chown(directory, uid, gid);
 		yield* fs.chmod(directory, mode);
 	}
-	if (yield* fs.exists("/data/boot.db")) {
-		if ((yield* fs.realPath("/data/boot.db")) !== "/data/boot.db") return yield* Effect.die("Invalid boot database");
-		yield* fs.chmod("/data/boot.db", 0o600);
+	// Create the main file privately before SQLite can derive WAL/journal modes.
+	if (!(yield* fs.exists("/data/boot.db"))) {
+		const handle = yield* fs.open("/data/boot.db", { flag: "wx", mode: 0o600 });
+		yield* handle.sync;
+	}
+	for (const filename of ["/data/boot.db", "/data/boot.db-wal", "/data/boot.db-shm", "/data/boot.db-journal"]) {
+		if (!(yield* fs.exists(filename))) continue;
+		if ((yield* fs.realPath(filename)) !== filename || (yield* fs.stat(filename)).type !== "File")
+			return yield* Effect.die("Invalid boot database file");
+		yield* fs.chown(filename, 1000, 1000);
+		yield* fs.chmod(filename, 0o600);
 	}
 }).pipe(Effect.scoped, Effect.provide(BunServices.layer), BunRuntime.runMain);

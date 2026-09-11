@@ -86,6 +86,8 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 	if (!/^[a-f0-9]{64}$/.test(config.attempt) || config.receipt !== `/data/attempts/${config.attempt}.closed`)
 		return yield* Effect.die("Invalid app receipt");
 	yield* regular(config.entry);
+	// Saved pre-generation dependency stores remain referenced by legacy snapshots.
+	if (yield* fs.exists("/data/prepared")) yield* ownTree("/data/prepared", 1000, 1003, true);
 	yield* ownTree(config.cwd, 1000, 1003, true);
 	for (const directory of ["/data/gen", path.dirname(config.cwd)]) {
 		yield* regular(directory);

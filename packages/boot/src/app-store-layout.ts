@@ -64,12 +64,12 @@ export const migrateAppStore = Effect.fn("migrateAppStore")(function* (options: 
 	if (!oldExists && !newExists) {
 		if (initialized || phase === "moving") return yield* new AppStoreLayoutError({ code: "app_store_missing" });
 		// Fresh installation: normal recovery creates the database, never this migration.
-		yield* sql`INSERT OR REPLACE INTO settings(key,value) VALUES('app_store_layout','ready')`;
+		yield* sql`INSERT INTO settings(key,value) VALUES('app_store_layout','ready') ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
 		return;
 	}
 	if (phase === "ready") return;
 	if (oldExists) {
-		yield* sql`INSERT OR REPLACE INTO settings(key,value) VALUES('app_store_layout','moving')`;
+		yield* sql`INSERT INTO settings(key,value) VALUES('app_store_layout','moving') ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
 		yield* Effect.scoped(
 			Effect.gen(function* () {
 				const app = yield* SqlClient.SqlClient;
@@ -99,5 +99,5 @@ export const migrateAppStore = Effect.fn("migrateAppStore")(function* (options: 
 	yield* sync(filename);
 	yield* sync(directory);
 	yield* sync(root);
-	yield* sql`INSERT OR REPLACE INTO settings(key,value) VALUES('app_store_layout','ready')`;
+	yield* sql`INSERT INTO settings(key,value) VALUES('app_store_layout','ready') ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
 });

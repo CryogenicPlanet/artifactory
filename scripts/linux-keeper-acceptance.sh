@@ -17,16 +17,51 @@ container=$(docker run --detach --init --read-only --tmpfs /tmp \
 	--mount "type=volume,src=$volume,dst=/data" --entrypoint /bin/sh "$image" -c 'exec sleep 300')
 docker exec "$container" /usr/local/bin/bun /opt/comms/packages/boot/dist/deployment-layout.js
 docker exec "$container" sh -ec '
-	mkdir -p /data/attempts /data/gen/1/source /data/cache/.prepare-probe/workspace/node_modules/vite/bin /data/cache/.prepare-probe/workspace/ui
-	printf private > /data/boot.db
+	mkdir -p /data/attempts /data/gen/1/source /data/prepared/legacy /data/cache/.prepare-probe/workspace/node_modules/vite/bin /data/cache/.prepare-probe/workspace/ui
 	chown 1000:1000 /data/attempts /data/boot.db
 	chmod 700 /data/attempts
 	chmod 600 /data/boot.db
+	printf "export const retained = true;\n" > /data/prepared/legacy/probe.js
+	chown -R 1000:1000 /data/prepared
+	chmod 700 /data/prepared /data/prepared/legacy
+	chmod 600 /data/prepared/legacy/probe.js
 '
+# SQLite inherits its sidecar permissions from the pre-created private main file.
+docker exec -i "$container" sh -c 'cat > /tmp/private-writer.js' <<'JS'
+import { Database } from "bun:sqlite";
+import { writeFileSync } from "node:fs";
+const db = new Database("/data/boot.db");
+db.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE private_probe(value TEXT)");
+db.query("INSERT INTO private_probe VALUES (?)").run("retained WAL identity");
+writeFileSync("/data/private-writer.pid", String(process.pid));
+setInterval(() => {}, 1000);
+JS
+docker exec --detach "$container" setpriv --reuid=1000 --regid=1000 --groups=1003 bun /tmp/private-writer.js
+tries=0
+until docker exec "$container" test -f /data/private-writer.pid; do
+    tries=$((tries+1)); test "$tries" -lt 100; sleep 0.1
+done
+private_files() {
+    docker exec "$container" sh -ec 'test -f /data/boot.db-wal && test -f /data/boot.db-shm'
+    for uid in 1001:1003 1002:1002; do
+        docker exec --user "$uid" "$container" sh -ec 'test ! -r /data/boot.db && test ! -r /data/boot.db-wal && test ! -r /data/boot.db-shm'
+    done
+}
+private_files
+docker exec "$container" sh -ec 'kill -KILL "$(cat /data/private-writer.pid)"'
+# Simulate permissions left by the former flat, single-UID image. No editable
+# process has been launched in this disposable container yet.
+docker exec "$container" chmod 0644 /data/boot.db /data/boot.db-wal /data/boot.db-shm
+docker exec "$container" /usr/local/bin/bun /opt/comms/packages/boot/dist/deployment-layout.js
+private_files
+docker exec --user 1000:1000 "$container" bun -e 'import {Database} from "bun:sqlite"; const db=new Database("/data/boot.db");if(db.query("SELECT value FROM private_probe").get().value!=="retained WAL identity")process.exit(1);db.close();'
+printf '%s\n' 'Passed fresh and legacy crash WAL privacy with retained committed data.'
 # The editable process checks its actual kernel identity, then spawns an ordinary
 # SQLite writer in its inherited process group. No escaped sessions are claimed.
 docker exec -i "$container" sh -c 'cat > /data/gen/1/source/probe.js' <<'JS'
 import { Database } from "bun:sqlite";
+import { retained } from "/data/prepared/legacy/probe.js";
+if (!retained) throw new Error("legacy prepared dependency unavailable");
 import { readFileSync, writeFileSync, accessSync, existsSync, constants } from "node:fs";
 function deny(path, mode) {
   try { accessSync(path, mode); } catch { return; }
