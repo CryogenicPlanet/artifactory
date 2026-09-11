@@ -44,11 +44,14 @@ async function fixture(test: TestContext) {
 		test.onTestFinished(stop);
 		let url = "";
 		await expect
-			.poll(() => {
-				if (processHandle.exitCode !== null) throw new Error(output);
-				url = /Listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(output)?.[1] ?? "";
-				return url;
-			})
+			.poll(
+				() => {
+					if (processHandle.exitCode !== null || processHandle.signalCode !== null) throw new Error(output);
+					url = /Listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(output)?.[1] ?? "";
+					return url;
+				},
+				{ timeout: 5000 },
+			)
 			.not.toBe("");
 		// The listener becomes live before the authentication store is ready, including on restart.
 		await expect.poll(async () => (await fetch(`${url}/auth/login`)).status).toBe(200);
