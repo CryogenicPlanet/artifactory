@@ -25,7 +25,7 @@ The baseline provides passkeys, enrollment/refresh, conversations, topics, pages
 | Boot simplification | Remove concrete duplication and unnecessary ownership without weakening recovery | Reassess after correctness lanes; count real production changes, not relocation or formatting |
 | Receipt retention | Bound terminal undo receipts without losing pending evidence or misrepresenting retained outcomes | Follow human-undo integration; explicit timestamps, legacy compatibility and replay window |
 
-Before this completion wave, boot was 10,719 production lines in 87 files; the new required mechanisms add code, the final implementation is 12,234 production lines across 99 TypeScript files. The review's approximate 7,250-line target is unmet. Most requested policy removals are implemented; the latest scout identified roughly 75–130 lines of further safe consolidation. Additional reduction requires a concrete ownership or coordination simplification, not deletion of safety checks to meet a number.
+Before this completion wave, boot was 10,719 production lines in 87 files; the new required mechanisms add code, the cleanup implementation is 12,206 production lines across 93 TypeScript files. The review's approximate 7,250-line target is unmet. Most requested policy removals are implemented; the latest scout identified roughly 75–130 lines of further safe consolidation. Additional reduction requires a concrete ownership or coordination simplification, not deletion of safety checks to meet a number.
 
 An optional request-event roster must label activity as last observed, because diagnostic event loss prevents exact presence reporting. Boot token use continues to update at authentication. Preserve this distinction in example documentation and acceptance claims.
 
@@ -54,7 +54,7 @@ The final source audit found these explicit requirements beyond the initial revi
 | SSE reference | Bounded browser example refreshes snapshots on restore and never rewinds the durable event cursor to restored message data. Executable mock validation passes. |
 | Request tracing and Logger export | Scoped cross-process request spans, bounded annotations, Logger export and optional drain example are integrated. The optional drain uses the public event capability; its privacy/fixed-window tests pass. Final combined local acceptance passes; Linux acceptance remains pending. |
 
-Full combined code `5b36d55` passes check/build and **711/711 tests across 177 files**,487.37s, actual Node22.22.3/two workers. The subsequent `640d9f6` is a reviewed QEMU probe-only correction preserving every prior message row while isolating user-topic counts. Actual Linux image/QEMU results remain required before deployment acceptance. Earlier failed runs and focused corrections are recorded in the scratchpad.
+Full combined code `06ae030` passes check/build and **711/711 tests across177files**,485.24s, actual Node22.22.3/two workers. Earlier `9f87364` passed the same711tests on Linux, but its image job failed during legacy WAL fixture setup and QEMU failed before initial readiness. Those harness fixes are integrated; actual new-head image/QEMU results remain required. An intermediate local run at `57b961f` had two initial startup failures; the exact pair and final full suite pass, with no deadline increases, and cause remains unconfirmed. Acceptance history is in the scratchpad.
 
 ## Build completion after the base review
 
@@ -69,6 +69,20 @@ Database portability is explicitly a separate PR after base review work (item 23
 | 5 | Board transfer between engines | Row-by-row transfer preserves identities/content/history and sequence rules; completion marker and source stamp enforce startup safety |
 
 Read the owner's detailed `docs/database.md` and its reviews before that track. Never mix engines between stores, hand boot credentials to a child, or claim backend acceptance from SQL compilation alone.
+
+### Database implementation constraints from design review
+
+The first separate stacked PR should introduce SQLite descriptors only, with `@comms/storage` shared by immutable boot and the standalone editable runtime. The owner document's server re-export from boot cannot resolve in that runtime. Preserve `APP_DATABASE` as a derived compatibility alias for retained generations; the keeper validates both descriptors and rewrites both to the private rehearsal copy. Parsing does not create files, choose the authoritative store or move recovery earlier. Remote engines remain explicitly unsupported in this tranche.
+
+Subsequent implementation must address these design gaps rather than silently following unsafe pseudocode:
+
+- Keep target transfer incomplete until provisioning succeeds; retire the source before final target completion. Persist a resumable transfer identifier and phases.
+- MySQL boot DDL needs per-step durable intent and postcondition recovery because its DDL is not transactional. App rehearsal does not protect boot migrations.
+- Adopt legacy store identities only after closure and authoritative-store selection, through a durable resumable adoption record. Missing initialized stores must not become fresh databases; old backup adoption belongs inside authorized restore.
+- Separate core and editable migration ledgers to avoid ID collisions. Preserve historical migration identity while explicitly supporting target dialect replay.
+- Transfer rows using verified schema inventory, explicit codecs and foreign-key ordering. Migration ledgers alone do not enumerate data; generated search structures must be rebuilt and verified.
+
+These are implementation constraints, not completed capabilities or edits to the owner's documents. Real PostgreSQL/MySQL server acceptance must prove roles, concurrent transactions, migration interruption and restore; compilation or an embedded substitute is insufficient.
 
 ## Safety contracts
 
