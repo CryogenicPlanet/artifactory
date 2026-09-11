@@ -2,7 +2,7 @@ import { redactHex } from "./auth-primitives.ts";
 import { acceptSourceRevert } from "./source-revert.ts";
 import { seedSource } from "./seed-source.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
-import { Layer, Cause, Clock, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
+import { Layer, Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { GenerationPreparation } from "./generation-preparation.ts";
 import { artifactRetention, ArtifactRetentionRejected } from "./artifact-retention.ts";
@@ -130,14 +130,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						: request.undo.generation !== undefined
 							? sources.prepareGeneration(owner, request.undo, request.coordinatorAgent)
 							: sources.prepareUndo(owner, request.undo, request.coordinatorAgent);
-				if (!request.check) {
-					const started = yield* Clock.monotonicTimeNanos;
-					yield* Effect.addFinalizer(() =>
-						Clock.monotonicTimeNanos.pipe(
-							Effect.flatMap((ended) => supervisor.child.metrics.swap(Number(ended - started) / 1_000_000_000)),
-						),
-					);
-				}
+
 				// Partial progress is retained for failure recovery; perform uses non-null local values.
 				const rollback: { generation: Generation | null; candidate: ActiveChild | null; priorClosed: boolean } = {
 					generation: null,

@@ -9,7 +9,6 @@ import type { Attempt } from "./event-http.ts";
 import { Generations, type Generation } from "./generations.ts";
 import { Events } from "./events.ts";
 import { traffic, type Traffic } from "./traffic.ts";
-import { metrics, type BootMetrics } from "./metrics.ts";
 
 export interface ChildStatus {
 	readonly state: "starting" | "live" | "failed";
@@ -35,7 +34,6 @@ export interface SupervisedChild {
 	readonly channelGate: Semaphore.Semaphore;
 	readonly sourceError: Ref.Ref<string | null>;
 	readonly traffic: Traffic;
-	readonly metrics: BootMetrics;
 }
 
 /** Supervisor owns process recovery; the cutover coordinator shares its one operation gate. */
@@ -84,7 +82,6 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		sourceError,
 		generations: history,
 		traffic: routing,
-		metrics: yield* metrics,
 	} satisfies SupervisedChild;
 	const fail = (cause: Cause.Cause<unknown>) =>
 		Ref.update(status, (state): ChildStatus => ({

@@ -15,7 +15,6 @@ import { layer as generationsLayer } from "../../src/generations.ts";
 import { layer as kernelBootLayer } from "../../src/kernel-boot.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { databaseBackup } from "../../src/database-backup.ts";
-import { metrics } from "../../src/metrics.ts";
 import type { ActiveChild, ChildStatus, Supervisor } from "../../src/supervisor.ts";
 import { traffic } from "../../src/traffic.ts";
 
@@ -112,7 +111,6 @@ const main = Effect.gen(function* () {
 			}),
 			fail: () => Effect.void,
 			child: {
-				metrics: yield* metrics,
 				traffic: routing,
 				sourceError: yield* Ref.make<string | null>(null),
 				channelGate: yield* Semaphore.make(1),

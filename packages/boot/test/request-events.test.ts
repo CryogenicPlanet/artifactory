@@ -58,6 +58,7 @@ it("records child requests and authentication refusals without query, body, cred
 		},
 		body: "body-secret",
 	});
+	expect(response.headers.get("x-comms-span")).toBeNull();
 	const echo: unknown = await response.json();
 	if (typeof echo !== "object" || !echo || !("requestId" in echo)) throw new Error("Missing request id");
 	expect(echo).toMatchObject({
@@ -75,9 +76,21 @@ it("records child requests and authentication refusals without query, body, cred
 		instance: app.id,
 		generation: 1,
 		request_id: echo.requestId,
+		topic: null,
+		message_id: null,
 		payload: { method: "POST", path: "/echo", status: 200, outcome: "completed" },
 	});
-	for (const secret of ["query-secret", "body-secret", "assertion-secret", "forged", app.cookie])
+	for (const secret of [
+		"query-secret",
+		"body-secret",
+		"assertion-secret",
+		"forged",
+		"private/topic",
+		"m_private",
+		"private.ts",
+		"annotations",
+		app.cookie,
+	])
 		expect(JSON.stringify(logged)).not.toContain(secret);
 	for (const headers of [{ "x-comms-agent": "forged" }, { authorization: "Bearer invalid", "x-comms-agent": "forged" }])
 		expect((await fetch(`${app.url}/echo`, { headers })).status).toBe(401);
@@ -262,7 +275,6 @@ it("records boot auth and enrollment failures and app-down replies once without 
 	for (const path of [
 		"/health",
 		"/_boot/status",
-		"/_boot/metrics",
 		"/api/events",
 		"/_boot/events",
 		"/api/stream",

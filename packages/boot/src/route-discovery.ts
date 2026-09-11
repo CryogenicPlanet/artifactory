@@ -36,7 +36,6 @@ const routes = [
 		"fs",
 		"Child state, recovery diagnostics and traffic state. Human session or fs-scoped bearer.",
 	],
-	["get", ["/_boot/metrics"], "fs", "Prometheus text metrics. Human session or fs-scoped bearer."],
 	[
 		"get",
 		["/_boot/generations", "/api/generations"],

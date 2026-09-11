@@ -250,14 +250,10 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		),
 		Effect.forkScoped,
 	);
-	yield* HttpRouter.add(
-		"*",
-		"/*",
-		child.metrics.request.pipe(
-			Effect.andThen(Ref.get(installed)),
-			Effect.flatMap((runtime) => runtime.handle),
-		),
-	).pipe((routes) => HttpRouter.serve(routes, { disableLogger: true }), Layer.build);
+	yield* HttpRouter.add("*", "/*", Ref.get(installed).pipe(Effect.flatMap((runtime) => runtime.handle))).pipe(
+		(routes) => HttpRouter.serve(routes, { disableLogger: true }),
+		Layer.build,
+	);
 	// The private publication handler and its services stay alive until all database owners close.
 	yield* Effect.addFinalizer(() =>
 		Ref.set(phase, { _tag: "Stopping" }).pipe(

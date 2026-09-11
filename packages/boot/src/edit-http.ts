@@ -10,7 +10,6 @@ import { assertionProof, authenticate, body, humanSession } from "./auth-http.ts
 import { databaseRestoreResponse } from "./database-restore-http.ts";
 import type { DatabaseRestore } from "./database-restore.ts";
 import type { Cutover } from "./cutover.ts";
-import type { BootMetrics } from "./metrics.ts";
 import { EditAuthority, EditRejected, type EditLock, type Ownership } from "./edit-lock.ts";
 import type { VerifiedIdentity } from "./enrollment.ts";
 import { BreakLock } from "./lock-break.ts";
@@ -34,7 +33,6 @@ export const editRoute = (
 	editing: Editing,
 	auth: Auth["Service"],
 	identity: VerifiedIdentity,
-	metrics: BootMetrics,
 	restore: DatabaseRestore,
 ) =>
 	Effect.gen(function* () {
@@ -235,7 +233,7 @@ export const editRoute = (
 						const current = yield* authenticate(auth, request);
 						if (!current.scopes.includes("fs")) return yield* new AuthError({ code: "scope_required" });
 					}),
-					(id) => perform(id).pipe(Effect.catchCause(editFailure(metrics))),
+					(id) => perform(id).pipe(Effect.catchCause(editFailure)),
 				);
 			}
 			if ([...url.searchParams.keys()].some((key) => !["reload", "check", "release", "history"].includes(key)))
@@ -332,7 +330,7 @@ export const editRoute = (
 					}),
 				),
 			);
-		}).pipe(Effect.catchCause(editFailure(metrics)));
+		}).pipe(Effect.catchCause(editFailure));
 	});
 
 const readBytes = (request: HttpServerRequest.HttpServerRequest, name: string) =>

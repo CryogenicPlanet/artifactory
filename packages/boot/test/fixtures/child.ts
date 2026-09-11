@@ -44,30 +44,39 @@ export function serve(mode: string) {
 				return new Response(String(received));
 			}
 			if (url.pathname === "/echo")
-				return Response.json({
-					method: request.method,
-					path: url.pathname,
-					search: url.search,
-					body: await request.text(),
-					authorization: request.headers.get("authorization"),
-					cookie: request.headers.get("cookie"),
-					assertion: request.headers.get("x-comms-assertion"),
-					kind: request.headers.get("x-comms-auth-kind"),
-					expires: request.headers.get("x-comms-token-expires"),
-					agent: request.headers.get("x-comms-agent"),
-					instance: request.headers.get("x-comms-instance"),
-					scopes: request.headers.get("x-comms-scopes"),
-					label: request.headers.get("x-comms-label"),
-					requestId: request.headers.get("x-comms-request-id"),
-					trace: request.headers.get("x-comms-traceparent"),
-					publicTrace: request.headers.get("traceparent"),
-					traceState: request.headers.get("tracestate"),
-					baggage: request.headers.get("baggage"),
-					forwarded: request.headers.get("x-forwarded-for"),
-					hop: request.headers.get("x-hop"),
-					contentType: request.headers.get("content-type"),
-					inheritedSecret: process.env.BOOT_DATABASE_URL ?? null,
-				});
+				return Response.json(
+					{
+						method: request.method,
+						path: url.pathname,
+						search: url.search,
+						body: await request.text(),
+						authorization: request.headers.get("authorization"),
+						cookie: request.headers.get("cookie"),
+						assertion: request.headers.get("x-comms-assertion"),
+						kind: request.headers.get("x-comms-auth-kind"),
+						expires: request.headers.get("x-comms-token-expires"),
+						agent: request.headers.get("x-comms-agent"),
+						instance: request.headers.get("x-comms-instance"),
+						scopes: request.headers.get("x-comms-scopes"),
+						label: request.headers.get("x-comms-label"),
+						requestId: request.headers.get("x-comms-request-id"),
+						trace: request.headers.get("x-comms-traceparent"),
+						publicTrace: request.headers.get("traceparent"),
+						traceState: request.headers.get("tracestate"),
+						baggage: request.headers.get("baggage"),
+						forwarded: request.headers.get("x-forwarded-for"),
+						hop: request.headers.get("x-hop"),
+						contentType: request.headers.get("content-type"),
+						inheritedSecret: process.env.BOOT_DATABASE_URL ?? null,
+					},
+					{
+						headers: {
+							"x-comms-span": encodeURIComponent(
+								JSON.stringify({ topic: "private/topic", message_id: "m_private", extension: "private.ts" }),
+							),
+						},
+					},
+				);
 			if (url.pathname === "/stream")
 				return new Response(
 					new ReadableStream({

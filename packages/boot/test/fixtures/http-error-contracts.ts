@@ -3,7 +3,6 @@ import { editFailure } from "../../src/edit-failure.ts";
 import { childErrorPolicy } from "../../src/child-error-policy.ts";
 import { EditRejected } from "../../src/edit-lock.ts";
 import { SourceRejected } from "../../src/source-schema.ts";
-import { metrics } from "../../src/metrics.ts";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Cause, Console, Effect, Ref, Schema, Semaphore } from "effect";
@@ -65,8 +64,7 @@ const program = Effect.gen(function* () {
 	] as const)
 		assert.equal(Schema.is(schema)({ _tag: tag, code: "future_unknown_code" }), false);
 
-	const meter = yield* metrics;
-	const edit = <E>(effect: Effect.Effect<never, E>) => effect.pipe(Effect.catchCause(editFailure(meter)));
+	const edit = <E>(effect: Effect.Effect<never, E>) => effect.pipe(Effect.catchCause(editFailure));
 	// Each known child failure retains its identity on both recovery HTTP boundaries.
 	for (const [code, detail] of Object.entries(childErrorPolicy)) {
 		const error = yield* Schema.decodeUnknownEffect(ChildError)({ _tag: "ChildError", code });

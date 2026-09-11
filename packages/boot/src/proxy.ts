@@ -34,7 +34,6 @@ POST /_boot/settings  Change {revision,patch} with a fresh settings.change asser
 GET /health        Bootloader liveness (independent of the child).
 GET /_boot/recovery  Human source-recovery page, independent of the child.
 GET /_boot/status  Child state and bounded stderr tail.
-GET /_boot/metrics  Prometheus metrics; human session or fs-scoped bearer.
 GET /_boot/generations  Persistent generation history (also /api/generations).
 GET /_boot/db/backups  Human-only backup catalog.
 POST /_boot/db/backup  Capture a consistent app backup (human or fs scope).
@@ -99,7 +98,7 @@ export const proxy = Effect.gen(function* () {
 	const requestId = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
 	// Polls and the child protocol must not manufacture events that wake themselves.
 	const excluded =
-		["/health", "/_boot/status", "/_boot/metrics", "/api/events", "/_boot/events", "/api/stream"].includes(path) ||
+		["/health", "/_boot/status", "/api/events", "/_boot/events", "/api/stream"].includes(path) ||
 		path === "/_kernel" ||
 		path.startsWith("/_kernel/") ||
 		path.startsWith("/_boot/seq") ||
@@ -214,7 +213,6 @@ export const proxy = Effect.gen(function* () {
 						{ ...editing, writable: (yield* Ref.get(phase))._tag === "Ready" },
 						auth,
 						identity,
-						child.metrics,
 						restores,
 					);
 					if (edited) return expires(edited);
@@ -232,23 +230,12 @@ export const proxy = Effect.gen(function* () {
 				);
 				if (eventResponse) return expires(eventResponse);
 				if (
-					["/_boot/status", "/_boot/metrics", "/_boot/generations", "/api/generations"].includes(path) &&
+					["/_boot/status", "/_boot/generations", "/api/generations"].includes(path) &&
 					identity?.kind !== "human" &&
 					!identity?.scopes.includes("fs")
 				)
 					return yield* new AuthError({ code: "scope_required" });
-				if (path === "/_boot/metrics") {
-					if (request.method !== "GET")
-						return expires(
-							HttpServerResponse.empty({ status: 405, headers: { allow: "GET", "cache-control": "no-store" } }),
-						);
-					return expires(
-						HttpServerResponse.text(yield* child.metrics.render((yield* child.traffic.state).queued), {
-							contentType: "text/plain; version=0.0.4; charset=utf-8",
-							headers: { "cache-control": "no-store" },
-						}),
-					);
-				}
+
 				let destination = yield* Ref.get(child.traffic.route);
 				const state = yield* Ref.get(child.status);
 				const safeState = { ...state, stderr: redactHex(state.stderr) };
@@ -389,7 +376,6 @@ export const proxy = Effect.gen(function* () {
 				return yield* client.execute(outgoing).pipe(
 					Effect.flatMap((response) =>
 						Effect.gen(function* () {
-							if (observed) yield* observed.child(response.headers["x-comms-span"]);
 							const connection = new Set(
 								(response.headers.connection ?? "")
 									.toLowerCase()

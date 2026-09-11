@@ -12,7 +12,6 @@ import { EditRejected } from "./edit-lock.ts";
 import { ArtifactRetentionRejected } from "./artifact-retention.ts";
 import { StorageRejected } from "./storage-headroom.ts";
 import { SourceRejected } from "./source-schema.ts";
-import type { BootMetrics } from "./metrics.ts";
 
 const conflict = {
 	status: 409,
@@ -152,7 +151,7 @@ export const errorResponse = (
 		{ status, headers: { "cache-control": "no-store" } },
 	);
 
-export const editFailure = (metrics: BootMetrics) => (cause: Cause.Cause<unknown>) => {
+export const editFailure = (cause: Cause.Cause<unknown>) => {
 	if (Cause.hasInterruptsOnly(cause))
 		return Effect.failCause(Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason)));
 	const expected =
@@ -186,10 +185,7 @@ export const editFailure = (metrics: BootMetrics) => (cause: Cause.Cause<unknown
 	const error = found._tag === "Success" ? found.success : undefined;
 	if (Schema.is(AuthError)(error)) return Effect.succeed(authErrorResponse(error.code));
 	if (Schema.is(EditRejected)(error))
-		return Effect.as(
-			error.code === "locked" || error.code === "cutover_in_flight" ? metrics.lockWait : Effect.void,
-			errorResponse(error.code, policy[error.code].status, error.holder),
-		);
+		return Effect.succeed(errorResponse(error.code, policy[error.code].status, error.holder));
 	if (
 		Schema.is(RecoveryRejected)(error) ||
 		Schema.is(StorageRejected)(error) ||

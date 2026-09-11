@@ -18,6 +18,8 @@ it("serves editable public orientation with negotiated HTML, a source version an
 		expect(discovery.paths[path]).toEqual(operations);
 	expect(discovery.components.securitySchemes).toMatchObject(manifest.components.securitySchemes);
 	expect(manifest.endpoints["/api/messages"]).toBeUndefined();
+	expect(manifest.endpoints["/_boot/metrics"]).toBeUndefined();
+	expect(discovery.paths["/_boot/metrics"]).toBeUndefined();
 	expect(manifest).toMatchObject({ api_url: "/api", recovery_url: "/_boot" });
 	for (const path of ["/api", "/api/ext", "/init", "/init.md"]) {
 		expect(discovery.paths[path].get.description.length).toBeGreaterThan(20);
@@ -39,7 +41,6 @@ it("serves editable public orientation with negotiated HTML, a source version an
 		["/api/reload", "post", "fs"],
 		["/_boot/db/backup", "post", "fs"],
 		["/_boot/db/backups", "get", "human"],
-		["/_boot/metrics", "get", "fs"],
 		["/_boot/restart", "post", "human"],
 		["/_boot/reset", "post", "human"],
 	] as const) {

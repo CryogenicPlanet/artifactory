@@ -56,13 +56,13 @@ export default api => api.route("GET", "/api/trace", { description: "Trace verif
 			}),
 			expect.objectContaining({
 				message: "http.request",
-				topic: "work/trace",
-				data: expect.objectContaining({
-					annotations: { topic: "work/trace", message_id: "m_trace", extension: "trace.ts" },
-				}),
+				topic: null,
+				data: expect.objectContaining({ method: "GET", path: "/api/trace", status: 200 }),
 			}),
 		]),
 	);
+	for (const row of rows.filter((row) => row.message === "http.request"))
+		expect(row.data).not.toHaveProperty("annotations");
 	for (const row of rows)
 		expect(row).toMatchObject({ timestamp: expect.any(String), level: expect.any(String), seq: expect.any(Number) });
 	expect((await fetch(`${app.url}/api/evlog?since=-1`, { headers: { cookie } })).status).toBe(400);
