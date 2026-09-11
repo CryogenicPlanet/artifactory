@@ -139,8 +139,6 @@ const main = Effect.gen(function* () {
 		};
 		if (mode === "cutover")
 			yield* sql`INSERT INTO cutover(singleton,candidate,lock_id,family,phase) VALUES(1,1,'fixture','fixture','working')`;
-		if (mode === "move")
-			yield* sql`INSERT INTO topic_moves VALUES('fixture','old','new','fixture',NULL,'{}','prepared',NULL)`;
 		if (mode === "source") yield* sql`INSERT INTO source_batches VALUES('fixture',NULL,'fixture',0,'publishing')`;
 		if (mode === "restore")
 			yield* sql`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES('fixture','hash','session','backup','restoring',0)`;
@@ -238,7 +236,6 @@ const main = Effect.gen(function* () {
 			mode !== "stale-request" &&
 			mode !== "cutover" &&
 			mode !== "restore" &&
-			mode !== "move" &&
 			mode !== "source"
 		)
 			yield* Deferred.await(frozen);

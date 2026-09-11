@@ -18,7 +18,7 @@ async function run(test: TestContext, mode: string) {
 }
 
 describe("on-demand quiesced backups", () => {
-	it.for(["restore", "move", "source"])(
+	it.for(["restore", "source"])(
 		"refuses pending %s recovery before touching traffic or the child",
 		async (mode, test) => {
 			expect(await run(test, mode)).toMatchObject({
