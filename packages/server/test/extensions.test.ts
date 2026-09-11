@@ -48,7 +48,11 @@ export default api => {${core ? "api.mount(CoreApi,coreHandlers(api));" : ""}api
 	expect(identity.instance).not.toBe("spoof");
 	for (const secret of ["x-boot-secret", "authorization", "cookie"]) expect(identity.headers[secret]).toBeUndefined();
 	expect((await get("/api/partial")).status).toBe(404);
-	expect((await get("/api/throws")).status).toBe(503);
+	for (let attempt = 0; attempt < 2; attempt++) {
+		const disabled = await get("/api/throws");
+		expect(disabled.status).toBe(500);
+		expect(await disabled.json()).toMatchObject({ error: { code: "extension_disabled", retriable: false } });
+	}
 	expect((await get("/api/standup")).status).toBe(200);
 	expect((await fetch(`${app.url}/api/head`, { method: "HEAD", headers: { cookie } })).headers.get("x-head")).toBe(
 		"explicit",

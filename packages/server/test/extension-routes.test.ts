@@ -27,6 +27,7 @@ export default api => {
   return Response.json({agent:ctx.agent,params:ctx.params,query:ctx.query,nativeParams:yield* HttpRouter.params,nativeQuery:yield* HttpServerRequest.ParsedSearchParams,headers:request.headers,sourceHeaders:Object.fromEntries(req.source.headers)});
  })});
  api.route("GET", "/api/files/:bucket/*", {description:"Nested files",scope:"read",handler:async(req,ctx)=>Response.json(ctx.params)});
+ api.route("POST", "/api/files/:container/:file", {description:"Single file write",scope:"write",handler:async(req,ctx)=>Response.json(ctx.params)});
  api.route("POST", "/api/route-demo/:target", {description:"Write route",scope:"write",handler:async(req,ctx)=>Response.json({method:req.method,params:ctx.params})});
  api.route("HEAD", "/api/route-demo/:name", {description:"Explicit HEAD",scope:"read",handler:async()=>new Response(null,{headers:{"x-route":"head"}})});
  api.route("OPTIONS", "/api/route-demo/:name", {description:"Explicit OPTIONS",scope:"read",handler:async()=>new Response(null,{headers:{"x-route":"options"}})});
@@ -94,6 +95,15 @@ export default api => {
 			expect.objectContaining({ in: "path", name: "*" }),
 		]),
 	);
+	expect(await (await app.post("/api/files/docs/readme", {}, cookie)).json()).toEqual({
+		container: "docs",
+		file: "readme",
+	});
+	expect(openapi.paths["/api/files/{bucket}/{*}"].post.parameters).toEqual(
+		expect.arrayContaining([expect.objectContaining({ name: "bucket" }), expect.objectContaining({ name: "*" })]),
+	);
+	expect(JSON.stringify(openapi.paths["/api/route-demo/{name}"].get.responses[500])).toContain("extension_disabled");
+	expect(JSON.stringify(openapi.paths["/api/topics/{*}"].get.responses[500])).toContain("extension_disabled");
 	const enrollment = await (await app.post("/auth/enroll", { name: "reader", kind: "agent", host: "test" })).json();
 	const params = { id: enrollment.id, decision: "approve" as const, scopes: ["read"], long_lived: false };
 	const proof = await app.assertion(params);
@@ -167,4 +177,49 @@ it("keeps reserved and static core routes ahead of broad extension patterns", as
 	expect(
 		(await (await fetch(`${app.url}/api/messages?topic=retained&since=0`, { headers: { cookie } })).json()).items,
 	).toEqual([expect.objectContaining({ body: "keep me" })]);
+}, 25000);
+
+it("isolates wildcard and parameter template conflicts during reload and retains healthy routes", async (test) => {
+	const fixture = await conversation(test);
+	const app = await fixture.launch();
+	await app.setup();
+	const cookie = await app.login();
+	await app.ready(cookie);
+	expect((await app.post("/api/messages", { topic: "retained", body: "keep me" }, cookie)).status).toBe(200);
+	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
+	const source = `export default api => {
+ api.route("GET","/api/uncommitted-route",{description:"Must not survive failed registration",scope:"read",handler:()=>Response.json("bad")});
+ api.route("GET","/api/topics/:path",{description:"Conflicting topic template",scope:"read",handler:()=>Response.json("bad")});
+};`;
+	const response = await fetch(`${app.url}/api/fs/app/ext/zz-template.ts`, {
+		method: "PUT",
+		headers: { cookie, origin: "https://comms.test" },
+		body: source,
+	});
+	expect(await response.json()).toMatchObject({ status: "live" });
+	const get = (path: string) => fetch(`${app.url}${path}`, { headers: { cookie } });
+	expect(await (await get("/api/ext")).json()).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({ name: "core.ts", status: "loaded" }),
+			expect.objectContaining({
+				name: "zz-template.ts",
+				status: "disabled",
+				registrations: [],
+				error: expect.stringContaining("core.ts"),
+			}),
+		]),
+	);
+	expect((await get("/api/uncommitted-route")).status).toBe(404);
+	expect((await get("/api/topics/retained?mark=0")).status).toBe(200);
+	expect((await get("/api")).status).toBe(200);
+	await expect
+		.poll(async () => (await (await get("/api/events?since=0&types=ext.failed")).json()).items)
+		.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					payload: expect.objectContaining({ extension: "zz-template.ts", error: expect.stringContaining("core.ts") }),
+				}),
+			]),
+		);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic='retained'")).toEqual([{ body: "keep me" }]);
 }, 25000);

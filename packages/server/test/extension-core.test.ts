@@ -11,18 +11,20 @@ it("loads core routes as an extension and keeps typed extension inputs, ownershi
 		join(seed, "ext/a-typed.ts"),
 		`
 import {Effect, Schema} from "effect";
-import {HttpApi,HttpApiBuilder,HttpApiEndpoint,HttpApiGroup,OpenApi} from "effect/unstable/httpapi";
+import {HttpApi,HttpApiBuilder,HttpApiEndpoint,HttpApiGroup,HttpApiSchema,OpenApi} from "effect/unstable/httpapi";
 export default api => Effect.gen(function*(){
  yield* api.migrate("entries", "CREATE TABLE extension_entries(value TEXT,seq INTEGER)");
  const definition=HttpApi.make("typed-example").add(HttpApiGroup.make("typed").add(
   HttpApiEndpoint.post("post","/api/typed",{payload:Schema.Struct({value:Schema.String}),success:Schema.Struct({value:Schema.String})}).annotate(OpenApi.Description,"Store an entry atomically. Requires write."),
   HttpApiEndpoint.get("tree","/api/tree/:branch/*",{params:Schema.Struct({branch:Schema.String,"*":Schema.String}),success:Schema.String}).annotate(OpenApi.Description,"Read a branch subtree."),
+  HttpApiEndpoint.post("leaf","/api/tree/:group/:leaf",{params:Schema.Struct({group:Schema.String,leaf:Schema.String}),success:Schema.String,error:Schema.Literal("custom_failure").pipe(HttpApiSchema.status(500))}).annotate(OpenApi.Description,"Write one leaf."),
   HttpApiEndpoint.get("get","/api/shape/:id",{params:Schema.Struct({id:Schema.String}),success:Schema.String}).annotate(OpenApi.Description,"Read an entry."),
   HttpApiEndpoint.post("named","/api/shape/:name",{params:Schema.Struct({name:Schema.String}),success:Schema.String}).annotate(OpenApi.Description,"Write an entry.")
  ));
  api.mount(definition,HttpApiBuilder.group(definition,"typed",h=>h
   .handle("post",({payload})=>Effect.gen(function*(){const ctx=yield* api.context("write");yield* ctx.emit("example.created",payload,seq=>ctx.db\`INSERT INTO extension_entries VALUES(\${payload.value},\${seq})\`.pipe(Effect.asVoid));return payload;}))
   .handle("tree",({params})=>Effect.succeed(params.branch))
+  .handle("leaf",({params})=>Effect.succeed(params.group+":"+params.leaf))
   .handle("get",({params})=>Effect.succeed(params.id))
   .handle("named",({params})=>Effect.succeed(params.name))));
  api.route("GET","/api/owner",{description:"First owner",scope:"read",handler:async()=>Response.json("first")});
@@ -68,10 +70,10 @@ api.mount(definition,HttpApiBuilder.group(definition,"mixed-input",h=>h.handle("
 	expect(events.items[0].payload).toEqual({ value: "atomic" });
 	expect(await (await get("/api/owner")).json()).toBe("first");
 	const mixed = await get("/api/mixed-cause");
-	expect(mixed.status).toBe(503);
+	expect(mixed.status).toBe(500);
 	expect(await mixed.json()).toMatchObject({ error: { code: "extension_disabled", retriable: false } });
 	const mixedInput = await get("/api/mixed-input");
-	expect(mixedInput.status).toBe(503);
+	expect(mixedInput.status).toBe(500);
 	expect(await mixedInput.json()).toMatchObject({ error: { code: "extension_disabled", retriable: false } });
 	const statuses = await (await get("/api/ext")).json();
 	expect(statuses).toEqual(
@@ -113,7 +115,17 @@ api.mount(definition,HttpApiBuilder.group(definition,"mixed-input",h=>h.handle("
 	const root = await get("/api/topics?mark=0");
 	expect(root.status).toBe(200);
 	expect(await root.json()).toMatchObject({ path: "" });
+	expect(await (await app.post("/api/tree/docs/readme", {}, cookie)).json()).toBe("docs:readme");
 	const docs = await (await get("/api")).json();
+	expect(docs.paths["/api/tree/{branch}/{*}"].post.parameters).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({ in: "path", name: "branch" }),
+			expect.objectContaining({ in: "path", name: "*" }),
+		]),
+	);
+	const leafErrors = JSON.stringify(docs.paths["/api/tree/{branch}/{*}"].post.responses[500]);
+	expect(leafErrors).toContain("custom_failure");
+	expect(leafErrors).toContain("extension_disabled");
 	expect(docs.paths["/api/topics"].get).toMatchObject({ operationId: "topics.detail.root" });
 	expect(docs.paths["/api/topics/{*}"].get.operationId).toBe("topics.detail");
 	expect(

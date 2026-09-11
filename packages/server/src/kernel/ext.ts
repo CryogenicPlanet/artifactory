@@ -1,5 +1,6 @@
+import { encodeError, policy } from "@comms/protocol/errors";
 import { makeExtensionEffects, type ExtensionEffects } from "./extension-effects.ts";
-import { reserved, requestPath, pattern, validateRoute } from "./extension-routes.ts";
+import { reserved, requestPath, pattern, templatePattern, validateRoute } from "./extension-routes.ts";
 import { Cause, Context, Crypto, DateTime, Effect, Exit, Layer, Path, Ref, Schema, Scope, Semaphore } from "effect";
 import { FetchHttpClient, FindMyWay, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { HttpMethod } from "effect/unstable/http/HttpMethod";
@@ -234,11 +235,17 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 				for (const [index, route] of pending.entries()) {
 					const own = pending
 						.slice(0, index)
-						.find((other) => other.method === route.method && pattern(other.path) === pattern(route.path));
+						.find(
+							(other) => other.method === route.method && templatePattern(other.path) === templatePattern(route.path),
+						);
 					const existing = registrations.findLast(
-						(other) => other.method === route.method && pattern(other.path) === pattern(route.path),
+						(other) => other.method === route.method && templatePattern(other.path) === templatePattern(route.path),
 					);
-					if (own || (existing && !/^core\.(ts|js)$/.test(existing.extension)))
+					if (
+						own ||
+						(existing &&
+							(!/^core\.(ts|js)$/.test(existing.extension) || pattern(existing.path) !== pattern(route.path)))
+					)
 						return yield* Effect.fail(
 							new ExtensionError({
 								message: `Route ${route.method} ${route.path} conflicts with ${(own ?? existing)?.extension}.`,
@@ -475,16 +482,20 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 					const route = matched.handler;
 					const who = yield* identity(route.scope);
 					const unavailable = () =>
-						HttpServerResponse.jsonUnsafe(
-							{
+						HttpServerResponse.text(
+							encodeError({
 								error: {
 									code: "extension_disabled",
 									message: `Extension ${route.extension} is disabled.`,
-									hint: "Inspect /api/ext, repair the source, then reload.",
+									hint: policy.extension_disabled.hint,
 									retriable: false,
 								},
+							}),
+							{
+								status: policy.extension_disabled.status,
+								contentType: "application/json",
+								headers: { "cache-control": "no-store" },
 							},
-							{ status: 503 },
 						);
 					if ((yield* Ref.get(statuses)).find((item) => item.name === route.extension)?.status !== "loaded")
 						return unavailable();

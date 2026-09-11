@@ -68,6 +68,11 @@ export const policy = {
 		message: "The request content type is unsupported.",
 		hint: "Send Content-Type: application/json for this JSON endpoint.",
 	},
+	extension_disabled: {
+		status: 500,
+		message: "The extension is disabled for this generation.",
+		hint: "Inspect /api/ext, repair the source, then reload.",
+	},
 	extension_migration_conflict: {
 		status: 409,
 		message: "The applied extension migration has different SQL.",

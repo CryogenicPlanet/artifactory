@@ -27,6 +27,8 @@ export const requestPath = (url: string) => {
 	}
 };
 export const pattern = (route: string) => route.replace(/:[A-Za-z_]\w*/g, ":parameter");
+// OpenAPI treats a terminal wildcard and a named segment as the same templated path shape.
+export const templatePattern = (route: string) => pattern(route).replace(/\/\*$/, "/:parameter");
 export const validateRoute = (method: string, route: string, description: string, scope: string) => {
 	if (!route.startsWith("/") || !description.trim()) throw new Error("Extensions require described absolute paths.");
 	const segments = route.slice(1).split("/");

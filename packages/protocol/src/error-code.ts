@@ -12,6 +12,7 @@ export const KernelErrorCode = Schema.Literals([
 	"event_cursor_invalid",
 	"event_storage_over_budget",
 	"event_storage_unavailable",
+	"extension_disabled",
 	"extension_migration_conflict",
 	"extension_migration_invalid",
 	"generation_not_live",
