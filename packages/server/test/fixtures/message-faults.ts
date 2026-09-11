@@ -185,13 +185,7 @@ const program = Effect.gen(function* () {
 							events: { query: channel.events, changed: channel.changed },
 							drained: Effect.never,
 							mutate: () => Effect.die("Standup remains read only"),
-							read: (task) =>
-								sql.withTransaction(
-									Effect.gen(function* () {
-										yield* sql`SELECT epoch FROM kernel_writer`;
-										return yield* task((yield* messages.fence).published_through);
-									}),
-								),
+							read: messages.read,
 							publicationFence: messages.fence,
 							params: {},
 							query: {},
@@ -213,6 +207,12 @@ const program = Effect.gen(function* () {
 						}),
 					);
 					assert.deepEqual(yield* counts, [{ agent: "rahul", messages: 1 }]);
+					if (mode === "standup-pages") {
+						for (let index = 0; index < 201; index++) yield* messages.create(who, { ...input, body: `page ${index}` });
+						assert.deepEqual(yield* counts, [{ agent: "rahul", messages: 202 }]);
+						assert.equal((yield* sql`SELECT * FROM reads`).length, 0);
+						return yield* Console.log("MESSAGE_RECOVERED");
+					}
 					if (mode === "read-race") {
 						holdFence = true;
 						const readFiber = yield* messages.get(initial.id).pipe(Effect.forkChild);

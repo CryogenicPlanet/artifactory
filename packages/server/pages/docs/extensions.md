@@ -39,19 +39,30 @@ A request context contains verified `agent`, `instance`, `label`, `kind` and `re
 
 Mutation helpers are allowed in write-scoped mutation requests and live background work. An admitted HTTP mutation keeps its existing request admission until completion, including later transaction phases after freeze begins; that admission is revoked when the request finishes. Background operations acquire the shared live-work admission. They reject nested SQL transactions: call them outside `ctx.read` and `ctx.db.withTransaction`. Ordinary request operations carry verified caller attribution; background operations use system attribution with the extension instance. Raw SQL remains trusted app code, not a sandbox or a substitute for these durability guarantees.
 
-The bundled `standup.ts` shows a projected aggregate:
+The bundled `standup.ts` counts the most recent day's messages by agent through the public projection. It pages within one `ctx.read` snapshot, so concurrent edits and publication cannot mix message versions between pages:
 
 ```ts
+const since = (yield * DateTime.nowAsDate).getTime() - 86400000;
 const rows =
 	yield *
-	ctx.read(
-		(fence) => ctx.db`
-  SELECT value FROM example_rows WHERE updated_seq <= ${fence}
-`,
+	ctx.read((fence) =>
+		Effect.gen(function* () {
+			const counts = new Map<string, number>();
+			let cursor = 0;
+			while (cursor < fence) {
+				const page = yield* ctx.messages.query({ since: cursor, limit: 200 });
+				for (const message of page.items)
+					if (message.created_at >= since) counts.set(message.agent, (counts.get(message.agent) ?? 0) + 1);
+				cursor = page.cursor;
+			}
+			return Array.from(counts, ([agent, messages]) => ({ agent, messages })).sort((a, b) =>
+				a.agent < b.agent ? -1 : a.agent > b.agent ? 1 : 0,
+			);
+		}),
 	);
 ```
 
-For mutable data, that condition alone hides pending changes but does not restore the previous published image. Store previous values or use `ctx.messages.query`/`ctx.topics.read` for the built-in projections.
+This example imports only `DateTime` and `Effect` from `effect` and the public `Api` type. It does not advance read marks. For extension-owned mutable SQL data, filtering `updated_seq <= fence` alone hides pending changes but does not restore the previous published image; retain previous values or use the built-in `ctx.messages.query`/`ctx.topics.read` projections.
 
 `ctx.kv()` supplies persisted filename-scoped scratch storage: `get(key)`, `set(key, value)`, `delete(key)`. Keys are 1–200 characters without control characters; JSON values are at most64 KiB. Renaming the extension changes its namespace. KV uses publication-aware previous values. `ctx.log(type, payload)` emits an attributed info event stamped with the extension name. Logs must never contain secrets. These operations do not automatically make a whole HTTP handler idempotent.
 
