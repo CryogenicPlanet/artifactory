@@ -6,12 +6,13 @@ import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 const execute = promisify(execFile);
 
-it("runs actual message/read/topic routes and rolls back every probe row without publishing its events", async (test) => {
+it("runs kernel KV mutation/read and rolls back every probe row without publishing its events", async (test) => {
 	const fixture = await conversation(test),
 		app = await fixture.launch();
 	await app.setup();
 	const cookie = await app.login();
 	await app.ready(cookie);
+	expect(await fixture.sql("SELECT * FROM kv WHERE ns='kernel-health'")).toEqual([]);
 	expect(await fixture.sql("SELECT COUNT(*) count FROM messages WHERE instance<>'extension:system.ts'")).toEqual([
 		{ count: 0 },
 	]);
@@ -52,21 +53,25 @@ it("runs actual message/read/topic routes and rolls back every probe row without
 	]);
 }, 20000);
 
-for (const kind of ["create", "read", "topic"])
-	it(`rejects a broken actual ${kind} route even when it returns HTTP 200`, async (test) => {
+for (const kind of ["write", "read", "completion"])
+	it(`rejects a broken kernel health ${kind} and never publishes probe data`, async (test) => {
 		const fixture = await conversation(test);
 		const seed = join(fixture.root, "seed");
 		await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
-		const source = join(seed, kind === "topic" ? "ext/core/topics-http.ts" : "ext/core/api.ts");
+		const source = join(seed, "kernel/health.ts");
 		const before = await readFile(source, "utf8");
 		const anchor =
-			kind === "create"
-				? 'const ctx = yield* extension.context("write");'
+			kind === "write"
+				? "INSERT INTO kv("
 				: kind === "read"
-					? 'const ctx = yield* extension.context("read");'
-					: "return result;";
+					? "AND updated_seq<=${fence}"
+					: "return yield* new RolledBack();";
 		const replacement =
-			kind === "topic" ? "return { ...result, messages: [] };" : "return HttpServerResponse.jsonUnsafe({ items: [] });";
+			kind === "write"
+				? "INSERT INTO missing_health_table("
+				: kind === "read"
+					? "AND updated_seq<=${fence} AND 0"
+					: 'return yield* new KernelError({ code: "health_failed" });';
 		expect(before).toContain(anchor);
 		await writeFile(source, before.replace(anchor, replacement));
 		const app = await fixture.launch(join(seed, "server.ts"));
@@ -82,7 +87,7 @@ for (const kind of ["create", "read", "topic"])
 				{ timeout: 20000 },
 			)
 			.toEqual({ state: "failed", attempt: 3 });
-		for (const table of ["messages", "topics", "outbox", "mutation_batches", "idempotency"])
+		for (const table of ["kv", "messages", "topics", "outbox", "mutation_batches", "idempotency"])
 			expect(await fixture.sql(`SELECT COUNT(*) count FROM ${table}`)).toEqual([{ count: 0 }]);
 		expect(
 			await fixture.sql(

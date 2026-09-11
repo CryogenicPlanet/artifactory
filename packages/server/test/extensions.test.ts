@@ -85,7 +85,7 @@ export default api => {${core ? "api.mount(CoreApi,coreHandlers(api));" : ""}api
 	expect((await app.post("/api/messages", { topic: "independent", body: "still working" }, cookie)).status).toBe(200);
 }, 25000);
 
-it("rejects a broken core override through actual health, but accepts an unrelated broken optional extension", async (test) => {
+it("accepts a core product override without weakening kernel health and isolates a broken optional extension", async (test) => {
 	const fixture = await conversation(test);
 	const seed = join(fixture.root, "lifecycle-seed"),
 		record = join(fixture.root, "lifecycle.jsonl");
@@ -107,12 +107,12 @@ it("rejects a broken core override through actual health, but accepts an unrelat
 			headers: { cookie, origin: "https://comms.test" },
 			body,
 		});
-	const broken =
-		'export default api => api.route("GET","/api/messages",{description:"Broken core override",scope:"read",handler:async()=>Response.json({items:[]})});';
-	expect(await (await put(broken)).json()).toMatchObject({ status: "failed" });
+	const override =
+		'export default api => api.route("GET","/api/messages",{description:"Custom message view",scope:"read",handler:async()=>Response.json({items:[]})});';
+	expect(await (await put(override)).json()).toMatchObject({ status: "live" });
 	expect(
 		(await (await fetch(`${app.url}/api/messages?topic=retained&since=0`, { headers: { cookie } })).json()).items,
-	).toEqual([expect.objectContaining({ body: "acknowledged" })]);
+	).toEqual([]);
 	expect(await (await put("invalid optional TypeScript !")).json()).toMatchObject({ status: "live" });
 	expect(await (await fetch(`${app.url}/api/ext`, { headers: { cookie } })).json()).toEqual(
 		expect.arrayContaining([expect.objectContaining({ name: "zz-override.ts", status: "disabled" })]),
@@ -122,13 +122,28 @@ it("rejects a broken core override through actual health, but accepts an unrelat
 		.trim()
 		.split("\n")
 		.map((line) => JSON.parse(line));
-	expect(trace.map((event) => event.type)).toEqual(["start", "start", "stop", "start", "stop", "stop", "start"]);
-	expect(trace[0].generation).toBe(trace[5].generation);
-	expect(trace[6].generation).not.toBe(trace[0].generation);
+	// Both the product override and the disabled optional extension accept a new generation.
+	expect(trace.map((event) => event.type)).toEqual([
+		"start",
+		"start",
+		"stop",
+		"stop",
+		"start",
+		"start",
+		"stop",
+		"stop",
+		"start",
+	]);
+	expect(trace[0].generation).toBe(trace[3].generation);
+	expect(trace[1].generation).toBe(trace[4].generation);
+	expect(trace[4].generation).toBe(trace[7].generation);
+	expect(trace[5].generation).toBe(trace[8].generation);
+	expect(trace[4].generation).not.toBe(trace[0].generation);
+	expect(trace[8].generation).not.toBe(trace[4].generation);
 	const events = await (await fetch(`${app.url}/api/events?since=0&types=ext.*`, { headers: { cookie } })).json();
 	expect(
 		events.items.every(
-			(event: { payload: { error?: string } }) => !event.payload.error?.includes("Broken core override"),
+			(event: { payload: { error?: string } }) => !event.payload.error?.includes("Custom message view"),
 		),
 	).toBe(true);
 }, 35000);

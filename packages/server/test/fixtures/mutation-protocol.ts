@@ -10,7 +10,6 @@ import { type EventRecord } from "@comms/protocol/events";
 import { BootChannel, KernelError } from "../../src/kernel/boot-channel.ts";
 import { makeOutboxRelay } from "../../src/kernel/outbox.ts";
 import { HealthProbe, layer as probeLayer } from "../../src/kernel/health-probe.ts";
-import { HttpServerResponse } from "effect/unstable/http";
 import { probeHealth } from "../../src/kernel/health.ts";
 import { Messages, layer as messagesLayer } from "../../src/ext/core/messages.ts";
 import { Lifecycle, layer as lifecycleLayer } from "../../src/kernel/lifecycle.ts";
@@ -324,8 +323,9 @@ const program = Effect.gen(function* () {
 								yield* sql`INSERT INTO domain VALUES('unconfirmed probe')`;
 								return { outcome: "probe", events: [event(range.from)] };
 							}),
-					}).pipe(Effect.as(HttpServerResponse.empty({ status: 500 })));
+					}).pipe(Effect.andThen(new KernelError({ code: "health_read_invalid" })));
 					const result = yield* probeHealth(dispatch).pipe(
+						Effect.provide(publicationLayer),
 						Effect.provideService(SqlClient.SqlClient, mutationSql),
 						Effect.provideService(BootChannel, boot),
 						Effect.exit,

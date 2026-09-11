@@ -2,12 +2,14 @@ import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Cause, Console, Crypto, Effect, Exit, Layer, Schema, Semaphore } from "effect";
-import { FetchHttpClient, HttpServerResponse } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/unstable/http";
 import { SqlClient, Statement } from "effect/unstable/sql";
 import { Reactivity } from "effect/unstable/reactivity";
 import type { EventRecord } from "@comms/protocol/events";
 import { BootChannel, KernelError, layer as bootLayer } from "../../src/kernel/boot-channel.ts";
+import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { probeHealth } from "../../src/kernel/health.ts";
+import { layer as lifecycleLayer } from "../../src/kernel/lifecycle.ts";
 import { makeMutate } from "../../src/kernel/mutate.ts";
 
 const program = Effect.gen(function* () {
@@ -100,7 +102,12 @@ const program = Effect.gen(function* () {
 				{ value: "second" },
 			]);
 		});
-		const result = yield* probeHealth(Effect.succeed(HttpServerResponse.empty({ status: 500 })), before, true).pipe(
+		const result = yield* probeHealth(
+			before.pipe(Effect.andThen(new KernelError({ code: "health_read_invalid" }))),
+			true,
+		).pipe(
+			Effect.provide(publicationLayer),
+			Effect.provide(lifecycleLayer),
 			Effect.provideService(SqlClient.SqlClient, probeSql),
 			Effect.provideService(BootChannel, boot),
 			Effect.exit,

@@ -12,7 +12,7 @@ const make = (allowMultiple: boolean) =>
 			ceiling: yield* Ref.make(0),
 		};
 	});
-/** Present only during same-fiber route health dispatch, never during router assembly. */
+/** Present only during same-fiber kernel health probe, never during router assembly. */
 export class HealthProbe extends Context.Service<HealthProbe, Effect.Success<ReturnType<typeof make>>>()(
 	"comms/server/HealthProbe",
 ) {}

@@ -132,9 +132,7 @@ const server = Effect.gen(function* () {
 					const actual = failure(extensions.dispatch(dispatch)).pipe(
 						Effect.provideContext(Context.add(context, Logger.CurrentLoggers, loggers)),
 					);
-					const sqlContext = yield* Effect.context<
-						Messages | Topics | Lifecycle | BootChannel | SqlClient | Crypto.Crypto
-					>();
+					const sqlContext = yield* Effect.context<Publication | Lifecycle | BootChannel | SqlClient | Crypto.Crypto>();
 					const health = healthGate
 						.withPermit(
 							Effect.gen(function* () {
@@ -142,7 +140,7 @@ const server = Effect.gen(function* () {
 								if (!["starting", "candidate", "rehearsal"].includes(state))
 									return HttpServerResponse.empty({ status: 409 });
 								if (!(yield* Ref.get(lifecycle.healthy))) {
-									yield* probeHealth(actual, extensions.rehearse, state === "rehearsal").pipe(
+									yield* probeHealth(extensions.rehearse, state === "rehearsal").pipe(
 										Effect.provideContext(sqlContext),
 									);
 									yield* Ref.set(lifecycle.healthy, true);
