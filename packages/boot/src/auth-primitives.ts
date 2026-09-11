@@ -1,4 +1,5 @@
 import { type Crypto, Effect, Result } from "effect";
+import type { AssertionProof } from "./enrollment.ts";
 import type { SqlClient } from "effect/unstable/sql";
 import { AuthError } from "./auth.ts";
 
@@ -31,3 +32,16 @@ export const captureRefusal =
  * Semantic results fail after COMMIT; errors, defects and interruption still roll back. */
 export const committed = <A, D, E, R>(sql: SqlClient.SqlClient, effect: Effect.Effect<Result.Result<A, D>, E, R>) =>
 	sql.withTransaction(effect).pipe(Effect.flatMap(Effect.fromResult));
+
+/** Stable assertion bytes bind durable receipts across retries and boot upgrades. */
+export const canonicalProof = (proof: AssertionProof) =>
+	JSON.stringify([
+		proof.id,
+		proof.response.id,
+		proof.response.rawId,
+		proof.response.type,
+		proof.response.response.clientDataJSON,
+		proof.response.response.authenticatorData,
+		proof.response.response.signature,
+		proof.response.response.userHandle ?? null,
+	]);

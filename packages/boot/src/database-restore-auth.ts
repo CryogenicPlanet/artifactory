@@ -1,7 +1,7 @@
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AuthError } from "./auth.ts";
-import { captureRefusal, committed } from "./auth-primitives.ts";
+import { captureRefusal, committed, canonicalProof } from "./auth-primitives.ts";
 import type { AssertionProof } from "./enrollment.ts";
 import {
 	DatabaseRestoreRequest,
@@ -9,18 +9,6 @@ import {
 	type RestoreSelection,
 	type RestoreTarget,
 } from "./database-restore-schema.ts";
-
-const canonicalProof = (proof: AssertionProof) =>
-	JSON.stringify([
-		proof.id,
-		proof.response.id,
-		proof.response.rawId,
-		proof.response.type,
-		proof.response.response.clientDataJSON,
-		proof.response.response.authenticatorData,
-		proof.response.response.signature,
-		proof.response.response.userHandle ?? null,
-	]);
 
 /** Resolve catalog metadata only. Filesystem ownership/inventory is checked by the coordinator. */
 export const resolveRestoreTarget = (params: RestoreSelection) =>

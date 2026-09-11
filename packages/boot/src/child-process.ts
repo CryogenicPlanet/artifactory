@@ -1,3 +1,4 @@
+import { ChildConfiguration } from "./keeper-configuration.ts";
 import { Deferred, Effect, Exit, FileSystem, Path, Ref, Schema, Scope, Stream } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -38,20 +39,7 @@ export class ChildError extends Schema.TaggedError<ChildError>()("ChildError", {
 		return `Child operation failed: ${this.code}`;
 	}
 }
-export interface Launch {
-	readonly entry: string;
-	readonly cwd: string;
-	readonly env: Readonly<Record<string, string>>;
-	readonly receipt: string;
-	readonly attempt: string;
-}
-const Configuration = Schema.Struct({
-	entry: Schema.String,
-	cwd: Schema.String,
-	env: Schema.Record(Schema.String, Schema.String),
-	receipt: Schema.String,
-	attempt: Schema.String,
-});
+export type Launch = typeof ChildConfiguration.Type;
 
 /** One keeper-owned process lifetime, with positive exit evidence independent of boot's lifetime. */
 export const launchChild = Effect.fn("launchChild")(function* (options: Launch) {
@@ -64,7 +52,7 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch) 
 	const scope = yield* Scope.fork(yield* Effect.scope);
 	const stderr = yield* Ref.make("");
 	return yield* Effect.gen(function* () {
-		const configuration = yield* Schema.encodeEffect(Schema.fromJsonString(Configuration))(options);
+		const configuration = yield* Schema.encodeEffect(Schema.fromJsonString(ChildConfiguration))(options);
 		const handle = yield* spawner
 			.spawn(
 				ChildProcess.make(process.execPath, [entry], {

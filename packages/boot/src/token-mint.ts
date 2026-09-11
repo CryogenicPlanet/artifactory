@@ -1,4 +1,4 @@
-import { authSecrets, refuse } from "./auth-primitives.ts";
+import { authSecrets, refuse, canonicalProof } from "./auth-primitives.ts";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import type { AssertionProof } from "./enrollment.ts";
@@ -22,18 +22,6 @@ const Token = Schema.Struct({
 	created_at: Schema.Int,
 	revoked_at: Schema.NullOr(Schema.Int),
 });
-const canonicalProof = (proof: AssertionProof) =>
-	JSON.stringify([
-		proof.id,
-		proof.response.id,
-		proof.response.rawId,
-		proof.response.type,
-		proof.response.response.clientDataJSON,
-		proof.response.response.authenticatorData,
-		proof.response.response.signature,
-		proof.response.response.userHandle ?? null,
-	]);
-
 /** One signed transaction owns issuance and a session-encrypted exact response receipt. */
 export const makeTokenMint = <E, R>(
 	verify: (params: MintBinding, proof: AssertionProof) => Effect.Effect<void, E, R>,

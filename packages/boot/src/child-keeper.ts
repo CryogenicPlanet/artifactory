@@ -1,19 +1,12 @@
+import { ChildConfiguration } from "./keeper-configuration.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Config, Console, Effect, Exit, FileSystem, Path, Redacted, Schema, Scope, Stdio, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-const Configuration = Schema.Struct({
-	entry: Schema.String,
-	cwd: Schema.String,
-	env: Schema.Record(Schema.String, Schema.String),
-	receipt: Schema.String,
-	attempt: Schema.String,
-});
-
 // Immutable owner of one editable app process. Parent pipe EOF closes the child even if its event loop hangs.
 const keeper = Effect.gen(function* () {
 	const encoded = yield* Config.Redacted("COMMS_CHILD_CONFIG");
-	const config = yield* Schema.decodeEffect(Schema.fromJsonString(Configuration))(Redacted.value(encoded)).pipe(
+	const config = yield* Schema.decodeEffect(Schema.fromJsonString(ChildConfiguration))(Redacted.value(encoded)).pipe(
 		Effect.orDie,
 	);
 	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;

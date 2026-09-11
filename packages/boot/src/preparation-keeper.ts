@@ -1,20 +1,15 @@
+import { PreparationConfiguration } from "./keeper-configuration.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Cause, Config, Console, Effect, Path, Redacted, Schema, Stdio, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { ChildError } from "./child-process.ts";
 
-const Configuration = Schema.Struct({
-	operation: Schema.Literals(["install", "build"]),
-	workspace: Schema.String,
-	output: Schema.String,
-});
-
 // This immutable entry only runs the two preparation commands. Pipe EOF cancels
 // the scoped process group, including ordinary descendants of editable Vite config.
 const keeper = Effect.gen(function* () {
 	const encoded = yield* Config.Redacted("COMMS_PREPARATION_CONFIG");
-	const config = yield* Schema.decodeEffect(Schema.fromJsonString(Configuration))(Redacted.value(encoded));
+	const config = yield* Schema.decodeEffect(Schema.fromJsonString(PreparationConfiguration))(Redacted.value(encoded));
 	const path = yield* Path.Path;
 	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 	const stdio = yield* Stdio.Stdio;

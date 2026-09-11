@@ -257,7 +257,7 @@ const make = Effect.gen(function* () {
 						cutover_in_flight: 0,
 						pending_release: null,
 					};
-					yield* sql`INSERT OR REPLACE INTO edit_lock ${sql.insert({ singleton: 1, ...value })}`;
+					yield* sql`INSERT INTO edit_lock ${sql.insert({ singleton: 1, ...value })} ON CONFLICT(singleton) DO UPDATE SET ${sql.update(value)}`;
 					transitions.push({
 						type: lock ? "renewed" : "acquired",
 						lock_id: value.id,

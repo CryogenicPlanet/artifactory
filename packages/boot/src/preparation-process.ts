@@ -1,12 +1,7 @@
+import { PreparationConfiguration } from "./keeper-configuration.ts";
 import { Context, Effect, Layer, Path, type PlatformError, Ref, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { ChildError } from "./child-process.ts";
-
-const Configuration = Schema.Struct({
-	operation: Schema.Literals(["install", "build"]),
-	workspace: Schema.String,
-	output: Schema.String,
-});
 
 /** Fixed subprocess commands; scope interruption also closes the keeper's pipe.
  * No app lifecycle scripts, inherited credentials, or editable entry in boot. */
@@ -33,7 +28,7 @@ export const layer = Layer.effect(
 				const stderr = yield* Ref.make("");
 				return yield* Effect.scoped(
 					Effect.gen(function* () {
-						const configuration = yield* Schema.encodeEffect(Schema.fromJsonString(Configuration))({
+						const configuration = yield* Schema.encodeEffect(Schema.fromJsonString(PreparationConfiguration))({
 							operation,
 							workspace,
 							output,
