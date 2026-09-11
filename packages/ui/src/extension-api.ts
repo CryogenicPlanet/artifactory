@@ -4,6 +4,7 @@ import { BoardError } from "./board-api.ts";
 import { accountRequest } from "./account-api.ts";
 
 const Lock = Schema.Struct({
+	id: Schema.String,
 	agent: Schema.String,
 	holder_family: Schema.String,
 	expires: Schema.Int,

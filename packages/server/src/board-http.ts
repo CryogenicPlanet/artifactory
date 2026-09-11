@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { boardRecovery } from "./board-recovery.ts";
 import { identity } from "./conversation-request.ts";
 
 /** Only built board files adjacent to this generation are served; never the editable tree. */
@@ -29,10 +30,11 @@ const board = (directory: string) =>
 		const unavailable = () =>
 			asset
 				? HttpServerResponse.empty({ status: 404 })
-				: HttpServerResponse.text(
-						'<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>comms</title><h1>comms</h1><p>The board build is unavailable. <a href="/init">Read the API guide</a> or <a href="/_boot">open recovery help</a>.</p></html>',
-						{ contentType: "text/html; charset=utf-8", status: 503, headers: { "cache-control": "no-store" } },
-					);
+				: HttpServerResponse.text(boardRecovery, {
+						contentType: "text/html; charset=utf-8",
+						status: 503,
+						headers: { "cache-control": "no-store" },
+					});
 		if (!(yield* fs.exists(directory))) return unavailable();
 		let target = directory;
 		if ((yield* fs.realPath(target)) !== target) return unavailable();

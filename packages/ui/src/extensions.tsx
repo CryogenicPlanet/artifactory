@@ -1,3 +1,4 @@
+import { RecoveryControls } from "./recovery-controls.tsx";
 import { BoardLayout } from "./board-layout.tsx";
 import { DateTime } from "effect";
 
@@ -130,6 +131,7 @@ export function Extensions() {
 				) : (
 					<p>No one holds the edit lock.</p>
 				)}
+				<RecoveryControls lock={lockError ? undefined : lock} refresh={reload} />
 				<p>Source edits and recovery use the bootloader. Source and diagnostic views require source access.</p>
 				<nav
 					className="mt-5 flex flex-wrap gap-x-6 gap-y-3 [&>a]:text-xs [&>a]:underline [&>a]:underline-offset-[3px]"

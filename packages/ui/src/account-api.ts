@@ -13,7 +13,7 @@ const explanation = (code: string) => {
 		return "This token request conflicts with an earlier attempt. Check the token list before creating another.";
 	return `Account request refused (${code}). Refresh the account list to check its current state.`;
 };
-export const accountRequest = (request: HttpClientRequest.HttpClientRequest) =>
+export const accountRequest = (request: HttpClientRequest.HttpClientRequest, timeoutMs = 15000) =>
 	Effect.gen(function* () {
 		const client = yield* HttpClient.HttpClient;
 		const response = yield* client.execute(request);
@@ -29,7 +29,7 @@ export const accountRequest = (request: HttpClientRequest.HttpClientRequest) =>
 	}).pipe(
 		Effect.provide(FetchHttpClient.layer),
 		Effect.timeoutOrElse({
-			duration: "15 seconds",
+			duration: timeoutMs,
 			orElse: () =>
 				Effect.fail(
 					new BoardError({
