@@ -6,7 +6,7 @@ import { Pages } from "./kernel/pages.ts";
 import { Topics } from "./kernel/topics.ts";
 import { escapeHtml } from "./page-markdown.ts";
 
-const orientation = (markdownOnly: boolean, endpoints: OpenAPISpec["paths"]) =>
+export const orientation = (markdownOnly: boolean, endpoints: OpenAPISpec["paths"]) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const pages = yield* Pages;
@@ -32,9 +32,14 @@ const orientation = (markdownOnly: boolean, endpoints: OpenAPISpec["paths"]) =>
 		if (request.headers["x-comms-scopes"]?.split(",").includes("read")) {
 			const who = yield* identity("read");
 			const topics = yield* Topics;
-			const inbox = yield* topics.inbox(who, yield* topics.cursor(who), 201);
+			const inbox = yield* topics.inbox(who, yield* topics.cursor(who), 201, "agent", 2000);
 			const root = yield* topics.detail(who, "");
-			const count = inbox.items.length > 200 ? "more than 200" : String(inbox.items.length);
+			const count =
+				inbox.items.length > 200
+					? "more than 200"
+					: inbox.scan_truncated
+						? `at least ${inbox.items.length} (partial scan)`
+						: String(inbox.items.length);
 			text += `\nYou are <code>${escapeHtml(`${who.agent}@${who.label ?? ""}`)}</code>: ${count} unread inbox messages; ${root.subtopics.filter((topic) => topic.unread > 0).length} root topics have unread messages.\n`;
 		}
 		const html = !markdownOnly && (request.headers.accept ?? "").includes("text/html");

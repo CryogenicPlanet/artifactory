@@ -88,50 +88,53 @@ export const topicHandlers = (api: typeof Api) =>
 					}),
 				),
 			)
-			.handleRaw("inbox", () =>
-				failure(
-					Effect.gen(function* () {
-						const who = yield* identity("read");
-						const request = yield* HttpServerRequest.HttpServerRequest;
-						const params = new URL(request.url, "http://localhost").searchParams;
-						if ([...params.keys()].some((key) => !["since", "limit", "wait", "mode"].includes(key)))
-							return yield* new KernelError({ code: "query_invalid" });
-						const since = integer(params.get("since"), 0, Number.MAX_SAFE_INTEGER),
-							limit = integer(params.get("limit"), 100, 200),
-							wait = integer(params.get("wait"), 0, 60);
-						if (since === null || limit === null || limit === 0 || wait === null)
-							return yield* new KernelError({ code: "query_invalid" });
-						const mode = params.get("mode") ?? "agent";
-						if (mode !== "agent" && mode !== "instance") return yield* new KernelError({ code: "query_invalid" });
-						const topics = yield* Topics;
-						const cursor = params.has("since")
-							? since
-							: wait > 0
-								? (yield* (yield* Messages).fence).published_through
-								: yield* topics.cursor(who);
-						const first = yield* topics.inbox(who, cursor, limit, mode);
-						if (first.items.length || wait === 0) return HttpServerResponse.jsonUnsafe(first);
-						const lifecycle = yield* Lifecycle;
-						const deadline = (yield* DateTime.nowAsDate).getTime() + wait * 1000;
-						const result = Effect.gen(function* () {
-							while ((yield* DateTime.nowAsDate).getTime() < deadline) {
-								if ((yield* Ref.get(lifecycle.state)) === "draining") return { ...first, drained: true };
-								yield* Effect.sleep("100 millis");
-								const next = yield* topics.inbox(who, cursor, limit, mode);
-								if (next.items.length) return next;
-							}
-							return { ...first, timed_out: true };
-						});
-						const encoder = new TextEncoder();
-						return HttpServerResponse.stream(
-							Stream.merge(
-								Stream.fromEffect(result.pipe(Effect.flatMap(Schema.encodeEffect(Schema.fromJsonString(Envelope))))),
-								Stream.tick("10 seconds").pipe(Stream.map(() => "\n")),
-								{ haltStrategy: "left" },
-							).pipe(Stream.map((value) => encoder.encode(value))),
-							{ contentType: "application/json" },
-						);
-					}),
-				),
-			),
+			.handleRaw("inbox", () => inboxResponse),
 	);
+
+export const inboxResponse = failure(
+	Effect.gen(function* () {
+		const who = yield* identity("read");
+		const request = yield* HttpServerRequest.HttpServerRequest;
+		const params = new URL(request.url, "http://localhost").searchParams;
+		if ([...params.keys()].some((key) => !["since", "limit", "wait", "mode"].includes(key)))
+			return yield* new KernelError({ code: "query_invalid" });
+		const since = integer(params.get("since"), 0, Number.MAX_SAFE_INTEGER),
+			limit = integer(params.get("limit"), 100, 200),
+			wait = integer(params.get("wait"), 0, 60);
+		if (since === null || limit === null || limit === 0 || wait === null)
+			return yield* new KernelError({ code: "query_invalid" });
+		const mode = params.get("mode") ?? "agent";
+		if (mode !== "agent" && mode !== "instance") return yield* new KernelError({ code: "query_invalid" });
+		const topics = yield* Topics;
+		const messages = yield* Messages;
+		// Capture before scanning: a later publication must trigger another scan.
+		let observedFence = wait > 0 ? (yield* messages.fence).published_through : 0;
+		const cursor = params.has("since") ? since : wait > 0 ? observedFence : yield* topics.cursor(who);
+		const first = yield* topics.inbox(who, cursor, limit, mode);
+		if (first.items.length || wait === 0) return HttpServerResponse.jsonUnsafe(first);
+		const lifecycle = yield* Lifecycle;
+		const deadline = (yield* DateTime.nowAsDate).getTime() + wait * 1000;
+		const result = Effect.gen(function* () {
+			while ((yield* DateTime.nowAsDate).getTime() < deadline) {
+				if ((yield* Ref.get(lifecycle.state)) === "draining") return { ...first, drained: true };
+				yield* Effect.sleep("100 millis");
+				const published = (yield* messages.fence).published_through;
+				if (published === observedFence) continue;
+				observedFence = published;
+				// Retain since: edits can turn previously scanned messages into mentions.
+				const next = yield* topics.inbox(who, cursor, limit, mode);
+				if (next.items.length) return next;
+			}
+			return { ...first, timed_out: true };
+		});
+		const encoder = new TextEncoder();
+		return HttpServerResponse.stream(
+			Stream.merge(
+				Stream.fromEffect(result.pipe(Effect.flatMap(Schema.encodeEffect(Schema.fromJsonString(Envelope))))),
+				Stream.tick("10 seconds").pipe(Stream.map(() => "\n")),
+				{ haltStrategy: "left" },
+			).pipe(Stream.map((value) => encoder.encode(value))),
+			{ contentType: "application/json" },
+		);
+	}),
+);

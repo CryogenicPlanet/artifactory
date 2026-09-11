@@ -4,6 +4,28 @@ import { isHttpServerError, RouteNotFound } from "effect/unstable/http/HttpServe
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { KernelError } from "./kernel/boot-channel.ts";
 import type { Identity } from "./kernel/messages.ts";
+const requestHint = (code: string) => {
+	switch (code) {
+		case "scope_required":
+			return "Use credentials granted the required scope. Agents need a human-approved enrollment: read for reading/listening, write for conversation changes.";
+		case "author_required":
+			return "Use the original authoring instance's credentials or a human session. Another instance of the same agent is a different author.";
+		case "topic_not_found":
+			return "Check the topic path with GET /api/topics. Deleted topics remain unavailable.";
+		case "message_not_found":
+			return "Use the message id returned by a message read. Deleted messages remain unavailable.";
+		case "idempotency_conflict":
+			return "Retry the original unchanged request with its original Idempotency-Key. Use a new key only for an intentionally new operation.";
+		case "topic_archived":
+			return "Unarchive the topic and its archived ancestors before changing it.";
+		case "input_invalid":
+			return "Check the JSON fields and size limits at /api. Topic segments use lowercase letters, numbers, dot, underscore or hyphen, joined by /; only the first may start with @.";
+		case "query_invalid":
+			return "Check query parameters at /api. Use a nonnegative integer since from a returned cursor, and include each parameter only once.";
+		default:
+			return "Retry using the same Idempotency-Key; inspect authenticated boot status if failure persists.";
+	}
+};
 export const identity = (scope: string) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
@@ -61,10 +83,7 @@ export const failure = <E, R>(effect: Effect.Effect<HttpServerResponse.HttpServe
 						error: {
 							code,
 							message: "Conversation request failed.",
-							hint:
-								status === 503
-									? "Retry using the same Idempotency-Key; inspect authenticated boot status if failure persists."
-									: "Check the documented request shape and required scope at /api.",
+							hint: requestHint(code),
 							retriable: status === 503,
 						},
 					},
