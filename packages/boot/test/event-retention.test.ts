@@ -85,7 +85,7 @@ it("keeps exact age boundaries and unpublished rows, preserving receipts and cur
 it("commits bounded chunks, rolls back a failed chunk, and safely resumes after restart", async (test) => {
 	const app = await store(test);
 	await app.sql(`WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n<600)
-		INSERT INTO events SELECT n,NULL,json_set('${JSON.stringify(event(0, "http.request", 8 * day))}','$.seq',n) FROM numbers`);
+		INSERT INTO events(seq,transaction_id,event) SELECT n,NULL,json_set('${JSON.stringify(event(0, "http.request", 8 * day))}','$.seq',n) FROM numbers`);
 	await app.sql("UPDATE seq SET next=601,published_through=600");
 	await app.sql(
 		"CREATE TRIGGER fail_retention BEFORE DELETE ON events WHEN old.seq=300 BEGIN SELECT RAISE(ABORT,'injected'); END",

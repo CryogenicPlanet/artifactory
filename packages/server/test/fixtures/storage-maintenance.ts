@@ -49,7 +49,7 @@ export async function storageFixture(test: TestContext, failDrillClosure = false
 	expect(index.split(initialize)).toHaveLength(2);
 	await writeFile(
 		indexPath,
-		`import { SqlClient } from "effect/unstable/sql";\n${index}`.replace(
+		index.replace(
 			initialize,
 			`${initialize}\nconst maintenanceSql = yield* SqlClient.SqlClient;
   yield* maintenanceSql\`INSERT OR IGNORE INTO settings(key,value) VALUES('backup.hourly_attempt_at','4102444800000'),('backup.drill_attempt_at','4102444800000')\`;`,

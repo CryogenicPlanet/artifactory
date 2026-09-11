@@ -34,6 +34,9 @@ const Sequence = Schema.Struct({
 	pending_from: Schema.NullOr(Schema.Int),
 	pending_to: Schema.NullOr(Schema.Int),
 });
+const Move = Schema.Struct({ from: Schema.String, to: Schema.String });
+const validTopic = (topic: string) =>
+	topic.length <= 200 && /^@?[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(topic);
 const encode = Schema.encodeSync(Schema.fromJsonString(EventRecord));
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(EventRecord));
 
@@ -99,8 +102,35 @@ const make = Effect.gen(function* () {
 				}
 				if (current.pending_id !== batch.transaction || current.pending_attempt !== attempt)
 					return yield* new EventError({ code: "reservation_mismatch" });
-				for (const event of batch.events)
-					yield* sql`INSERT INTO events(seq,transaction_id,event) VALUES(${event.seq},${batch.transaction},${encode(event)})`;
+				for (const event of batch.events) {
+					// Only the first publication applies routing changes. Replays compare the original JSON above.
+					if (event.type === "topic.moved") {
+						const move = yield* Schema.decodeUnknownEffect(Move)(event.payload).pipe(
+							Effect.mapError(() => new EventError({ code: "topic_move_invalid" })),
+						);
+						if (
+							!validTopic(move.from) ||
+							!validTopic(move.to) ||
+							move.from === move.to ||
+							move.from.startsWith(`${move.to}/`) ||
+							move.to.startsWith(`${move.from}/`)
+						)
+							return yield* new EventError({ code: "topic_move_invalid" });
+						const intent = yield* sql`SELECT id FROM topic_moves WHERE id=${batch.transaction}
+							AND from_path=${move.from} AND to_path=${move.to} AND state='pages_published'
+							AND (seq IS NULL OR seq=${event.seq})`;
+						if (batch.events.length !== 1 || intent.length !== 1)
+							return yield* new EventError({ code: "topic_move_unprepared" });
+						const tooLong = yield* sql`SELECT seq FROM events WHERE
+							(topic=${move.from} OR substr(topic,1,length(${move.from})+1)=${`${move.from}/`})
+							AND length(topic)-length(${move.from})+length(${move.to})>200 LIMIT 1`;
+						if (tooLong.length) return yield* new EventError({ code: "topic_move_invalid" });
+						yield* sql`UPDATE events SET topic=${move.to} || substr(topic,length(${move.from})+1)
+							WHERE topic=${move.from} OR substr(topic,1,length(${move.from})+1)=${`${move.from}/`}`;
+						yield* sql`UPDATE topic_moves SET state='completed',seq=${batch.to} WHERE id=${batch.transaction}`;
+					}
+					yield* sql`INSERT INTO events(seq,transaction_id,event,topic) VALUES(${event.seq},${batch.transaction},${encode(event)},${event.topic})`;
+				}
 				yield* sql`UPDATE event_batches SET state='published' WHERE id=${batch.transaction}`;
 				yield* finish;
 				return { published_through: current.next - 1 };
@@ -158,9 +188,10 @@ const make = Effect.gen(function* () {
 		writeBoot: (event: Omit<typeof EventRecord.Type, "seq">) =>
 			sql.withTransaction(
 				Effect.gen(function* () {
+					if (event.type === "topic.moved") return yield* new EventError({ code: "topic_move_unprepared" });
 					const current = yield* state;
 					if (!Number.isSafeInteger(current.next + 1)) return yield* new EventError({ code: "sequence_exhausted" });
-					yield* sql`INSERT INTO events(seq,transaction_id,event) VALUES(${current.next},NULL,${encode({ ...event, seq: current.next })})`;
+					yield* sql`INSERT INTO events(seq,transaction_id,event,topic) VALUES(${current.next},NULL,${encode({ ...event, seq: current.next })},${event.topic})`;
 					yield* sql`UPDATE seq SET next=next+1,published_through=CASE WHEN pending_id IS NULL THEN next ELSE published_through END WHERE singleton=1`;
 				}),
 			),
@@ -181,8 +212,8 @@ const make = Effect.gen(function* () {
 				if (since > fence) return yield* new EventError({ code: "cursor_ahead" });
 				const types = input.types ?? [];
 				const typesJson = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(types);
-				const rows = yield* sql`SELECT event FROM events WHERE seq>${since} AND seq<=${fence}
-    AND (${input.topic ?? null} IS NULL OR json_extract(event,'$.topic')=${input.topic ?? null} OR substr(json_extract(event,'$.topic'),1,length(${input.topic ?? ""})+1)=${(input.topic ?? "") + "/"})
+				const rows = yield* sql`SELECT event,topic FROM events WHERE seq>${since} AND seq<=${fence}
+    AND (${input.topic ?? null} IS NULL OR topic=${input.topic ?? null} OR substr(topic,1,length(${input.topic ?? ""})+1)=${(input.topic ?? "") + "/"})
     AND (${input.requestActor ?? null} IS NULL OR json_extract(event,'$.type')<>'http.request' OR json_extract(event,'$.actor')=${input.requestActor ?? null})
     AND (${input.excludeMessageInstance ?? null} IS NULL OR substr(json_extract(event,'$.type'),1,8)<>'message.' OR json_extract(event,'$.instance') IS NOT ${input.excludeMessageInstance ?? null})
     AND (${input.agent ?? null} IS NULL OR json_extract(event,'$.actor')=${input.agent ?? null})
@@ -190,11 +221,15 @@ const make = Effect.gen(function* () {
     AND (${input.level ?? null} IS NULL OR json_extract(event,'$.level')=${input.level ?? null})
     AND (${types.length}=0 OR EXISTS(SELECT 1 FROM json_each(${typesJson}) WHERE value=json_extract(event,'$.type') OR substr(value,-1)='*' AND substr(json_extract(event,'$.type'),1,length(value)-1)=substr(value,1,length(value)-1)))
     ORDER BY seq LIMIT ${input.limit}`.pipe(
-					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ event: Schema.String })))),
+					Effect.flatMap(
+						Schema.decodeUnknownEffect(
+							Schema.Array(Schema.Struct({ event: Schema.String, topic: Schema.NullOr(Schema.String) })),
+						),
+					),
 				);
 				const items: Array<typeof EventRecord.Type> = [];
 				for (const row of rows) {
-					const event = yield* decode(row.event);
+					const event = { ...(yield* decode(row.event)), topic: row.topic };
 					if (input.topic && event.topic !== input.topic && !event.topic?.startsWith(`${input.topic}/`)) continue;
 					if (
 						(input.agent && event.actor !== input.agent) ||

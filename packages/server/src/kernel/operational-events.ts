@@ -29,6 +29,7 @@ export const recordOperationalEvent = <E, E2 = never>(
 		const payload = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))(input.payload);
 		if (
 			!/^[a-zA-Z0-9_.-]{1,128}$/.test(input.type) ||
+			input.type === "topic.moved" ||
 			!/^[a-f0-9]{32}$/.test(input.transaction) ||
 			new TextEncoder().encode(payload).length > 65536
 		)

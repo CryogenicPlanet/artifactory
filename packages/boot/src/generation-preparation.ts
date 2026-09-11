@@ -69,6 +69,7 @@ export const layer = (options: { readonly dataDirectory: string; readonly depend
 									});
 								const syncSnapshot = Effect.gen(function* () {
 									yield* syncPreparedTree(snapshot);
+									if (yield* fs.exists(`${snapshot}.board`)) yield* syncPreparedTree(`${snapshot}.board`);
 									let ancestor = path.dirname(snapshot);
 									while (true) {
 										yield* (yield* fs.open(ancestor)).sync;
@@ -236,6 +237,22 @@ export const layer = (options: { readonly dataDirectory: string; readonly depend
 									yield* syncSnapshot;
 									return;
 								}
+								const manifestObject = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.JsonObject))(
+									new TextDecoder().decode(manifest),
+								).pipe(
+									Effect.mapError(
+										() => new SnapshotRejected({ path: source, reason: "Runtime manifest must be a JSON object" }),
+									),
+								);
+								const capability = Schema.Struct({
+									comms: Schema.Struct({ board_directory: Schema.Literal("environment-v1") }),
+								});
+								if (!Schema.is(capability)(manifestObject))
+									return yield* new SnapshotRejected({
+										path: path.join(source, "package.json"),
+										reason:
+											'board_directory_upgrade_required: update the child to read BOARD_DIRECTORY and declare comms.board_directory="environment-v1" in package.json before rebuilding UI',
+									});
 								const uiKey = yield* hash([dependenciesKey, yield* treeHash(ui)]);
 								const built = path.join(artifacts, "ui", uiKey);
 								if (!(yield* fs.exists(built))) {
@@ -259,8 +276,7 @@ export const layer = (options: { readonly dataDirectory: string; readonly depend
 									yield* (yield* fs.open(path.dirname(built))).sync;
 								}
 								// Board's static handler deliberately refuses a symlink root.
-								yield* fs.remove(path.join(snapshotDirectory, "board"), { recursive: true, force: true });
-								yield* copySource(path.join(built, "board"), path.join(snapshotDirectory, "board"));
+								yield* copySource(path.join(built, "board"), `${snapshotDirectory}.board`);
 								yield* syncSnapshot;
 							}).pipe(Effect.provideService(FileSystem.FileSystem, fs), Effect.provideService(Path.Path, path)),
 						),

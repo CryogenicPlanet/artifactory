@@ -123,14 +123,15 @@ export async function conversation(test: TestContext) {
 			const proof = { id: started.id, response: device.assertion(started.options.challenge, ++counter) };
 			return Buffer.from(JSON.stringify(proof)).toString("base64url");
 		};
-		const revocationAssertion = async (family: string, cookie: string) => {
+		const signedAssertion = async (action: string, params: unknown, cookie: string) => {
 			const started = Schema.decodeUnknownSync(ceremony)(
-				await (await post("/_boot/auth/challenge", { action: "token.revoke", params: { family } }, cookie)).json(),
+				await (await post("/_boot/auth/challenge", { action, params }, cookie)).json(),
 			);
 			return Buffer.from(
 				JSON.stringify({ id: started.id, response: device.assertion(started.options.challenge, ++counter) }),
 			).toString("base64url");
 		};
+		const revocationAssertion = (family: string, cookie: string) => signedAssertion("token.revoke", { family }, cookie);
 		return {
 			url,
 			post,
@@ -140,6 +141,7 @@ export async function conversation(test: TestContext) {
 			stop,
 			assertion,
 			revocationAssertion,
+			signedAssertion,
 			processHandle,
 			output: () => output,
 		};

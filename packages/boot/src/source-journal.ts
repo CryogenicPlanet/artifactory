@@ -2,12 +2,14 @@ import { Crypto, Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Batch, SourceRejected, Version, type Change } from "./source-schema.ts";
 import { sameImage, type sourceIO } from "./source-io.ts";
+import type { TreeEntry } from "./source-tree-publication.ts";
 
 export interface UndoSelection {
 	readonly retry?: { readonly family: string; readonly key: string };
 	readonly path?: string;
 	readonly batch?: string;
 	readonly version?: number;
+	readonly generation?: number;
 }
 
 /** One durable publication, with transient recovery bytes separate from retained undo history. */
@@ -23,12 +25,14 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 		if (batch) return yield* new SourceRejected({ code: "publication_pending", path: batch.id });
 	});
 	const rows = (batch: string) =>
-		sql`SELECT path, before, before_sha, before_mode, desired, desired_sha, desired_mode FROM source_changes WHERE batch = ${batch} ORDER BY path`.pipe(
+		sql`SELECT path, before, before_sha, before_mode, desired, desired_sha, desired_mode, before_directory, desired_directory FROM source_changes WHERE batch = ${batch} ORDER BY path`.pipe(
 			Effect.flatMap(
 				Schema.decodeUnknownEffect(
 					Schema.Array(
 						Schema.Struct({
 							path: Schema.String,
+							before_directory: Schema.Literals([0, 1]),
+							desired_directory: Schema.Literals([0, 1]),
 							before: Schema.NullOr(Schema.Uint8Array),
 							before_sha: Schema.NullOr(Schema.String),
 							before_mode: Schema.NullOr(Schema.Int),
@@ -42,8 +46,18 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 			Effect.map((rows) =>
 				rows.map((row) => ({
 					path: row.path,
-					before: { content: row.before, sha: row.before_sha, mode: row.before_mode },
-					desired: { content: row.desired, sha: row.desired_sha, mode: row.desired_mode },
+					before: {
+						content: row.before,
+						sha: row.before_sha,
+						mode: row.before_mode,
+						...(row.before_directory === 1 ? { directory: true as const } : {}),
+					},
+					desired: {
+						content: row.desired,
+						sha: row.desired_sha,
+						mode: row.desired_mode,
+						...(row.desired_directory === 1 ? { directory: true as const } : {}),
+					},
 				})),
 			),
 		);
@@ -53,33 +67,45 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 				yield* ready;
 				yield* sql`INSERT INTO source_batches ${sql.insert(batch)}`;
 				for (const change of changes)
-					yield* sql`INSERT INTO source_changes ${sql.insert({ batch: batch.id, path: change.path, before: change.before.content, before_sha: change.before.sha, before_mode: change.before.mode, desired: change.desired.content, desired_sha: change.desired.sha, desired_mode: change.desired.mode })}`;
+					yield* sql`INSERT INTO source_changes ${sql.insert({ batch: batch.id, path: change.path, before_directory: change.before.directory ? 1 : 0, desired_directory: change.desired.directory ? 1 : 0, before: change.before.content, before_sha: change.before.sha, before_mode: change.before.mode, desired: change.desired.content, desired_sha: change.desired.sha, desired_mode: change.desired.mode })}`;
 			}),
 		);
+	const recordVersions = (batch: typeof Batch.Type, changes: readonly Change[]) =>
+		Effect.gen(function* () {
+			for (const change of changes) {
+				const beforeEligible =
+					change.before.sha === null ||
+					(change.before.content !== null && change.before.content.byteLength <= 1024 * 1024);
+				const desiredEligible =
+					change.desired.sha === null ||
+					(change.desired.content !== null && change.desired.content.byteLength <= 1024 * 1024);
+				yield* sql`INSERT INTO versions ${sql.insert({ batch: batch.id, path: change.path, previous_directory: change.before.directory ? 1 : 0, directory: change.desired.directory ? 1 : 0, agent: batch.agent, at: batch.at, content: desiredEligible ? change.desired.content : null, sha: change.desired.sha, mode: change.desired.mode, previous_content: beforeEligible ? change.before.content : null, previous_sha: change.before.sha, previous_mode: change.before.mode, versioned: beforeEligible && desiredEligible ? 1 : 0, reason: beforeEligible && desiredEligible ? null : "size_limit" })}`;
+			}
+		});
 	const recover = Effect.gen(function* () {
 		const batch = yield* pending;
 		if (!batch) return null;
 		const changes = yield* rows(batch.id);
-		// Validate every target before applying the first one; recheck each immediately before replacement.
-		for (const change of changes) {
-			const current = yield* io.read(change.path);
-			if (!sameImage(current, change.before) && !sameImage(current, change.desired))
-				return yield* new SourceRejected({ code: "external_conflict", path: change.path });
-		}
-		for (const [index, change] of changes.entries()) {
-			const current = yield* io.read(change.path);
-			if (!sameImage(current, change.before) && !sameImage(current, change.desired))
-				return yield* new SourceRejected({ code: "external_conflict", path: change.path });
-			// Replacing even an already-desired image repeats file and parent fsync after a crash.
-			yield* io.replace(change.path, change.desired, `${batch.id}-${index}`);
+		if (changes.some((change) => change.before.directory || change.desired.directory))
+			yield* io.publishTree(changes, batch.id);
+		else {
+			// Validate every target before applying the first one; recheck each immediately before replacement.
+			for (const change of changes) {
+				const current = yield* io.read(change.path);
+				if (!sameImage(current, change.before) && !sameImage(current, change.desired))
+					return yield* new SourceRejected({ code: "external_conflict", path: change.path });
+			}
+			for (const [index, change] of changes.entries()) {
+				const current = yield* io.read(change.path);
+				if (!sameImage(current, change.before) && !sameImage(current, change.desired))
+					return yield* new SourceRejected({ code: "external_conflict", path: change.path });
+				// Replacing even an already-desired image repeats file and parent fsync after a crash.
+				yield* io.replace(change.path, change.desired, `${batch.id}-${index}`);
+			}
 		}
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
-				for (const change of changes) {
-					const beforeEligible = (change.before.content?.byteLength ?? 0) <= 1024 * 1024;
-					const desiredEligible = (change.desired.content?.byteLength ?? 0) <= 1024 * 1024;
-					yield* sql`INSERT INTO versions ${sql.insert({ batch: batch.id, path: change.path, agent: batch.agent, at: batch.at, content: desiredEligible ? change.desired.content : null, sha: change.desired.sha, mode: change.desired.mode, previous_content: beforeEligible ? change.before.content : null, previous_sha: change.before.sha, previous_mode: change.before.mode, versioned: beforeEligible && desiredEligible ? 1 : 0, reason: beforeEligible && desiredEligible ? null : "size_limit" })}`;
-				}
+				yield* recordVersions(batch, changes);
 				yield* sql`UPDATE source_batches SET state = 'published' WHERE id = ${batch.id}`;
 				yield* sql`DELETE FROM source_changes WHERE batch = ${batch.id}`;
 			}),
@@ -98,6 +124,9 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 			);
 			if (versions.length === 0) return yield* new SourceRejected({ code: "batch_missing", path: batch });
 			for (const version of versions)
+				if (version.directory || version.previous_directory)
+					return yield* new SourceRejected({ code: "version_unavailable", path: version.path });
+			for (const version of versions)
 				if (version.previous_sha !== null && version.previous_content === null)
 					return yield* new SourceRejected({ code: "version_unavailable", path: version.path });
 			return versions.map((version) => ({
@@ -110,17 +139,20 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 		batch: Schema.NullOr(Schema.String),
 		version: Schema.NullOr(Schema.Int),
 		previous: Schema.Boolean,
+		generation: Schema.optional(Schema.Int),
 	});
 	const Binding = Schema.fromJsonString(Schema.Struct({ request: Schema.String, selected: Selected }));
 	const select = (selection: UndoSelection) =>
 		Effect.gen(function* () {
+			if (selection.generation !== undefined)
+				return { batch: null, version: null, previous: false, generation: selection.generation };
 			if (selection.batch !== undefined) return { batch: selection.batch, version: null, previous: true };
 			const rows = yield* (
 				selection.version !== undefined
 					? sql`SELECT * FROM versions WHERE id = ${selection.version}`
 					: selection.path !== undefined
-						? sql`SELECT * FROM versions WHERE path = ${selection.path} ORDER BY id DESC LIMIT 1`
-						: sql`SELECT * FROM versions WHERE path LIKE 'app/%' ORDER BY id DESC LIMIT 1`
+						? sql`SELECT * FROM versions WHERE path = ${selection.path} ORDER BY (sha IS NOT previous_sha OR mode IS NOT previous_mode OR directory != previous_directory) DESC,id DESC LIMIT 1`
+						: sql`SELECT * FROM versions WHERE (path = 'app' OR path LIKE 'app/%') AND batch != COALESCE((SELECT value FROM settings WHERE key='source.watcher_baseline'),'') ORDER BY id DESC LIMIT 1`
 			).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Version))));
 			const version = rows[0];
 			if (!version)
@@ -134,12 +166,16 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 		});
 	const selectedWrites = (selected: typeof Selected.Type) =>
 		Effect.gen(function* () {
+			if (selected.generation !== undefined)
+				return yield* new SourceRejected({ code: "invalid_path", path: "generation" });
 			if (selected.batch !== null) return yield* previous(selected.batch);
 			const rows = yield* sql`SELECT * FROM versions WHERE id = ${selected.version}`.pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Version))),
 			);
 			const version = rows[0];
 			if (!version) return yield* new SourceRejected({ code: "batch_missing", path: String(selected.version) });
+			if (version.directory || version.previous_directory)
+				return yield* new SourceRejected({ code: "version_unavailable", path: version.path });
 			const content = selected.previous ? version.previous_content : version.content;
 			const sha = selected.previous ? version.previous_sha : version.sha;
 			const mode = selected.previous ? version.previous_mode : version.mode;
@@ -147,10 +183,10 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 				return yield* new SourceRejected({ code: "version_unavailable", path: version.path });
 			return [{ path: version.path, content, ...(mode === null ? {} : { mode }) }];
 		});
-	const undo = (selection: UndoSelection) =>
+	const selectUndo = (selection: UndoSelection) =>
 		sql.withTransaction(
 			Effect.gen(function* () {
-				if (!selection.retry) return yield* selectedWrites(yield* select(selection));
+				if (!selection.retry) return yield* select(selection);
 				const key =
 					"source-revert:" +
 					Buffer.from(
@@ -169,9 +205,15 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 							path: Schema.NullOr(Schema.String),
 							batch: Schema.NullOr(Schema.String),
 							version: Schema.NullOr(Schema.Int),
+							generation: Schema.optional(Schema.Int),
 						}),
 					),
-				)({ path: selection.path ?? null, batch: selection.batch ?? null, version: selection.version ?? null });
+				)({
+					path: selection.path ?? null,
+					batch: selection.batch ?? null,
+					version: selection.version ?? null,
+					...(selection.generation === undefined ? {} : { generation: selection.generation }),
+				});
 				const rows = yield* sql`SELECT value FROM settings WHERE key = ${key}`.pipe(
 					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ value: Schema.String })))),
 				);
@@ -179,12 +221,72 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 				if (saved && saved.request !== request)
 					return yield* new SourceRejected({ code: "idempotency_conflict", path: "revert" });
 				const selected = saved?.selected ?? (yield* select(selection));
-				const writes = yield* selectedWrites(selected);
+
 				if (!saved)
 					yield* sql`INSERT INTO settings (key,value) VALUES (${key},${yield* Schema.encodeEffect(Binding)({ request, selected })})`;
-				return writes;
+				return selected;
 			}),
 		);
+	const undo = (selection: UndoSelection) => sql.withTransaction(Effect.flatMap(selectUndo(selection), selectedWrites));
+	/** Typed history restores only the selected subtree. The caller overlays it on the current full tree. */
+	const treeUndo = (selection: UndoSelection) =>
+		sql.withTransaction(
+			Effect.gen(function* () {
+				yield* ready;
+				const selected = yield* selectUndo(selection);
+				if (selected.generation !== undefined) return null;
+				const chosen =
+					selected.batch === null
+						? yield* sql`SELECT * FROM versions WHERE id = ${selected.version}`.pipe(
+								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Version))),
+							)
+						: [];
+				const version = chosen[0];
+				if (selected.batch === null && !version)
+					return yield* new SourceRejected({ code: "batch_missing", path: String(selected.version) });
+				if (version && !version.directory && !version.previous_directory) return null;
+				const batch = selected.batch ?? version?.batch;
+				if (batch === undefined) return yield* new SourceRejected({ code: "batch_missing", path: "revert" });
+				const versions = yield* sql`SELECT * FROM versions WHERE batch = ${batch} ORDER BY path`.pipe(
+					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Version))),
+				);
+				if (versions.length === 0) return yield* new SourceRejected({ code: "batch_missing", path: batch });
+				if (!versions.some((row) => row.directory || row.previous_directory)) return null;
+				// A full-tree checkpoint carries unchanged entries for recovery evidence, not permission to undo them.
+				const changed = version
+					? [version.path]
+					: versions
+							.filter(
+								(row) =>
+									row.sha !== row.previous_sha ||
+									row.mode !== row.previous_mode ||
+									row.directory !== row.previous_directory,
+							)
+							.map((row) => row.path);
+				const roots = changed.filter(
+					(name) => !changed.some((parent) => name !== parent && name.startsWith(`${parent}/`)),
+				);
+				for (const root of roots)
+					if (root !== "app" && !root.startsWith("app/"))
+						return yield* new SourceRejected({ code: "invalid_path", path: root });
+				const entries: TreeEntry[] = [];
+				for (const row of versions) {
+					if (!roots.some((root) => row.path === root || row.path.startsWith(`${root}/`))) continue;
+					const directory = selected.previous ? row.previous_directory : row.directory;
+					const content = selected.previous ? row.previous_content : row.content;
+					const sha = selected.previous ? row.previous_sha : row.sha;
+					const mode = selected.previous ? row.previous_mode : row.mode;
+					if (directory)
+						entries.push({ path: row.path, image: { directory: true, content: null, sha: null, mode: null } });
+					else if (sha !== null) {
+						if (content === null) return yield* new SourceRejected({ code: "version_unavailable", path: row.path });
+						entries.push({ path: row.path, image: { content, sha, mode } });
+					}
+				}
+				return { roots, entries };
+			}),
+		);
+
 	// Only immutable history identity is inspected here; resolving/binding the undo happens under SourceFiles' gate.
 	const targetsPages = (selection: UndoSelection) =>
 		Effect.gen(function* () {
@@ -197,5 +299,14 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 			).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ path: Schema.String })))));
 			return rows.length > 0 && rows.every((row) => row.path.startsWith("pages/"));
 		});
-	return { ready, begin, recover, history, previous, undo, targetsPages };
+	const recordObserved = (batch: typeof Batch.Type, changes: readonly Change[]) =>
+		sql.withTransaction(
+			Effect.gen(function* () {
+				yield* ready;
+				yield* sql`INSERT INTO source_batches ${sql.insert({ ...batch, state: "published" })}`;
+				yield* recordVersions(batch, changes);
+				return batch.id;
+			}),
+		);
+	return { ready, begin, recover, history, previous, undo, treeUndo, selectUndo, targetsPages, recordObserved };
 });

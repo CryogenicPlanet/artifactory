@@ -1,3 +1,4 @@
+import { recoveryIntents } from "./recovery-intents.ts";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Clock, Context, Effect, FileSystem, Layer, Path, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -36,6 +37,7 @@ const make = (directory: string, operationGate: Semaphore.Semaphore, channelGate
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
 		const events = yield* Events;
+		const bootSql = yield* SqlClient.SqlClient;
 		const appRead = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 			effect.pipe(
 				Effect.provide(
@@ -51,6 +53,7 @@ const make = (directory: string, operationGate: Semaphore.Semaphore, channelGate
 		const withWrite = <A, E, R>(names: readonly string[], effect: Effect.Effect<A, E, R>) =>
 			operationGate.withPermit(
 				Effect.gen(function* () {
+					if ((yield* recoveryIntents(bootSql)).count > 0) return yield* new PublicPagesUnavailable({});
 					const deadline = (yield* Clock.monotonicTimeNanos) + 1_000_000_000n;
 					while (true) {
 						const admitted = yield* channelGate.withPermit(
@@ -102,6 +105,7 @@ const make = (directory: string, operationGate: Semaphore.Semaphore, channelGate
 				.withPermit(
 					channelGate.withPermit(
 						Effect.gen(function* () {
+							if ((yield* recoveryIntents(bootSql)).count > 0) return yield* new PublicPagesUnavailable({});
 							if (!pathname.startsWith("/p/") || /%2f|%5c/i.test(pathname)) return null;
 							const name = yield* Effect.try(() => decodeURIComponent(pathname.slice(3).replace(/\/$/, ""))).pipe(
 								Effect.orElseSucceed(() => ""),

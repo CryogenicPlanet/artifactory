@@ -3,8 +3,20 @@ import { Context, Effect, FileSystem, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { type Batch, Events, EventError, EventRecord } from "./events.ts";
 
+export interface RecoveryHooks<E, R> {
+	readonly beforeAppend: (batch: Batch) => Effect.Effect<void, E, R>;
+	readonly afterResolve: Effect.Effect<void, E, R>;
+}
+const noMoves: RecoveryHooks<EventError, never> = {
+	beforeAppend: (batch) =>
+		batch.events.some((event) => event.type === "topic.moved")
+			? Effect.fail(new EventError({ code: "topic_move_recovery_required" }))
+			: Effect.void,
+	afterResolve: Effect.void,
+};
+
 /** Narrow shared SQL contract. Domain schema remains owned by editable server code. */
-const make = (filename: string) =>
+const make = (filename: string, hooks: RecoveryHooks<EventError, never>) =>
 	Effect.gen(function* () {
 		const bootSql = yield* SqlClient.SqlClient;
 		const events = yield* Events;
@@ -96,13 +108,32 @@ const make = (filename: string) =>
 					// Both SQL scopes are deliberately separate. App writer fence commits before boot resolves.
 					yield* bootSql`INSERT OR IGNORE INTO settings(key,value) VALUES('app_store_initialized','1')`;
 					if (pending.pending_id && pending.pending_attempt) {
-						if (evidence.success) yield* events.append(evidence.success, pending.pending_attempt);
-						else yield* events.abort(pending.pending_id, pending.pending_attempt);
+						if (evidence.success) {
+							yield* hooks.beforeAppend(evidence.success);
+							yield* events.append(evidence.success, pending.pending_attempt);
+						} else yield* events.abort(pending.pending_id, pending.pending_attempt);
 					}
+					yield* hooks.afterResolve;
 				}),
 		};
 	});
 export class AppRecovery extends Context.Service<AppRecovery, Effect.Success<ReturnType<typeof make>>>()(
 	"comms/boot/AppRecovery",
 ) {}
-export const layer = (filename: string) => Layer.effect(AppRecovery, make(filename));
+export const layer = <E = EventError, R = never>(filename: string, hooks?: RecoveryHooks<E, R>) =>
+	Layer.effect(
+		AppRecovery,
+		Effect.gen(function* () {
+			if (!hooks) return yield* make(filename, noMoves);
+			const context = yield* Effect.context<R>();
+			const close = <A>(effect: Effect.Effect<A, E, R>) =>
+				effect.pipe(
+					Effect.provideContext(context),
+					Effect.mapError(() => new EventError({ code: "topic_move_recovery_required" })),
+				);
+			return yield* make(filename, {
+				beforeAppend: (batch) => close(hooks.beforeAppend(batch)),
+				afterResolve: close(hooks.afterResolve),
+			});
+		}),
+	);

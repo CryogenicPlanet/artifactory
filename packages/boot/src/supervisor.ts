@@ -1,4 +1,4 @@
-import { Cause, Crypto, Effect, Path, Ref, Schema, Scope, Semaphore } from "effect";
+import { Cause, Crypto, Effect, FileSystem, Path, Ref, Schema, Scope, Semaphore } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import { prepareGeneration, snapshotEntry, type ApplicationSource } from "./application.ts";
 import { AppRecovery } from "./app-recovery.ts";
@@ -38,6 +38,7 @@ export interface SupervisedChild {
 export const supervise = Effect.fn("supervise")(function* (options: ApplicationSource) {
 	const crypto = yield* Crypto.Crypto;
 	const path = yield* Path.Path;
+	const fs = yield* FileSystem.FileSystem;
 	const processScope = yield* Effect.scope;
 	const http = yield* HttpServer.HttpServer;
 	if (http.address._tag === "UnixPathAddress") return yield* Effect.die("Expected TCP boot listener");
@@ -114,6 +115,9 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 					GENERATION: String(generation.n),
 					APP_DATABASE: filename,
 					PAGES_DIRECTORY: path.resolve(options.dataDirectory, "pages"),
+					BOARD_DIRECTORY: (yield* fs.exists(`${generation.snapshot_dir}.board`))
+						? `${generation.snapshot_dir}.board`
+						: path.join(generation.snapshot_dir ?? "", "board"),
 					STATE: mode,
 					...(mode === "rehearsal" ? { REHEARSAL_SEQUENCE: String(rehearsalSequence ?? 1) } : { BOOT_URL: callback }),
 				},
@@ -214,7 +218,13 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			Effect.flatMap((rows) => Ref.set(history, rows)),
 			Effect.orDie,
 		);
-		yield* operationGate.withPermit(recover).pipe(Effect.ensuring(refresh), Effect.catchCause(fail));
+		yield* operationGate
+			.withPermit(
+				Effect.gen(function* () {
+					if (!(yield* Ref.get(current))) yield* recover;
+				}),
+			)
+			.pipe(Effect.ensuring(refresh), Effect.catchCause(fail));
 		while (true) {
 			const active = yield* Ref.get(current);
 			if (!active) {

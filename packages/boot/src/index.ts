@@ -1,5 +1,7 @@
+import { recoveryIntents } from "./recovery-intents.ts";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Cause, Effect, FileSystem, Layer, Path, Ref } from "effect";
+import { Cause, Crypto, Effect, FileSystem, Layer, Path, Ref } from "effect";
+import { SqlClient } from "effect/unstable/sql";
 import { HttpRouter } from "effect/unstable/http";
 import { Auth, layer as authLayer, type AuthConfig } from "./auth.ts";
 import { validateAuthConfig } from "./auth-http.ts";
@@ -10,7 +12,7 @@ import { Generations, layer as generationsLayer } from "./generations.ts";
 import { SourceFiles, layer as sourceLayer } from "./source-files.ts";
 import { Events, layer as eventsLayer } from "./events.ts";
 import { retainEvents } from "./event-retention.ts";
-import { layer as recoveryLayer } from "./app-recovery.ts";
+import { AppRecovery, layer as recoveryLayer } from "./app-recovery.ts";
 import { layer as attemptsLayer, ChildAttempts } from "./child-attempts.ts";
 import { cutover } from "./cutover.ts";
 import { layer as backupLayer } from "./app-backup.ts";
@@ -21,9 +23,14 @@ import { layer as preparationProcessLayer } from "./preparation-process.ts";
 import { makeBackupInventory, type BackupInventory } from "./backup-inventory.ts";
 import { requestEvents } from "./request-events.ts";
 import { proxy } from "./proxy.ts";
+import { topicMove, type TopicMove } from "./topic-move.ts";
+import { moveRecovery } from "./topic-move-recovery.ts";
+import { layer as topicPageMoveLayer } from "./topic-page-move.ts";
 import { layer as kernelBootLayer } from "./kernel-boot.ts";
 import { storageUsage } from "./storage-usage.ts";
+import { watchSource } from "./source-watcher.ts";
 import { storageMaintenance } from "./storage-maintenance.ts";
+import { databaseRestore, type DatabaseRestore } from "./database-restore.ts";
 import { supervise } from "./supervisor.ts";
 
 /** Owns the public listener and an independently supervised child.
@@ -34,10 +41,14 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const auth = yield* Ref.make<Auth["Service"] | null>(null);
 	const events = yield* Ref.make<Events["Service"] | null>(null);
 	const editing = yield* Ref.make<Editing | null>(null);
+	const restores = yield* Ref.make<DatabaseRestore | null>(null);
 	const publicPages = yield* Ref.make<PublicPages["Service"] | null>(null);
 	const backups = yield* Ref.make<BackupInventory | null>(null);
 	const requests = yield* requestEvents(events);
 	const storage = yield* storageUsage(options.dataDirectory);
+	const moves = yield* Ref.make<TopicMove | null>(null);
+	const sourceServices = sourceLayer(options.dataDirectory).pipe(Layer.provideMerge(editLockLayer));
+	const movePagesServices = topicPageMoveLayer(options.dataDirectory).pipe(Layer.provideMerge(sourceServices));
 	const supervisor = yield* supervise(options);
 	const { child, run, fail } = supervisor;
 	yield* Effect.gen(function* () {
@@ -51,29 +62,46 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 				yield* Ref.set(auth, yield* Auth);
 				yield* Ref.set(backups, yield* makeBackupInventory);
 				yield* Ref.set(events, yield* Events);
-				yield* (yield* Generations).recover;
 				const coordinator = yield* cutover(options, supervisor);
-				yield* Ref.set(editing, {
-					source: yield* SourceFiles,
-					lock: yield* EditLock,
-					cutover: coordinator,
-					pages: yield* PublicPages,
-				});
-				const source = yield* (yield* SourceFiles).recover.pipe(Effect.exit);
+				const restore = yield* databaseRestore(supervisor);
+				yield* Ref.set(restores, restore);
+				yield* Ref.set(moves, yield* topicMove(supervisor));
+				const moveRecovered = yield* Effect.gen(function* () {
+					const bootSql = yield* SqlClient.SqlClient;
+					const intents = yield* recoveryIntents(bootSql);
+					if (intents.count > 1) return yield* Effect.die("Conflicting recovery intents");
+					// No recovery path may select or mutate an authoritative store before this global check.
+					yield* (yield* Generations).recover;
+					yield* (yield* ChildAttempts).recover;
+					if (intents.move) yield* (yield* AppRecovery).prepare(yield* (yield* Crypto.Crypto).randomUUIDv4);
+				}).pipe(Effect.exit);
+
+				const source =
+					moveRecovered._tag === "Failure" ? moveRecovered : yield* (yield* SourceFiles).recover.pipe(Effect.exit);
 				if (source._tag === "Failure")
-					yield* Ref.set(child.sourceError, Cause.pretty(source.cause).replace(/[a-f0-9]{64}/g, "[redacted]"));
-				const recovered = yield* (yield* ChildAttempts).recover.pipe(
-					Effect.andThen(coordinator.recover),
-					Effect.andThen(source._tag === "Success" ? (yield* EditLock).recover : Effect.void),
-					Effect.exit,
-				);
+					yield* Ref.set(child.sourceError, Cause.pretty<unknown>(source.cause).replace(/[a-f0-9]{64}/g, "[redacted]"));
+				const recovered =
+					moveRecovered._tag === "Failure"
+						? moveRecovered
+						: yield* coordinator.recover.pipe(
+								Effect.andThen(restore.recover),
+								Effect.andThen(source._tag === "Success" ? (yield* EditLock).recover : Effect.void),
+								Effect.exit,
+							);
 				if (recovered._tag === "Failure") {
 					yield* Ref.set(child.sourceError, Cause.pretty(recovered.cause).replace(/[a-f0-9]{64}/g, "[redacted]"));
 					yield* fail(recovered.cause);
 				} else {
+					yield* Ref.set(editing, {
+						source: yield* SourceFiles,
+						lock: yield* EditLock,
+						cutover: coordinator,
+						pages: yield* PublicPages,
+					});
 					yield* Ref.set(publicPages, yield* PublicPages);
 					yield* run.pipe(Effect.catchCause(fail), Effect.forkScoped);
 					yield* (yield* storageMaintenance(supervisor)).run.pipe(Effect.forkScoped);
+					yield* watchSource(options.dataDirectory, coordinator).pipe(Effect.forkScoped);
 				}
 				return yield* Effect.never;
 			}).pipe(
@@ -86,8 +114,9 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 						),
 						attemptsLayer(options.dataDirectory).pipe(Layer.provide(kernelBootLayer)),
 						backupLayer(path.join(options.dataDirectory, "comms.db")),
-						recoveryLayer(path.join(options.dataDirectory, "comms.db")).pipe(Layer.provideMerge(eventsLayer)),
-						sourceLayer(options.dataDirectory).pipe(Layer.provideMerge(editLockLayer)),
+						recoveryLayer(path.join(options.dataDirectory, "comms.db"), moveRecovery).pipe(
+							Layer.provideMerge(Layer.mergeAll(eventsLayer, movePagesServices)),
+						),
 						authLayer(options.auth).pipe(Layer.provide(Layer.mergeAll(eventsLayer, editLockLayer))),
 					),
 				),
@@ -112,7 +141,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	yield* HttpRouter.add(
 		"*",
 		"/*",
-		proxy(child, auth, options.auth, events, editing, publicPages, requests, backups, storage.current),
+		proxy(child, auth, options.auth, events, editing, publicPages, requests, backups, restores, moves, storage.current),
 	).pipe((routes) => HttpRouter.serve(routes, { disableLogger: true }), Layer.build);
 	return yield* Effect.never;
 });

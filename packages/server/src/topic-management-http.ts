@@ -5,10 +5,18 @@ import type { Api } from "./conversation.ts";
 import { failure, identity } from "./conversation-request.ts";
 import { KernelError } from "./kernel/boot-channel.ts";
 import { TopicDeletion } from "./kernel/topic-delete.ts";
+import { TopicMove } from "./kernel/topic-move.ts";
 import { Messages } from "./kernel/messages.ts";
 import { TopicArchiveInput, TopicMetaInput, TopicMutation } from "./kernel/topic-operations.ts";
 
 export const topicManagementGroup = HttpApiGroup.make("topicManagement").add(
+	HttpApiEndpoint.post("move", "/api/topics/*", {
+		payload: Schema.Struct({ to: Schema.String }),
+		success: TopicMove,
+	}).annotate(
+		OpenApi.Description,
+		"POST /api/topics/<path>/move with {to}. Requires write. Boot briefly pauses application traffic while coordinating the SQL prefix rewrite, page publication and topic.moved event. Destination subtrees must be absent. Explicit read cursor collisions retain MAX; reactions keep their message IDs and historical idempotency outcomes remain unchanged. Optional Idempotency-Key preserves the first outcome.",
+	),
 	HttpApiEndpoint.delete("delete", "/api/topics/*", { success: TopicDeletion }).annotate(
 		OpenApi.Description,
 		"Soft-delete a topic subtree. Requires write and either a human or the sole instance author of every message, including deleted messages. Empty and page-only topics require a human. Paths stay reserved; historical events remain. Success follows topic.deleted publication; optional Idempotency-Key preserves the first outcome.",
@@ -61,6 +69,9 @@ const mutate = (archive: boolean) =>
 export const topicManagementHandlers = (api: typeof Api) =>
 	HttpApiBuilder.group(api, "topicManagement", (handlers) =>
 		handlers
+			.handleRaw("move", () =>
+				Effect.succeed(HttpServerResponse.jsonUnsafe({ error: { code: "boot_route_required" } }, { status: 503 })),
+			)
 			.handleRaw("meta", () => mutate(false))
 			.handleRaw("archive", () => mutate(true))
 			.handleRaw("delete", () =>

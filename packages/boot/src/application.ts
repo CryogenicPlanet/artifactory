@@ -2,6 +2,7 @@ import { Cause, Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { ChildError } from "./child-process.ts";
 import { GenerationPreparation } from "./generation-preparation.ts";
+import { initializeSourceBaseline } from "./source-observation.ts";
 import { SourceFiles } from "./source-files.ts";
 import { Generations, type Generation } from "./generations.ts";
 import { copySource, layer as snapshotsLayer, SnapshotRejected, Snapshots } from "./snapshots.ts";
@@ -56,6 +57,7 @@ export const prepareGeneration = Effect.fn("prepareGeneration")(function* (optio
 	const generation = yield* sources.withCommitted(generations.reserve(options.entryFile));
 	const prepare = Effect.gen(function* () {
 		const sourceDirectory = path.join(options.dataDirectory, "app");
+		const fresh = !(yield* generations.appSeeded);
 		if (!(yield* fs.exists(sourceDirectory))) {
 			if (yield* generations.appSeeded) {
 				return yield* new SnapshotRejected({
@@ -74,6 +76,7 @@ export const prepareGeneration = Effect.fn("prepareGeneration")(function* (optio
 				}),
 			);
 		}
+		if (fresh) yield* initializeSourceBaseline(options.dataDirectory);
 		yield* generations.markAppSeeded;
 		const generationsDirectory = path.join(options.dataDirectory, "gen");
 		yield* fs.makeDirectory(generationsDirectory, { recursive: true, mode: 0o750 });

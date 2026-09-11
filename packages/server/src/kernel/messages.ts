@@ -9,6 +9,7 @@ import { HealthProbe } from "./health-probe.ts";
 import { markRead } from "./read-marks.ts";
 import { recordOperationalEvent, type OperationalEvent } from "./operational-events.ts";
 import { deleteTopic } from "./topic-delete.ts";
+import { moveTopic, type TopicMoveCommand } from "./topic-move.ts";
 import { writerGate } from "./database.ts";
 
 export const Message = Schema.Struct({
@@ -303,6 +304,7 @@ const make = Effect.gen(function* () {
 		);
 	return {
 		create,
+		moveTopic: (input: typeof TopicMoveCommand.Type) => mutex.withPermit(moveTopic(sql, boot, input)),
 		topic: (
 			identity: Identity,
 			path: string,

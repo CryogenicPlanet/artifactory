@@ -1,3 +1,4 @@
+import { recoveryIntents } from "./recovery-intents.ts";
 import { Crypto, DateTime, Effect, FileSystem, Path, Ref } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AppBackup } from "./app-backup.ts";
@@ -21,8 +22,7 @@ export const scheduledBackup = Effect.fn("scheduledBackup")(function* (superviso
 	const capture = supervisor.operationGate.withPermit(
 		Effect.gen(function* () {
 			yield* supervisor.assertClosure;
-			if ((yield* sql`SELECT singleton FROM cutover`).length > 0)
-				return yield* new ChildError({ code: "cutover_recovery_required" });
+			if ((yield* recoveryIntents(sql)).count > 0) return yield* new ChildError({ code: "cutover_recovery_required" });
 			const active = yield* Ref.get(supervisor.current);
 			const route = yield* Ref.get(supervisor.child.traffic.route);
 			if (

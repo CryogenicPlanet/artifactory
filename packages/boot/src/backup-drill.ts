@@ -1,3 +1,4 @@
+import { recoveryIntents } from "./recovery-intents.ts";
 import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AppBackup } from "./app-backup.ts";
@@ -22,7 +23,7 @@ export const backupDrill = Effect.fn("backupDrill")(function* (supervisor: Super
 			Effect.gen(function* () {
 				yield* supervisor.assertClosure;
 				const active = yield* Ref.get(supervisor.current);
-				if (!active || (yield* sql`SELECT singleton FROM cutover`).length > 0) return null;
+				if (!active || (yield* recoveryIntents(sql)).count > 0) return null;
 				const rows = yield* sql`SELECT * FROM backups ORDER BY taken_at DESC,id DESC LIMIT 1`.pipe(
 					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BackupRecord))),
 				);

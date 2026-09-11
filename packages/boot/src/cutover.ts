@@ -1,3 +1,4 @@
+import { recoveryIntents } from "./recovery-intents.ts";
 import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { GenerationPreparation } from "./generation-preparation.ts";
@@ -91,17 +92,27 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 	});
 	const reload = (
 		owner: Ownership,
-		options: { readonly release?: boolean; readonly check?: boolean; readonly undo?: UndoSelection } = {},
+		options: {
+			readonly release?: boolean;
+			readonly check?: boolean;
+			readonly undo?: UndoSelection;
+			readonly watcher?: boolean;
+		} = {},
 	) =>
 		supervisor.operationGate.withPermit(
 			Effect.scoped(
 				Effect.gen(function* () {
-					if (!(yield* Ref.get(ready)) || (yield* read))
+					if (!(yield* Ref.get(ready)) || (yield* recoveryIntents(sql)).count > 0)
 						return yield* new ChildError({ code: "cutover_recovery_required" });
 					yield* supervisor.assertClosure;
-					const proposal = yield* options.undo === undefined
-						? sources.prepare(owner)
-						: sources.prepareUndo(owner, options.undo);
+					const proposal = yield* options.watcher
+						? sources.prepareWatcher(owner)
+						: options.undo === undefined
+							? sources.prepare(owner)
+							: options.undo.generation !== undefined
+								? sources.prepareGeneration(owner, options.undo)
+								: sources.prepareUndo(owner, options.undo);
+					if (proposal === null) return { status: "unchanged", generation: null, lock: (yield* lock.inspect).value };
 					let candidate: ActiveChild | null = null;
 					let generation: Generation | null = null;
 
@@ -140,7 +151,12 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							Effect.catch((error) =>
 								Effect.gen(function* () {
 									return yield* new ChildError({
-										code: String(error),
+										code:
+											options.undo?.generation !== undefined &&
+											Schema.is(ChildError)(error) &&
+											error.code === "health_failed"
+												? "incompatible_schema: restore withDb using a fresh human assertion, or apply a forward source fix"
+												: String(error),
 										stderr: yield* Ref.get(rehearsed.process.stderr),
 									});
 								}),
@@ -213,6 +229,15 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							yield* closePrior;
 						}
 						yield* activate(candidate, "live");
+						yield* sources
+							.adoptWatcherBaseline(path.join(materialized, "app"))
+							.pipe(
+								Effect.catch(() =>
+									Effect.logWarning(
+										"Watcher baseline could not be verified; acquire the source lock and reload through the API to retry",
+									),
+								),
+							);
 						yield* finish(owner, true, options.release ?? false);
 						yield* sql`DELETE FROM cutover WHERE singleton=1`;
 						return {

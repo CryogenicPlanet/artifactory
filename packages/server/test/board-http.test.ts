@@ -61,4 +61,14 @@ it("serves a private compiled board from its generation and confines SPA fallbac
 	expect(fallback.status).toBe(503);
 	expect(await fallback.text()).toContain("open recovery help");
 	expect((await get("/api/messages?since=0")).status).toBe(200);
+	await app.stop();
+	const preparedBoard = join(fixture.root, "gen", String(generation), "source.board");
+	await mkdir(preparedBoard);
+	await writeFile(join(preparedBoard, "index.html"), "<title>Prepared sibling board</title>");
+	const resumed = await fixture.launch(join(seed, "server.js"));
+	await resumed.ready(cookie);
+	expect(await (await fetch(`${resumed.url}/`, { headers: { cookie } })).text()).toBe(
+		"<title>Prepared sibling board</title>",
+	);
+	expect(await readFile(join(fixture.root, "app/board/index.html"), "utf8")).toBe("edited outside snapshot");
 }, 20000);

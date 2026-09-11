@@ -23,6 +23,8 @@ import {
 	type AddPasskey,
 	type DeletePasskey,
 } from "./passkey-management-schema.ts";
+import { makeDatabaseRestoreAuth } from "./database-restore-auth.ts";
+import { canonicalDatabaseRestore, validDatabaseRestore, type DatabaseRestore } from "./database-restore-schema.ts";
 import { makeTokenMint } from "./token-mint.ts";
 import { canonicalMint, validMint, type MintBinding } from "./token-mint-schema.ts";
 import { makeTokens } from "./tokens.ts";
@@ -236,7 +238,14 @@ const makeAuth = (config: AuthConfig) =>
 				sql.withTransaction(verifyAssertion(id, response, "login", null).pipe(Effect.andThen(newSession))),
 			);
 		const startActionAssertion = (
-			action: "enrollment.decide" | "token.revoke" | "lock.break" | "passkey.add" | "passkey.delete" | "token.mint",
+			action:
+				| "enrollment.decide"
+				| "token.revoke"
+				| "lock.break"
+				| "passkey.add"
+				| "passkey.delete"
+				| "token.mint"
+				| "db.restore",
 			binding: string,
 		) =>
 			mutex.withPermit(
@@ -303,6 +312,15 @@ const makeAuth = (config: AuthConfig) =>
 			(params, proof) => verifyAssertion(proof.id, proof.response, "token.mint", canonicalMint(params)),
 			mutex,
 		);
+		const startDatabaseRestoreAssertion = (params: DatabaseRestore, sessionId: string) =>
+			validDatabaseRestore(params)
+				? startActionAssertion("db.restore", canonicalDatabaseRestore(params, sessionId))
+				: denied("invalid_request");
+		const authorizeDatabaseRestore = yield* makeDatabaseRestoreAuth(
+			(params, proof, sessionId) =>
+				verifyAssertion(proof.id, proof.response, "db.restore", canonicalDatabaseRestore(params, sessionId)),
+			mutex,
+		);
 		const tokens = yield* makeTokens(
 			(params: RevokeFamily, proof: AssertionProof) =>
 				verifyAssertion(proof.id, proof.response, "token.revoke", canonicalRevocation(params)),
@@ -338,6 +356,8 @@ const makeAuth = (config: AuthConfig) =>
 			startPasskeyDeleteAssertion,
 			...mint,
 			startMintAssertion,
+			startDatabaseRestoreAssertion,
+			authorizeDatabaseRestore,
 			startLockBreakAssertion,
 			breakLock,
 			startRevocationAssertion,

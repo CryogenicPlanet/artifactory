@@ -8,9 +8,10 @@ import { AppBackup, layer as backupLayer } from "../../src/app-backup.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../src/app-recovery.ts";
 import { layer as ownersLayer } from "../../src/child-attempts.ts";
 import { ChildError } from "../../src/child-process.ts";
-import { type EventRecord, Events, eventsSchema, layer as eventsLayer } from "../../src/events.ts";
+import { type EventRecord, Events, layer as eventsLayer } from "../../src/events.ts";
 import { layer as generationsLayer } from "../../src/generations.ts";
 import { layer as kernelBootLayer } from "../../src/kernel-boot.ts";
+import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { scheduledBackup } from "../../src/scheduled-backup.ts";
 import type { ActiveChild, ChildStatus, Supervisor } from "../../src/supervisor.ts";
 import { traffic } from "../../src/traffic.ts";
@@ -23,10 +24,7 @@ const main = Effect.gen(function* () {
 	const boot = SqliteClient.layer({ filename: `${root}/boot.db` });
 	const program = Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		yield* eventsSchema;
-		yield* sql`CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)`;
-		yield* sql`CREATE TABLE cutover(singleton INTEGER PRIMARY KEY)`;
-		yield* sql`CREATE TABLE backups(id TEXT PRIMARY KEY,path TEXT,reason TEXT,bytes INTEGER,taken_at INTEGER,published_through INTEGER,generation INTEGER)`;
+		yield* initializeBootSchema;
 		const events = yield* Events;
 		const recovery = yield* AppRecovery;
 		yield* recovery.prepare("original");
@@ -129,7 +127,13 @@ const main = Effect.gen(function* () {
 					return started;
 				}),
 		};
-		if (mode === "cutover") yield* sql`INSERT INTO cutover VALUES(1)`;
+		if (mode === "cutover")
+			yield* sql`INSERT INTO cutover(singleton,candidate,lock_id,family,phase) VALUES(1,1,'fixture','fixture','working')`;
+		if (mode === "move")
+			yield* sql`INSERT INTO topic_moves VALUES('fixture','old','new','fixture',NULL,'{}','prepared',NULL)`;
+		if (mode === "source") yield* sql`INSERT INTO source_batches VALUES('fixture',NULL,'fixture',0,'publishing')`;
+		if (mode === "restore")
+			yield* sql`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES('fixture','hash','session','backup','restoring',0)`;
 		if (mode === "registration-failure")
 			yield* sql`CREATE TRIGGER reject_event BEFORE INSERT ON events WHEN json_extract(NEW.event,'$.type')='backup.taken' BEGIN SELECT RAISE(ABORT,'fixture'); END`;
 		const backup = yield* AppBackup;
@@ -190,7 +194,7 @@ const main = Effect.gen(function* () {
 			Effect.exit,
 			Effect.forkChild,
 		);
-		if (mode !== "cutover") yield* Deferred.await(frozen);
+		if (mode !== "cutover" && mode !== "restore" && mode !== "move" && mode !== "source") yield* Deferred.await(frozen);
 		yield* Deferred.succeed(releaseWrite, undefined);
 		yield* Fiber.join(writer);
 		const result = yield* Fiber.join(saving);

@@ -1,4 +1,7 @@
-import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
+import { Context, Effect, FileSystem, Layer, Path, Schema, Crypto } from "effect";
+import type { SourceRejected } from "./source-schema.ts";
+import { sourceIO } from "./source-io.ts";
+import { sourceTreeFingerprint } from "./source-tree-publication.ts";
 import type { PlatformError } from "effect/PlatformError";
 
 export class SnapshotRejected extends Schema.TaggedError<SnapshotRejected>()("SnapshotRejected", {
@@ -66,7 +69,7 @@ export const copySource = Effect.fn("copySource")(function* (sourceDirectory: st
 export class Snapshots extends Context.Service<
 	Snapshots,
 	{
-		readonly create: (generation: number) => Effect.Effect<Snapshot, SnapshotRejected | PlatformError>;
+		readonly create: (generation: number) => Effect.Effect<Snapshot, SnapshotRejected | PlatformError | SourceRejected>;
 	}
 >()("comms/boot/Snapshots") {}
 
@@ -75,6 +78,7 @@ export const layer = (options: { readonly sourceDirectory: string; readonly gene
 		Snapshots,
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem;
+			const crypto = yield* Crypto.Crypto;
 			const path = yield* Path.Path;
 			const source = yield* fs.realPath(options.sourceDirectory);
 			if ((yield* fs.stat(source)).type !== "Directory") {
@@ -113,6 +117,22 @@ export const layer = (options: { readonly sourceDirectory: string; readonly gene
 					);
 					// A failure or interruption leaves only .partial; later retention can remove the reservation.
 					yield* fs.rename(partial, directory);
+					// New snapshots keep generated board output beside source. The marker proves
+					// preparation has never overwritten editable board/ bytes in this snapshot.
+					yield* Effect.scoped(
+						Effect.gen(function* () {
+							const metadata = yield* sourceIO(reserved).pipe(
+								Effect.flatMap((io) => io.inventory(directory)),
+								Effect.provideService(Crypto.Crypto, crypto),
+								Effect.provideService(FileSystem.FileSystem, fs),
+								Effect.provideService(Path.Path, path),
+							);
+							const marker = yield* fs.open(`${directory}.editable`, { flag: "wx", mode: 0o640 });
+							yield* marker.writeAll(new TextEncoder().encode(sourceTreeFingerprint(metadata)));
+							yield* marker.sync;
+							yield* (yield* fs.open(reserved)).sync;
+						}),
+					);
 					return { generation, directory };
 				}),
 			});

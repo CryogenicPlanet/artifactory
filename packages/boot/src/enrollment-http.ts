@@ -5,12 +5,14 @@ import { AuthError, type AuthConfig } from "./auth.ts";
 import { assertionProof, humanSession, authFailure, authErrorResponse, body, type AuthStore } from "./auth-http.ts";
 import { AddPasskey, DeletePasskey } from "./passkey-management-schema.ts";
 import { MintBinding } from "./token-mint-schema.ts";
+import { DatabaseRestoreInput, databaseRestoreParams } from "./database-restore-schema.ts";
 import { BreakLock } from "./lock-break-schema.ts";
 import { RevokeFamily } from "./refresh-schema.ts";
 import { EnrollmentDecision } from "./enrollment-schema.ts";
 import { approvalClient, approvalPage } from "./enrollment-page.ts";
 
 const challengeInput = Schema.Union([
+	Schema.Struct({ action: Schema.Literal("db.restore"), params: DatabaseRestoreInput }),
 	Schema.Struct({ action: Schema.Literal("passkey.add"), params: AddPasskey }),
 	Schema.Struct({ action: Schema.Literal("passkey.delete"), params: DeletePasskey }),
 	Schema.Struct({ action: Schema.Literal("token.mint"), params: MintBinding }),
@@ -98,6 +100,12 @@ export const enrollmentRoute = (store: AuthStore, config: AuthConfig) =>
 							yield* input.action === "passkey.add"
 								? auth.startPasskeyAddAssertion(input.params, session.id)
 								: auth.startPasskeyDeleteAssertion(input.params, session.id),
+						);
+					}
+					if (input.action === "db.restore") {
+						const session = yield* humanSession(auth, request);
+						return HttpServerResponse.jsonUnsafe(
+							yield* auth.startDatabaseRestoreAssertion(databaseRestoreParams(input.params), session.id),
 						);
 					}
 					if (input.action === "token.mint") {

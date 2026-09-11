@@ -95,18 +95,25 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 					}),
 				);
 				if (input.withDb === true) return errorResponse("database_restore_unavailable", 501);
-				if (input.generation !== undefined) return errorResponse("generation_revert_unavailable", 501);
 				if (
-					[input.path, input.batch, input.version].filter((value) => value !== undefined).length > 1 ||
+					[input.path, input.batch, input.version, input.generation].filter((value) => value !== undefined).length >
+						1 ||
 					input.path === "" ||
 					input.batch === "" ||
-					(input.version !== undefined && input.version < 1)
+					(input.version !== undefined && input.version < 1) ||
+					(input.generation !== undefined && (!Number.isSafeInteger(input.generation) || input.generation < 1))
 				)
 					return errorResponse("revert_selection_invalid", 400);
 				const key = request.headers["idempotency-key"];
 				if (key !== undefined && !/^[\x20-\x7e]{1,128}$/.test(key))
 					return errorResponse("idempotency_key_invalid", 400);
 				const undo = { ...input, ...(key === undefined ? {} : { retry: { family: identity.id, key } }) };
+				if (input.generation !== undefined) {
+					if (!known) return yield* new EditRejected({ code: "lock_required", holder: null, transitions: [] });
+					if (known.holder_family !== identity.id)
+						return yield* new EditRejected({ code: "locked", holder: known, transitions: [] });
+					return HttpServerResponse.jsonUnsafe(yield* authoritative(editing.cutover.reload(owner(), { undo })));
+				}
 				return yield* authoritative(
 					Effect.acquireUseRelease(
 						editing.source.preparePageUndo(identity.agent, undo),
@@ -244,7 +251,8 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 									: 400,
 						),
 					);
-				if (Schema.is(AuthError)(error)) return Effect.succeed(errorResponse(error.code, 401));
+				if (Schema.is(AuthError)(error))
+					return Effect.succeed(errorResponse(error.code, error.code === "invalid_request" ? 400 : 401));
 				return Effect.succeed(errorResponse("edit_unavailable", 503));
 			}),
 			Effect.catchCauseIf(

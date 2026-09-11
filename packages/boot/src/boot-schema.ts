@@ -1,3 +1,7 @@
+import { databaseRestoreSchema } from "./database-restore-journal.ts";
+import { eventRoutingSchema } from "./event-routing-schema.ts";
+import { topicMoveSchema } from "./topic-move-schema.ts";
+import { topicPageMoveSchema } from "./topic-page-move-schema.ts";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { cutoverSchema } from "./cutover-schema.ts";
@@ -7,7 +11,7 @@ import { eventsSchema } from "./events.ts";
 import { refreshSchema } from "./refresh-schema.ts";
 import { backupMetadataSchema } from "./backup-metadata.ts";
 import { mintSchema } from "./token-mint-schema.ts";
-import { sourceSchema } from "./source-schema.ts";
+import { sourceSchema, sourceTreeSchema } from "./source-schema.ts";
 
 export class BootSchemaTooNew extends Schema.TaggedError<BootSchemaTooNew>()("BootSchemaTooNew", {
 	found: Schema.Int,
@@ -26,10 +30,10 @@ export const initializeBootSchema = Effect.gen(function* () {
 	);
 	const version = versions[0]?.user_version;
 	if (version === undefined) return yield* Effect.die("Missing boot schema version");
-	if (version > 12) return yield* new BootSchemaTooNew({ found: version, supported: 12 });
+	if (version > 13) return yield* new BootSchemaTooNew({ found: version, supported: 13 });
 	yield* sql`PRAGMA journal_mode = WAL`;
 	yield* sql`PRAGMA synchronous = FULL`;
-	if (version === 12) return;
+	if (version === 13) return;
 	yield* sql.withTransaction(
 		Effect.gen(function* () {
 			if (version === 0)
@@ -69,7 +73,14 @@ export const initializeBootSchema = Effect.gen(function* () {
 				yield* sql`ALTER TABLE child_attempts ADD COLUMN boot_id TEXT`;
 				yield* backupMetadataSchema;
 			}
-			yield* sql`PRAGMA user_version = 12`;
+			if (version < 13) {
+				yield* databaseRestoreSchema;
+				yield* eventRoutingSchema;
+				yield* topicMoveSchema;
+				yield* topicPageMoveSchema;
+				yield* sourceTreeSchema;
+			}
+			yield* sql`PRAGMA user_version = 13`;
 		}),
 	);
 });

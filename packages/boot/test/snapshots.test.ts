@@ -1,10 +1,10 @@
-import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
+import { BunServices } from "@effect/platform-bun";
 import { Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path } from "effect";
 import { it } from "@effect/vitest";
 import { describe, expect } from "vitest";
 import { layer, Snapshots } from "../src/snapshots.ts";
 
-const platform = Layer.merge(BunFileSystem.layer, Path.layer);
+const platform = Layer.merge(BunServices.layer, Path.layer);
 const fixture = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;

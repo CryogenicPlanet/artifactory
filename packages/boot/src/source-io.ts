@@ -1,4 +1,5 @@
 import { Crypto, Effect, FileSystem, Path } from "effect";
+import { sourceTreeIO } from "./source-tree-publication.ts";
 import { SourceRejected, type Image } from "./source-schema.ts";
 
 export const validSourcePath = (name: string) => {
@@ -20,7 +21,8 @@ export const validSourcePath = (name: string) => {
 		!(parts[0] === "app" && parts[1] === "ui" && parts[2] === "dist")
 	);
 };
-export const sameImage = (a: Image, b: Image) => a.sha === b.sha && a.mode === b.mode;
+export const sameImage = (a: Image, b: Image) =>
+	a.sha === b.sha && a.mode === b.mode && (a.directory === true) === (b.directory === true);
 
 /** Platform IO bound to one editable data root. Nothing is resolved during construction. */
 export const sourceIO = Effect.fn("sourceIO")(function* (dataDirectory: string) {
@@ -135,5 +137,5 @@ export const sourceIO = Effect.fn("sourceIO")(function* (dataDirectory: string) 
 			}),
 		);
 	});
-	return { read, list, image, replace, resolve };
+	return { read, list, image, replace, resolve, ...(yield* sourceTreeIO(dataDirectory, validSourcePath)) };
 });

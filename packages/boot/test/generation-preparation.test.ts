@@ -11,7 +11,10 @@ const fixture = Effect.gen(function* () {
 	const root = yield* fs.realPath(yield* fs.makeTempDirectoryScoped());
 	const source = path.join(root, "app");
 	yield* fs.makeDirectory(path.join(source, "ui/public"), { recursive: true });
-	yield* fs.writeFileString(path.join(source, "package.json"), '{"dependencies":{"vite":"8.0.0"}}');
+	yield* fs.writeFileString(
+		path.join(source, "package.json"),
+		'{"dependencies":{"vite":"8.0.0"},"comms":{"board_directory":"environment-v1"}}',
+	);
 	yield* fs.writeFileString(path.join(source, "bun.lock"), "lock-one");
 	yield* fs.writeFileString(path.join(source, "ui/index.html"), "first");
 	yield* fs.writeFileString(path.join(source, "ui/vite.config.ts"), "config-one");
@@ -42,7 +45,8 @@ const fixture = Effect.gen(function* () {
 	const prepare = (n: number) =>
 		Effect.gen(function* () {
 			const snapshot = path.join(root, `snapshot-${n}`);
-			yield* fs.makeDirectory(snapshot);
+			yield* fs.makeDirectory(path.join(snapshot, "board"), { recursive: true });
+			yield* fs.writeFileString(path.join(snapshot, "board/source.txt"), "editable source");
 			yield* service.prepare(source, snapshot);
 			return snapshot;
 		});
@@ -58,12 +62,13 @@ describe("generation preparation", () => {
 				const second = yield* prepare(2);
 				expect(yield* Ref.get(installs)).toBe(1);
 				expect(yield* Ref.get(builds)).toBe(1);
+				expect(yield* fs.readFileString(path.join(first, "board/source.txt"))).toBe("editable source");
 				const dependencies = yield* fs.realPath(path.join(first, "node_modules"));
 				expect(dependencies.startsWith(path.join(root, "prepared/dependencies"))).toBe(true);
 				expect(yield* fs.readFileString(path.join(first, "node_modules/alias/index.js"))).toBe("installed");
-				expect(yield* fs.realPath(path.join(first, "board"))).toBe(path.join(first, "board"));
-				yield* fs.writeFileString(path.join(second, "board/index.html"), "changed");
-				expect(yield* fs.readFileString(path.join(first, "board/index.html"))).toBe("first");
+				expect(yield* fs.realPath(`${first}.board`)).toBe(`${first}.board`);
+				yield* fs.writeFileString(`${second}.board/index.html`, "changed");
+				expect(yield* fs.readFileString(`${first}.board/index.html`)).toBe("first");
 				expect(yield* fs.readDirectory(path.join(root, "cache"))).toEqual([]);
 			}),
 		).pipe(Effect.provide(BunServices.layer)),
@@ -102,8 +107,22 @@ describe("generation preparation", () => {
 				yield* fs.remove(path.join(source, "ui"), { recursive: true });
 				const headless = yield* prepare(3);
 				expect(yield* fs.exists(path.join(headless, "node_modules/pkg/index.js"))).toBe(true);
-				expect(yield* fs.exists(path.join(headless, "board"))).toBe(false);
+				expect(yield* fs.exists(`${headless}.board`)).toBe(false);
 				expect(yield* Ref.get(builds)).toBe(2);
+			}),
+		).pipe(Effect.provide(BunServices.layer)),
+	);
+
+	it.effect("refuses rebuilding a legacy UI until its child declares the board directory contract", () =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { fs, path, source, builds, prepare } = yield* fixture;
+				yield* fs.writeFileString(path.join(source, "package.json"), '{"dependencies":{"vite":"8.0.0"}}');
+				const result = yield* prepare(1).pipe(Effect.result);
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") expect(String(result.failure)).toContain("board_directory_upgrade_required");
+				expect(yield* Ref.get(builds)).toBe(0);
+				expect(yield* fs.readFileString(path.join(source, "ui/index.html"))).toBe("first");
 			}),
 		).pipe(Effect.provide(BunServices.layer)),
 	);

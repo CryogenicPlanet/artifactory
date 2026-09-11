@@ -22,6 +22,14 @@ const program = Effect.gen(function* () {
 			yield* sql`ALTER TABLE child_attempts DROP COLUMN boot_id`;
 			yield* sql`ALTER TABLE backups DROP COLUMN published_through`;
 			yield* sql`ALTER TABLE backups DROP COLUMN generation`;
+			yield* sql`ALTER TABLE events DROP COLUMN topic`;
+			yield* sql`DROP TABLE topic_moves`;
+			yield* sql`DROP TABLE topic_page_moves`;
+			yield* sql`DROP TABLE db_restore_requests`;
+			yield* sql`ALTER TABLE source_changes DROP COLUMN before_directory`;
+			yield* sql`ALTER TABLE source_changes DROP COLUMN desired_directory`;
+			yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;
+			yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 			yield* sql`PRAGMA user_version=11`;
 			yield* sql`INSERT INTO child_attempts(id,generation,receipt,opened) VALUES('legacy',1,${`${directory}/attempts/legacy.closed`},1)`;
 			return { result: "legacy" };

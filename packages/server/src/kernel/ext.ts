@@ -395,21 +395,23 @@ const make = (directory: string) =>
 					const headers = new Headers(web.headers);
 					for (const name of ["x-boot-secret", "authorization", "cookie"]) headers.delete(name);
 					const exposed = HttpServerRequest.fromWeb(new Request(web, { headers }));
-					return yield* work(() =>
-						route.handler(exposed, {
-							...who,
-							...data(
-								route.extension,
-								who,
-								!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
-									(request.headers["x-comms-scopes"] ?? "").split(",").includes("write"),
-							),
-							db: sql,
-							publishedThrough,
-							publicationFence: messages.fence,
-							params: matched.params,
-							query: matched.searchParams,
-						}),
+					return yield* work(
+						() =>
+							route.handler(exposed, {
+								...who,
+								...data(
+									route.extension,
+									who,
+									!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
+										(request.headers["x-comms-scopes"] ?? "").split(",").includes("write"),
+								),
+								db: sql,
+								publishedThrough,
+								publicationFence: messages.fence,
+								params: matched.params,
+								query: matched.searchParams,
+							}),
+						true,
 					).pipe(
 						Effect.provideService(HttpServerRequest.HttpServerRequest, exposed),
 						Effect.provideService(HttpServerRequest.ParsedSearchParams, matched.searchParams),

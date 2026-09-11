@@ -13,6 +13,7 @@ const Input = Schema.Struct({
 	event: Schema.optionalKey(EventRecord),
 	since: Schema.optionalKey(Schema.Int),
 	limit: Schema.optionalKey(Schema.Int),
+	topic: Schema.optionalKey(Schema.String),
 });
 const main = Effect.gen(function* () {
 	const root = process.argv[2];
@@ -43,6 +44,7 @@ const main = Effect.gen(function* () {
 					return yield* events.query({
 						...(input.since === undefined ? {} : { since: input.since }),
 						limit: input.limit ?? 100,
+						...(input.topic === undefined ? {} : { topic: input.topic }),
 					});
 				case "recover":
 					yield* (yield* AppRecovery).prepare(input.epoch ?? "attempt");

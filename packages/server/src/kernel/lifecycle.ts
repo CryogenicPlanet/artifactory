@@ -9,6 +9,7 @@ const make = Effect.gen(function* () {
 		initial,
 		state: yield* Ref.make<State>(initial),
 		mutations: yield* Ref.make(0),
+		requests: yield* Ref.make(0),
 		healthy: yield* Ref.make(false),
 		gate: yield* Semaphore.make(1),
 	};

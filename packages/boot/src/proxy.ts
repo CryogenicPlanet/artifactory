@@ -1,3 +1,5 @@
+import { databaseRestoreRoute, type DatabaseRestoreStore } from "./database-restore-http.ts";
+import { backupRoute, type BackupStore } from "./backup-http.ts";
 import { Clock, Crypto, Effect, Ref } from "effect";
 import {
 	Cookies,
@@ -11,8 +13,8 @@ import { AuthError, type AuthConfig } from "./auth.ts";
 import { authenticate, authErrorResponse, authFailure, authRoute, sessionCookie, type AuthStore } from "./auth-http.ts";
 import { editRoute, type EditStore } from "./edit-http.ts";
 import { passkeyManagementRoute } from "./passkey-management-http.ts";
-import { backupRoute, type BackupStore } from "./backup-http.ts";
 import { accountRoute } from "./account-http.ts";
+import { topicMoveRoute, type TopicMoveStore } from "./topic-move-http.ts";
 import { tokenMintRoute } from "./token-mint-http.ts";
 import { tokenRoute } from "./token-http.ts";
 import { enrollmentRoute } from "./enrollment-http.ts";
@@ -27,7 +29,8 @@ const help = `comms local development bootloader
 GET /health        Bootloader liveness (independent of the child).
 GET /_boot/status  Child state and bounded stderr tail.
 GET /_boot/generations  Persistent generation history (also /api/generations).
-GET /_boot/db/backups  Human-only backup catalog; restore is not implemented.
+GET /_boot/db/backups  Human-only backup catalog.
+POST /_boot/db/restore  Human-only database restore with a fresh db.restore assertion.
 GET /api/events?since=0&wait=60  Read or wait for published events.
 GET /api/stream?since=0  SSE with cursor resume, independent of app swaps.
 
@@ -43,7 +46,8 @@ POST /api/lock acquires the editor; GET/PUT/DELETE /api/fs/app/<path> reads or s
 PUT ?reload=0 stages only; POST /api/reload rehearses and cuts over. Failed edits retain the repair lock.
 POST /api/reload?release=1 releases the lock after a successful edit.
 POST /api/revert {} undoes the latest app batch; {path}, {batch}, or {version} selects retained source history.
-Revert needs your edit lock and empty staging; database and whole-generation restores remain pending.
+POST /api/revert {generation:n} restores a retained whole source tree and rebuilds its locked dependencies.
+Revert needs your edit lock and empty staging; source must have complete retained provenance. Database restore remains separate.
 Local commands bind to 127.0.0.1 by default. The development image publishes only to host loopback.
 If first startup fails, repair source through /api/fs/app/<path> and POST /api/reload, or fix DATA_DIR/app and restart the launcher.
 After a healthy startup, restarts use the newest known-good snapshot even if the editable source is broken.
@@ -82,6 +86,8 @@ export const proxy = (
 	publicPages: Ref.Ref<PublicPages["Service"] | null>,
 	requests: RequestEvents,
 	backups: BackupStore,
+	restores: DatabaseRestoreStore,
+	moves: TopicMoveStore,
 	storage: Ref.Ref<StorageUsage>,
 ) =>
 	Effect.gen(function* () {
@@ -127,6 +133,10 @@ export const proxy = (
 		if (enrollmentResponse) return enrollmentResponse;
 		const backupResponse = yield* backupRoute(authStore, backups);
 		if (backupResponse) return backupResponse;
+		if (restores) {
+			const restored = yield* databaseRestoreRoute(restores, authStore, authConfig);
+			if (restored) return restored;
+		}
 		const accountResponse = yield* accountRoute(authStore);
 		if (accountResponse) return accountResponse;
 		const mintResponse = yield* tokenMintRoute(authStore, authConfig);
@@ -137,6 +147,7 @@ export const proxy = (
 		const explicitCredential =
 			request.headers.authorization !== undefined ||
 			(request.headers.cookie ?? "").split(";").some((part) => part.trim().startsWith(`${sessionCookie}=`));
+		const policyRevision = yield* child.traffic.requests.revision;
 		let publicPage: string | null = null;
 		if ((request.method === "GET" || request.method === "HEAD") && path.startsWith("/p/") && !explicitCredential) {
 			const policy = yield* Ref.get(publicPages);
@@ -163,6 +174,10 @@ export const proxy = (
 					identity
 						? HttpServerResponse.setHeader(response, "x-comms-token-expires", String(identity.expiresAt))
 						: response;
+				if (identity && auth && moves) {
+					const moved = yield* topicMoveRoute(moves, auth);
+					if (moved) return expires(moved);
+				}
 				if (identity && auth) {
 					const edited = yield* editRoute(editing, auth, identity);
 					if (edited) return expires(edited);
@@ -241,6 +256,11 @@ export const proxy = (
 						},
 						{ status: 503 },
 					);
+				const requestAdmission = yield* child.traffic.requests.admit.pipe(Effect.result);
+				if (requestAdmission._tag === "Failure") return expires(unavailable());
+				if (publicPage !== null && !identity && requestAdmission.success.revision !== policyRevision)
+					return expires(unavailable());
+				destination = requestAdmission.success.destination;
 				if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
 					const admitted = yield* child.traffic.admit;
 					destination = admitted.destination;

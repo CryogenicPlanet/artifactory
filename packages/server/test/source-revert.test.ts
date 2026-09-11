@@ -66,7 +66,7 @@ it("refuses ambiguous selectors, unavailable history and unrelated staging witho
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 	for (const input of [{ path: "app/server.ts", batch: "x" }, { version: 0 }, { path: "app/../boot.db" }])
 		expect((await app.post("/api/revert", input, cookie)).status).toBe(400);
-	expect((await app.post("/api/revert", { generation: 1 }, cookie)).status).toBe(501);
+	expect((await app.post("/api/revert", { generation: 0 }, cookie)).status).toBe(400);
 	expect((await app.post("/api/revert", { withDb: true }, cookie)).status).toBe(501);
 	const put = (content: string) =>
 		fetch(`${app.url}/api/fs/app/large.txt`, {

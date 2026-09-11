@@ -51,6 +51,14 @@ const run = Effect.gen(function* () {
 		yield* sql`DROP TABLE enrollments`;
 		for (const table of ["child_attempts", "backups", "cutover"]) yield* sql.unsafe(`DROP TABLE ${table}`);
 		yield* sql`ALTER TABLE sessions DROP COLUMN last_seen_at`;
+		yield* sql`ALTER TABLE events DROP COLUMN topic`;
+		yield* sql`DROP TABLE topic_moves`;
+		yield* sql`DROP TABLE topic_page_moves`;
+		yield* sql`DROP TABLE db_restore_requests`;
+		yield* sql`ALTER TABLE source_changes DROP COLUMN before_directory`;
+		yield* sql`ALTER TABLE source_changes DROP COLUMN desired_directory`;
+		yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;
+		yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 		yield* sql`PRAGMA user_version=6`;
 		yield* initializeBootSchema;
 		const after: unknown[] = [];
@@ -59,7 +67,7 @@ const run = Effect.gen(function* () {
 				yield* sql.unsafe(`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : "*"} FROM ${table}`),
 			);
 		assert.deepEqual(after, before);
-		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 12 }]);
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 13 }]);
 		assert.equal((yield* sql`SELECT * FROM tokens`).length, 0);
 		assert.equal((yield* sql`SELECT * FROM enrollments`).length, 0);
 		return;

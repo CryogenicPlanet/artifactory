@@ -59,6 +59,12 @@ async function sql(data: string, statement: string) {
 }
 
 async function removeSourceSchema(data: string) {
+	if (
+		Schema.decodeUnknownSync(Schema.Array(Schema.Unknown))(
+			await sql(data, "SELECT name FROM sqlite_master WHERE type='table' AND name='settings'"),
+		).length > 0
+	)
+		await sql(data, "DELETE FROM settings WHERE key='source.watcher_baseline'");
 	for (const table of [
 		"child_attempts",
 		"backups",
@@ -69,6 +75,9 @@ async function removeSourceSchema(data: string) {
 		"seq",
 		"events",
 		"event_batches",
+		"topic_moves",
+		"topic_page_moves",
+		"db_restore_requests",
 		"enrollments",
 		"tokens",
 		"mint_receipts",
@@ -295,7 +304,7 @@ await helper.exited;
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 12 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 13 }]);
 		expect(await sql(env.data, "SELECT value FROM settings WHERE key = 'app_seeded'")).toEqual([{ value: "1" }]);
 	}, 15000);
 
@@ -314,7 +323,7 @@ await helper.exited;
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 12 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 13 }]);
 		expect(await sql(env.data, "SELECT value FROM settings WHERE key = 'app_seeded'")).toEqual([{ value: "1" }]);
 		expect(await sql(env.data, "SELECT * FROM edit_lock")).toEqual([]);
 	}, 15000);
@@ -340,7 +349,7 @@ await helper.exited;
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 12 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 13 }]);
 		expect(await sql(env.data, "SELECT id, holder_family FROM edit_lock")).toEqual([
 			{ id: "saved-lock", holder_family: "family-one" },
 		]);
@@ -369,7 +378,7 @@ await helper.exited;
 		await sql(env.data, "PRAGMA user_version = 4");
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 12 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 13 }]);
 		expect(await sql(env.data, "SELECT id,counter,label FROM passkeys")).toEqual([
 			{ id: "saved-key", counter: 4, label: "laptop" },
 		]);
@@ -400,7 +409,7 @@ await helper.exited;
 		await sql(env.data, "INSERT INTO source_batches VALUES ('pending','pending-lock','codex',0,'publishing')");
 		await sql(
 			env.data,
-			`INSERT INTO source_changes VALUES ('pending','app/content.txt',CAST('snapshot-content' AS BLOB),'${sha("snapshot-content")}',416,CAST('changed' AS BLOB),'${sha("changed")}',416)`,
+			`INSERT INTO source_changes (batch,path,before,before_sha,before_mode,desired,desired_sha,desired_mode) VALUES ('pending','app/content.txt',CAST('snapshot-content' AS BLOB),'${sha("snapshot-content")}',416,CAST('changed' AS BLOB),'${sha("changed")}',416)`,
 		);
 		await writeFile(join(env.data, "app/content.txt"), "external");
 		const conflicted = await launch(test, env);
@@ -426,7 +435,9 @@ await helper.exited;
 		expect(await (await recovered.fetch(recovered.url)).json()).toMatchObject({ content: "changed", generation: "2" });
 		expect(await sql(env.data, "SELECT * FROM edit_lock")).toEqual([]);
 		expect(await sql(env.data, "SELECT * FROM staging")).toEqual([]);
-		expect(await sql(env.data, "SELECT state FROM source_batches")).toEqual([{ state: "published" }]);
+		expect(await sql(env.data, "SELECT state FROM source_batches WHERE id='pending'")).toEqual([
+			{ state: "published" },
+		]);
 	});
 
 	it("falls back to an older good snapshot after the newest snapshot exhausts its attempts", async (test) => {

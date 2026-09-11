@@ -108,5 +108,5 @@ it("rejects caller metadata even with the correct secret on direct child control
 		body: JSON.stringify({ action: "frozen" }),
 	});
 	expect(trusted.status).toBe(200);
-	expect(await trusted.json()).toEqual({ state: "frozen", mutations: 0 });
+	expect(await trusted.json()).toEqual({ state: "frozen", mutations: 0, requests: 0 });
 });

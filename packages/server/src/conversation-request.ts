@@ -16,6 +16,8 @@ const requestHint = (code: string) => {
 			return "Use the message id returned by a message read. Deleted messages remain unavailable.";
 		case "idempotency_conflict":
 			return "Retry the original unchanged request with its original Idempotency-Key. Use a new key only for an intentionally new operation.";
+		case "topic_exists":
+			return "Choose a destination whose topic subtree and page directory do not already exist.";
 		case "topic_archived":
 			return "Unarchive the topic and its archived ancestors before changing it.";
 		case "input_invalid":
@@ -72,7 +74,7 @@ export const failure = <E, R>(effect: Effect.Effect<HttpServerResponse.HttpServe
 				? 403
 				: ["topic_not_found", "message_not_found"].includes(code)
 					? 404
-					: ["idempotency_conflict", "topic_archived"].includes(code)
+					: ["idempotency_conflict", "topic_archived", "topic_exists"].includes(code)
 						? 409
 						: ["input_invalid", "query_invalid"].includes(code)
 							? 400

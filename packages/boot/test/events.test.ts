@@ -127,6 +127,8 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 	await app.sql("DROP TABLE seq");
 	await app.sql("DROP TABLE events");
 	await app.sql("DROP TABLE event_batches");
+	await app.sql("DROP TABLE topic_moves");
+	await app.sql("DROP TABLE topic_page_moves");
 	await app.sql("DROP TABLE enrollments");
 	await app.sql("DROP TABLE tokens");
 	await app.sql("DROP TABLE mint_receipts");
@@ -144,7 +146,7 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 		"SELECT batch,path,hex(before) AS before_bytes,before_mode,hex(desired) AS desired_bytes,desired_mode FROM source_changes",
 	);
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
-	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 12 }]);
+	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 13 }]);
 	expect(await app.sql("SELECT value FROM settings WHERE key='preserved'")).toEqual([{ value: "value" }]);
 	expect(
 		await app.sql(
@@ -157,3 +159,163 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 		{ id: "session", hash: "hash", created_at: 1, expires_at: 9999999999999, last_seen_at: null },
 	]);
 }, 15000);
+
+it("routes moved history without changing immutable replay identity or rerouting recreated paths", async (test) => {
+	const app = await store(test);
+	await app.run({ op: "init" });
+	const original = {
+		transaction: "original",
+		from: 1,
+		to: 2,
+		events: [
+			{ ...event(1), topic: "a/child", payload: { topic: "a/child", body: "old" } },
+			{ ...event(2), topic: "ab/child" },
+		],
+	};
+	await app.run({ op: "reserve", transaction: "original", count: 2 });
+	await app.run({ op: "append", batch: original });
+	const rawBefore = await app.sql("SELECT event FROM events ORDER BY seq");
+	const move = {
+		transaction: "move-one",
+		from: 3,
+		to: 3,
+		events: [{ ...event(3), type: "topic.moved", topic: "b", payload: { from: "a", to: "b" } }],
+	};
+	await app.run({ op: "reserve", transaction: "move-one" });
+	await app.sql("INSERT INTO topic_moves VALUES('move-one','a','b','family',NULL,'hash','pages_published',NULL)");
+	expect(await app.run({ op: "append", batch: move })).toMatchObject({ _tag: "Success" });
+	expect(await app.sql("SELECT event FROM events WHERE seq<=2 ORDER BY seq")).toEqual(rawBefore);
+	expect(await app.run({ op: "query", topic: "b", since: 0, limit: 1 })).toMatchObject({
+		success: {
+			items: [{ seq: 1, topic: "b/child", payload: { topic: "a/child", body: "old" } }],
+			cursor: 1,
+		},
+	});
+	expect(await app.run({ op: "query", topic: "a", since: 0 })).toMatchObject({ success: { items: [] } });
+	expect(await app.run({ op: "query", topic: "ab", since: 0 })).toMatchObject({
+		success: { items: [{ seq: 2, topic: "ab/child" }] },
+	});
+	expect(await app.run({ op: "append", epoch: "restart", batch: original })).toMatchObject({ _tag: "Success" });
+	expect(
+		await app.run({
+			op: "append",
+			epoch: "restart",
+			batch: {
+				...original,
+				events: original.events.map((item) => (item.seq === 1 ? { ...item, topic: "b/child" } : item)),
+			},
+		}),
+	).toMatchObject({ _tag: "Failure", failure: { code: "batch_conflict" } });
+	// A newly created topic at the old path is not the subtree that the old receipt moved.
+	await app.run({ op: "boot", event: { ...event(4), topic: "a/new" } });
+	const next = {
+		transaction: "move-two",
+		from: 5,
+		to: 5,
+		events: [{ ...event(5), type: "topic.moved", topic: "c", payload: { from: "b", to: "c" } }],
+	};
+	await app.run({ op: "reserve", transaction: "move-two" });
+	await app.sql("INSERT INTO topic_moves VALUES('move-two','b','c','family',NULL,'hash','pages_published',NULL)");
+	await app.run({ op: "append", batch: next });
+	expect(await app.run({ op: "append", epoch: "restart", batch: move })).toMatchObject({ _tag: "Success" });
+	expect(await app.run({ op: "query", topic: "a", since: 0 })).toMatchObject({
+		success: { items: [{ seq: 4, topic: "a/new" }] },
+	});
+	expect(await app.run({ op: "query", topic: "c", since: 0 })).toMatchObject({
+		success: {
+			items: [
+				{ seq: 1, topic: "c/child" },
+				{ seq: 3, topic: "c" },
+				{ seq: 5, topic: "c" },
+			],
+		},
+	});
+	await app.sql("DELETE FROM events WHERE seq IN (1,3)");
+	await app.run({ op: "append", epoch: "again", batch: original });
+	await app.run({ op: "append", epoch: "again", batch: move });
+	expect(await app.sql("SELECT seq,topic FROM events ORDER BY seq")).toEqual([
+		{ seq: 2, topic: "ab/child" },
+		{ seq: 4, topic: "a/new" },
+		{ seq: 5, topic: "c" },
+	]);
+	expect(await app.sql("SELECT state,seq FROM topic_moves ORDER BY seq")).toEqual([
+		{ state: "completed", seq: 3 },
+		{ state: "completed", seq: 5 },
+	]);
+}, 15000);
+
+it("rejects unprepared and malformed moves and rolls routing back with publication failures", async (test) => {
+	const app = await store(test);
+	await app.run({ op: "init" });
+	await app.run({ op: "boot", event: { ...event(1), topic: "a/child" } });
+	await app.run({ op: "reserve", transaction: "move" });
+	const batch = {
+		transaction: "move",
+		from: 2,
+		to: 2,
+		events: [{ ...event(2), type: "topic.moved", topic: "b", payload: { from: "a", to: "b" } }],
+	};
+	const append = (from: string, to: string) =>
+		app.run({ op: "append", batch: { ...batch, events: [{ ...batch.events[0], payload: { from, to } }] } });
+	for (const [from, to] of [
+		["", "b"],
+		["a", "a"],
+		["a", "a/child"],
+		["a/child", "a"],
+		["a/../b", "c"],
+		["a", "B"],
+		["a", "x".repeat(201)],
+	]) {
+		expect(await append(from ?? "", to ?? "")).toMatchObject({
+			_tag: "Failure",
+			failure: { code: "topic_move_invalid" },
+		});
+	}
+	expect(await app.run({ op: "append", batch })).toMatchObject({
+		_tag: "Failure",
+		failure: { code: "topic_move_unprepared" },
+	});
+	await app.sql("INSERT INTO topic_moves VALUES('move','a','b','family',NULL,'hash','prepared',NULL)");
+	expect(await app.run({ op: "append", batch })).toMatchObject({
+		_tag: "Failure",
+		failure: { code: "topic_move_unprepared" },
+	});
+	await app.sql("UPDATE topic_moves SET state='pages_published'");
+	const longDestination = "x".repeat(200);
+	await app.sql(`UPDATE topic_moves SET to_path='${longDestination}'`);
+	expect(await append("a", longDestination)).toMatchObject({
+		_tag: "Failure",
+		failure: { code: "topic_move_invalid" },
+	});
+	await app.sql("UPDATE topic_moves SET to_path='b'");
+	await app.sql(
+		"CREATE TRIGGER fail_move BEFORE INSERT ON events WHEN NEW.seq=2 BEGIN SELECT RAISE(ABORT,'injected'); END",
+	);
+	expect(await app.run({ op: "append", batch })).toMatchObject({ _tag: "Failure" });
+	expect(await app.sql("SELECT topic FROM events")).toEqual([{ topic: "a/child" }]);
+	expect(await app.sql("SELECT state,seq FROM topic_moves")).toEqual([{ state: "pages_published", seq: null }]);
+	expect(await app.run({ op: "state" })).toMatchObject({ success: { published_through: 1, pending_id: "move" } });
+	await app.sql("DROP TRIGGER fail_move");
+	await app.run({ op: "append", batch });
+	expect(await app.run({ op: "boot", event: batch.events[0] })).toMatchObject({
+		_tag: "Failure",
+		failure: { code: "topic_move_unprepared" },
+	});
+}, 15000);
+
+it("backfills legacy routing without altering pending state or original event bytes", async (test) => {
+	const app = await store(test);
+	await app.run({ op: "boot", event: event(1) });
+	await app.run({ op: "reserve", transaction: "pending" });
+	const before = await app.sql("SELECT event FROM events");
+	const pending = await app.sql("SELECT * FROM seq");
+	await app.sql("ALTER TABLE events DROP COLUMN topic");
+	await app.sql("DROP TABLE topic_moves");
+	await app.sql("DROP TABLE topic_page_moves");
+	await app.sql("PRAGMA user_version=12");
+	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
+	expect(await app.sql("SELECT topic FROM events")).toEqual([{ topic: "project/thread" }]);
+	expect(await app.sql("SELECT event FROM events")).toEqual(before);
+	expect(await app.sql("SELECT * FROM seq")).toEqual(pending);
+	expect(await app.run({ op: "query", topic: "project", since: 0 })).toMatchObject({ success: { items: [event(1)] } });
+});

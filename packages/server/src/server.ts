@@ -38,6 +38,7 @@ import type { HttpPlatform } from "effect/unstable/http/HttpPlatform";
 import { routes } from "./conversation.ts";
 import { Extensions, layer as extensionsLayer } from "./kernel/ext.ts";
 import { failure } from "./conversation-request.ts";
+import { TopicMoveCommand } from "./kernel/topic-move.ts";
 
 type Handler = Effect.Effect<
 	HttpServerResponse.HttpServerResponse,
@@ -54,6 +55,9 @@ const server = Effect.gen(function* () {
 	const program = Effect.gen(function* () {
 		const boot = yield* BootChannel;
 		const pagesDirectory = yield* Config.String("PAGES_DIRECTORY");
+		const boardDirectory = yield* Config.String("BOARD_DIRECTORY").pipe(
+			Config.withDefault(`${import.meta.dirname}/board`),
+		);
 		const lifecycle = yield* Lifecycle;
 		const http = yield* HttpServer.HttpServer;
 		if (http.address._tag === "UnixPathAddress") return yield* Effect.die("Expected TCP listener");
@@ -84,7 +88,7 @@ const server = Effect.gen(function* () {
 					yield* Ref.set(extensionState, extensions.changeState);
 					yield* Ref.set(quiesce, messages.quiesce);
 					const dispatch = yield* HttpRouter.toHttpEffect(
-						Layer.mergeAll(routes(extensions), pageRoutes, boardRoutes(`${import.meta.dirname}/board`)),
+						Layer.mergeAll(routes(extensions), pageRoutes, boardRoutes(boardDirectory)),
 					);
 					const context = yield* Effect.context<
 						| BootChannel
@@ -135,26 +139,46 @@ const server = Effect.gen(function* () {
 							const request = yield* HttpServerRequest.HttpServerRequest;
 							if (request.url === "/health" && request.method === "GET") return yield* health;
 							const state = yield* Ref.get(lifecycle.state);
+							if (request.url === "/_kernel/topic-move" && request.method === "POST")
+								return yield* failure(
+									controlGate.withPermit(
+										Effect.gen(function* () {
+											if (Object.keys(request.headers).some((name) => name.startsWith("x-comms-")))
+												return HttpServerResponse.empty({ status: 403 });
+											if ((yield* Ref.get(lifecycle.state)) !== "frozen")
+												return HttpServerResponse.empty({ status: 409 });
+											const command = yield* request.json.pipe(
+												Effect.flatMap(Schema.decodeUnknownEffect(TopicMoveCommand, { onExcessProperty: "error" })),
+											);
+											return HttpServerResponse.jsonUnsafe(yield* messages.moveTopic(command));
+										}),
+									),
+								);
 							const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method);
 							if (
-								!["accepted", "live", "frozen", "draining"].includes(state) ||
+								!["accepted", "live", "frozen"].includes(state) ||
 								(mutation && state !== "accepted" && state !== "live")
 							)
 								return HttpServerResponse.empty({ status: 503 });
-							return yield* mutation
-								? Effect.acquireUseRelease(
-										lifecycle.gate.withPermit(
-											Effect.gen(function* () {
-												const latest = yield* Ref.get(lifecycle.state);
-												if (latest !== "accepted" && latest !== "live") return false;
-												yield* Ref.update(lifecycle.mutations, (count) => count + 1);
-												return true;
-											}),
-										),
-										(admitted) => (admitted ? actual : Effect.succeed(HttpServerResponse.empty({ status: 503 }))),
-										(admitted) => (admitted ? Ref.update(lifecycle.mutations, (count) => count - 1) : Effect.void),
-									)
-								: actual;
+							const admitted = yield* Effect.acquireRelease(
+								lifecycle.gate.withPermit(
+									Effect.gen(function* () {
+										const latest = yield* Ref.get(lifecycle.state);
+										if (latest === "draining" || (mutation && latest !== "accepted" && latest !== "live")) return false;
+										yield* Ref.update(lifecycle.requests, (count) => count + 1);
+										if (mutation) yield* Ref.update(lifecycle.mutations, (count) => count + 1);
+										return true;
+									}),
+								),
+								(admitted) =>
+									admitted
+										? Effect.gen(function* () {
+												yield* Ref.update(lifecycle.requests, (count) => count - 1);
+												if (mutation) yield* Ref.update(lifecycle.mutations, (count) => count - 1);
+											})
+										: Effect.void,
+							);
+							return admitted ? yield* actual : HttpServerResponse.empty({ status: 503 });
 						}),
 					);
 					yield* Effect.gen(function* () {
@@ -204,7 +228,7 @@ const server = Effect.gen(function* () {
 				)
 					return HttpServerResponse.empty({ status: 403 });
 				if (request.url === "/_kernel/control" && request.method === "POST") {
-					// Boot control calls carry only the attempt secret, never proxied caller metadata.
+					// Genuine boot control has the attempt secret only, never proxied caller metadata.
 					if (Object.keys(request.headers).some((name) => name.startsWith("x-comms-")))
 						return HttpServerResponse.empty({ status: 403 });
 					const body = yield* request.json.pipe(
@@ -220,13 +244,18 @@ const server = Effect.gen(function* () {
 						yield* transitionTo(body.action);
 					} else {
 						yield* transitionTo(body.action);
-						while ((yield* Ref.get(lifecycle.mutations)) !== 0) yield* Effect.sleep("10 millis");
+						while (
+							(yield* Ref.get(lifecycle.mutations)) !== 0 ||
+							(body.action === "draining" && (yield* Ref.get(lifecycle.requests)) !== 0)
+						)
+							yield* Effect.sleep("10 millis");
 						const idle = yield* Ref.get(quiesce);
 						if (idle) yield* idle;
 					}
 					return HttpServerResponse.jsonUnsafe({
 						state: yield* Ref.get(lifecycle.state),
 						mutations: yield* Ref.get(lifecycle.mutations),
+						requests: yield* Ref.get(lifecycle.requests),
 					});
 				}
 				const handler = yield* Ref.get(installed);

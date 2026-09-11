@@ -15,5 +15,8 @@
 		"react-dom": "19.3.0",
 		"tailwindcss": "4.3.3",
 		"vite": "8.2.2"
+	},
+	"comms": {
+		"board_directory": "environment-v1"
 	}
 }

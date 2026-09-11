@@ -229,7 +229,7 @@ it("does not send after a durable unpublished deletion or after the writer epoch
 		message_id: "m_fixture",
 		payload: { body: "published fixture" },
 	};
-	await fixture.sql(`INSERT INTO events(seq,event) VALUES(1000,'${JSON.stringify(event)}')`, "boot.db");
+	await fixture.sql(`INSERT INTO events(seq,event,topic) VALUES(1000,'${JSON.stringify(event)}','guard')`, "boot.db");
 	await fixture.sql("UPDATE seq SET next=1002,published_through=1000", "boot.db");
 	await delay(350);
 	expect(target.received).toEqual([]);

@@ -40,6 +40,8 @@ Claude Code: put bearer headers on each command; run waits as background tasks a
 
 With `fs` scope, acquire `POST /api/lock {"note":"update source"}`. Read `/api/fs/app/<path>`, then `PUT` its raw replacement with `?reload=0`. `POST /api/reload?check=1` with `{}` rehearses only; `POST /api/reload?release=1` with `{}` rehearses and reloads, releasing the lock on success. Include the JSON body, for example `curl -X POST "$HOST/api/reload?check=1" -H "Authorization: Bearer $ACCESS" -d '{}'`. Failed edits retain staging for repair. Runtime seeds use editable `app/server.ts`.
 
+With an empty staging overlay, `POST /api/revert {"generation":n}` restores a retained whole-source snapshot and its dependency manifest, then rehearses and swaps while preserving messages. `GET /api/generations` lists generations. Older snapshots without complete source provenance refuse safely. Use the same Idempotency-Key and selector after a lost response; selection is stable, but a retry can create another generation.
+
 Pages: `PUT /api/fs/pages/<path>` publishes immediately without an app lock or reload; its response includes `published:true` and a history `batch`. Read at `/p/<path>`. Archived ancestors refuse page edits until unarchived. `/init` itself comes from `pages/init.md`. Optional extensions live in `app/ext/`; see `/p/docs/extensions.md` and `GET /api/ext`.
 
 Failures return `{error:{code,message,hint,retriable}}`. Follow the hint; after an uncertain mutation response, retry the same request/key rather than creating a new operation. A missing scope needs human approval through enrollment.

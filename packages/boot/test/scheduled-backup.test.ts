@@ -18,6 +18,19 @@ async function run(test: TestContext, mode: string) {
 }
 
 describe("scheduled quiesced backups", () => {
+	it.for(["restore", "move", "source"])(
+		"refuses pending %s recovery before touching traffic or the child",
+		async (mode, test) => {
+			expect(await run(test, mode)).toMatchObject({
+				outcome: "Failure",
+				calls: [],
+				rows: [],
+				current: "original",
+				traffic: { frozen: false },
+			});
+		},
+	);
+
 	it("drains an admitted WAL write and reconciles publication before capture without restarting", async (test) => {
 		expect(await run(test, "success")).toMatchObject({
 			outcome: "Success",
