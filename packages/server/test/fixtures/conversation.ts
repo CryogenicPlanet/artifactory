@@ -98,18 +98,29 @@ export async function conversation(test: TestContext) {
 			).toBe(200);
 		};
 		const ready = async (cookie: string, timeout = 15000) => {
-			await expect
-				.poll(
-					async () => {
-						const response = await fetch(`${url}/_boot/status`, { headers: { cookie } });
-						const value = Schema.decodeUnknownSync(
-							Schema.Struct({ child: Schema.Struct({ state: Schema.String, error: Schema.NullOr(Schema.String) }) }),
-						)(await response.json());
-						return value.child.state === "failed" ? value.child.error : value.child.state;
-					},
-					{ timeout },
-				)
-				.toBe("live");
+			let lastStatus: unknown = null;
+			try {
+				await expect
+					.poll(
+						async () => {
+							const response = await fetch(`${url}/_boot/status`, { headers: { cookie } });
+							lastStatus = await response.json();
+							const value = Schema.decodeUnknownSync(
+								Schema.Struct({ child: Schema.Struct({ state: Schema.String, error: Schema.NullOr(Schema.String) }) }),
+							)(lastStatus);
+							return value.child.state === "failed" ? value.child.error : value.child.state;
+						},
+						{ timeout },
+					)
+					.toBe("live");
+			} catch (cause) {
+				// Report the last sampled status without another request extending the deadline.
+				// Boot output includes a setup code; credentials are never useful failure evidence.
+				const evidence = `Status: ${JSON.stringify(lastStatus)}\nBoot output: ${output}`
+					.replace(/\/setup is open, code \S+/g, "/setup code [redacted]")
+					.replace(/[A-Za-z0-9_-]{43,}/g, "[redacted]");
+				throw new Error(`App did not become live within ${timeout}ms. ${evidence}`, { cause });
+			}
 		};
 		const assertion = async (params: {
 			readonly id: string;
