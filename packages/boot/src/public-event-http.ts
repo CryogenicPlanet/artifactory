@@ -10,8 +10,8 @@ const integer = (value: string | null, fallback: number, maximum: number) => {
 	return Number.isSafeInteger(number) && number <= maximum ? number : null;
 };
 
-/** Boot-owned delivery reads each page through the caller's admission gate.
- * No permit or child lifetime is retained while waiting for another event. */
+/** Boot-owned delivery uses bounded, authenticated page reads.
+ * No child lifetime is retained while waiting for another event. */
 export const publicEventResponse = (
 	request: HttpServerRequest.HttpServerRequest,
 	identity: VerifiedIdentity | null,

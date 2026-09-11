@@ -1,7 +1,7 @@
 import { layer as durableEventsLayer } from "../../src/events.ts";
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Clock, Console, Crypto, Effect, Layer, Ref, Schema, Semaphore } from "effect";
+import { Clock, Console, Crypto, Deferred, Effect, Layer, Ref, Schema, Semaphore } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Events, EventRecord, layer } from "../../src/events.ts";
 import { SqlClient } from "effect/unstable/sql";
@@ -21,10 +21,9 @@ const main = Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const crypto = yield* Crypto.Crypto;
 		const reads = yield* Ref.make(0);
-		const store: Events["Service"] = {
-			...events,
-			query: (input) => Ref.update(reads, (n) => n + 1).pipe(Effect.andThen(events.query(input))),
-		};
+		const blockedReads = yield* Ref.make(0);
+		const gateHeld = yield* Ref.make(false);
+		const releaseQuery = yield* Deferred.make<void>();
 		const server = yield* HttpServer.HttpServer;
 		const host = new URL(HttpServer.formatAddress(server.address)).host;
 		const attempts = yield* Ref.make<readonly Attempt[]>([
@@ -34,6 +33,19 @@ const main = Effect.gen(function* () {
 		const route = yield* Ref.make<Destination | null>(null);
 		const handler = Effect.gen(function* () {
 			const request = yield* HttpServerRequest.HttpServerRequest;
+			const store: Events["Service"] = {
+				...events,
+				query: (input) =>
+					Effect.gen(function* () {
+						yield* Ref.update(reads, (n) => n + 1);
+						if (request.headers["x-block-query"]) {
+							yield* Ref.update(blockedReads, (n) => n + 1);
+							yield* Deferred.await(releaseQuery).pipe(Effect.ensuring(Ref.update(blockedReads, (n) => n - 1)));
+						}
+						return yield* events.query(input);
+					}),
+			};
+
 			if (request.url === "/token") {
 				const token = Buffer.from(yield* crypto.randomBytes(32)).toString("base64url");
 				const hash = Buffer.from(yield* crypto.digest("SHA-256", new TextEncoder().encode(token))).toString("hex");
@@ -46,7 +58,21 @@ const main = Effect.gen(function* () {
 				return HttpServerResponse.empty();
 			}
 			if (request.url === "/hold") {
-				yield* gate.withPermit(Effect.sleep("3 seconds"));
+				yield* gate.withPermit(
+					Ref.set(gateHeld, true).pipe(
+						Effect.andThen(Effect.sleep("3 seconds")),
+						Effect.ensuring(Ref.set(gateHeld, false)),
+					),
+				);
+				return HttpServerResponse.empty();
+			}
+			if (request.url === "/query-state")
+				return HttpServerResponse.jsonUnsafe({
+					blockedReads: yield* Ref.get(blockedReads),
+					gateHeld: yield* Ref.get(gateHeld),
+				});
+			if (request.url === "/release-query") {
+				yield* Deferred.succeed(releaseQuery, undefined);
 				return HttpServerResponse.empty();
 			}
 			if (request.url === "/stats") return HttpServerResponse.jsonUnsafe({ reads: yield* Ref.get(reads) });

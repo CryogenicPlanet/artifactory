@@ -136,15 +136,66 @@ it("boot long-poll survives child retirement, emits heartbeats, and disconnect r
 	expect(await json(await app.get("/stats"))).toEqual(stopped);
 }, 15000);
 
-it("long-poll deadline includes channel admission and disconnect interrupts a blocked read", async (test) => {
+it("event pages and long-poll deadlines do not wait for the child channel gate", async (test) => {
 	const app = await launch(test);
+	const held = app.post("/hold", {});
+	await expect.poll(async () => json(await app.get("/query-state"))).toMatchObject({ gateHeld: true });
+	for (const headers of [{}, { "x-boot-secret": "fixture-secret" }]) {
+		const response = await app.get("/api/events?since=0", { headers, signal: AbortSignal.timeout(1000) });
+		expect(response.status).toBe(200);
+	}
 	const started = performance.now();
 	const waiting = await app.get("/api/events?since=0&wait=1");
-	const held = app.post("/hold", {});
 	expect(await json(waiting)).toEqual({ items: [], cursor: 0, timed_out: true, drained: false });
 	expect(performance.now() - started).toBeLessThan(1800);
 	await held;
 }, 6000);
+
+it.for([false, true])(
+	"a blocked event page cannot hold publication or retirement (child=%s)",
+	async (internal, test) => {
+		const app = await launch(test);
+		const reading = app.get("/api/events?since=0", {
+			headers: { "x-block-query": "1", ...(internal ? { "x-boot-secret": "fixture-secret" } : {}) },
+		});
+		await expect.poll(async () => json(await app.get("/query-state"))).toMatchObject({ blockedReads: 1 });
+		const reserve = await app.get("/_boot/seq/reserve", {
+			method: "POST",
+			headers: { "content-type": "application/json", "x-boot-secret": "fixture-secret" },
+			body: JSON.stringify({ transaction: "during-read", count: 1 }),
+			signal: AbortSignal.timeout(1000),
+		});
+		expect(reserve.status).toBe(200);
+		expect((await app.post("/_boot/seq/abort", { transaction: "during-read" }, true)).status).toBe(204);
+		const retired = await app.get("/retire", { method: "POST", signal: AbortSignal.timeout(1000) });
+		expect(retired.status).toBe(204);
+		await app.post("/release-query", {});
+		const response = await reading;
+		expect(response.status).toBe(internal ? 403 : 200);
+		if (internal) expect(await json(response)).toMatchObject({ error: { code: "stale_attempt", retriable: false } });
+		else expect(await json(response)).toMatchObject({ cursor: 2 });
+	},
+);
+
+it("event page timeout and disconnect interrupt the query", async (test) => {
+	const app = await launch(test);
+	const response = await app.get("/api/events?since=0", { headers: { "x-block-query": "1" } });
+	expect(response.status).toBe(503);
+	expect(await json(response)).toMatchObject({ error: { code: "events_unavailable", retriable: true } });
+	await expect.poll(async () => json(await app.get("/query-state"))).toMatchObject({ blockedReads: 0 });
+	const controller = new AbortController();
+	test.onTestFinished(() => controller.abort());
+	const reading = app
+		.get("/api/events?since=0", {
+			headers: { "x-block-query": "1" },
+			signal: controller.signal,
+		})
+		.catch(() => undefined);
+	await expect.poll(async () => json(await app.get("/query-state"))).toMatchObject({ blockedReads: 1 });
+	controller.abort();
+	await reading;
+	await expect.poll(async () => json(await app.get("/query-state"))).toMatchObject({ blockedReads: 0 });
+});
 
 it("revoked credentials and captured expiry stop an open stream before new events are delivered", async (test) => {
 	const app = await launch(test);
