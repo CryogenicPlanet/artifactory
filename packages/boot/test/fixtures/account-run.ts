@@ -55,28 +55,29 @@ const run = Effect.gen(function* () {
 			yield* sql`INSERT INTO enrollments(id,device_secret_hash,user_code,agent_name,kind,host,status,family,created_at,expires_at,scopes)
 			VALUES(${enrollmentId(letter)},${`secret-${letter}`},'ABCD12','codex','codex','laptop',${status},${familyId(letter)},${now},${expires},${status === "pending" ? null : '["read"]'})`;
 		}
-		const first = yield* auth.listEnrollments({ limit: 1, before: null, status: "pending" });
-		assert.equal(first.items[0]?.id, enrollmentId("x"));
-		assert.equal(first.next, enrollmentId("x"));
-		const second = yield* auth.listEnrollments({ limit: 1, before: first.next, status: "pending" });
-		assert.equal(second.items[0]?.id, enrollmentId("w"));
-		assert.equal(second.next, null);
-		assert.equal(first.items[0]?.family, null);
-		assert.equal(first.items[0]?.scopes, null);
-		const expired = yield* auth.listEnrollments({ limit: 100, before: null, status: "expired" });
+		const result = yield* auth.listEnrollments();
 		assert.deepEqual(
-			expired.items.map((row) => row.id),
-			[enrollmentId("z"), enrollmentId("y")],
+			result.items.map((row) => [row.id, row.status, row.expires_at]),
+			[
+				[enrollmentId("z"), "pending", 0],
+				[enrollmentId("y"), "approved", 0],
+				[enrollmentId("x"), "pending", now + 10000],
+				[enrollmentId("w"), "pending", now + 10000],
+				[enrollmentId("v"), "denied", 0],
+				[enrollmentId("u"), "collected", 0],
+			],
 		);
-		assert.equal((yield* auth.listEnrollments({ limit: 100, before: null, status: "denied" })).items.length, 1);
-		assert.equal((yield* auth.listEnrollments({ limit: 100, before: null, status: "collected" })).items.length, 1);
-		const response = yield* request("/_boot/enrollments?status=pending&limit=1");
+		assert.equal(result.items[0]?.family, familyId("z"));
+		assert.equal(result.items[0]?.scopes, null);
+		// Listings preserve stored metadata and do not run an expiry transition.
+		assert.deepEqual(Object.keys(result), ["items"]);
+		const response = yield* request("/_boot/enrollments");
 		assert.equal(response.status, 200);
 		assert.equal(response.headers.get("cache-control"), "no-store");
 		const payload = yield* Effect.promise(() => response.text());
 		assert.ok(!payload.includes("secret"));
 		assert.deepEqual(
-			Object.keys(first.items[0] ?? {}).sort(),
+			Object.keys(result.items[0] ?? {}).sort(),
 			["id", "name", "kind", "host", "user_code", "status", "created_at", "expires_at", "scopes", "family"].sort(),
 		);
 	} else if (process.argv[3] === "families") {
@@ -89,27 +90,33 @@ const run = Effect.gen(function* () {
 				}
 		}
 		assert.equal((yield* sql`SELECT id FROM enrollments`).length, 0);
-		const first = yield* auth.listTokenFamilies({ limit: 1, before: null });
-		assert.deepEqual(first.items, [
-			{
-				family: familyId("z"),
-				agent: "codex",
-				label: "machine",
-				scopes: ["read", "write"],
-				created_at: 1,
-				last_used_at: 25,
-				access_expires_at: 200,
-				refresh_expires_at: 1200,
-				revoked: false,
-			},
-		]);
+		const result = yield* auth.listTokenFamilies();
+		assert.deepEqual(
+			result.items.map((row) => row.family),
+			[familyId("z"), familyId("y"), familyId("x")],
+		);
+		assert.deepEqual(result.items[0], {
+			family: familyId("z"),
+			agent: "codex",
+			label: "machine",
+			scopes: ["read", "write"],
+			created_at: 1,
+			last_used_at: 25,
+			access_expires_at: 200,
+			refresh_expires_at: 1200,
+			revoked: false,
+		});
+		assert.equal(result.items[1]?.revoked, true);
 		yield* sql`UPDATE tokens SET last_used_at=2000 WHERE family=${familyId("x")}`;
-		const second = yield* auth.listTokenFamilies({ limit: 1, before: first.next });
-		assert.equal(second.items[0]?.family, familyId("y"));
-		assert.equal(second.items[0]?.revoked, true);
-		const third = yield* auth.listTokenFamilies({ limit: 1, before: second.next });
-		assert.equal(third.items[0]?.family, familyId("x"));
-		assert.equal(third.next, null);
+		assert.equal((yield* auth.listTokenFamilies()).items[2]?.last_used_at, 2000);
+		assert.deepEqual(Object.keys(result), ["items"]);
+		// A complete account read must not silently retain the old 200-row page cap.
+		for (let index = 0; index < 201; index++) {
+			const id = `extra-${index}`;
+			yield* sql`INSERT INTO tokens(id,pair_id,family,agent,kind,hash,label,scopes,expires_at,created_at)
+			VALUES(${id},${id},${`f_${String(index).padStart(43, "0")}`},'codex','access',${`secret-${id}`},'machine','["read"]',0,0)`;
+		}
+		assert.equal((yield* auth.listTokenFamilies()).items.length, 204);
 		const response = yield* request("/_boot/tokens");
 		assert.equal(response.status, 200);
 		assert.ok(!(yield* Effect.promise(() => response.text())).includes("secret"));
@@ -125,6 +132,8 @@ const run = Effect.gen(function* () {
 				assert.equal((yield* request(path, headers)).status, 401);
 			assert.equal((yield* request(path)).status, 200);
 			for (const query of [
+				"?limit=1",
+				"?status=pending",
 				"?limit=0",
 				"?limit=201",
 				"?limit=1&limit=2",

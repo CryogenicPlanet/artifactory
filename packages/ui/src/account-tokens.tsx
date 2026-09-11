@@ -14,7 +14,7 @@ type MintInput = {
 type PendingMint = { readonly input: MintInput; readonly key: string; readonly proof: string };
 export function AccountTokens() {
 	const request = useMemo(() => getFamilies(), []);
-	const { value: families, error: loadError, reload, update } = useLoad(request);
+	const { value: families, error: loadError, reload } = useLoad(request);
 	const [error, setError] = useState<BoardError | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [agent, setAgent] = useState("");
@@ -112,23 +112,6 @@ export function AccountTokens() {
 				</article>
 			))}
 			{families && !families.items.length && <p className="field-hint">No issued agent tokens.</p>}
-			{families?.next && (
-				<button
-					type="button"
-					disabled={busy}
-					onClick={() =>
-						run(
-							getFamilies(families?.next).pipe(
-								Effect.map((page) =>
-									update((current) => ({ items: [...(current?.items ?? []), ...page.items], next: page.next })),
-								),
-							),
-						)
-					}
-				>
-					More tokens
-				</button>
-			)}
 			<form
 				className="rounded-[10px] border border-[#dfe5d8] bg-white p-[17px] min-[651px]:p-[22px] mt-[18px] [&_h3]:text-sm [&_fieldset]:mb-4 [&_fieldset]:min-w-0 [&_button]:mt-[14px]"
 				onSubmit={(event) => {

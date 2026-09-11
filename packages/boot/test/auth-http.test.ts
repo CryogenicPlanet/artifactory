@@ -262,7 +262,7 @@ it("keeps real setup and login working after all child attempts fail without exp
 		const listed = await fetch(`${app.url}${path}`, { headers });
 		expect(listed.status).toBe(200);
 		expect(listed.headers.get("cache-control")).toBe("no-store");
-		expect(await listed.json()).toEqual({ items: [], next: null });
+		expect(await listed.json()).toEqual({ items: [] });
 	}
 
 	await app.post("/_boot/auth/logout", {}, session.cookie);

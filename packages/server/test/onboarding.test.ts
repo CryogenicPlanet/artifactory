@@ -16,6 +16,27 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	const discovery = await (await fetch(app.url + "/api", { headers: { cookie: first } })).json();
 	expect(manifest.endpoints).toEqual(discovery.paths);
 	expect(manifest.components).toEqual(discovery.components);
+	for (const [path, method, access] of [
+		["/auth/enroll", "post", "public"],
+		["/auth/enroll/{id}", "post", "device-secret"],
+		["/auth/refresh", "post", "refresh-token"],
+		["/api/fs/{path}", "put", "fs"],
+		["/api/reload", "post", "fs"],
+		["/_boot/db/backup", "post", "fs"],
+		["/_boot/db/backups", "get", "human"],
+		["/_boot/metrics", "get", "fs"],
+		["/_boot/restart", "post", "human"],
+	] as const) {
+		for (const paths of [manifest.endpoints, discovery.paths]) {
+			expect(paths[path][method]["x-comms-auth"]).toBe(access);
+			expect(paths[path][method].description.length).toBeGreaterThan(20);
+			expect(paths[path][method]["x-comms-scopes"]).toEqual(access === "fs" ? ["fs"] : []);
+		}
+	}
+	expect(discovery.paths["/_boot/seq"]).toBeUndefined();
+	expect(discovery.paths["/_boot/revert"].post.description).toContain("generation.restore");
+	expect(discovery.paths["/_boot/auth/challenge"].post.description).toContain("boot.restart");
+
 	const anonymous = await fetch(app.url + "/init", {
 		headers: {
 			"x-comms-agent": "spoofed",

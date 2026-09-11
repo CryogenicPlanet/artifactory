@@ -1,3 +1,4 @@
+import { discoveryResponse } from "./route-discovery.ts";
 import { restartRoute } from "./restart-http.ts";
 import { databaseRestoreRoute } from "./database-restore-http.ts";
 import { backupRoute } from "./backup-http.ts";
@@ -323,6 +324,7 @@ export const proxy = Effect.gen(function* () {
 					{
 						headers: {
 							...headers,
+							...(path === "/api" || path === "/.well-known/agent.json" ? { "accept-encoding": "identity" } : {}),
 							...(request.headers["x-comms-init"] && /^[a-f0-9]{64}$/.test(request.headers["x-comms-init"])
 								? { "x-comms-init": request.headers["x-comms-init"] }
 								: {}),
@@ -354,56 +356,60 @@ export const proxy = Effect.gen(function* () {
 				const client = yield* HttpClient.HttpClient;
 
 				return yield* client.execute(outgoing).pipe(
-					Effect.map((response) => {
-						const connection = new Set(
-							(response.headers.connection ?? "")
-								.toLowerCase()
-								.split(",")
-								.map((name) => name.trim()),
-						);
-						const converted = HttpServerResponse.fromClientResponse(response);
-						const responseHeaders = Object.fromEntries(
-							Object.entries(response.headers).filter(
-								([name]) =>
-									!hopHeaders.includes(name) &&
-									!connection.has(name) &&
-									name !== "x-boot-secret" &&
-									(!name.startsWith("x-comms-") || ["x-comms-init-version", "x-comms-init-stale"].includes(name)) &&
-									name !== "set-cookie",
-							),
-						);
-						if (converted.body._tag !== "Stream")
-							return HttpServerResponse.empty({ status: response.status, headers: responseHeaders });
-						let body = converted.body.stream;
-						const credential = identity;
-						if (credential && responseHeaders["content-type"]?.split(";")[0]?.trim() === "text/event-stream") {
-							// Authentication remains at the credential boundary even when the app owns the stream.
-							body = body.pipe(
-								Stream.takeWhileEffect(() =>
-									authenticate(auth, request).pipe(
-										Effect.map((current) => current.scopes.includes("read")),
-										Effect.timeout("2 seconds"),
-										Effect.orElseSucceed(() => false),
-									),
-								),
-								Stream.interruptWhen(
-									Effect.gen(function* () {
-										yield* Effect.sleep(Math.max(0, credential.expiresAt - (yield* Clock.currentTimeMillis)));
-									}),
+					Effect.flatMap((response) =>
+						Effect.gen(function* () {
+							const discovered = yield* discoveryResponse(path, request.method, response);
+							if (discovered) return discovered;
+							const connection = new Set(
+								(response.headers.connection ?? "")
+									.toLowerCase()
+									.split(",")
+									.map((name) => name.trim()),
+							);
+							const converted = HttpServerResponse.fromClientResponse(response);
+							const responseHeaders = Object.fromEntries(
+								Object.entries(response.headers).filter(
+									([name]) =>
+										!hopHeaders.includes(name) &&
+										!connection.has(name) &&
+										name !== "x-boot-secret" &&
+										(!name.startsWith("x-comms-") || ["x-comms-init-version", "x-comms-init-stale"].includes(name)) &&
+										name !== "set-cookie",
 								),
 							);
-						}
-						const forwarded = HttpServerResponse.empty({
-							status: response.status,
-							cookies: connection.has("set-cookie") ? Cookies.empty : Cookies.remove(response.cookies, sessionCookie),
-						}).pipe(
-							HttpServerResponse.setBody(HttpBody.stream(body, responseHeaders["content-type"] ?? "")),
-							HttpServerResponse.setHeaders(responseHeaders),
-						);
-						return responseHeaders["content-type"] === undefined
-							? HttpServerResponse.removeHeader(forwarded, "content-type")
-							: forwarded;
-					}),
+							if (converted.body._tag !== "Stream")
+								return HttpServerResponse.empty({ status: response.status, headers: responseHeaders });
+							let body = converted.body.stream;
+							const credential = identity;
+							if (credential && responseHeaders["content-type"]?.split(";")[0]?.trim() === "text/event-stream") {
+								// Authentication remains at the credential boundary even when the app owns the stream.
+								body = body.pipe(
+									Stream.takeWhileEffect(() =>
+										authenticate(auth, request).pipe(
+											Effect.map((current) => current.scopes.includes("read")),
+											Effect.timeout("2 seconds"),
+											Effect.orElseSucceed(() => false),
+										),
+									),
+									Stream.interruptWhen(
+										Effect.gen(function* () {
+											yield* Effect.sleep(Math.max(0, credential.expiresAt - (yield* Clock.currentTimeMillis)));
+										}),
+									),
+								);
+							}
+							const forwarded = HttpServerResponse.empty({
+								status: response.status,
+								cookies: connection.has("set-cookie") ? Cookies.empty : Cookies.remove(response.cookies, sessionCookie),
+							}).pipe(
+								HttpServerResponse.setBody(HttpBody.stream(body, responseHeaders["content-type"] ?? "")),
+								HttpServerResponse.setHeaders(responseHeaders),
+							);
+							return responseHeaders["content-type"] === undefined
+								? HttpServerResponse.removeHeader(forwarded, "content-type")
+								: forwarded;
+						}),
+					),
 					Effect.orElseSucceed(unavailable),
 					Effect.map(expires),
 				);

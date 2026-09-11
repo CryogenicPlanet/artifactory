@@ -76,7 +76,6 @@ const Families = Schema.Struct({
 			revoked: Schema.Boolean,
 		}),
 	),
-	next: Schema.NullOr(Schema.String),
 });
 export const TokenPair = Schema.Struct({
 	access: Schema.String,
@@ -101,13 +100,8 @@ export const getPasskeys = Effect.suspend(() =>
 		Effect.catchTag("SchemaError", () => unreadable),
 	),
 );
-export const getFamilies = (before: string | null = null) =>
-	accountRequest(
-		HttpClientRequest.get(
-			new URL(`/_boot/tokens?limit=50${before ? `&before=${encodeURIComponent(before)}` : ""}`, window.location.origin)
-				.href,
-		),
-	).pipe(
+export const getFamilies = () =>
+	accountRequest(HttpClientRequest.get(new URL("/_boot/tokens", window.location.origin).href)).pipe(
 		Effect.flatMap(Schema.decodeUnknownEffect(Families)),
 		Effect.catchTag("SchemaError", () => unreadable),
 	);
