@@ -55,7 +55,16 @@ const program = Effect.gen(function* () {
 			assert.equal(yield* count("lock.broken"), 1);
 			yield* locks.recover;
 			yield* locks.recover;
+			// Recovery completes the deferred break once; it is not a separate interruption.
+			assert.equal(yield* count("lock.broken"), 2);
+			assert.equal(yield* count("lock.interrupted"), 0);
+			assert.equal((yield* locks.inspect).value, null);
+			const interrupted = (yield* locks.acquire("family", "codex")).value;
+			yield* locks.pin({ id: interrupted.id, family: interrupted.holder_family });
+			yield* locks.recover;
+			yield* locks.recover;
 			assert.equal(yield* count("lock.interrupted"), 1);
+			assert.equal((yield* locks.inspect).value, null);
 			const text = yield* sql`SELECT event FROM events`.pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ event: Schema.String })))),
 			);
