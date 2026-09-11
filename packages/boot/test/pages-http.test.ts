@@ -465,6 +465,10 @@ it("replays keyed page undo and failure outcomes without replacing newer pages, 
 	expect(await replies[1]?.json()).toEqual(first);
 	expect((await app.call(`${app.url}/api/fs/pages/receipt.md`, { method: "PUT", body: "later" })).status).toBe(200);
 	const history = await env.sql("SELECT id FROM versions");
+	const conflict = await call(app.url, { path: "pages/index.md" }, "page");
+	expect(conflict.status).toBe(409);
+	expect(await conflict.json()).toMatchObject({ error: { code: "idempotency_conflict", retriable: false } });
+	expect(await env.sql("SELECT id FROM versions")).toEqual(history);
 	const failure = await call(app.url, { path: "pages/absent.md" }, "failed");
 	const failed = await failure.json();
 	expect(failure.status).toBe(400);
@@ -480,6 +484,10 @@ it("replays keyed page undo and failure outcomes without replacing newer pages, 
 	expect(await retry.json()).toEqual(failed);
 	expect(await readFile(join(env.root, "data/pages/absent.md"), "utf8")).toBe("created later");
 	expect(await env.sql("SELECT id FROM versions WHERE path != 'pages/absent.md'")).toEqual(history);
+	expect(await env.sql("SELECT COUNT(*) AS n FROM settings WHERE key LIKE 'source-revert:%'")).toEqual([{ n: 0 }]);
+	expect(await env.sql("SELECT COUNT(*) AS n FROM settings WHERE key LIKE 'source-revert-result:%'")).toEqual([
+		{ n: 2 },
+	]);
 }, 15000);
 
 it("refuses a legacy selector-only undo key rather than replaying uncertain old effects", async (test) => {
@@ -503,6 +511,8 @@ it("refuses a legacy selector-only undo key rather than replaying uncertain old 
 		error: { code: "source_revert_outcome_unavailable", retriable: false },
 	});
 	expect(await env.sql("SELECT id FROM versions")).toEqual(before);
+	expect(await env.sql(`SELECT value FROM settings WHERE key='source-revert:${digest}'`)).toEqual([{ value: "{}" }]);
+	expect(await env.sql("SELECT key FROM settings WHERE key LIKE 'source-revert-result:%'")).toEqual([]);
 });
 
 it("rechecks credentials after a keyed revert waits behind another request", async (test) => {

@@ -137,49 +137,6 @@ describe("structural source history undo", () => {
 		]);
 		expect(await env.sql("SELECT * FROM source_changes")).toEqual([]);
 	});
-	it("retains one selected tree across newer history and rejects shared-key selector conflicts", async (test) => {
-		const env = await fixture(test, [
-			{ path: "app", content: null, directory: true },
-			{ path: "app/swap", content: "original" },
-		]);
-		const first = publication(
-			await env.call({
-				op: "publish",
-				desired: [
-					{ path: "app", content: null, directory: true },
-					{ path: "app/swap", content: null, directory: true },
-					{ path: "app/swap/empty", content: null, directory: true },
-				],
-			}),
-		);
-		const retry = { family: "family", key: "one logical undo" };
-		const selection = { path: "app/swap", retry };
-		const plan = await env.call({ op: "plan", selection });
-		expect(plan).toMatchObject({
-			roots: ["app/swap"],
-			entries: [{ path: "app/swap", image: { content: "original", mode: 0o640 } }],
-		});
-		await env.call({ op: "tree_undo", selection });
-		await env.call({
-			op: "publish",
-			desired: [
-				{ path: "app", content: null, directory: true },
-				{ path: "app/swap", content: null, directory: true },
-				{ path: "app/swap/other", content: "new history" },
-			],
-		});
-		expect(await env.call({ op: "plan", selection })).toEqual(plan);
-		for (const conflicting of [
-			{ batch: first.batch, retry },
-			{ path: "app", retry },
-			{ generation: 1, retry },
-		])
-			expect(await env.call({ op: "plan", selection: conflicting })).toEqual({
-				error: "idempotency_conflict",
-				path: "revert",
-			});
-		expect(await env.sql("SELECT COUNT(*) AS n FROM settings WHERE key LIKE 'source-revert:%'")).toEqual([{ n: 1 }]);
-	});
 	it.for(["before", "after"] as const)(
 		"refuses omitted %s file bytes without altering source or history",
 		async (side, test) => {
@@ -196,8 +153,7 @@ describe("structural source history undo", () => {
 			const env = await fixture(test, before);
 			const published = publication(await env.call({ op: "publish", desired: after }));
 			const id = versionRows(await env.sql("SELECT id FROM versions WHERE path='app/swap'"))[0]?.id;
-			const retry = { family: "family", key: "missing bytes" };
-			const selection = side === "before" ? { batch: published.batch, retry } : { version: id, retry };
+			const selection = side === "before" ? { batch: published.batch } : { version: id };
 			const history = await env.sql("SELECT id, path, sha, previous_sha FROM versions ORDER BY id");
 			expect(await env.call({ op: "tree_undo", selection })).toEqual({
 				error: "version_unavailable",

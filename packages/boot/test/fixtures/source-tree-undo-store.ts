@@ -15,7 +15,6 @@ const Input = Schema.Struct({
 			batch: Schema.optionalKey(Schema.String),
 			version: Schema.optionalKey(Schema.Int),
 			generation: Schema.optionalKey(Schema.Int),
-			retry: Schema.optionalKey(Schema.Struct({ family: Schema.String, key: Schema.String })),
 		}),
 	),
 	desired: Schema.optionalKey(

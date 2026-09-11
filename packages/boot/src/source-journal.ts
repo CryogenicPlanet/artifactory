@@ -1,5 +1,5 @@
 import { decodeRows } from "./decode-rows.ts";
-import { Crypto, Effect, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Events } from "./events.ts";
 import { Batch, SourceRejected, Version, type Change } from "./source-schema.ts";
@@ -7,7 +7,6 @@ import { sameImage, type sourceIO } from "./source-io.ts";
 import type { TreeEntry } from "./source-tree-publication.ts";
 
 export interface UndoSelection {
-	readonly retry?: { readonly family: string; readonly key: string };
 	readonly path?: string;
 	readonly batch?: string;
 	readonly version?: number;
@@ -17,7 +16,6 @@ export interface UndoSelection {
 /** One durable publication, with transient recovery bytes separate from retained undo history. */
 export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Success<ReturnType<typeof sourceIO>>) {
 	const sql = yield* SqlClient.SqlClient;
-	const crypto = yield* Crypto.Crypto;
 	const events = yield* Events;
 	const pending = sql`SELECT * FROM source_batches WHERE state = 'publishing'`.pipe(
 		decodeRows(Batch),
@@ -159,9 +157,8 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 		previous: Schema.Boolean,
 		generation: Schema.optional(Schema.Int),
 	});
-	const Binding = Schema.fromJsonString(Schema.Struct({ request: Schema.String, selected: Selected }));
 	// Keep legacy watcher baseline rows out of implicit undo; their retained history stays readable.
-	const select = (selection: UndoSelection) =>
+	const selectUndo = (selection: UndoSelection) =>
 		Effect.gen(function* () {
 			if (selection.generation !== undefined)
 				return { batch: null, version: null, previous: false, generation: selection.generation };
@@ -200,50 +197,6 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 				return yield* new SourceRejected({ code: "version_unavailable", path: version.path });
 			return [{ path: version.path, content, ...(mode === null ? {} : { mode }) }];
 		});
-	const selectUndo = (selection: UndoSelection) =>
-		sql.withTransaction(
-			Effect.gen(function* () {
-				if (!selection.retry) return yield* select(selection);
-				const key =
-					"source-revert:" +
-					Buffer.from(
-						yield* crypto.digest(
-							"SHA-256",
-							new TextEncoder().encode(
-								yield* Schema.encodeEffect(
-									Schema.fromJsonString(Schema.Struct({ family: Schema.String, key: Schema.String })),
-								)(selection.retry),
-							),
-						),
-					).toString("hex");
-				const request = yield* Schema.encodeEffect(
-					Schema.fromJsonString(
-						Schema.Struct({
-							path: Schema.NullOr(Schema.String),
-							batch: Schema.NullOr(Schema.String),
-							version: Schema.NullOr(Schema.Int),
-							generation: Schema.optional(Schema.Int),
-						}),
-					),
-				)({
-					path: selection.path ?? null,
-					batch: selection.batch ?? null,
-					version: selection.version ?? null,
-					...(selection.generation === undefined ? {} : { generation: selection.generation }),
-				});
-				const rows = yield* sql`SELECT value FROM settings WHERE key = ${key}`.pipe(
-					decodeRows(Schema.Struct({ value: Schema.String })),
-				);
-				const saved = rows[0] ? yield* Schema.decodeEffect(Binding)(rows[0].value) : null;
-				if (saved && saved.request !== request)
-					return yield* new SourceRejected({ code: "idempotency_conflict", path: "revert" });
-				const selected = saved?.selected ?? (yield* select(selection));
-
-				if (!saved)
-					yield* sql`INSERT INTO settings (key,value) VALUES (${key},${yield* Schema.encodeEffect(Binding)({ request, selected })})`;
-				return selected;
-			}),
-		);
 	const undo = (selection: UndoSelection) => sql.withTransaction(Effect.flatMap(selectUndo(selection), selectedWrites));
 	/** Typed history restores only the selected subtree. The caller overlays it on the current full tree. */
 	const treeUndo = (selection: UndoSelection) =>
@@ -302,7 +255,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 			}),
 		);
 
-	// Only immutable history identity is inspected here; resolving/binding the undo happens under SourceFiles' gate.
+	// Only immutable history identity is inspected here; resolving the undo happens under SourceFiles' gate.
 	const targetsPages = (selection: UndoSelection) =>
 		Effect.gen(function* () {
 			if (selection.path !== undefined) return selection.path.startsWith("pages/");
