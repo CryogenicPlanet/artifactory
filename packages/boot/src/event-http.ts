@@ -164,7 +164,16 @@ const eventFailure = <A, E, R>(
 					Schema.is(EventStorageRejected)(error) ||
 					Schema.is(ArtifactRetentionRejected)(error)
 				)
-					return Effect.succeed(failure(error.code, error.code === "unsafe_artifact_path" ? 409 : 507));
+					return Effect.succeed(
+						failure(
+							error.code,
+							error.code === "unsafe_artifact_path"
+								? 409
+								: error.code === "storage_measurement_failed" || error.code === "event_storage_unavailable"
+									? 503
+									: 507,
+						),
+					);
 			}
 			return Effect.succeed(failure(unavailable, 503));
 		}),

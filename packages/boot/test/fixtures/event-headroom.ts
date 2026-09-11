@@ -164,7 +164,7 @@ Effect.gen(function* () {
 		for (const code of ["event_storage_unavailable", "event_storage_over_budget"] as const) {
 			yield* Ref.set(budgetError, new EventStorageRejected({ code }));
 			const denied = yield* send("/_boot/seq/reserve", '{"transaction":"budget-refusal","count":1}');
-			assert.equal(denied?.status, 507);
+			assert.equal(denied?.status, code === "event_storage_unavailable" ? 503 : 507);
 			assert.ok(denied?.body._tag === "Uint8Array");
 			assert.match(new TextDecoder().decode(denied.body.body), new RegExp(code));
 			yield* Ref.update(attempts, (current) => current.map((attempt) => ({ ...attempt, state: "starting" })));

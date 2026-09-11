@@ -4,15 +4,17 @@ import { expect, it } from "vitest";
 import { BootChannel, layer } from "../src/kernel/boot-channel.ts";
 import { failure } from "../src/conversation-request.ts";
 
-it("preserves boot storage refusals as actionable nonretryable responses", async () => {
+it("preserves boot storage refusals with distinct quota and measurement retry semantics", async () => {
 	for (const [status, body, expectedStatus, expectedCode] of [
 		[507, { error: { code: "storage_headroom" } }, 507, "storage_headroom"],
 		[507, { error: { code: "backup_budget" } }, 507, "backup_budget"],
 		[507, { error: { code: "invalid_storage_sample" } }, 507, "invalid_storage_sample"],
 		[507, { error: { code: "event_storage_over_budget" } }, 507, "event_storage_over_budget"],
-		[507, { error: { code: "event_storage_unavailable" } }, 507, "event_storage_unavailable"],
-		[507, { error: { code: "storage_measurement_failed" } }, 507, "storage_measurement_failed"],
+		[503, { error: { code: "event_storage_unavailable" } }, 503, "event_storage_unavailable"],
+		[503, { error: { code: "storage_measurement_failed" } }, 503, "storage_measurement_failed"],
 		[507, { error: { code: "unrecognized" } }, 503, "boot_unavailable"],
+		[503, { error: { code: "unrecognized" } }, 503, "boot_unavailable"],
+		[507, { error: { code: "event_storage_unavailable" } }, 503, "boot_unavailable"],
 		[503, { error: { code: "storage_headroom" } }, 503, "boot_unavailable"],
 		[409, { error: { code: "unsafe_artifact_path" } }, 409, "unsafe_artifact_path"],
 		[409, { error: { code: "unrecognized" } }, 503, "boot_unavailable"],

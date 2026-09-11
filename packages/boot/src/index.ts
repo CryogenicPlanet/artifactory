@@ -33,6 +33,7 @@ import { layer as topicPageMoveLayer } from "./topic-page-move.ts";
 import { layer as kernelBootLayer } from "./kernel-boot.ts";
 import { databaseBackup } from "./database-backup.ts";
 import { headroomPolicyLayer, storageHeadroom } from "./storage-headroom.ts";
+import { sampleStorageVolume } from "./storage-volume.ts";
 import { makeEventStorage } from "./event-storage.ts";
 import { databaseRestore } from "./database-restore.ts";
 import { supervise } from "./supervisor.ts";
@@ -78,10 +79,17 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const eventServices = Layer.unwrap(
 		Effect.gen(function* () {
 			const headroom = yield* storageHeadroom(options.dataDirectory);
-			const storage = yield* makeEventStorage(headroom.sample);
+			const volume = yield* sampleStorageVolume(headroom.sample);
+			yield* volume.run.pipe(Effect.forkScoped);
+			const storage = yield* makeEventStorage(volume.sample);
 			yield* storage.run.pipe(Effect.forkScoped);
 			yield* retainEvents.pipe(Effect.forkScoped);
-			return eventsLayer(headroom.check().pipe(Effect.andThen(storage.admit)));
+			return eventsLayer(
+				volume.sample.pipe(
+					Effect.flatMap((sample) => headroom.reserve(sample)),
+					Effect.andThen(storage.admit),
+				),
+			);
 		}),
 	).pipe(Layer.provideMerge(storageServices));
 	const sourceServices = sourceLayer(options.dataDirectory).pipe(

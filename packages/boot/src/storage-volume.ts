@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect";
+import { Clock, Effect, Ref, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 export type StorageVolume =
@@ -81,4 +81,20 @@ export const readStorageVolume = (
 				return code === 0 ? parseStorageVolume(platform, output) : unavailable();
 			}).pipe(Effect.timeout("2 seconds")),
 		).pipe(Effect.orElseSucceed(unavailable));
+	});
+
+/** Reservation admission reads a bounded-age sample; only this scoped loop runs the probe. */
+export const sampleStorageVolume = <R>(probe: Effect.Effect<StorageVolume, never, R>) =>
+	Effect.gen(function* () {
+		const state = yield* Ref.make<{ readonly volume: StorageVolume; readonly at: number } | null>(null);
+		const refresh = Effect.gen(function* () {
+			const volume = yield* probe;
+			yield* Ref.set(state, { volume, at: yield* Clock.currentTimeMillis });
+		});
+		const sample = Effect.gen(function* () {
+			const current = yield* Ref.get(state);
+			const now = yield* Clock.currentTimeMillis;
+			return current && now >= current.at && now - current.at <= 5000 ? current.volume : unavailable();
+		});
+		return { sample, refresh, run: refresh.pipe(Effect.andThen(Effect.sleep("1 second")), Effect.forever) };
 	});

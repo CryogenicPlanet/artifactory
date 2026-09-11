@@ -29,7 +29,7 @@ export const policy = {
 		hint: "Inspect boot event storage maintenance and resolve protected or unprunable data before retrying the original request with its original Idempotency-Key.",
 	},
 	event_storage_unavailable: {
-		status: 507,
+		status: 503,
 		message: "The event storage budget could not be measured.",
 		hint: "Restore event storage measurement before retrying the original request with its original Idempotency-Key.",
 	},
@@ -39,7 +39,7 @@ export const policy = {
 		hint: "Free space on the data volume, then retry the original request with its original Idempotency-Key.",
 	},
 	storage_measurement_failed: {
-		status: 507,
+		status: 503,
 		message: "The data volume's available capacity could not be measured.",
 		hint: "Restore the volume capacity probe before retrying the original request with its original Idempotency-Key.",
 	},

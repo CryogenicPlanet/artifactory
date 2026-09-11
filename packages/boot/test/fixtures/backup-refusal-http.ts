@@ -71,7 +71,16 @@ const program = Effect.gen(function* () {
 								: backupRoute(auth, inventory, capture, { rpId: "comms.test", expectedOrigin: "https://comms.test" })
 						).pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
 						assert.ok(response);
-						assert.equal(response.status, mixed ? 500 : error.code === "unsafe_artifact_path" ? 409 : 507);
+						assert.equal(
+							response.status,
+							mixed
+								? 500
+								: error.code === "unsafe_artifact_path"
+									? 409
+									: error.code === "storage_measurement_failed"
+										? 503
+										: 507,
+						);
 						const body = yield* HttpServerResponse.toClientResponse(response).json.pipe(
 							Effect.flatMap(
 								Schema.decodeUnknownEffect(
@@ -80,7 +89,7 @@ const program = Effect.gen(function* () {
 							),
 						);
 						assert.equal(body.error.code, mixed ? "handler_failed" : error.code);
-						assert.equal(body.error.retriable, false);
+						assert.equal(body.error.retriable, !mixed && error.code === "storage_measurement_failed");
 					}
 				}
 			}

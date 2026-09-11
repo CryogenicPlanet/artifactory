@@ -89,6 +89,20 @@ const make = Effect.gen(function* () {
 				);
 				return yield* new KernelError({ code: body.error.code });
 			}
+			if (response.status === 503) {
+				const body = yield* response.json.pipe(
+					Effect.flatMap(
+						Schema.decodeUnknownEffect(
+							Schema.Struct({
+								error: Schema.Struct({
+									code: Schema.Literals(["storage_measurement_failed", "event_storage_unavailable"]),
+								}),
+							}),
+						),
+					),
+				);
+				return yield* new KernelError({ code: body.error.code });
+			}
 			if (response.status === 507) {
 				const body = yield* response.json.pipe(
 					Effect.flatMap(
@@ -99,9 +113,7 @@ const make = Effect.gen(function* () {
 										"backup_budget",
 										"invalid_storage_sample",
 										"storage_headroom",
-										"storage_measurement_failed",
 										"event_storage_over_budget",
-										"event_storage_unavailable",
 									]),
 								}),
 							}),

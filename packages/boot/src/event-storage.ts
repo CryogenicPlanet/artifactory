@@ -156,17 +156,37 @@ export const makeEventStorage = <R>(volume: Effect.Effect<StorageVolume, never, 
 						),
 			),
 		);
-		const status: Effect.Effect<EventStorageStatus> = Effect.gen(function* () {
+		const status: Effect.Effect<EventStorageStatus, never, R> = Effect.gen(function* () {
 			const measured = yield* Ref.get(state);
-			if (measured.status === "unavailable") return measured;
 			const policy = yield* readStoragePolicy.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-			if (policy.event_percent === measured.event_percent) return measured;
-			const unavailable = { status: "unavailable", reason: "policy_changed" } satisfies EventStorageStatus;
-			yield* Ref.set(state, unavailable);
-			return unavailable;
+			if (measured.status !== "unavailable" && policy.event_percent === measured.event_percent) return measured;
+			// Refresh only accounting here: admission already owns a SQL transaction, so
+			// checkpointing/reclamation stays in maintenance and never borrows a second connection.
+			const sample = yield* volume;
+			if (sample.status === "unavailable") {
+				const unavailable = { status: "unavailable", reason: sample.reason } satisfies EventStorageStatus;
+				yield* Ref.set(state, unavailable);
+				return unavailable;
+			}
+			const usage = {
+				...(yield* measure),
+				limit_bytes: Math.floor((sample.capacity_bytes * policy.event_percent) / 100),
+				event_percent: policy.event_percent,
+				deleted: 0,
+			};
+			const current: EventStorageStatus =
+				usage.allocated_bytes <= usage.limit_bytes
+					? { status: "within_budget", ...usage }
+					: { status: "over_budget", reason: "pruning_in_progress", ...usage };
+			yield* Ref.set(state, current);
+			return current;
 		}).pipe(
-			Effect.catch(() => {
-				const unavailable = { status: "unavailable", reason: "policy_unavailable" } satisfies EventStorageStatus;
+			Effect.catchCause((cause) => {
+				if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
+				const unavailable = {
+					status: "unavailable",
+					reason: "policy_or_measurement_unavailable",
+				} satisfies EventStorageStatus;
 				return Ref.set(state, unavailable).pipe(Effect.as(unavailable));
 			}),
 		);

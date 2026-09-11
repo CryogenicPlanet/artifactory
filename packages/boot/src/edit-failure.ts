@@ -71,8 +71,8 @@ const policy = {
 	publication_pending: unavailable,
 	storage_headroom: storage,
 	storage_measurement_failed: {
-		status: 507,
-		retriable: false,
+		status: 503,
+		retriable: true,
 		hint: "Inspect the DATA_DIR volume and boot storage-probe failure before retrying.",
 	},
 	backup_budget: storage,

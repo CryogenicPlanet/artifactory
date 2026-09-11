@@ -42,6 +42,8 @@ async function store(test: TestContext) {
 		sql,
 		seed,
 		policyAfterPrune: (policy: string) => invoke("event-storage", { capacity: 1_000_000, policyAfterPrune: policy }),
+		// Fresh schema WAL remains physical usage: this case isolates probe recovery, not reclamation.
+		recoverAfterFailure: () => invoke("event-storage", { capacity: 100_000_000, recoverAfterFailure: true }),
 		legacy: () => invoke("event-storage", { capacity: 1_000_000, legacy: true }),
 	};
 }
@@ -111,7 +113,7 @@ it("limits each pass, rolls back a failed chunk, and recovers on another process
 	await app.sql(
 		"CREATE TRIGGER fail_prune BEFORE DELETE ON events WHEN old.seq=300 BEGIN SELECT RAISE(ABORT,'injected'); END",
 	);
-	expect(await app.prune()).toMatchObject({ status: { status: "unavailable" }, admission: { _tag: "Failure" } });
+	expect(await app.prune()).toMatchObject({ status: { status: "over_budget" }, admission: { _tag: "Failure" } });
 	expect(await app.sql("SELECT min(seq) AS first,count(*) AS count FROM events")).toEqual([
 		{ first: 257, count: 2048 },
 	]);
@@ -231,15 +233,28 @@ it("charges the old main-file tail while a reader prevents checkpointing a logic
 	expect(usage.allocated_bytes + usage.other_database_bytes).toBeGreaterThanOrEqual(before);
 });
 
-it("refuses admission immediately after a lower or malformed policy replaces a successful measurement", async (test) => {
+it("remeasures immediately after policy changes and refuses malformed settings", async (test) => {
 	const app = await store(test);
 	expect(await app.policyAfterPrune('{"backup_percent":20,"event_percent":1,"headroom_percent":5}')).toMatchObject({
-		status: { status: "unavailable", reason: "policy_changed" },
-		admission: { _tag: "Failure", failure: { code: "event_storage_unavailable" } },
+		status: { status: "over_budget", limit_bytes: 10_000 },
+		admission: { _tag: "Failure", failure: { code: "event_storage_over_budget" } },
+	});
+	expect(await app.policyAfterPrune('{"backup_percent":20,"event_percent":20,"headroom_percent":5}')).toMatchObject({
+		status: { status: "within_budget", limit_bytes: 200_000 },
+		admission: { _tag: "Success" },
 	});
 	await app.sql("DELETE FROM settings WHERE key='storage_policy'");
 	expect(await app.policyAfterPrune("invalid")).toMatchObject({
-		status: { status: "unavailable", reason: "policy_unavailable" },
+		status: { status: "unavailable", reason: "policy_or_measurement_unavailable" },
 		admission: { _tag: "Failure", failure: { code: "event_storage_unavailable" } },
+	});
+});
+
+it("recovers a failed initial volume measurement on admission without waiting for minute maintenance", async (test) => {
+	const app = await store(test);
+	expect(await app.recoverAfterFailure()).toMatchObject({
+		initial: { _tag: "Failure", failure: { code: "event_storage_unavailable" } },
+		status: { status: "within_budget" },
+		admission: { _tag: "Success" },
 	});
 });

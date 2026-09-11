@@ -82,6 +82,7 @@ export const backupRoute = (
 								(Schema.is(StorageRejected)(error.success) || Schema.is(ArtifactRetentionRejected)(error.success))
 							) {
 								const unsafe = error.success.code === "unsafe_artifact_path";
+								const unavailable = error.success.code === "storage_measurement_failed";
 								return Effect.succeed(
 									HttpServerResponse.jsonUnsafe(
 										{
@@ -90,11 +91,13 @@ export const backupRoute = (
 												message: "Backup capture was refused.",
 												hint: unsafe
 													? "Inspect and repair boot-owned artifact paths before another request."
-													: "Free space on the data volume, then retry.",
-												retriable: false,
+													: unavailable
+														? "Inspect the storage probe and retry after measurements recover."
+														: "Free space on the data volume, then retry.",
+												retriable: unavailable,
 											},
 										},
-										{ status: unsafe ? 409 : 507, headers: { "cache-control": "no-store" } },
+										{ status: unsafe ? 409 : unavailable ? 503 : 507, headers: { "cache-control": "no-store" } },
 									),
 								);
 							}

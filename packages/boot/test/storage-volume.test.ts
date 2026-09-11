@@ -4,7 +4,12 @@ import { Cause, Effect, Exit, Fiber, Ref } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { describe, expect, it } from "vitest";
-import { parseStorageVolume, readStorageVolume } from "../src/storage-volume.ts";
+import {
+	parseStorageVolume,
+	readStorageVolume,
+	sampleStorageVolume,
+	type StorageVolume,
+} from "../src/storage-volume.ts";
 
 describe("storage volume", () => {
 	it("converts Linux allocation units and preserves zero available space", () => {
@@ -69,6 +74,35 @@ describe("storage volume", () => {
 			yield* Fiber.interrupt(interrupted);
 			const exit = yield* Fiber.await(interrupted);
 			expect(Exit.isFailure(exit) && exit.cause.reasons.some(Cause.isInterruptReason)).toBe(true);
+		}),
+	);
+
+	effectIt.effect("uses scoped samples without probing on admission and refuses failed or stale samples", () =>
+		Effect.gen(function* () {
+			const healthy: StorageVolume = { status: "available", capacity_bytes: 1000, available_bytes: 500 };
+			const result = yield* Ref.make<StorageVolume>(healthy);
+			const calls = yield* Ref.make(0);
+			const volume = yield* sampleStorageVolume(Ref.update(calls, (n) => n + 1).pipe(Effect.andThen(Ref.get(result))));
+			expect((yield* volume.sample).status).toBe("unavailable");
+			yield* volume.refresh;
+			for (let n = 0; n < 100; n++) expect(yield* volume.sample).toEqual(healthy);
+			expect(yield* Ref.get(calls)).toBe(1);
+			yield* TestClock.adjust("5001 millis");
+			expect((yield* volume.sample).status).toBe("unavailable");
+			yield* volume.refresh;
+			expect(yield* volume.sample).toEqual(healthy);
+			yield* Ref.set(result, { status: "unavailable", reason: "measurement_failed" });
+			yield* volume.refresh;
+			expect((yield* volume.sample).status).toBe("unavailable");
+			yield* Ref.set(result, healthy);
+			const loop = yield* volume.run.pipe(Effect.forkChild);
+			yield* TestClock.adjust("1 second");
+			expect(yield* volume.sample).toEqual(healthy);
+			yield* Fiber.interrupt(loop);
+			const stopped = yield* Ref.get(calls);
+			yield* TestClock.adjust("6 seconds");
+			expect(yield* Ref.get(calls)).toBe(stopped);
+			expect((yield* volume.sample).status).toBe("unavailable");
 		}),
 	);
 
