@@ -9,7 +9,7 @@ import { document } from "../extension-http.ts";
 import type { OpenApi } from "effect/unstable/httpapi";
 import { mountApi } from "./extension-mount.ts";
 import { makeExtensionMigrate } from "./extension-migrations.ts";
-import type { extensionCapabilities } from "../ext/core/capabilities.ts";
+import type { CapabilityFactory } from "./extension-capabilities.ts";
 import { ExtensionError, work, type Work } from "./extension-work.ts";
 import { parseCron, runCron } from "./extension-cron.ts";
 import { identity } from "../conversation-request.ts";
@@ -69,7 +69,7 @@ const factory = Schema.Struct({
 export class Extensions extends Context.Service<Extensions, Effect.Success<ReturnType<typeof make>>>()(
 	"comms/server/Extensions",
 ) {}
-const make = (directory: string, capabilities: Effect.Success<typeof extensionCapabilities>) =>
+const make = (directory: string, capabilities: CapabilityFactory) =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path;
 		const sql = yield* SqlClient.SqlClient;
@@ -561,5 +561,5 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 				}),
 		};
 	});
-export const layer = (directory: string, capabilities: Effect.Success<typeof extensionCapabilities>) =>
+export const layer = (directory: string, capabilities: CapabilityFactory) =>
 	Layer.effect(Extensions, make(directory, capabilities)).pipe(Layer.provide(FetchHttpClient.layer));

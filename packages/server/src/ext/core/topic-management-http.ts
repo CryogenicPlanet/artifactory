@@ -16,33 +16,36 @@ import { moveTopic } from "./topic-move.ts";
 import { mutateTopic } from "./topic-operations.ts";
 
 export const topicManagementHandlers = (api: typeof Api, extension: ExtensionApi) => {
-	const move = ({
-		payload,
-		request,
-	}: {
-		readonly payload: { readonly to: string };
-		readonly request: HttpServerRequest.HttpServerRequest;
-	}) =>
-		refusal(
-			Effect.gen(function* () {
-				const ctx = yield* extension.context("write");
-				const path = yield* Effect.try({
-					try: () => decodeURIComponent(new URL(request.url, "http://localhost").pathname.slice("/api/topics/".length)),
-					catch: () => new KernelError({ code: "input_invalid" }),
-				});
-				if (!path.endsWith("/move")) return yield* new KernelError({ code: "input_invalid" });
-				return yield* moveTopic(
-					ctx.db,
-					ctx.mutate,
-					ctx,
-					ctx,
-					path.slice(0, -5),
-					payload.to,
-					(yield* Pages).move,
-					request.headers["idempotency-key"],
-				);
-			}),
-		);
+	const move =
+		(pages: Pages["Service"]) =>
+		({
+			payload,
+			request,
+		}: {
+			readonly payload: { readonly to: string };
+			readonly request: HttpServerRequest.HttpServerRequest;
+		}) =>
+			refusal(
+				Effect.gen(function* () {
+					const ctx = yield* extension.context("write");
+					const path = yield* Effect.try({
+						try: () =>
+							decodeURIComponent(new URL(request.url, "http://localhost").pathname.slice("/api/topics/".length)),
+						catch: () => new KernelError({ code: "input_invalid" }),
+					});
+					if (!path.endsWith("/move")) return yield* new KernelError({ code: "input_invalid" });
+					return yield* moveTopic(
+						ctx.db,
+						ctx.mutate,
+						ctx,
+						ctx,
+						path.slice(0, -5),
+						payload.to,
+						pages.move,
+						request.headers["idempotency-key"],
+					);
+				}),
+			);
 	const meta = ({
 		payload,
 		request,
@@ -63,6 +66,13 @@ export const topicManagementHandlers = (api: typeof Api, extension: ExtensionApi
 			}),
 		);
 	return HttpApiBuilder.group(api, "topicManagement", (handlers) =>
-		handlers.handle("move", move).handle("legacyMove", move).handle("meta", meta).handle("legacyMeta", meta),
+		Effect.gen(function* () {
+			const moveHandler = move(yield* Pages);
+			return handlers
+				.handle("move", moveHandler)
+				.handle("legacyMove", moveHandler)
+				.handle("meta", meta)
+				.handle("legacyMeta", meta);
+		}),
 	).pipe(Layer.provide(bodyLayer(131072)));
 };

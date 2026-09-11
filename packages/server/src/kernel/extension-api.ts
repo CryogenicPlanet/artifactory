@@ -2,17 +2,14 @@ import type { Crypto, FileSystem, Layer, Path, Schema } from "effect";
 import type { HttpApi, HttpApiGroup } from "effect/unstable/httpapi";
 import type { Etag } from "effect/unstable/http";
 import type { HttpPlatform } from "effect/unstable/http/HttpPlatform";
-import type { Topics } from "../ext/core/topics.ts";
-import type { Pages } from "../ext/core/pages.ts";
 import type { Lifecycle } from "./lifecycle.ts";
 import type { BootChannel, KernelError } from "./boot-channel.ts";
-import type { ExtensionCapabilities } from "../ext/core/capabilities.ts";
+import type { ExtensionCapabilities } from "./extension-capabilities.ts";
 import type { makeExtensionMigrate } from "./extension-migrations.ts";
 import type { Effect } from "effect";
 import type { HttpRouter, HttpServerRequest } from "effect/unstable/http";
 import type { HttpMethod } from "effect/unstable/http/HttpMethod";
 import type { SqlClient } from "effect/unstable/sql";
-import type { Messages } from "../ext/core/messages.ts";
 import type { Publication } from "./publication.ts";
 import type { Identity } from "./identity.ts";
 import type { EventRecord } from "@comms/protocol/events";
@@ -68,9 +65,6 @@ type OnArguments =
 	| [event: `${string}.${string}` | "*", handler: EventHandler];
 export type ExtensionServices =
 	| Publication
-	| Messages
-	| Topics
-	| Pages
 	| Lifecycle
 	| BootChannel
 	| SqlClient.SqlClient

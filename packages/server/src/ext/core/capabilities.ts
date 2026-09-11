@@ -1,3 +1,4 @@
+import type { ExtensionCapabilities } from "../../kernel/extension-capabilities.ts";
 import { markRead } from "./read-marks.ts";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { Pages } from "./pages.ts";
@@ -21,7 +22,7 @@ export const extensionCapabilities = Effect.gen(function* () {
 	const pages = yield* Pages;
 	const crypto = yield* Crypto.Crypto;
 	const lifecycle = yield* Lifecycle;
-	return (extension: string, who?: Identity, writable = true) => {
+	return (extension: string, who?: Identity, writable = true): ExtensionCapabilities => {
 		const caller = who ?? { agent: "system", instance: `extension:${extension}`, request: "", kind: "agent" };
 		const write = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 			Effect.gen(function* () {
@@ -138,4 +139,3 @@ export const extensionCapabilities = Effect.gen(function* () {
 		};
 	};
 });
-export type ExtensionCapabilities = ReturnType<Effect.Success<typeof extensionCapabilities>>;
