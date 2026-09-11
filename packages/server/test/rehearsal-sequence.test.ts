@@ -24,8 +24,12 @@ it("rehearses above pruned app events and boot allocation gaps without changing 
 		await fixture.sql("SELECT next FROM seq", "boot.db"),
 	)[0]?.next;
 	if (sequence === undefined) throw new Error("Missing sequence");
-	const rows = await fixture.sql("SELECT * FROM messages");
-	const topics = await fixture.sql("SELECT * FROM topics");
+	// The live system view may mirror lock/rehearsal diagnostics while the clone is checked.
+	const originalSystem = Schema.decodeUnknownSync(Schema.Array(Schema.Unknown))(
+		await fixture.sql("SELECT * FROM messages WHERE topic='system'"),
+	);
+	const rows = await fixture.sql("SELECT * FROM messages WHERE topic!='system'");
+	const topics = await fixture.sql("SELECT * FROM topics WHERE path!='system'");
 	const source = await readFile(join(import.meta.dirname, "../src/server.ts"), "utf8");
 	const guarded = `${source}\nif (process.env.STATE === "rehearsal" && Number(process.env.REHEARSAL_SEQUENCE) < ${sequence}) throw new Error("rehearsal sequence reused retained history");\n`;
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
@@ -36,7 +40,10 @@ it("rehearses above pruned app events and boot allocation gaps without changing 
 	});
 	expect(staged.status).toBe(200);
 	expect(await (await app.post("/api/reload?check=1", {}, cookie)).json()).toMatchObject({ status: "checked" });
-	expect(await fixture.sql("SELECT * FROM messages")).toEqual(rows);
-	expect(await fixture.sql("SELECT * FROM topics")).toEqual(topics);
+	expect(await fixture.sql("SELECT * FROM messages WHERE topic!='system'")).toEqual(rows);
+	expect(await fixture.sql("SELECT * FROM topics WHERE path!='system'")).toEqual(topics);
+	expect(await fixture.sql("SELECT * FROM messages WHERE topic='system'")).toEqual(
+		expect.arrayContaining([...originalSystem]),
+	);
 	expect(await fixture.sql("SELECT pending_id FROM seq", "boot.db")).toEqual([{ pending_id: null }]);
 }, 20000);

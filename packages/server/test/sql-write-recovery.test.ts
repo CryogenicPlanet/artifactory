@@ -52,8 +52,11 @@ for (const mode of ["constraint", "trigger"] as const)
 		const seeded = await app.post("/api/sql", sqlInput, cookie, "seed");
 		expect(seeded.status).toBe(200);
 		const seedOutcome = await seeded.json();
+		const originalSystemReceipts = Schema.decodeUnknownSync(Schema.Array(Schema.Unknown))(
+			await fixture.sql("SELECT * FROM idempotency WHERE instance='extension:system.ts'"),
+		);
 		const originalReceipts = await fixture.sql(
-			"SELECT * FROM idempotency WHERE json_extract(key,'$[0]')='key' ORDER BY key",
+			"SELECT * FROM idempotency WHERE json_extract(key,'$[0]')='key' AND instance!='extension:system.ts' ORDER BY key",
 		);
 		const beforeBatches = Schema.decodeUnknownSync(Schema.Array(Batch))(
 			await fixture.sql(`SELECT id,state,from_seq,to_seq FROM event_batches WHERE attempt='${epoch}'`, "boot.db"),
@@ -90,8 +93,14 @@ for (const mode of ["constraint", "trigger"] as const)
 		expect(await fixture.sql("SELECT body FROM messages WHERE topic='sql-recovery'")).toEqual([
 			{ body: "acknowledged" },
 		]);
-		expect(await fixture.sql("SELECT * FROM idempotency WHERE json_extract(key,'$[0]')='key' ORDER BY key")).toEqual(
-			originalReceipts,
+		expect(
+			await fixture.sql(
+				"SELECT * FROM idempotency WHERE json_extract(key,'$[0]')='key' AND instance!='extension:system.ts' ORDER BY key",
+			),
+		).toEqual(originalReceipts);
+		// Recovery diagnostics append system receipts; every previous receipt must survive unchanged.
+		expect(await fixture.sql("SELECT * FROM idempotency WHERE instance='extension:system.ts'")).toEqual(
+			expect.arrayContaining([...originalSystemReceipts]),
 		);
 		const afterBatches = Schema.decodeUnknownSync(Schema.Array(Batch))(
 			await fixture.sql(`SELECT id,state,from_seq,to_seq FROM event_batches WHERE attempt='${epoch}'`, "boot.db"),

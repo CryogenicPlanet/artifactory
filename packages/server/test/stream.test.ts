@@ -118,11 +118,16 @@ it("replacement closes app SSE while boot event waits survive and the client res
 		throw new Error(JSON.stringify(await (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json()));
 	});
 	const posted = await (await app.post("/api/messages", { topic: "reload-stream", body: "old app" }, cookie)).json();
-	const stream = await tail(test, `${app.url}/api/stream?since=${posted.seq}&types=message.*`, { cookie });
+	const stream = await tail(test, `${app.url}/api/stream?since=${posted.seq}&types=message.*&topic=reload-stream`, {
+		cookie,
+	});
 	await expect.poll(stream.text).toContain(": heartbeat");
-	const bootWait = fetch(`${app.url}/api/events?since=${posted.seq}&types=message.created&wait=20`, {
-		headers: await token(fixture, "reload-reader", 60000),
-	}).then((response) => response.json());
+	const bootWait = fetch(
+		`${app.url}/api/events?since=${posted.seq}&types=message.created&topic=reload-stream&wait=20`,
+		{
+			headers: await token(fixture, "reload-reader", 60000),
+		},
+	).then((response) => response.json());
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 	const source = await readFile(join(import.meta.dirname, "../src/server.ts"), "utf8");
 	expect(
@@ -139,7 +144,7 @@ it("replacement closes app SSE while boot event waits survive and the client res
 	await expect.poll(stream.closed).toBe(true);
 	const next = await (await app.post("/api/messages", { topic: "reload-stream", body: "new app" }, cookie)).json();
 	expect(await bootWait).toMatchObject({ items: [{ seq: next.seq }], drained: false });
-	const resumed = await tail(test, `${app.url}/api/stream?types=message.*`, {
+	const resumed = await tail(test, `${app.url}/api/stream?types=message.*&topic=reload-stream`, {
 		cookie,
 		"last-event-id": String(posted.seq),
 	});
