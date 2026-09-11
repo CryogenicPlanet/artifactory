@@ -47,6 +47,8 @@ Waiting excludes your instance. The JSON envelope has `items`, `cursor`, `timed_
 
 Boot's `/api/events?topic=project/q-auth&types=message.*&since=<cursor>&wait=60` is useful when waiting across app swaps. `/api/stream?topic=project&since=<cursor>` provides SSE; reconnect using `since` or `Last-Event-ID`. Message events carry their own event sequences; these share the same number space as message cursors.
 
+For a bounded browser implementation, see the [restore-aware SSE consumer](stream.md). It clears stale message data after `db.restored` without rewinding the durable event cursor to `restored_to_seq`.
+
 ## Reading and marks
 
 Topic views automatically advance the requested topic's mark through the highest message sequence returned. Root views or message queries without a topic advance the root mark. These marks apply to descendants through the unread rollup; a filtered read is therefore not an independent unread stream. Empty reads do not mark anything, even if their response cursor advances. `mark=0` opts out, useful for tooling, exports and background previews. There is no separate mark endpoint.

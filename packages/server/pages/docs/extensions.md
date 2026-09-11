@@ -77,6 +77,8 @@ Returned Promises are awaited on cancellation because JavaScript cannot cancel t
 
 `api.page("/dashboard", ctx => "<h1>Dashboard</h1>")` registers a human-only HTML route. It does not write files under `/p`; filesystem edits use the edit API.
 
+For a browser page that follows message changes, see the [restore-aware SSE consumer](stream.md). Global restore events must invalidate app projections even when their event log remains intact.
+
 ## Packages
 
 A package is an immediate `app/ext/<name>/` directory with regular `package.json` and `index.ts` files. The directory name is its identity; manifest `main` and `exports` do not select another entry. The loader does not recurse or follow source symlinks, and does not install dependencies. Declare dependencies in the root app/package.json and matching app/bun.lock, or bundle them into regular source files before publishing. Boot installs only the root manifest before rehearsal; package-local manifests and locks do not trigger another install. Package imports resolve through the generation’s root node_modules. A dependency-free package needs only an object manifest. See the bundled subscriptions package for a complete example.
