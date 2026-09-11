@@ -157,10 +157,10 @@ No Elysia, no Hono. The Effect HTTP stack covers every surface the spec has.
 
 Every request is one wide event. The source of truth is the spec's event log; nothing leaves the box unless an extension sends it.
 
-- The bootloader's proxy opens a root span per request. The app continues it (trace headers forwarded with the identity headers). Handlers annotate the span: agent, topic, message id, extension, lock state, generation. A custom `Tracer` exporter in both processes turns each finished root span into one `http.request` event with the accumulated annotations. That is the wide event.
+- The bootloader records one bounded `http.request` per request it answers or forwards: verified identity, request id, method, path, status, duration, redacted. The app continues the request id (forwarded with the identity headers), annotates its own span (agent, topic, message id, extension, lock state, generation) and exports it through its own `Tracer` exporter as its own `http.request` event. Two records sharing a request id; boot never parses the child's annotations (decided 2026-09-11, SPEC §12).
 - `Logger` output goes to the same exporter as `log` events at their level, and to stderr as NDJSON, which the bootloader captures per generation.
 - **evlog**: its concepts (wide events, `log.set()` accumulation, structured errors with `why` and `fix`) are exactly what the above implements, and its `createError` shape maps onto the spec's `{code, message, hint}`. Adopting the library itself would add a second logging API next to Effect's `Logger` and `Tracer`. Recommendation: borrow the shape, not the package. Ship a `pages/tooling/evlog-sink.ts` extension that drains the event log to evlog's NDJSON file format so anyone who wants evlog's ecosystem of sinks can plug it in. Open question for Rahul below.
-- Metrics: `effect/Metric` counters and histograms (requests, swap time, queue depth, lock waits) exposed at `/_boot/metrics` in Prometheus text format via `effect/unstable/observability` `PrometheusMetrics`, which is a formatter, not an external dependency.
+- Metrics: none in boot. `/_boot/status` reports the operational numbers (generation, candidate, lock, queue depth, in-flight mutations, disk budget). Counters and Prometheus text, if anyone wants them, are an extension over `effect/Metric` (decided 2026-09-11).
 
 ## 9. Auth
 

@@ -282,6 +282,34 @@ Full detail in `second-pass-5d96c1d.md`. Checks and 712 tests pass in a clean wo
 
 **Comment.** `pages-http.ts` gets the item 6 treatment (nested ternaries and a bodiless 503 remain). Enrollment enforces the lowercase host it documents (`enrollment.ts:78`, and the same class in `token-mint-schema.ts`). The README still documents six deleted routes. Drop the `reactions` and `agents` creates from the fresh-store rungs. `webhook_subscriptions` is created twice, by the app migration ladder and by `api.migrate`, with divergent DDL; delete the ladder file. The subscriptions error union declares two codes at two statuses, and `SubscriptionError` carries a `status` field nothing reads. `topics-http.ts` re-parses the raw URL instead of using its declared `:path` param and classifies a bad path as `query_invalid` on read and `input_invalid` on write. `sql-write.ts` should take its protected-table set from a registry extensions fill (`api.migrate(..., {protect:true})`) rather than hard-coding a core table. `extension-api.ts` should not type the kernel contract in terms of `ext/core`'s services. Event reads should not take the child channel gate. Every proxied request publishes an `http.request` event that wakes every idle long-poll; keep diagnostics off the publication sequence or let `changed` ignore diagnostic-only moves. `ctx.read` needs a bound. Board HTML needs the CSP `/p/**` has. Anonymous public-page reads answer a non-retriable 401 during recovery; answer a retriable 503. `extensions.md`'s worked example queries a table that does not exist and `standup.ts` imports a core internal. The subscriptions example bypasses `api.effects` for its deliveries and runs an empty durable transaction per delivery as a liveness check.
 
+## Decisions after the ownership audit (a834e3f, 2026-09-11)
+
+Codex's `docs/boot-ownership-audit.md` narrowed four things the review had recorded the other way, and the owner gave Codex direction directly on the first. Recorded here so the ledger, the spec and the code agree. Check: `docs/pr-1/ownership-check-a834e3f.md`.
+
+### 32. Events split: boot serves its own lifecycle events, the app serves application events
+
+**Decided by the owner, 2026-09-11.** The log and `seq` stay in boot: one seq space, the fence, `POST /_boot/events/append`, `/_boot/seq/*`. What changes is the read surface. `GET /_boot/events` answers with boot's own events only (`generation.*`, `lock.*`, `fs.*`, `backup.*`, `db.restored`; `generation.failed` carries the redacted stderr tail). It needs no app and is the dead-app diagnostic surface. `GET /api/events` and `GET /api/stream` are app routes: the kernel reads the whole log over the localhost channel, and the app applies the type, topic, agent and instance filters and the `wait=`. Consequence, accepted: an application event wait runs in the child, so a swap ends it with `drained:true` exactly like `/api/messages`, and the client re-issues from the cursor. The "wait on `/api/events` instead, it hits the bootloader" advice leaves `/init` and §6.2. Spec: §5 examples, the §6 rows for `/_boot/events` and `/_boot/stream`, the §6.1 paragraph on how the app reads the log, §6.2, §7.1 invariant 2, the §7.7 flip bullet, §12 item 21. Codex implemented this in `2ee17ac`; the third pass checks it.
+
+### 33. Anchored edits out; conditional raw writes in
+
+**Decided 2026-09-11 on Codex's audit; owner not objecting.** `POST /_boot/fs/edit` (old_string/new_string anchors) is removed. `PUT /_boot/fs/<path>` takes the content token `GET` returned (`baseVersion`, `null` for a new file) and refuses `409 stale_base` when the bytes moved; the agent's own edit tool does the string replacement locally over the bytes it read. Boot keeps compare-and-set, locks, path checks, modes and atomic publication and stops being a text editor. Spec: the §6 row for `/_boot/fs/edit`, the §7.6 anchored-edit bullet. Codex implemented this in `ba5866b`.
+
+### 34. No `GET /_boot/metrics`, no child trace aggregation in boot
+
+**Decided 2026-09-11 on Codex's audit; owner not objecting.** Item 21 asked for the metrics route to be implemented; that is withdrawn. `/_boot/status` is boot's operational surface. Counters and Prometheus text are an extension if anyone wants them. Boot's `http.request` record is its own bounded view of each request it answered or forwarded (verified identity, request id, method, path, status, duration, redacted); it no longer parses the child's span annotations, and the app exports its own spans. `docs/tech.md` §8's one aggregated wide event becomes two records sharing a request id. Codex implemented this in `dd3c6e7`.
+
+### 35. Retention: boot keeps the byte cap, the calendar leaves (proposed, awaiting the owner)
+
+Item 21 says event retention is one of two policies boot enforces when the app is dead; SPEC §12 says retention rules belong to the app. The audit's split resolves it: boot keeps the physical protection (the 5% headroom refusal and the 10% event byte cap with protected-artifact reclamation) because a full store must not block auth or recovery, and the 7-day/30-day calendar pruning in `event-retention.ts` and its settings keys go. Nothing replaces them: agents carry `since=` cursors, and a log that only shrinks under byte pressure is simpler than a schedule in boot. If confirmed: §6.1's "pruned hourly by the bootloader" changes, §7.5 keeps the cap sentence, and item 21 loses "retention" from the enforce-when-dead pair.
+
+### 36. Delete `legacy-topic-moves.ts` (proposed, awaiting the third pass)
+
+Item 27 asked for the 228 lines of topic-move machinery to go. They went, and 282 new lines arrived in `legacy-topic-moves.ts`: startup-only recovery of old boot-owned topic-move tables, with a whole-tree hash walk and a page-subtree `fs.rename`, both of which item 21 removed from boot. There are no deployed stores, so there is no legacy data to recover. Recommendation: delete the file, and refuse to start on an old store version with a clear message. The ownership audit does not mention the file in either list.
+
+### Status at a834e3f, from the ownership check
+
+25, 26 and 29 fixed. 31 is seventeen of eighteen. 27: all four sub-items fixed, size unmet (12,265 lines in 93 files; the scratchpad's 9,361 in 78 matches no counting rule). 28 still open: `supervisor.ts:269` releases the mutation gate only when the failure is a `ChildError`, so a health-probe `TimeoutError` leaves the gate frozen for the process lifetime; the queue-versus-freeze numbers are fixed. 30 partly: lock and revert reopen only if a re-run of recovery succeeds. The scratchpad now says the owner made ownership scope, not line count, the criterion; the ledger's rule is the six jobs, and the line count stays the way we measure it.
+
 ## Moot after the deletions
 
 Findings that no longer need a comment because items 3 and 4 remove what they were about.
