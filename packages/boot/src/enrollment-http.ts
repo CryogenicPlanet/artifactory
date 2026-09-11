@@ -1,3 +1,4 @@
+import { SettingsChange } from "./settings-schema.ts";
 import { SourceResetParams } from "./source-reset-schema.ts";
 import type { Editing } from "./edit-http.ts";
 import { Clock, Effect, Schema } from "effect";
@@ -13,6 +14,7 @@ import { EnrollmentDecision } from "./enrollment-schema.ts";
 import { approvalClient, approvalPage } from "./enrollment-page.ts";
 
 const challengeInput = Schema.Union([
+	Schema.Struct({ action: Schema.Literal("settings.change"), params: SettingsChange }),
 	Schema.Struct({ action: Schema.Literal("app.reset"), params: SourceResetParams }),
 	Schema.Struct({ action: Schema.Literal("generation.restore"), params: GenerationRestoreParams }),
 	Schema.Struct({ action: Schema.Literal("boot.restart"), params: Schema.Record(Schema.String, Schema.Never) }),
@@ -92,6 +94,10 @@ export const enrollmentRoute = (auth: Auth["Service"], config: AuthConfig, editi
 								? auth.startPasskeyAddAssertion(input.params, session.id)
 								: auth.startPasskeyDeleteAssertion(input.params, session.id),
 						);
+					}
+					if (input.action === "settings.change") {
+						const session = yield* humanSession(auth, request);
+						return HttpServerResponse.jsonUnsafe(yield* auth.startSettingsAssertion(input.params, session.id));
 					}
 					if (input.action === "app.reset") {
 						const session = yield* humanSession(auth, request);

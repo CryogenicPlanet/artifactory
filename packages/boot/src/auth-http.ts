@@ -32,6 +32,10 @@ export const authentication = Schema.Struct({
 
 const policy = {
 	...childErrorPolicy,
+	settings_conflict: {
+		status: 409,
+		hint: "Read GET /_boot/settings, then obtain a fresh settings.change assertion for the current revision and intended patch.",
+	},
 	already_collected: { status: 410, hint: "Re-enroll with POST /auth/enroll. Collection is one-time." },
 	assertion_invalid: {
 		status: 401,

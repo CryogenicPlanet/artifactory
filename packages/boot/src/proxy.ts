@@ -1,3 +1,4 @@
+import { settingsRoute } from "./settings-http.ts";
 import { discoveryResponse } from "./route-discovery.ts";
 import { restartRoute } from "./restart-http.ts";
 import { databaseRestoreRoute } from "./database-restore-http.ts";
@@ -26,6 +27,8 @@ import { Events } from "./events.ts";
 
 const help = `comms local development bootloader
 
+GET /_boot/settings  Human-only revisioned retention, storage percentages and public paths.
+POST /_boot/settings  Change {revision,patch} with a fresh settings.change assertion; retain proof for exact retries.
 GET /health        Bootloader liveness (independent of the child).
 GET /_boot/status  Child state and bounded stderr tail.
 GET /_boot/metrics  Prometheus metrics; human session or fs-scoped bearer.
@@ -129,6 +132,8 @@ export const proxy = Effect.gen(function* () {
 			if (internal) return internal;
 		}
 		if ((yield* Ref.get(phase))._tag === "Stopping") return authErrorResponse("boot_unavailable", 503);
+		const settingsResponse = yield* settingsRoute(auth, authConfig);
+		if (settingsResponse) return settingsResponse;
 		const restarted = yield* restartRoute(auth, authConfig, restart);
 		if (restarted) return restarted;
 		const authResponse = yield* authRoute(auth, authConfig);
@@ -163,6 +168,10 @@ export const proxy = Effect.gen(function* () {
 				publicPage = result.success;
 			}
 		}
+		const configuredPublic =
+			!explicitCredential &&
+			(request.method === "GET" || request.method === "HEAD") &&
+			(yield* auth.publicPaths).includes(path);
 		const isPublic =
 			(request.method === "GET" || request.method === "HEAD") &&
 			([
@@ -175,7 +184,8 @@ export const proxy = Effect.gen(function* () {
 				"/page-assets/mermaid-init.js",
 				"/page-assets/tailwind.js",
 			].includes(path) ||
-				publicPage !== null);
+				publicPage !== null ||
+				configuredPublic);
 		return yield* authFailure(
 			Effect.gen(function* () {
 				let identity = !isPublic || explicitCredential ? yield* authenticate(auth, request) : null;
@@ -296,6 +306,8 @@ export const proxy = Effect.gen(function* () {
 					publicPage = checked.success;
 					if (publicPage === null) return authErrorResponse("credential_required", 401);
 				}
+				if (configuredPublic && !identity && !(yield* auth.publicPaths).includes(path))
+					return authErrorResponse("credential_required", 401);
 				destination = requestAdmission.success.destination;
 				if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
 					const admitted = yield* child.traffic.awaitDestination;

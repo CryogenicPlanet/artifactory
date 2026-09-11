@@ -4,6 +4,18 @@ import { HttpServerResponse, type HttpClientResponse } from "effect/unstable/htt
 type Access = "public" | "read" | "fs" | "human" | "proof" | "device-secret" | "refresh-token" | "action-dependent";
 // Immutable descriptors live beside the handlers that own these routes. Private child IPC is intentionally excluded.
 const routes = [
+	[
+		"get",
+		["/_boot/settings"],
+		"human",
+		"Read revisioned retention, storage percentages and additional exact public GET/HEAD paths. Internal settings and recovery receipts are never exposed.",
+	],
+	[
+		"post",
+		["/_boot/settings"],
+		"human",
+		"Change {revision,patch} with exact Origin and a fresh settings.change X-Comms-Assertion bound to that body and session. patch may contain event_retention, storage or public_paths. Repeat the exact proof and body after a lost response to read the first accepted result; it never reapplies over a later change.",
+	],
 	["get", ["/health"], "public", "Bootloader liveness, independent of the app."],
 	["head", ["/health"], "public", "Bootloader liveness without a response body."],
 	["get", ["/_boot"], "public", "Plain-text boot recovery help."],
@@ -156,7 +168,7 @@ const routes = [
 		"post",
 		["/_boot/auth/challenge"],
 		"action-dependent",
-		"Create {action,params} challenge for enrollment.decide, token.mint, token.revoke, lock.break, db.restore, generation.restore, boot.restart, app.reset, passkey.add or passkey.delete. Exact Origin required; all except enrollment.decide require a human session. Complete using X-Comms-Assertion: base64url JSON {id,response}.",
+		"Create {action,params} challenge for enrollment.decide, token.mint, token.revoke, lock.break, db.restore, generation.restore, boot.restart, app.reset, settings.change, passkey.add or passkey.delete. Exact Origin required; all except enrollment.decide require a human session. Complete using X-Comms-Assertion: base64url JSON {id,response}.",
 	],
 	[
 		"get",

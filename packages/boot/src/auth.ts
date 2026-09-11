@@ -1,3 +1,5 @@
+import { makeSettings } from "./settings.ts";
+import { SettingsChange, canonicalSettings } from "./settings-schema.ts";
 import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
 // Effect Crypto has no constant-time comparison primitive.
 // oxlint-disable-next-line effecttsgo/node-builtin-import
@@ -76,6 +78,7 @@ export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
 		"restore_in_progress",
 		"scope_required",
 		"session_invalid",
+		"settings_conflict",
 		"setup_closed",
 		"setup_code_invalid",
 		"setup_required",
@@ -285,7 +288,8 @@ const makeAuth = (config: AuthConfig) =>
 				| "db.restore"
 				| "generation.restore"
 				| "boot.restart"
-				| "app.reset",
+				| "app.reset"
+				| "settings.change",
 			binding: string,
 		) =>
 			mutex.withPermit(
@@ -314,6 +318,15 @@ const makeAuth = (config: AuthConfig) =>
 					return { id: yield* saveChallenge(options.challenge, action, binding), options };
 				}),
 			);
+		const settings = yield* makeSettings(
+			(params, proof, session) =>
+				verifyAssertion(proof.id, proof.response, "settings.change", canonicalSettings(params, session)),
+			mutex,
+		);
+		const startSettingsAssertion = (params: SettingsChange, session: string) =>
+			Schema.is(SettingsChange)(params)
+				? startActionAssertion("settings.change", canonicalSettings(params, session))
+				: refuse("invalid_request");
 		const restartBinding = (sessionId: string) => JSON.stringify({ session: sessionId });
 		const startRestartAssertion = (sessionId: string) =>
 			startActionAssertion("boot.restart", restartBinding(sessionId));
@@ -436,6 +449,8 @@ const makeAuth = (config: AuthConfig) =>
 		const accounts = yield* makeAccountQueries;
 		return {
 			...accounts,
+			...settings,
+			startSettingsAssertion,
 			...enrollment,
 			...tokens,
 			...passkeys,
