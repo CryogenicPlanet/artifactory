@@ -1,3 +1,4 @@
+import { childErrorPolicy } from "./child-error-policy.ts";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import { ChildError } from "./child-process.ts";
 import { StorageRejected } from "./storage-headroom.ts";
@@ -5,7 +6,7 @@ import { EventStorageRejected } from "./event-storage.ts";
 import { ArtifactRetentionRejected } from "./artifact-retention.ts";
 // oxlint-disable-next-line effecttsgo/node-builtin-import -- Constant-time comparison is not exposed by Effect Crypto.
 import { timingSafeEqual } from "node:crypto";
-import { Cause, DateTime, Effect, Ref, Schema, type Semaphore, Stream } from "effect";
+import { Cause, DateTime, Effect, Option, Ref, Schema, type Semaphore, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { DatabaseBackup } from "./database-backup.ts";
 import type { Destination } from "./traffic.ts";
@@ -22,26 +23,80 @@ export interface Attempt {
 }
 const reserveBody = Schema.Struct({ transaction: Schema.String, count: Schema.Int });
 const abortBody = Schema.Struct({ transaction: Schema.String });
-const failure = (code: string, status: number) =>
+const recoveryHint =
+	"Inspect authenticated /_boot/status and recovery evidence before retrying; preserve the pending reservation and journal.";
+const eventHints = {
+	...childErrorPolicy,
+	app_evidence_invalid: { hint: recoveryHint },
+	app_fence_invalid: { hint: recoveryHint },
+	app_store_missing: { hint: recoveryHint },
+	batch_conflict: { hint: recoveryHint },
+	batch_invalid: { hint: "Correct the event batch to match the reserved sequence range." },
+	body_invalid: { hint: "Send the documented JSON body for this operation." },
+	body_too_large: { hint: "Reduce the event batch to the documented body limit." },
+	candidate_probe_committed: { hint: recoveryHint },
+	credential_expired: { hint: "Refresh or sign in again, then resume from your last delivered cursor." },
+	credential_invalid: { hint: "Use a valid credential, then resume from your last delivered cursor." },
+	cursor_ahead: {
+		hint: "Inspect the current publication cursor and resume from a cursor that was actually delivered.",
+	},
+	events_unavailable: {
+		hint: "Retry the unchanged query after storage contention clears; inspect /_boot/status if it persists.",
+	},
+	public_path_invalid: { hint: "Correct the public-path projection before publishing this batch." },
+	publication_pending: { hint: recoveryHint },
+	query_invalid: { hint: "Correct the event filters, cursor, limit or wait using the documented query contract." },
+	reservation_conflict: { hint: recoveryHint },
+	reservation_invalid: { hint: recoveryHint },
+	reservation_mismatch: { hint: recoveryHint },
+	sequence_exhausted: {
+		hint: "The sequence space is exhausted. Inspect boot state; retrying cannot allocate another sequence.",
+	},
+	stale_attempt: { hint: "This child attempt is no longer authorized. Stop using its channel." },
+	topic_move_invalid: { hint: "Correct the topic-move routing event before publication." },
+	topic_move_recovery_required: { hint: recoveryHint },
+	topic_move_unprepared: { hint: recoveryHint },
+	storage_headroom: { hint: "Free space on the data volume before new reservations; recovery evidence is retained." },
+	storage_measurement_failed: { hint: "Inspect the data volume and failed storage probe before retrying." },
+	backup_budget: { hint: "Expand the data volume or remove eligible backups before taking another copy." },
+	invalid_storage_sample: { hint: "Inspect storage measurements and backup metadata before retrying." },
+	unsafe_artifact_path: { hint: "Inspect and repair boot-owned artifact paths before another request." },
+	event_storage_unavailable: { hint: "Inspect event storage measurements before allocating more events." },
+	event_storage_over_budget: {
+		hint: "Expand storage or wait for eligible event pruning; retained recovery evidence cannot be discarded.",
+	},
+	handler_failed: {
+		hint: "Inspect bootloader logs and fix the failed route. This is not an unchanged-retry condition.",
+	},
+	child_forbidden: { hint: "Use the active boot-issued child channel; public callers cannot invoke this operation." },
+	child_not_live: { hint: "Wait for live admission before publishing through this child channel." },
+	scope_required: { hint: "Re-enroll and ask the human to grant read scope." },
+	method_invalid: { hint: "Use the HTTP method documented for this event operation." },
+	backup_unavailable: { hint: "Inspect /_boot/status and backup metadata before requesting another copy." },
+	completion_event_invalid: { hint: "Supply the completion event belonging to this reserved operation." },
+	generation_invalid: { hint: "Use the generation belonging to the active child attempt." },
+} as const satisfies Readonly<
+	Record<
+		| EventError["code"]
+		| ChildError["code"]
+		| StorageRejected["code"]
+		| ArtifactRetentionRejected["code"]
+		| EventStorageRejected["code"],
+		{ readonly hint: string }
+	> &
+		Record<string, { readonly hint: string }>
+>;
+const failure = (code: keyof typeof eventHints, status: number, route = "the requested route") =>
 	HttpServerResponse.jsonUnsafe(
 		{
 			error: {
 				code,
-				message: "Event operation unavailable.",
-				hint:
-					status === 500
-						? "Inspect bootloader logs. This failure is not an unchanged-retry condition."
-						: status === 507
-							? "Free space on the data volume, then retry; existing publication and recovery remain available."
-							: code === "unsafe_artifact_path"
-								? "Inspect and repair boot-owned artifact paths before another request."
-								: code === "scope_required"
-									? "Re-enroll and ask the human to grant read scope."
-									: "Retry infrastructure failures; inspect authenticated boot status.",
+				message: code === "handler_failed" ? `Handler failed for ${route}.` : "Event operation refused.",
+				hint: eventHints[code].hint,
 				retriable: status === 503,
 			},
 		},
-		{ status },
+		{ status, headers: { "cache-control": "no-store" } },
 	);
 // Query and child mutation routes retain their existing distinct refusal statuses.
 const eventStatus = {
@@ -69,13 +124,17 @@ const eventStatus = {
 	topic_move_recovery_required: [400, 409],
 	topic_move_unprepared: [400, 409],
 } as const satisfies Readonly<Record<EventError["code"], readonly [number, number]>>;
-const eventFailure = <A, E, R>(effect: Effect.Effect<A, E, R>, mode: 0 | 1, unavailable = "events_unavailable") =>
+const eventFailure = <A, E, R>(
+	effect: Effect.Effect<A, E, R>,
+	mode: 0 | 1,
+	unavailable: "events_unavailable" | "backup_unavailable" = "events_unavailable",
+) =>
 	effect.pipe(
 		Effect.catchCause((cause) => {
 			if (Cause.hasInterruptsOnly(cause))
 				return Effect.failCause(Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason)));
 			const expected =
-				cause.reasons.length > 0 &&
+				cause.reasons.length === 1 &&
 				cause.reasons.every(
 					(reason) =>
 						reason._tag === "Fail" &&
@@ -87,10 +146,16 @@ const eventFailure = <A, E, R>(effect: Effect.Effect<A, E, R>, mode: 0 | 1, unav
 							Cause.isTimeoutError(reason.error) ||
 							(isSqlError(reason.error) && reason.error.isRetryable)),
 				);
-			if (!expected) return Effect.succeed(failure("handler_failed", 500));
+			if (!expected)
+				return Effect.gen(function* () {
+					const request = Option.getOrUndefined(yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest));
+					return failure("handler_failed", 500, request ? `${request.method} ${request.url.split("?")[0]}` : undefined);
+				});
 			for (const reason of cause.reasons) {
 				if (reason._tag !== "Fail") continue;
 				const error = reason.error;
+				if (Schema.is(ChildError)(error))
+					return Effect.succeed(failure(error.code, childErrorPolicy[error.code].status));
 				if (Schema.is(EventError)(error)) return Effect.succeed(failure(error.code, eventStatus[error.code][mode]));
 				if (
 					Schema.is(StorageRejected)(error) ||

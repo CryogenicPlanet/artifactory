@@ -1,3 +1,4 @@
+import { childErrorPolicy } from "./child-error-policy.ts";
 import { PlatformError } from "effect/PlatformError";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import { isHttpClientError } from "effect/unstable/http/HttpClientError";
@@ -40,23 +41,43 @@ export const backupRoute = (
 						Effect.map((record) => HttpServerResponse.jsonUnsafe(record, { headers: { "cache-control": "no-store" } })),
 						Effect.catchCause((cause) => {
 							if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
-							const unexpected = cause.reasons.some(
-								(reason) =>
-									reason._tag !== "Fail" ||
-									!(
-										Schema.is(AuthError)(reason.error) ||
-										Schema.is(StorageRejected)(reason.error) ||
-										Schema.is(ArtifactRetentionRejected)(reason.error) ||
-										Schema.is(ChildError)(reason.error) ||
-										reason.error instanceof PlatformError ||
-										Cause.isTimeoutError(reason.error) ||
-										isHttpClientError(reason.error) ||
-										(isSqlError(reason.error) && reason.error.isRetryable)
-									),
-							);
-							if (unexpected) return Effect.succeed(authErrorResponse("handler_failed"));
+							const unexpected =
+								cause.reasons.length !== 1 ||
+								cause.reasons.some(
+									(reason) =>
+										reason._tag !== "Fail" ||
+										!(
+											Schema.is(AuthError)(reason.error) ||
+											Schema.is(StorageRejected)(reason.error) ||
+											Schema.is(ArtifactRetentionRejected)(reason.error) ||
+											Schema.is(ChildError)(reason.error) ||
+											reason.error instanceof PlatformError ||
+											Cause.isTimeoutError(reason.error) ||
+											isHttpClientError(reason.error) ||
+											(isSqlError(reason.error) && reason.error.isRetryable)
+										),
+								);
+							if (unexpected)
+								return Effect.succeed(authErrorResponse("handler_failed", 500, `${request.method} ${url.pathname}`));
 							const error = Cause.findError(cause);
 							if (error._tag === "Success" && Schema.is(AuthError)(error.success)) return Effect.fail(error.success);
+							if (error._tag === "Success" && Schema.is(ChildError)(error.success)) {
+								const policy = childErrorPolicy[error.success.code];
+								// Capture may have committed before resuming its child failed. Never invite an automatic second copy.
+								return Effect.succeed(
+									HttpServerResponse.jsonUnsafe(
+										{
+											error: {
+												code: error.success.code,
+												message: "Backup capture did not complete normally.",
+												hint: `${policy.retriable ? "Wait for boot to become available." : policy.hint} A copy may already exist; inspect /_boot/db/backups before another capture.`,
+												retriable: false,
+											},
+										},
+										{ status: policy.status, headers: { "cache-control": "no-store" } },
+									),
+								);
+							}
 							if (
 								error._tag === "Success" &&
 								(Schema.is(StorageRejected)(error.success) || Schema.is(ArtifactRetentionRejected)(error.success))

@@ -1,3 +1,8 @@
+import { editFailure } from "../../src/edit-failure.ts";
+import { childErrorPolicy } from "../../src/child-error-policy.ts";
+import { EditRejected } from "../../src/edit-lock.ts";
+import { SourceRejected } from "../../src/source-schema.ts";
+import { metrics } from "../../src/metrics.ts";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Cause, Console, Effect, Ref, Schema, Semaphore } from "effect";
@@ -32,7 +37,7 @@ const program = Effect.gen(function* () {
 	for (const [error, status, code] of [
 		[new AuthError({ code: "token_expired" }), 401, "token_expired"],
 		[new AuthError({ code: "scope_required" }), 403, "scope_required"],
-		[new ChildError({ code: "child_closure_unproven" }), 503, "boot_unavailable"],
+		[new ChildError({ code: "child_closure_unproven" }), 409, "child_closure_unproven"],
 		[new TrafficError({ code: "freeze_queue_full" }), 503, "boot_unavailable"],
 		[retryable, 503, "boot_unavailable"],
 		[syntax, 500, "handler_failed"],
@@ -59,6 +64,69 @@ const program = Effect.gen(function* () {
 	] as const)
 		assert.equal(Schema.is(schema)({ _tag: tag, code: "future_unknown_code" }), false);
 
+	const meter = yield* metrics;
+	const edit = <E>(effect: Effect.Effect<never, E>) => effect.pipe(Effect.catchCause(editFailure(meter)));
+	// Each known child failure retains its identity on both recovery HTTP boundaries.
+	for (const [code, detail] of Object.entries(childErrorPolicy)) {
+		const error = yield* Schema.decodeUnknownEffect(ChildError)({ _tag: "ChildError", code });
+		yield* check(yield* edit(Effect.fail(error)), detail.status, code);
+		yield* check(yield* authFailure(Effect.fail(error)), detail.status, code);
+	}
+	for (const [error, status, code] of [
+		[new SourceRejected({ code: "external_conflict", path: "pages/private.txt" }), 409, "external_conflict"],
+		[new SourceRejected({ code: "publication_pending", path: "recovery" }), 503, "publication_pending"],
+		[new AuthError({ code: "scope_required" }), 403, "scope_required"],
+		[new AuthError({ code: "origin_invalid" }), 403, "origin_invalid"],
+		[new EditRejected({ code: "authority_expired", holder: null, transitions: [] }), 401, "authority_expired"],
+		[new EditRejected({ code: "locked", holder: null, transitions: [] }), 423, "locked"],
+		[retryable, 503, "edit_unavailable"],
+	] as const)
+		yield* check(yield* edit(Effect.fail(error)), status, code);
+	const editRequest = HttpServerRequest.fromWeb(
+		new Request("http://localhost/api/revert?private=query-secret", { method: "POST" }),
+	);
+	for (const failure of [
+		Effect.die("private defect"),
+		Effect.fail(syntax),
+		Effect.fail(new ChildError({ code: "cutover_recovery_required" })).pipe(
+			Effect.ensuring(Effect.die("private cleanup defect")),
+		),
+		Effect.failCause(
+			Cause.combine(
+				Cause.fail(new SourceRejected({ code: "external_conflict", path: "secret-path" })),
+				Cause.fail("unknown sibling"),
+			),
+		),
+		Effect.fail({ _tag: "ChildError", code: "future_unknown_code" }),
+		Effect.failCause(
+			Cause.combine(Cause.fail(retryable), Cause.fail(new ChildError({ code: "cutover_recovery_required" }))),
+		),
+		Effect.failCause(
+			Cause.combine(
+				Cause.fail(new ChildError({ code: "boot_shutting_down" })),
+				Cause.fail(new ChildError({ code: "child_closure_unproven" })),
+			),
+		),
+	]) {
+		for (const handled of [edit<unknown>(failure), authFailure<unknown, never>(failure)]) {
+			const response = yield* handled.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, editRequest));
+			yield* check(response, 500, "handler_failed");
+			const value = yield* HttpServerResponse.toClientResponse(response).json;
+			const encoded = JSON.stringify(value);
+			assert.ok(encoded.includes("POST /api/revert"));
+			for (const secret of [
+				"query-secret",
+				"private defect",
+				"private cleanup defect",
+				"unknown sibling",
+				"secret-path",
+			])
+				assert.ok(!encoded.includes(secret));
+		}
+	}
+	const cancelled = yield* edit(Effect.interrupt).pipe(Effect.exit);
+	assert.equal(cancelled._tag, "Failure");
+	if (cancelled._tag === "Failure") assert.ok(Cause.hasInterruptsOnly(cancelled.cause));
 	const attempts = yield* Ref.make<readonly Attempt[]>([]);
 	const route = yield* Ref.make<Destination | null>(null);
 	const gate = yield* Semaphore.make(1);
@@ -100,6 +168,10 @@ const program = Effect.gen(function* () {
 		);
 		assert.ok(response);
 		yield* check(response, status, code);
+		if (code === "handler_failed") {
+			const value = yield* HttpServerResponse.toClientResponse(response).json;
+			assert.ok(JSON.stringify(value).includes("GET /api/events"));
+		}
 	}
 	yield* Console.log("HTTP_ERROR_CONTRACTS_VERIFIED");
 }).pipe(Effect.scoped, Effect.provide(BunServices.layer));

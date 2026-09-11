@@ -160,8 +160,8 @@ it("preserves accepted data and the restore pin on source conflict, rejects a co
 	expect((await fetch(`${state.app.url}/auth/login`)).status).toBe(200);
 	const competing = await state.signed("competing-conflict");
 	const blocked = await competing(state.app.url);
-	expect(blocked.status).toBe(503);
-	await blocked.body?.cancel();
+	expect(blocked.status).toBe(409);
+	expect(await blocked.json()).toMatchObject({ error: { code: "restore_recovery_required", retriable: false } });
 	expect(await fixture.sql("SELECT COUNT(*) count FROM db_restore_requests", "boot.db")).toEqual([{ count: 1 }]);
 	expect(
 		await fixture.sql("SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type')='db.restored'", "boot.db"),

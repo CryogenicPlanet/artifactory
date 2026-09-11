@@ -1,7 +1,8 @@
+import { childErrorPolicy } from "./child-error-policy.ts";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import { ChildError } from "./child-process.ts";
 import { TrafficError } from "./traffic.ts";
-import { Cause, Effect, Schema, Stream } from "effect";
+import { Cause, Effect, Option, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
 import { PasskeyRegistrationResponse } from "./passkey-management-schema.ts";
@@ -30,40 +31,71 @@ export const authentication = Schema.Struct({
 });
 
 const policy = {
+	...childErrorPolicy,
 	already_collected: { status: 410, hint: "Re-enroll with POST /auth/enroll. Collection is one-time." },
-	assertion_invalid: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
-	auth_configuration_invalid: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
+	assertion_invalid: {
+		status: 401,
+		hint: "Obtain a fresh action challenge and sign the exact requested parameters with your passkey.",
+	},
+	auth_configuration_invalid: {
+		status: 401,
+		hint: "Correct RP_ID and PUBLIC_ORIGIN in the boot configuration before authenticating.",
+	},
 	authentication_failed: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
 	authentication_invalid: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
-	backup_not_found: { status: 404, hint: "Use /setup for first setup or /auth/login to sign in." },
-	backup_not_restorable: { status: 409, hint: "Use /setup for first setup or /auth/login to sign in." },
-	challenge_invalid: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
+	backup_not_found: { status: 404, hint: "Inspect /_boot/db/backups and select an existing backup." },
+	backup_not_restorable: {
+		status: 409,
+		hint: "Select a backup with retained restore metadata; inspect the catalog before requesting another proof.",
+	},
+	challenge_invalid: {
+		status: 401,
+		hint: "Obtain a fresh challenge for this exact action; challenges expire and are single-use.",
+	},
 	device_secret_invalid: { status: 401, hint: "Re-enroll with POST /auth/enroll. Collection is one-time." },
-	enrollment_decided: { status: 409, hint: "Use /setup for first setup or /auth/login to sign in." },
+	enrollment_decided: {
+		status: 409,
+		hint: "Inspect the enrollment decision; start a new enrollment if different scopes or approval are needed.",
+	},
 	enrollment_denied: { status: 403, hint: "Re-enroll with POST /auth/enroll. Collection is one-time." },
 	enrollment_expired: { status: 410, hint: "Re-enroll with POST /auth/enroll. Collection is one-time." },
-	enrollment_invalid: { status: 404, hint: "Use /setup for first setup or /auth/login to sign in." },
-	family_not_found: { status: 404, hint: "Use /setup for first setup or /auth/login to sign in." },
+	enrollment_invalid: { status: 404, hint: "Start a new enrollment and use its returned identifier." },
+	family_not_found: { status: 404, hint: "Inspect /_boot/tokens and select an existing token family." },
 	family_revoked: { status: 401, hint: "Re-enroll with POST /auth/enroll. Collection is one-time." },
-	generation_not_restorable: { status: 409, hint: "Use /setup for first setup or /auth/login to sign in." },
-	idempotency_conflict: { status: 409, hint: "Use a fresh Idempotency-Key for this refresh token." },
-	invalid_request: { status: 400, hint: "Use /setup for first setup or /auth/login to sign in." },
-	last_passkey: { status: 409, hint: "Use /setup for first setup or /auth/login to sign in." },
-	origin_invalid: { status: 403, hint: "Use /setup for first setup or /auth/login to sign in." },
-	passkey_exists: { status: 409, hint: "Use /setup for first setup or /auth/login to sign in." },
-	passkey_not_found: { status: 404, hint: "Use /setup for first setup or /auth/login to sign in." },
+	generation_not_restorable: {
+		status: 409,
+		hint: "Inspect /_boot/generations and choose a generation with its retained snapshot and backup.",
+	},
+	idempotency_conflict: {
+		status: 409,
+		hint: "Keep the original request and Idempotency-Key together; use a new key only for a new operation.",
+	},
+	invalid_request: {
+		status: 400,
+		hint: "Correct the JSON body and query using the documented authentication operation.",
+	},
+	last_passkey: { status: 409, hint: "Register another passkey before deleting the last registered key." },
+	origin_invalid: {
+		status: 403,
+		hint: "Send this action from the configured PUBLIC_ORIGIN with its exact Origin header.",
+	},
+	passkey_exists: { status: 409, hint: "Use the registered passkey or choose a different authenticator." },
+	passkey_not_found: { status: 404, hint: "Inspect /_boot/auth/passkeys and select an existing passkey." },
 	refresh_invalid: { status: 401, hint: "Re-enroll with POST /auth/enroll. Collection is one-time." },
 	registration_failed: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
 	registration_invalid: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
-	restore_in_progress: { status: 409, hint: "Use /setup for first setup or /auth/login to sign in." },
+	restore_in_progress: {
+		status: 409,
+		hint: "Inspect /_boot/status and finish the existing restore before starting another one.",
+	},
 	scope_required: {
 		status: 403,
 		hint: "Re-enroll with POST /auth/enroll and ask the human to grant the required scope.",
 	},
 	session_invalid: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
-	setup_closed: { status: 404, hint: "Use /setup for first setup or /auth/login to sign in." },
-	setup_code_invalid: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
-	setup_required: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
+	setup_closed: { status: 404, hint: "Setup is complete. Sign in at /auth/login with an existing passkey." },
+	setup_code_invalid: { status: 401, hint: "Use the current setup code printed by boot; do not reuse an older code." },
+	setup_required: { status: 401, hint: "Complete first-passkey setup at /setup using the code printed by boot." },
 	token_expired: { status: 401, hint: "POST /auth/refresh with your refresh token." },
 	token_invalid: { status: 401, hint: "Re-enroll with POST /auth/enroll. Collection is one-time." },
 	boot_unavailable: { status: 503, hint: "Retry the same request; check bootloader logs if it persists." },
@@ -71,11 +103,15 @@ const policy = {
 	handler_failed: { status: 500, hint: "Inspect bootloader logs. This failure is not an unchanged-retry condition." },
 } as const satisfies Readonly<
 	Record<
-		AuthError["code"] | "boot_unavailable" | "credential_required" | "handler_failed",
+		AuthError["code"] | ChildError["code"] | "boot_unavailable" | "credential_required" | "handler_failed",
 		{ readonly status: number; readonly hint: string }
 	>
 >;
-export const authErrorResponse = (code: keyof typeof policy, status: number = policy[code].status) =>
+export const authErrorResponse = (
+	code: keyof typeof policy,
+	status: number = policy[code].status,
+	route = "the requested route",
+) =>
 	HttpServerResponse.jsonUnsafe(
 		{
 			error: {
@@ -84,7 +120,7 @@ export const authErrorResponse = (code: keyof typeof policy, status: number = po
 					status === 503
 						? "Boot authentication is unavailable."
 						: status === 500
-							? "Boot handler failed."
+							? `Handler failed for ${route}.`
 							: "Authentication request refused.",
 				hint: policy[code].hint,
 				retriable: status === 503,
@@ -100,7 +136,7 @@ export const authFailure = <E, R>(effect: Effect.Effect<HttpServerResponse.HttpS
 				return Effect.failCause(Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason)));
 			// Classify the complete cause before extracting a typed refusal: finalizer defects must not become 401/503.
 			const expected =
-				cause.reasons.length > 0 &&
+				cause.reasons.length === 1 &&
 				cause.reasons.every(
 					(reason) =>
 						reason._tag === "Fail" &&
@@ -110,10 +146,21 @@ export const authFailure = <E, R>(effect: Effect.Effect<HttpServerResponse.HttpS
 							Cause.isTimeoutError(reason.error) ||
 							(isSqlError(reason.error) && reason.error.isRetryable)),
 				);
-			if (!expected) return Effect.succeed(authErrorResponse("handler_failed"));
-			const refusal = cause.reasons.find((reason) => reason._tag === "Fail" && Schema.is(AuthError)(reason.error));
+			if (!expected)
+				return Effect.gen(function* () {
+					const request = Option.getOrUndefined(yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest));
+					return authErrorResponse(
+						"handler_failed",
+						500,
+						request ? `${request.method} ${request.url.split("?")[0]}` : undefined,
+					);
+				});
+			const refusal = cause.reasons.find(
+				(reason) =>
+					reason._tag === "Fail" && (Schema.is(AuthError)(reason.error) || Schema.is(ChildError)(reason.error)),
+			);
 			return Effect.succeed(
-				refusal?._tag === "Fail" && Schema.is(AuthError)(refusal.error)
+				refusal?._tag === "Fail" && (Schema.is(AuthError)(refusal.error) || Schema.is(ChildError)(refusal.error))
 					? authErrorResponse(refusal.error.code)
 					: authErrorResponse("boot_unavailable"),
 			);
