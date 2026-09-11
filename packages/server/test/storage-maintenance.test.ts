@@ -2,6 +2,7 @@ import { cp, readFile } from "node:fs/promises";
 import { request } from "node:http";
 import { basename, join } from "node:path";
 import { expect, it } from "vitest";
+import { Schema } from "effect";
 import { storageFixture } from "./fixtures/storage-maintenance.ts";
 
 it("captures acknowledged WAL data without changing live ownership and does not immediately repeat an app-scheduled backup across restart", async (test) => {
@@ -16,6 +17,16 @@ it("captures acknowledged WAL data without changing live ownership and does not 
 	const owner = await fixture.status(app.url, cookie);
 	const epoch = await fixture.sql("SELECT * FROM kernel_writer");
 	const messages = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
+	// Backup includes every pre-capture row, including the resumable system view.
+	await expect
+		.poll(() => fixture.sql("SELECT 1 present FROM messages WHERE topic='system' LIMIT 1"))
+		.toEqual([{ present: 1 }]);
+	const allMessages = Schema.decodeUnknownSync(
+		Schema.Array(Schema.Struct({ id: Schema.String, seq: Schema.Int, body: Schema.String, topic: Schema.String })),
+	)(await fixture.sql("SELECT id,seq,body,topic FROM messages ORDER BY seq"));
+	expect(allMessages.some((row) => row.topic === "system")).toBe(true);
+	const through = Math.max(...allMessages.map((row) => row.seq));
+
 	await cp(join(fixture.root, "comms.db"), join(fixture.root, "main-only.db"));
 	expect(
 		await fixture
@@ -32,6 +43,13 @@ it("captures acknowledged WAL data without changing live ownership and does not 
 	if (!saved) throw Error("Missing hourly backup");
 	expect(saved.reason).toBe("hourly");
 	expect(saved.generation).toBe(owner.child.generation);
+	expect(
+		await fixture.sql(
+			`SELECT id,seq,body,topic FROM messages WHERE seq<=${through} ORDER BY seq`,
+			join("backups", basename(saved.path)),
+		),
+	).toEqual(allMessages);
+
 	expect(
 		await fixture.sql(
 			"SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq",

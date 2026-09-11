@@ -47,12 +47,26 @@ it("resets the entire source tree while preserving messages, pages, identity, to
 	await rm(join(editable, "seed-empty"), { recursive: true });
 	await writeFile(join(editable, "later-only.txt"), "remove this");
 	const beforeMessages = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
+	// Preserve existing derived messages too; later system events may append new rows.
+	await expect
+		.poll(() => fixture.sql("SELECT 1 present FROM messages WHERE topic='system' LIMIT 1"))
+		.toEqual([{ present: 1 }]);
+	const allMessages = Schema.decodeUnknownSync(
+		Schema.Array(Schema.Struct({ id: Schema.String, seq: Schema.Int, body: Schema.String, topic: Schema.String })),
+	)(await fixture.sql("SELECT id,seq,body,topic FROM messages ORDER BY seq"));
+	expect(allMessages.some((row) => row.topic === "system")).toBe(true);
+	const through = Math.max(...allMessages.map((row) => row.seq));
+
 	const reset = await state.request();
 	expect(reset.status).toBe(200);
 	expect(await reset.json()).toMatchObject({ status: "live" });
 	await app.ready(cookie);
 	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(beforeMessages);
 	const assertData = async () => {
+		expect(await fixture.sql(`SELECT id,seq,body,topic FROM messages WHERE seq<=${through} ORDER BY seq`)).toEqual(
+			allMessages,
+		);
+
 		await state.assertPreserved();
 		expect(await readFile(join(editable, "reset-version.txt"), "utf8")).toBe("configured seed source");
 		expect(await readFile(join(editable, "seed-file"), "utf8")).toBe("seed file");
