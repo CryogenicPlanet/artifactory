@@ -94,17 +94,17 @@ export const layer = (options: { readonly dataDirectory: string; readonly depend
 									}
 									const cache = path.join(root, "cache");
 									yield* fs.makeDirectory(cache, { recursive: true, mode: 0o750 });
-									const work = yield* fs.makeTempDirectoryScoped({ directory: cache, prefix: ".prepare-" });
-									yield* fs.writeFileString(path.join(work, "package.json"), manifest);
-									yield* fs.copyFile(lockPath, path.join(work, "bun.lock"));
+									const temporary = yield* fs.makeTempDirectoryScoped({ directory: cache, prefix: ".prepare-" });
+									const work = path.join(temporary, "workspace");
+									// Workspace manifests and sources must exist before the frozen install.
+									yield* copySource(source, work);
 									yield* headroom.check();
 									yield* commands.install(work);
 									const dependencies = path.join(work, "node_modules");
 									if (!(yield* fs.exists(dependencies))) yield* fs.makeDirectory(dependencies);
 									// Copy before editable Vite runs: build mutations must not change runtime dependencies.
-									yield* copyPreparedTree(dependencies, path.join(snapshot, "node_modules"));
+									yield* copyPreparedTree(dependencies, path.join(snapshot, "node_modules"), work);
 									if (hasUi) {
-										yield* copySource(ui, path.join(work, "ui"));
 										const output = path.join(work, "board");
 										yield* headroom.check();
 										yield* commands.build(work, output);

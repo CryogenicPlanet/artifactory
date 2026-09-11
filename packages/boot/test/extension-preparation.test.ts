@@ -20,7 +20,7 @@ it("loads extension dependencies from its generation root and retains them after
  }`;
 	await writeFile(join(source, "package.json"), manifest);
 	await writeFile(join(source, "bun.lock"), lock);
-	// Package-local install declarations are not inputs to boot's root-only preparation.
+	// Undeclared package-local manifests do not add dependencies to the root install.
 	await writeFile(
 		join(packageDirectory, "package.json"),
 		'{"name":"tool","type":"module","dependencies":{"is-number":"0.0.0"}}',

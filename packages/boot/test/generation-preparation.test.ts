@@ -29,7 +29,7 @@ const fixture = Effect.gen(function* () {
 		install: (workspace) =>
 			Effect.gen(function* () {
 				yield* Ref.update(installs, (n) => n + 1);
-				expect((yield* fs.readDirectory(workspace)).sort()).toEqual(["bun.lock", "package.json"]);
+				expect((yield* fs.readDirectory(workspace)).sort()).toEqual((yield* fs.readDirectory(source)).sort());
 				yield* fs.makeDirectory(path.join(workspace, "node_modules/pkg"), { recursive: true });
 				yield* fs.writeFileString(path.join(workspace, "node_modules/pkg/index.js"), "installed");
 				yield* fs.symlink("pkg", path.join(workspace, "node_modules/alias"));
@@ -39,6 +39,8 @@ const fixture = Effect.gen(function* () {
 				yield* Ref.update(builds, (n) => n + 1);
 				// A Vite config can write into its own working dependencies without changing the saved runtime dependencies.
 				yield* fs.writeFileString(path.join(workspace, "node_modules/pkg/index.js"), "build mutation");
+				// Match Vite --emptyOutDir even when editable board/ source was copied.
+				yield* fs.remove(output, { recursive: true, force: true });
 				yield* copySource(path.join(workspace, "ui"), output).pipe(
 					Effect.provideService(FileSystem.FileSystem, fs),
 					Effect.provideService(Path.Path, path),
