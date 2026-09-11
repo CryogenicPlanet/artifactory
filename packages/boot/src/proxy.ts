@@ -1,7 +1,7 @@
 import { redactHex } from "./auth-primitives.ts";
 import { recoveryRoute } from "./recovery-http.ts";
 import { settingsRoute } from "./settings-http.ts";
-import { discoveryResponse } from "./route-discovery.ts";
+import { recoveryManifest } from "./route-discovery.ts";
 import { restartRoute } from "./restart-http.ts";
 import { databaseRestoreRoute } from "./database-restore-http.ts";
 import { backupRoute } from "./backup-http.ts";
@@ -187,7 +187,6 @@ export const proxy = Effect.gen(function* () {
 			([
 				"/init",
 				"/init.md",
-				"/.well-known/agent.json",
 				"/page-assets/markdown.css",
 				"/page-assets/highlight.css",
 				"/page-assets/mermaid.js",
@@ -356,7 +355,6 @@ export const proxy = Effect.gen(function* () {
 					{
 						headers: {
 							...headers,
-							...(path === "/api" || path === "/.well-known/agent.json" ? { "accept-encoding": "identity" } : {}),
 							...(request.headers["x-comms-init"] && /^[a-f0-9]{64}$/.test(request.headers["x-comms-init"])
 								? { "x-comms-init": request.headers["x-comms-init"] }
 								: {}),
@@ -392,8 +390,6 @@ export const proxy = Effect.gen(function* () {
 					Effect.flatMap((response) =>
 						Effect.gen(function* () {
 							if (observed) yield* observed.child(response.headers["x-comms-span"]);
-							const discovered = yield* discoveryResponse(path, request.method, response);
-							if (discovered) return discovered;
 							const connection = new Set(
 								(response.headers.connection ?? "")
 									.toLowerCase()
@@ -468,6 +464,11 @@ export const publicRoute = Effect.gen(function* () {
 		return HttpServerResponse.empty({ status: 403 });
 	if (path === "/health" && (request.method === "GET" || request.method === "HEAD")) {
 		return HttpServerResponse.jsonUnsafe({ status: "ok", mode: "local-development" });
+	}
+	if (path === "/.well-known/agent.json") {
+		if (request.method !== "GET" && request.method !== "HEAD")
+			return HttpServerResponse.empty({ status: 405, headers: { allow: "GET, HEAD" } });
+		return HttpServerResponse.jsonUnsafe(recoveryManifest(), { headers: { "cache-control": "no-store" } });
 	}
 	if (path === "/_boot" && request.method === "GET") return HttpServerResponse.text(help);
 	return null;

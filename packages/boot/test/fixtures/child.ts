@@ -87,6 +87,10 @@ export function serve(mode: string) {
 				headers.append("set-cookie", "app-preference=dark; Path=/");
 				return new Response("cookies", { headers });
 			}
+			if (url.pathname === "/api")
+				return new Response(Bun.gzipSync("editable discovery bytes"), {
+					headers: { "content-encoding": "gzip", "x-boot-secret": "remove" },
+				});
 			if (url.pathname === "/gzip")
 				return new Response(Bun.gzipSync("compressed-body"), { headers: { "content-encoding": "gzip" } });
 			if (url.pathname === "/redirect") return new Response(null, { status: 302, headers: { location: "/echo" } });

@@ -1,5 +1,4 @@
-import { Effect, Schema, Stream } from "effect";
-import { HttpServerResponse, type HttpClientResponse } from "effect/unstable/http";
+import type { Schema } from "effect";
 
 type Access = "public" | "read" | "fs" | "human" | "proof" | "device-secret" | "refresh-token" | "action-dependent";
 // Immutable descriptors live beside the handlers that own these routes. Private child IPC is intentionally excluded.
@@ -19,6 +18,12 @@ const routes = [
 	["get", ["/health"], "public", "Bootloader liveness, independent of the app."],
 	["head", ["/health"], "public", "Bootloader liveness without a response body."],
 	["get", ["/_boot"], "public", "Plain-text boot recovery help."],
+	[
+		"get",
+		["/.well-known/agent.json"],
+		"public",
+		"Immutable boot recovery manifest. Follow api_url for the full live application route table.",
+	],
 	[
 		"get",
 		["/_boot/recovery"],
@@ -221,8 +226,7 @@ const routes = [
 	],
 ] as const satisfies ReadonlyArray<readonly [string, readonly string[], Access, string]>;
 
-export const mergeDiscovery = (document: Schema.JsonObject, field: "paths" | "endpoints") => {
-	const paths = Schema.decodeUnknownSync(Schema.JsonObject)(document[field]);
+export const recoveryManifest = () => {
 	const boot: Record<string, Schema.JsonObject> = {};
 	for (const [method, aliases, access, description] of routes) {
 		for (const path of aliases) {
@@ -251,15 +255,11 @@ export const mergeDiscovery = (document: Schema.JsonObject, field: "paths" | "en
 			};
 		}
 	}
-	const components = Schema.decodeUnknownSync(Schema.JsonObject)(document.components ?? {});
-	const schemes = Schema.decodeUnknownSync(Schema.JsonObject)(components.securitySchemes ?? {});
 	return {
-		...document,
-		[field]: { ...paths, ...boot },
+		name: "comms",
+		endpoints: boot,
 		components: {
-			...components,
 			securitySchemes: {
-				...schemes,
 				commsBootSession: { type: "apiKey", in: "cookie", name: "__Host-comms_session" },
 				commsBootAccess: {
 					type: "http",
@@ -268,29 +268,12 @@ export const mergeDiscovery = (document: Schema.JsonObject, field: "paths" | "en
 				},
 			},
 		},
+		init_url: "/init",
+		api_url: "/api",
+		recovery_url: "/_boot",
+		auth: "passkey session or enrolled bearer access token",
+		enrollment_url: "/auth/enroll",
+		refresh_url: "/auth/refresh",
+		capabilities: ["events", "source-edits", "reload", "enrollment", "refresh"],
 	};
 };
-
-/** Only discovery responses are buffered. Ordinary application bodies keep streaming. */
-export const discoveryResponse = (path: string, method: string, response: HttpClientResponse.HttpClientResponse) =>
-	Effect.gen(function* () {
-		if (method !== "GET" || response.status !== 200 || (path !== "/api" && path !== "/.well-known/agent.json"))
-			return null;
-		let size = 0;
-		const chunks = yield* response.stream.pipe(
-			Stream.tap((chunk) =>
-				Effect.try(() => {
-					size += chunk.byteLength;
-					if (size > 2 * 1024 * 1024) throw new Error("Discovery document exceeds 2 MiB");
-				}),
-			),
-			Stream.runCollect,
-		);
-		const document = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.JsonObject))(
-			Buffer.concat(chunks).toString("utf8"),
-		);
-		const merged = yield* Effect.try(() => mergeDiscovery(document, path === "/api" ? "paths" : "endpoints"));
-		return HttpServerResponse.jsonUnsafe(merged, {
-			headers: { "cache-control": "no-store", vary: "Authorization, Cookie" },
-		});
-	}).pipe(Effect.timeout("5 seconds"));

@@ -27,10 +27,6 @@ export const description = HttpApiGroup.make("onboarding").add(
 		OpenApi.Description,
 		"Public editable orientation as Markdown, including live routes and an init-text-only version stamp.",
 	),
-	HttpApiEndpoint.get("manifest", "/.well-known/agent.json", { success: Schema.Unknown }).annotate(
-		OpenApi.Description,
-		"Public machine manifest with the assembled API endpoints, components and onboarding links.",
-	),
 );
 
 export const orientation = (markdownOnly: boolean, endpoints: OpenAPISpec["paths"]) =>
@@ -84,30 +80,4 @@ export const routes = (spec: OpenAPISpec) =>
 	Layer.mergeAll(
 		HttpRouter.add("GET", "/init", orientation(false, spec.paths)),
 		HttpRouter.add("GET", "/init.md", orientation(true, spec.paths)),
-		HttpRouter.add(
-			"GET",
-			"/.well-known/agent.json",
-			HttpServerResponse.jsonUnsafe({
-				name: "comms",
-				endpoints: spec.paths,
-				components: spec.components,
-				init_url: "/init",
-				api_url: "/api",
-				auth: "passkey session or enrolled bearer access token",
-				enrollment_url: "/auth/enroll",
-				refresh_url: "/auth/refresh",
-				capabilities: [
-					"extensions",
-					"messages",
-					"topics",
-					"events",
-					"event-stream",
-					"source-edits",
-					"reload",
-					"pages",
-					"enrollment",
-					"refresh",
-				],
-			}),
-		),
 	);

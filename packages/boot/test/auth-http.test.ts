@@ -234,7 +234,7 @@ it("keeps real setup and login working after all child attempts fail without exp
 		expect(response.status).toBe(401);
 		expect(await response.text()).not.toContain("fixture startup failed");
 	}
-	for (const path of ["/init", "/init.md", "/.well-known/agent.json"]) {
+	for (const path of ["/init", "/init.md"]) {
 		const response = await fetch(`${app.url}${path}`);
 		expect(response.status).toBe(503);
 		const body = await response.text();
@@ -243,6 +243,12 @@ it("keeps real setup and login working after all child attempts fail without exp
 	}
 	expect((await fetch(`${app.url}/health`)).status).toBe(200);
 	expect((await fetch(`${app.url}/_boot`)).status).toBe(200);
+	const manifest = await fetch(`${app.url}/.well-known/agent.json`);
+	expect(manifest.status).toBe(200);
+	const recovery = await manifest.json();
+	expect(recovery).toHaveProperty("endpoints./api/revert.post.description");
+	expect(recovery).not.toHaveProperty("child");
+	expect(JSON.stringify(recovery)).not.toContain("fixture startup failed");
 	await app.setup();
 	const session = await app.login();
 	const headers = { cookie: session.cookie };

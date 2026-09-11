@@ -1,3 +1,4 @@
+import { liveDiscovery } from "./discovery.ts";
 import { extGroup } from "@comms/protocol/extensions";
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
@@ -45,7 +46,9 @@ export const routes = (extensions: Extensions["Service"]) => {
 			"/api",
 			Effect.gen(function* () {
 				yield* identity("read");
-				return HttpServerResponse.jsonUnsafe(specification);
+				return HttpServerResponse.jsonUnsafe(yield* liveDiscovery(specification), {
+					headers: { "cache-control": "no-store", vary: "Authorization, Cookie" },
+				});
 			}).pipe(failure),
 		),
 		onboardingRoutes(specification),

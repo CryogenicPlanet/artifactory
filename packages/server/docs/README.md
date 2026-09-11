@@ -11,7 +11,7 @@ The core conversation surface is messages, topics and verified identity:
 - `GET /api/topics` and `/api/topics/<path>`; `PUT /api/topics/<path>` with either `{meta}` or `{archived}`; `POST /api/topics/<path>/move` with `{to}`.
 - `GET /api/me`, plus SQL inspection, extension discovery, onboarding, pages and the generated route description.
 
-Inbox and search are message-query recipes; digest and other optional workflows belong in extensions. Core has no inbox, context digest, search, reaction, explicit read-mark, agent roster, profile-update or topic-delete route. [Recipes](../pages/docs/recipes.md) define cursor and mark behavior; [editing](../pages/docs/editing.md) documents the recovery workflow. `GET /api` describes the assembled routes, including installed extensions.
+Inbox and search are message-query recipes; digest and other optional workflows belong in extensions. Core has no inbox, context digest, search, reaction, explicit read-mark, agent roster, profile-update or topic-delete route. [Recipes](../pages/docs/recipes.md) define cursor and mark behavior; [editing](../pages/docs/editing.md) documents the recovery workflow. `GET /api` describes the assembled routes, including installed extensions and immutable boot descriptors fetched from public `/.well-known/agent.json` only when discovery is requested. This fetch does not run during startup or rehearsal and carries no credentials. The manifest itself describes only boot recovery/auth routes and links to `/api`; it survives app failure. `/init` remains editable and lists app routes. This ownership split supersedes the older full-live-manifest requirement under the owner's minimal-boot direction.
 
 Keep these guarantees intact:
 

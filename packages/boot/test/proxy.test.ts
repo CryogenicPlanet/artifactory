@@ -133,6 +133,10 @@ describe("real Bun boot proxy", () => {
 		expect(new TextDecoder().decode((await reader.read()).value)).toBe("second\n");
 		expect((await reader.read()).done).toBe(true);
 		expect(await (await app.fetch(`${app.url}/gzip`)).text()).toBe("compressed-body");
+		const discovery = await rawRequest(`${app.url}/api`, "GET", { cookie: app.cookie, "accept-encoding": "gzip" });
+		expect(discovery.headers["content-encoding"]).toBe("gzip");
+		expect(discovery.headers["x-boot-secret"]).toBeUndefined();
+		expect(gunzipSync(discovery.body).toString()).toBe("editable discovery bytes");
 		const compressed = await rawRequest(`${app.url}/gzip`, "GET", { cookie: app.cookie });
 		expect(compressed.headers["content-encoding"]).toBe("gzip");
 		expect(gunzipSync(compressed.body).toString()).toBe("compressed-body");
@@ -150,6 +154,12 @@ describe("real Bun boot proxy", () => {
 		await expect.poll(async () => (await app.state()).state).toBe("failed");
 		expect((await app.fetch(`${app.url}/health`)).status).toBe(200);
 		expect(await (await app.fetch(`${app.url}/_boot`)).text()).toContain("restart the launcher");
+		const manifest = await fetch(`${app.url}/.well-known/agent.json`);
+		expect(manifest.status).toBe(200);
+		expect(await manifest.json()).toHaveProperty("endpoints./api/revert.post.description");
+		const head = await fetch(`${app.url}/.well-known/agent.json`, { method: "HEAD" });
+		expect(head.status).toBe(200);
+		expect(await head.text()).toBe("");
 		expect((await app.fetch(app.url)).status).toBe(503);
 		expect(app.processHandle.exitCode).toBeNull();
 	});

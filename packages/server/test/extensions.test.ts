@@ -76,7 +76,7 @@ export default api => {${core ? "api.mount(CoreApi,coreHandlers(api));" : ""}api
 		]),
 	);
 	expect((await (await get("/api")).json()).paths["/api/example"].get.description).toContain("zz-example.ts");
-	expect((await (await fetch(`${app.url}/.well-known/agent.json`)).json()).endpoints["/api/example"]).toBeDefined();
+	expect((await (await fetch(`${app.url}/.well-known/agent.json`)).json()).endpoints["/api/example"]).toBeUndefined();
 	await expect
 		.poll(async () =>
 			(await (await get("/api/events?since=0&types=ext.*")).json()).items.map((event: { type: string }) => event.type),

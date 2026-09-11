@@ -23,7 +23,14 @@ import {
 	Semaphore,
 	type Scope,
 } from "effect";
-import { FetchHttpClient, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import {
+	FetchHttpClient,
+	type HttpClient,
+	HttpRouter,
+	HttpServer,
+	HttpServerRequest,
+	HttpServerResponse,
+} from "effect/unstable/http";
 import { BootChannel, type KernelError, layer as channelLayer } from "./kernel/boot-channel.ts";
 import { initialize } from "./ext/core/schema.ts";
 import { migrate } from "./kernel/migrations.ts";
@@ -116,6 +123,7 @@ const server = Effect.gen(function* () {
 						| Topics
 						| Lifecycle
 						| Pages
+						| HttpClient.HttpClient
 						| HttpPlatform
 						| Crypto.Crypto
 						| FileSystem.FileSystem
@@ -317,11 +325,16 @@ const server = Effect.gen(function* () {
 	return yield* program.pipe(
 		Effect.provide(
 			Layer.mergeAll(
-				channelLayer.pipe(Layer.provide(FetchHttpClient.layer)),
+				channelLayer,
 				lifecycleLayer,
 				BunHttpServer.layer({ hostname: "127.0.0.1", port, idleTimeout: 0, gracefulShutdownTimeout: "1500 millis" }),
 			),
 		),
 	);
-}).pipe(Effect.scoped, Effect.provide(BunServices.layer), Effect.provideService(Logger.LogToStderr, true));
+}).pipe(
+	Effect.scoped,
+	Effect.provide(FetchHttpClient.layer),
+	Effect.provide(BunServices.layer),
+	Effect.provideService(Logger.LogToStderr, true),
+);
 server.pipe(BunRuntime.runMain);

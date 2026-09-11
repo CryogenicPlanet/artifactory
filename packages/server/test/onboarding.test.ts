@@ -14,9 +14,12 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	await app.ready(first);
 	const manifest = await (await fetch(app.url + "/.well-known/agent.json")).json();
 	const discovery = await (await fetch(app.url + "/api", { headers: { cookie: first } })).json();
-	expect(manifest.endpoints).toEqual(discovery.paths);
-	expect(manifest.components).toEqual(discovery.components);
-	for (const path of ["/api", "/api/ext", "/init", "/init.md", "/.well-known/agent.json"]) {
+	for (const [path, operations] of Object.entries(manifest.endpoints))
+		expect(discovery.paths[path]).toEqual(operations);
+	expect(discovery.components.securitySchemes).toMatchObject(manifest.components.securitySchemes);
+	expect(manifest.endpoints["/api/messages"]).toBeUndefined();
+	expect(manifest).toMatchObject({ api_url: "/api", recovery_url: "/_boot" });
+	for (const path of ["/api", "/api/ext", "/init", "/init.md"]) {
 		expect(discovery.paths[path].get.description.length).toBeGreaterThan(20);
 		expect(Object.keys(discovery.paths[path])).toEqual(["get"]);
 	}
@@ -27,8 +30,7 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	expect(Object.keys(discovery.paths["/init.md"].get.responses["200"].content)).toEqual(["text/markdown"]);
 	expect(discovery.paths["/api"].get.description).toContain("Requires read");
 	expect(discovery.paths["/api/ext"].get.description).toContain("Requires read");
-	for (const path of ["/init", "/init.md", "/.well-known/agent.json"])
-		expect(discovery.paths[path].get.description).toContain("Public");
+	for (const path of ["/init", "/init.md"]) expect(discovery.paths[path].get.description).toContain("Public");
 	for (const [path, method, access] of [
 		["/auth/enroll", "post", "public"],
 		["/auth/enroll/{id}", "post", "device-secret"],
@@ -110,6 +112,9 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	expect(registered.headers.get("x-comms-init-stale")).toBeNull();
 	expect(registered.headers.get("x-comms-init-version")).toBe(beforeExtension);
 	expect(await registered.text()).toContain("GET /api/orientation-example");
+	const updatedDiscovery = await (await fetch(app.url + "/api", { headers: { cookie: first } })).json();
+	expect(updatedDiscovery.paths["/api/orientation-example"].get.description).toContain("Orientation example");
+	expect(await (await fetch(app.url + "/.well-known/agent.json")).json()).toEqual(manifest);
 	const head = await fetch(app.url + "/init", { method: "HEAD" });
 	expect(head.status).toBe(200);
 	expect(await head.text()).toBe("");
