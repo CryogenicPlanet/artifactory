@@ -68,23 +68,21 @@ describe("durable child ownership across kernel lifetimes", () => {
 		});
 	});
 
-	it("never treats same, missing or malformed current/recorded identity as closure", async (test) => {
-		for (const pair of [
-			[firstBoot, firstBoot],
-			[firstBoot, null],
-			[null, nextBoot],
-			["bad", nextBoot],
-			[firstBoot, "bad"],
-			["", nextBoot],
-			[firstBoot, ""],
-		]) {
-			const root = await directory(test);
-			expect(await execute(root, { op: "reserve", bootId: pair[0] })).toMatchObject({ beforeOpen: [{ opened: 0 }] });
-			expect(await execute(root, { op: "recover", bootId: pair[1] })).toMatchObject({
-				result: "Failure",
-				rows: [{ closed: 0 }],
-			});
-		}
+	it.for([
+		{ name: "same kernel", recorded: firstBoot, current: firstBoot },
+		{ name: "missing current kernel", recorded: firstBoot, current: null },
+		{ name: "missing recorded kernel", recorded: null, current: nextBoot },
+		{ name: "malformed recorded kernel", recorded: "bad", current: nextBoot },
+		{ name: "malformed current kernel", recorded: firstBoot, current: "bad" },
+		{ name: "empty recorded kernel", recorded: "", current: nextBoot },
+		{ name: "empty current kernel", recorded: firstBoot, current: "" },
+	])("never infers closure from $name", async ({ recorded, current }, test) => {
+		const root = await directory(test);
+		expect(await execute(root, { op: "reserve", bootId: recorded })).toMatchObject({ beforeOpen: [{ opened: 0 }] });
+		expect(await execute(root, { op: "recover", bootId: current })).toMatchObject({
+			result: "Failure",
+			rows: [{ closed: 0 }],
+		});
 	});
 
 	it("does not trust malformed stored evidence even with a valid new kernel", async (test) => {
