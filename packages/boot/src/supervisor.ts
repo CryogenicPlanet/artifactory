@@ -329,8 +329,9 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			);
 			const recoverAvailable = operationGate.withPermit(
 				Effect.gen(function* () {
-					if ((yield* recoveryIntents(yield* SqlClient.SqlClient)).count > 0)
-						return yield* new ChildError({ code: "cutover_recovery_required" });
+					const intents = yield* recoveryIntents(yield* SqlClient.SqlClient);
+					if (intents.cutover || intents.restore) return yield* new ChildError({ code: "cutover_recovery_required" });
+					// Source conflicts permit saved-good snapshots; withCommitted still blocks new source preparation.
 					if (!(yield* Ref.get(current))) yield* recover;
 				}),
 			);
