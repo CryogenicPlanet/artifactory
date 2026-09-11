@@ -4,6 +4,14 @@ This is the handoff and remaining-work ledger for Codex. Implementation resumed 
 
 ## Active completion goal — 2026-09-11
 
+**New controlling review:** owner explicitly requested [second-pass comment5637214197](https://github.com/CryogenicPlanet/artifactory/pull/1#issuecomment-5637214197). Read `docs/pr-1/second-pass-5d96c1d.md` and updated items25–31 in `pr-comments.md`. These add real requirements; earlier narrow audits are not completion claims. Database PRs and prepared database work remain paused.
+
+Current root `d9224e7` locally integrates shared bootRoute/Origin policy, remaining Tailwind conversion, readonly SQL subprocess cancellation, controlled cron ownership acceptance and an opt-in cutover measurement. Check/build and fresh reviews pass. Full actualNode22.22.3/two-worker suite passes717tests across179files in514.26s at `/tmp/comms-base-final-full.log`; one opt-in measurement test/file is skipped. Measurement and temporary two-agent workflow remain unrun. This accepts the integrated changes, not the new second-pass requirements. Last pushed `5c3834f` passes712/712177files in Linux34618631417, image and actualQEMU34618631321. Earlier854e18c HTTP507 cause remains unknown.
+
+Second-pass isolated lanes: mention punctuation/OR read marks; extension collision isolation/error declaration; freeze finalizers/queue budget; sampled storage admission; pages errors/board CSP; lowercase enrollment/persistent build cache/human constant. Read-only recovery/legacy-intent and server signal/ctx.read audits precede those changes. Parent alone integrates; no test subprocesses run beside the parent full suite. BootRoute and SQL read findings already have current local fixes, but newer findings remain open. Boot size12,194lines/95files remains above the approximate target.
+
+Protected documents changed externally during this continuation: `pr-comments.md` was revised and `second-pass-5d96c1d.md` added. Neither was edited by this work. Preserve all current owner files; new inventory `/tmp/comms-base-owner-hashes-second-pass.json` supplements, never replaces, prior inventories.
+
 The owner requested finishing review changes, then completing the build plan against the spec. The broader goal remains active. **Base first:** the owner explicitly paused advancement of PRs #2–4 and later database work until PR #1 is finished. Prepared database commits remain preserved and unintegrated.
 
 Owner-file preservation: 15 of the original 16 files still match `/tmp/comms-takeover-owner-hashes.json`. The owner revised `docs/database.md` and added `docs/pr-1/stack-review-2b3e365.md`; both are preserved. The current 17-file inventory is `/tmp/comms-base-owner-hashes-854e18c.json`. The original inventory remains unchanged. Earlier claims that all 16 still matched at `854e18c` were incorrect.

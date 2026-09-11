@@ -4,6 +4,8 @@ The lead owns integration and acceptance. Writers use isolated checkouts; only t
 
 ## Goal and verified baseline
 
+**Current priority:** finish the owner's [second-pass PR1 review](https://github.com/CryogenicPlanet/artifactory/pull/1#issuecomment-5637214197), including items25–31 in `docs/pr-1/pr-comments.md`, before any database-stack advancement. The new report supersedes earlier narrow completion audits. Isolated changes cover mention delivery/read marks, route collision isolation, freeze cleanup and queueing, storage sampling, failed-recovery access, and the listed smaller API/security/extension issues. Shared bootRoute, UI utility conversion and readonly SQL cancellation are locally integrated at `d9224e7`; check/build/freshreview and actualNode22.22.3/two-worker full suite pass717tests/179files in514.26s, with the opt-in measurement skipped. New second-pass changes and final workflow evidence remain pending. The detailed live handoff is the leading scratchpad section.
+
 The active owner request is to finish the PR #1 review changes, then complete the build plan against the spec. Passing tests alone do not establish either milestone.
 
 **Base-first sequencing:** the owner explicitly stopped advancement of the database stack until PR #1 is finished. PRs #2–4 and the prepared migration/remote-client commits are paused. Current work is the fresh numbered-review audit, required boot-route/Origin consolidation, and exact-head Linux/image/QEMU acceptance. The QEMU run at `854e18c` failed its first message with HTTP507 before reboot; the cause is not yet established. Preserve its diagnostic evidence and do not treat a later green run as an explanation.
