@@ -48,6 +48,7 @@ export class EditRejected extends Schema.TaggedError<EditRejected>()("EditReject
 		"invalid_path",
 		"not_pinned",
 		"staging_not_empty",
+		"lock_recovery_conflict",
 	]),
 	holder: Schema.NullOr(Lock),
 	transitions: Schema.Array(Transition),
@@ -59,7 +60,7 @@ export class EditRejected extends Schema.TaggedError<EditRejected>()("EditReject
 /** Supplied only by authenticated edit HTTP mutations; checked under the lock's SQL admission transaction. */
 export class EditAuthority extends Context.Service<
 	EditAuthority,
-	{ readonly kind: "human" | "agent"; readonly id: string; readonly expiresAt: number }
+	{ readonly kind: "human" | "agent"; readonly id: string; readonly expiresAt: number; readonly repairLock?: boolean }
 >()("comms/boot/EditAuthority") {}
 export const authorityLayer = (authority: EditAuthority["Service"]) => Layer.succeed(EditAuthority, authority);
 
@@ -180,6 +181,37 @@ const make = Effect.gen(function* () {
 					const authority = checkAuthority ? Option.getOrNull(yield* Effect.serviceOption(EditAuthority)) : null;
 					if (authority && !(yield* editAuthorityActive(sql, authority, now)))
 						return reject("authority_expired", lock, transitions);
+					if (authority?.repairLock) {
+						// A failed recovery must not let expiry or release discard journal-owned staging.
+						const owners = yield* sql`SELECT lock_id AS id, family, 0 AS source FROM cutover
+							UNION ALL SELECT lock_id AS id, lock_family AS family, 0 AS source FROM db_restore_requests
+							WHERE phase IN ('authorized','restoring','working','rollback') OR lock_id IS NOT NULL OR lock_family IS NOT NULL
+							UNION ALL SELECT lock_id AS id, NULL AS family, 1 AS source FROM source_batches
+							WHERE state='publishing'`.pipe(
+							Effect.flatMap(
+								Schema.decodeUnknownEffect(
+									Schema.Array(
+										Schema.Struct({
+											id: Schema.NullOr(Schema.String),
+											family: Schema.NullOr(Schema.String),
+											source: Schema.Literals([0, 1]),
+										}),
+									),
+								),
+							),
+						);
+						if (
+							owners.length > 1 ||
+							owners.some(
+								(owner) =>
+									!lock?.cutover_in_flight ||
+									owner.id !== lock.id ||
+									(!owner.source && owner.family !== lock.holder_family),
+							) ||
+							(lock && !lock.cutover_in_flight && lock.reset_pin !== 0)
+						)
+							return reject("lock_recovery_conflict", lock, transitions);
+					}
 					if (lock && !lock.cutover_in_flight && lock.expires <= now) {
 						transitions.push(yield* drop(lock, "expired"));
 						lock = null;

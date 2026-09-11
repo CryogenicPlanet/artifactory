@@ -98,23 +98,28 @@ it(
 				).status,
 			).toBe(503);
 		}
+		expect(await evidence()).toEqual(before);
 		for (const [method, path] of [
 			["POST", "/api/lock"],
 			["DELETE", "/api/lock"],
-			["POST", "/api/revert"],
 		] as const) {
-			// Retry through the restarted listener, preserving ambiguous publication evidence.
+			// Explicit lock operations may expire unrelated staging; legacy page evidence remains protected.
 			const retry = await fetch(`${restarted.url}${path}`, {
 				method,
 				headers: { cookie, origin: "https://comms.test", "content-type": "application/json" },
 				body: "{}",
 			});
 			expect({ status: retry.status, body: await retry.json() }).toMatchObject({
-				status: 409,
-				body: { error: { code: "topic_move_recovery_required", retriable: false } },
+				status: 200,
+				body: { lock_committed: true, recovery: { status: "failed", error: { code: "recovery_failed" } } },
 			});
 		}
-		expect(await evidence()).toEqual(before);
+		const refused = await restarted.post("/api/revert", {}, cookie);
+		expect(refused.status).toBe(409);
+		expect(await refused.json()).toMatchObject({ error: { code: "topic_move_recovery_required", retriable: false } });
+		const after = await evidence();
+		expect(after.slice(2)).toEqual(before.slice(2));
+		expect(after.slice(0, 2)).toEqual([[], []]);
 		expect(await readFile(join(fixture.root, "app/server.ts"), "utf8")).toBe(source);
 		expect(await readFile(join(fixture.root, "pages/new/index.md"), "utf8")).toBe("physical page");
 	},

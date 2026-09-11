@@ -49,6 +49,11 @@ const policy = {
 		retriable: false,
 		hint: "Conflicting durable recovery journals need operator inspection. Preserve the journals, store and keeper receipts; do not choose or delete an intent to force recovery.",
 	},
+	lock_recovery_conflict: {
+		status: 409,
+		retriable: false,
+		hint: "Edit ownership conflicts with durable recovery journals. Preserve the lock, staging and journals; repair ownership before retrying.",
+	},
 	...childErrorPolicy,
 	authority_expired: {
 		status: 401,

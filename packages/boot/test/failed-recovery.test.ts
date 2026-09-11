@@ -271,3 +271,37 @@ it("returns retriable anonymous page refusal during recovery without relaxing ex
 		(await fetch(`${restarted.url}/p/public/index.md`, { headers: { authorization: "Bearer invalid" } })).status,
 	).toBe(401);
 }, 30000);
+
+it("commits human lock metadata while recovery remains broken and refuses conflicting journal cleanup", async (test) => {
+	const env = await fixture(test);
+	const first = await env.start();
+	await first.stop();
+	await env.sql("INSERT INTO settings(key,value) VALUES('source-revert-result:broken','invalid-json-private-detail')");
+	const restarted = await env.start(false);
+	await expect.poll(restarted.status, { timeout: 10000 }).toMatchObject({ child: { state: "failed" } });
+	const post = { method: "POST", headers: { "content-type": "application/json" }, body: "{}" };
+	const acquired = await restarted.call(`${restarted.url}/_boot/lock`, post);
+	expect(acquired.status).toBe(200);
+	const value: unknown = await acquired.json();
+	expect(value).toMatchObject({
+		lock_committed: true,
+		lock: { holder_family: restarted.session.id },
+		recovery: { status: "failed", error: { code: "recovery_failed" } },
+	});
+	expect(JSON.stringify(value)).not.toContain("invalid-json-private-detail");
+	expect(await env.sql("SELECT COUNT(*) AS n FROM edit_lock")).toEqual([{ n: 1 }]);
+	expect(
+		(await restarted.call(`${restarted.url}/_boot/fs/app/nope.ts?reload=0`, { method: "PUT", body: "unsafe" })).status,
+	).toBe(503);
+	const released = await restarted.call(`${restarted.url}/_boot/lock`, { method: "DELETE" });
+	expect(released.status).toBe(200);
+	expect(await released.json()).toMatchObject({ lock: null, lock_committed: true, recovery: { status: "failed" } });
+	expect(await env.sql("SELECT * FROM edit_lock")).toEqual([]);
+	await env.sql("INSERT INTO cutover VALUES(1,1,NULL,NULL,'missing-lock','family','working',NULL)");
+	const journal = await env.sql("SELECT * FROM cutover");
+	const refused = await restarted.call(`${restarted.url}/_boot/lock`, post);
+	expect(refused.status).toBe(409);
+	expect(await refused.json()).toMatchObject({ error: { code: "lock_recovery_conflict" } });
+	expect(await env.sql("SELECT * FROM cutover")).toEqual(journal);
+	expect(await env.sql("SELECT * FROM edit_lock")).toEqual([]);
+}, 30000);

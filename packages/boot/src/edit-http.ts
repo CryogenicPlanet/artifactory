@@ -1,9 +1,10 @@
+import { captureRefusal } from "./auth-primitives.ts";
 import { bootRoute } from "./boot-route.ts";
 import { requestBytes } from "./request-bytes.ts";
 import { editFailure, errorResponse } from "./edit-failure.ts";
 import type { SourceReverts } from "./source-revert.ts";
 import { SourceResetParams } from "./source-reset-schema.ts";
-import { Effect, Schema } from "effect";
+import { Cause, Effect, Schema } from "effect";
 import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth } from "./auth.ts";
 import { assertionProof, authenticate, body, humanSession } from "./auth-http.ts";
@@ -49,12 +50,12 @@ export const editRoute = (
 		if (!identity.scopes.includes("fs")) return yield* new AuthError({ code: "scope_required" });
 		return yield* Effect.gen(function* () {
 			let writable = editing.writable;
-			if (
+			const repairLock =
 				!writable &&
 				identity.kind === "human" &&
-				((route === "/_boot/lock" && ["POST", "DELETE"].includes(request.method)) ||
-					(route === "/_boot/revert" && request.method === "POST"))
-			) {
+				route === "/_boot/lock" &&
+				["POST", "DELETE"].includes(request.method);
+			if (!writable && identity.kind === "human" && route === "/_boot/revert" && request.method === "POST") {
 				yield* humanSession(auth, request);
 				yield* editing.retryRecovery(Effect.asVoid(humanSession(auth, request)));
 				yield* humanSession(auth, request);
@@ -64,15 +65,52 @@ export const editRoute = (
 				if (url.search) return errorResponse("unsupported_query", 400);
 				return HttpServerResponse.jsonUnsafe({ lock: yield* editing.lock.snapshot });
 			}
-			if (!writable && (request.method !== "GET" || !route.startsWith("/_boot/fs/")))
+			if (!writable && !repairLock && (request.method !== "GET" || !route.startsWith("/_boot/fs/")))
 				return errorResponse("editing_unavailable", 503);
+			if (writable && route === "/_boot/lock" && ["POST", "DELETE"].includes(request.method))
+				yield* editing.retryRecovery(Effect.asVoid(authenticate(auth, request)));
 			// Failed recovery permits committed-source diagnostics, without lock expiry or staged-overlay mutation.
-			const known = writable ? (yield* editing.lock.inspect).value : null;
+			const known = writable ? (yield* editing.lock.inspect).value : repairLock ? yield* editing.lock.snapshot : null;
 			const owner = (): Ownership => ({ id: known?.id ?? "", family: identity.id });
 			const authoritative = <A, E, R>(operation: Effect.Effect<A, E, R>) =>
 				Effect.gen(function* () {
 					const current = yield* authenticate(auth, request);
-					return yield* operation.pipe(Effect.provideService(EditAuthority, current));
+					return yield* operation.pipe(
+						Effect.provideService(EditAuthority, { ...current, ...(repairLock ? { repairLock: true } : {}) }),
+					);
+				});
+			const lockResponse = <A, E, R>(operation: Effect.Effect<A, E, R>) =>
+				Effect.gen(function* () {
+					const result = yield* operation.pipe(captureRefusal(Schema.is(EditRejected)));
+					if (
+						result._tag === "Failure" &&
+						["lock_recovery_conflict", "authority_expired", "invalid_ttl"].includes(result.failure.code)
+					)
+						return yield* Effect.fail(result.failure);
+					const recovery = repairLock
+						? yield* editing.retryRecovery(Effect.asVoid(humanSession(auth, request))).pipe(
+								Effect.as({ status: "ready" as const }),
+								Effect.catchCause((cause) =>
+									Cause.hasInterruptsOnly(cause)
+										? Effect.failCause(cause)
+										: Effect.succeed({
+												status: "failed" as const,
+												error: {
+													code: "recovery_failed",
+													message: "Lock operation committed; recovery still needs repair.",
+													hint: "Inspect /_boot/status and recovery journals before retrying.",
+													retriable: false,
+												},
+											}),
+								),
+							)
+						: undefined;
+					const lock = yield* Effect.fromResult(result);
+					if (repairLock) yield* humanSession(auth, request);
+					return HttpServerResponse.jsonUnsafe(
+						{ lock, ...(recovery ? { lock_committed: true, recovery } : {}) },
+						{ headers: { "cache-control": "no-store" } },
+					);
 				});
 			if (route === "/_boot/reset") {
 				if (request.method !== "POST") return errorResponse("method_invalid", 405);
@@ -91,10 +129,7 @@ export const editRoute = (
 					const input = yield* body(BreakLock);
 					const session = yield* humanSession(auth, request);
 					const proof = yield* assertionProof(request);
-					return HttpServerResponse.jsonUnsafe(
-						{ lock: yield* auth.breakLock(input, proof, session.id) },
-						{ headers: { "cache-control": "no-store" } },
-					);
+					return yield* lockResponse(authoritative(auth.breakLock(input, proof, session.id)));
 				}
 				if (url.search) return errorResponse("unsupported_query", 400);
 				if (request.method === "GET") return HttpServerResponse.jsonUnsafe({ lock: known });
@@ -103,12 +138,16 @@ export const editRoute = (
 						Schema.Struct({ ttl: Schema.optionalKey(Schema.Int), note: Schema.optionalKey(Schema.String) }),
 					);
 					if ((input.note?.length ?? 0) > 1000) return errorResponse("invalid_note", 400);
-					return HttpServerResponse.jsonUnsafe({
-						lock: (yield* authoritative(editing.lock.acquire(identity.id, identity.agent, input))).value,
-					});
+					return yield* lockResponse(
+						authoritative(editing.lock.acquire(identity.id, identity.agent, input)).pipe(
+							Effect.map((outcome) => outcome.value),
+						),
+					);
 				}
 				if (request.method === "DELETE")
-					return HttpServerResponse.jsonUnsafe({ lock: (yield* authoritative(editing.lock.release(owner()))).value });
+					return yield* lockResponse(
+						authoritative(editing.lock.release(owner())).pipe(Effect.map((outcome) => outcome.value)),
+					);
 				return errorResponse("method_invalid", 405);
 			}
 			if (route === "/_boot/revert") {

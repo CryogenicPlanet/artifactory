@@ -4,10 +4,11 @@ import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
-import { EditLock, layer as rawEditLockLayer } from "../../src/edit-lock.ts";
+import { EditAuthority, EditLock, layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 
 const layer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const Input = Schema.Struct({
+	repair: Schema.optional(Schema.Boolean),
 	op: Schema.Literals([
 		"init",
 		"acquire",
@@ -85,7 +86,17 @@ const main = Effect.gen(function* () {
 			Effect.succeed({ error: error.code, holder: error.holder, transitions: error.transitions }),
 		),
 	);
-	const result = yield* operation.pipe(
+	const guarded = input.repair
+		? operation.pipe(
+				Effect.provideService(EditAuthority, {
+					kind: "human",
+					id: "repair",
+					expiresAt: Number.MAX_SAFE_INTEGER,
+					repairLock: true,
+				}),
+			)
+		: operation;
+	const result = yield* guarded.pipe(
 		Effect.provide(layer.pipe(Layer.provideMerge(SqliteClient.layer({ filename, disableWAL: true })))),
 	);
 	yield* Console.log(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(result ?? null));

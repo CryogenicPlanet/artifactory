@@ -32,6 +32,50 @@ async function fixture(test: TestContext) {
 const owner = (lock: Lock) => ({ id: lock.id, family: lock.holder_family });
 
 describe("durable edit ownership and staging", () => {
+	it.for(["cutover", "restore", "source", "ownerless-source"])(
+		"refuses repair expiry under contradictory %s ownership",
+		async (kind, test) => {
+			const env = await fixture(test);
+			const lock = await env.acquire();
+			await env.call({ op: "stage", ...owner(lock) });
+			await env.sql("INSERT INTO sessions(id,hash,created_at,expires_at) VALUES('repair','repair',0,9999999999999)");
+			await env.sql("UPDATE edit_lock SET expires=0");
+			if (kind === "cutover")
+				await env.sql(`INSERT INTO cutover VALUES(1,1,NULL,NULL,'${lock.id}','${lock.holder_family}','working',NULL)`);
+			if (kind === "restore")
+				await env.sql(
+					`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq,lock_id,lock_family) VALUES('restore','hash','repair','missing','failed',0,'${lock.id}','${lock.holder_family}')`,
+				);
+			if (kind === "source")
+				await env.sql(`INSERT INTO source_batches VALUES('source','${lock.id}','boot',0,'publishing')`);
+			if (kind === "ownerless-source")
+				await env.sql("INSERT INTO source_batches VALUES('source',NULL,'boot',0,'publishing')");
+			const before = await env.sql("SELECT * FROM staging");
+			for (const op of ["acquire", "release", "break"])
+				expect(await env.call({ op, ...owner(lock), repair: true })).toMatchObject({
+					error: "lock_recovery_conflict",
+					transitions: [],
+				});
+			expect(await env.sql("SELECT * FROM staging")).toEqual(before);
+			expect(await env.sql("SELECT id,expires FROM edit_lock")).toEqual([{ id: lock.id, expires: 0 }]);
+		},
+	);
+
+	it("defers repair break for a matching journal pin without discarding staging", async (test) => {
+		const env = await fixture(test);
+		const lock = await env.acquire();
+		await env.call({ op: "stage", ...owner(lock) });
+		await env.call({ op: "pin", ...owner(lock) });
+		await env.sql("INSERT INTO sessions(id,hash,created_at,expires_at) VALUES('repair','repair',0,9999999999999)");
+		await env.sql(`INSERT INTO cutover VALUES(1,1,NULL,NULL,'${lock.id}','${lock.holder_family}','working',NULL)`);
+		const before = await env.sql("SELECT * FROM staging");
+		expect(await env.call({ op: "break", ...owner(lock), repair: true })).toMatchObject({
+			value: { id: lock.id, cutover_in_flight: 1, pending_release: "broken" },
+			transitions: [{ deferred: true }],
+		});
+		expect(await env.sql("SELECT * FROM staging")).toEqual(before);
+	});
+
 	it("serializes independent process contenders with exactly one owner", async (test) => {
 		const env = await fixture(test);
 		const results = await Promise.all([
