@@ -54,6 +54,15 @@ it("loads optional profile, roster and deletion policies through public capabili
 	expect((await fetch(app.url + "/api/agents")).status).toBe(401);
 	expect((await call("/api/me", "PATCH", reader, { status: "blocked" })).status).toBe(403);
 	expect((await call("/api/me", "PATCH", first, { agent: "other" })).status).toBe(400);
+	const oversized = await fetch(app.url + "/api/me", {
+		method: "PATCH",
+		headers: { authorization: `Bearer ${first}`, "content-type": "application/json" },
+		body: " ".repeat(4096) + JSON.stringify({ status: "valid but oversized" }),
+	});
+	expect(oversized.status).toBe(400);
+	const missing = await call("/api/topics/never-created", "DELETE", first);
+	expect(missing.status).toBe(404);
+	expect(await missing.json()).toMatchObject({ error: { code: "topic_not_found", retriable: false } });
 	const changed = await call(
 		"/api/me",
 		"PATCH",

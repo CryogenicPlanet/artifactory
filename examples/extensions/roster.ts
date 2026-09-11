@@ -1,4 +1,4 @@
-import { DateTime, Effect, Schema } from "effect";
+import { DateTime, Effect, Schema, Stream } from "effect";
 import type { Api, EventContext } from "../../packages/server/src/kernel/extension-api.ts";
 
 const Profile = Schema.Struct({
@@ -18,7 +18,7 @@ const invalid = () =>
 			error: {
 				code: "profile_invalid",
 				message: "Invalid profile update.",
-				hint: "Send only emoji (at most 32 characters), color (#RRGGBB), or status (at most 280 characters). No query parameters.",
+				hint: "Send only emoji (at most 32 characters), color (#RRGGBB), or status (at most 280 characters). No query parameters; JSON is limited to 4 KiB and five seconds.",
 				retriable: false,
 			},
 		},
@@ -62,8 +62,21 @@ export default function roster(api: Api) {
 			handler: (request, ctx) =>
 				Effect.gen(function* () {
 					if (Object.keys(ctx.query).length) return invalid();
-					const decoded = yield* request.json.pipe(
-						Effect.flatMap(Schema.decodeUnknownEffect(Patch, { onExcessProperty: "error" })),
+					let bytes = 0;
+					const decoded = yield* request.stream.pipe(
+						Stream.tap((chunk) =>
+							Effect.try(() => {
+								bytes += chunk.byteLength;
+								if (bytes > 4096) throw new Error("Profile request too large");
+							}),
+						),
+						Stream.runCollect,
+						Effect.flatMap((chunks) =>
+							Schema.decodeEffect(Schema.fromJsonString(Patch), { onExcessProperty: "error" })(
+								Buffer.concat(chunks).toString("utf8"),
+							),
+						),
+						Effect.timeout("5 seconds"),
 						Effect.result,
 					);
 					if (decoded._tag === "Failure") return invalid();

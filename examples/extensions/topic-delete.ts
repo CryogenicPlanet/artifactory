@@ -4,6 +4,26 @@ import type { Api, RequestContext } from "../../packages/server/src/kernel/exten
 export class TopicDeleteError extends Schema.TaggedError<TopicDeleteError>()("TopicDeleteError", {
 	code: Schema.Literals(["input_invalid", "topic_not_found", "author_required"]),
 }) {}
+const refusals = {
+	input_invalid: {
+		status: 400,
+		message: "Invalid topic deletion request.",
+		hint: "Use a valid topic path, no query parameters, and an Idempotency-Key of 1–200 characters when supplied.",
+	},
+	topic_not_found: {
+		status: 404,
+		message: "The topic does not exist or is already deleted.",
+		hint: "Check the topic path. To recover an uncertain successful deletion, retry with its original Idempotency-Key.",
+	},
+	author_required: {
+		status: 403,
+		message: "This instance is not the sole author of the subtree.",
+		hint: "Use the instance that authored every retained message, or a human session. Empty and page-only topics require a human.",
+	},
+} as const satisfies Record<
+	TopicDeleteError["code"],
+	{ readonly status: number; readonly message: string; readonly hint: string }
+>;
 const validTopic = (path: string) =>
 	path.length <= 200 && /^@?[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(path);
 export const TopicDeletion = Schema.Struct({ path: Schema.String, deleted_at: Schema.Int, seq: Schema.Int });
@@ -117,12 +137,12 @@ export default function topicDelete(api: Api) {
 							{
 								error: {
 									code: error.code,
-									message: "Topic deletion refused.",
-									hint: "Use a valid existing topic, your sole-author instance or a human session; preserve the idempotency key on retry.",
+									message: refusals[error.code].message,
+									hint: refusals[error.code].hint,
 									retriable: false,
 								},
 							},
-							{ status: error.code === "author_required" ? 403 : error.code === "topic_not_found" ? 404 : 400 },
+							{ status: refusals[error.code].status },
 						),
 					),
 				),
