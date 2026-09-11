@@ -159,8 +159,23 @@ it.for(["rehearsal", "published", "accepted"] as const)(
 		);
 		const state = await fixture.initialize();
 		await writeFile(armed, "pause reset only");
-		const pending = state.request().catch(() => null);
-		await expect.poll(() => readFile(reached, "utf8").catch(() => ""), { timeout: 15000 }).toBe(boundary);
+		const request = state.request();
+		// Observe refusal/transport failure before the hook instead of hiding it behind a marker timeout.
+		const pending = request.catch(() => null);
+		try {
+			await Promise.race([
+				expect.poll(() => readFile(reached, "utf8").catch(() => ""), { timeout: 15000 }).toBe(boundary),
+				request.then(async (response) => {
+					throw new Error(`Reset completed before ${boundary}: HTTP ${response.status} ${await response.text()}`);
+				}),
+			]);
+		} catch (cause) {
+			const output = state.app
+				.output()
+				.replace(/\/setup is open, code \S+/g, "/setup code [redacted]")
+				.replace(/[A-Za-z0-9_-]{43,}/g, "[redacted]");
+			throw new Error(`Reset did not reach ${boundary}. Boot output: ${output}`, { cause });
+		}
 		expect(await fixture.sql("SELECT cutover_in_flight,reset_pin FROM edit_lock", "boot.db")).toEqual([
 			{ cutover_in_flight: 1, reset_pin: 1 },
 		]);
