@@ -57,11 +57,13 @@ wait_guest() {
   return 1
 }
 wait_guest
+printf 'Guest SSH ready at %s\n' "$(date -u +%FT%TZ)"
 # Transfer the built Linux runtime and its exact resolved dependency tree, not macOS binaries.
 tar -czf "$vm_dir/runtime.tgz" --exclude='packages/*/test' \
   package.json bun.lock node_modules packages scripts/reboot-guest.py
 scp -q -i "$vm_dir/key" -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
   "$vm_dir/runtime.tgz" "$(command -v bun)" ubuntu@127.0.0.1:/home/ubuntu/
+printf 'Guest runtime transferred at %s\n' "$(date -u +%FT%TZ)"
 ssh "${ssh_options[@]}" ubuntu@127.0.0.1 \
   'sudo install -m755 /home/ubuntu/bun /usr/local/bin/bun; mkdir comms; tar -xzf runtime.tgz -C comms; cd comms; test "$(bun --revision)" = "1.4.0+34cbb9a40"; python3 - <<'"'"'PY'"'"'
 import json

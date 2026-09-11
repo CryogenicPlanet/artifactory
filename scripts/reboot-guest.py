@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import sqlite3
@@ -58,6 +59,40 @@ def messages(topic=None):
     return result['rows']
 
 
+def diagnostic():
+    # Only structured state and counts: never print cookies, setup codes or raw logs.
+    try:
+        status = http('/_boot/status')['child']
+        print('Guest child:', {key: status.get(key) for key in ('state', 'error', 'attempt')}, flush=True)
+    except urllib.error.HTTPError as error:
+        code = None
+        try:
+            value = json.load(error).get('error', {}).get('code')
+            if isinstance(value, str) and re.fullmatch(r'[a-z_]{1,64}', value):
+                code = value
+        except (ValueError, AttributeError):
+            pass
+        print('Guest status refused:', error.code, code, flush=True)
+    except Exception as error:
+        print('Guest status unavailable:', type(error).__name__, flush=True)
+    for name, statement in [
+        ('generations', 'SELECT n,status,good FROM generations ORDER BY n'),
+        ('attempts', 'SELECT opened,closed,COUNT(*) AS count FROM child_attempts GROUP BY opened,closed'),
+    ]:
+        try:
+            print('Guest ' + name + ':', rows(statement), flush=True)
+        except sqlite3.Error as error:
+            print('Guest database diagnostic unavailable:', type(error).__name__, flush=True)
+    log = ROOT / 'reboot-runtime.log'
+    if log.exists():
+        text = log.read_text(errors='replace')
+        print('Guest runtime log summary:', {
+            'bytes': log.stat().st_size,
+            'listener_announced': 'Listening on' in text,
+            'error_codes': sorted(set(re.findall(r'code: [\"\']([a-z_]{1,64})[\"\']', text))),
+        }, flush=True)
+
+
 def wait_for(check, label, seconds=180):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -68,6 +103,7 @@ def wait_for(check, label, seconds=180):
         except (OSError, sqlite3.Error, urllib.error.URLError):
             pass
         time.sleep(0.25)
+    diagnostic()
     raise RuntimeError('Timed out: ' + label)
 
 
@@ -97,6 +133,7 @@ def verify_unreceipted(proof):
 
 def before():
     require(not PROOF.exists(), 'Guest test must start on fresh data')
+    print('Guest initial runtime start:', time.monotonic(), flush=True)
     start()
     wait_for(lambda: rows("SELECT name FROM sqlite_master WHERE name='sessions'"), 'auth schema')
     token = secrets.token_urlsafe(32)
@@ -105,7 +142,9 @@ def before():
     # Fixture setup creates only a hashed session, as existing HTTP transport tests do.
     rows('INSERT INTO sessions(id,hash,created_at,expires_at) VALUES(?,?,0,9999999999999)',
          (secrets.token_hex(16), hashlib.sha256(token.encode()).hexdigest()))
+    print('Guest auth schema ready:', time.monotonic(), flush=True)
     child = wait_for(live, 'initial live child')
+    print('Guest initial child live:', time.monotonic(), flush=True)
     response = http('/api/messages', {'topic': 'reboot-proof', 'body': BODY}, 'guest-reboot-write')
     owners = rows('SELECT id,boot_id,opened,closed,receipt FROM child_attempts WHERE opened=1 AND closed=0')
     require(len(owners) == 1, 'Expected one live child attempt')
