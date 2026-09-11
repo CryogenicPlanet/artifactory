@@ -1,6 +1,7 @@
 import { DateTime, Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { BootChannel, type EventRecord, KernelError } from "../../kernel/boot-channel.ts";
+import { type EventRecord } from "@comms/protocol/events";
+import { BootChannel, KernelError } from "../../kernel/boot-channel.ts";
 import { Lifecycle } from "../../kernel/lifecycle.ts";
 import { publishedTopics } from "./published-topics.ts";
 import { Messages } from "./messages.ts";

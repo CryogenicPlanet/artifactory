@@ -1,5 +1,6 @@
 import { Effect, Ref } from "effect";
-import { type BootChannel, type EventRecord, KernelError } from "./boot-channel.ts";
+import { type EventRecord } from "@comms/protocol/events";
+import { type BootChannel, KernelError } from "./boot-channel.ts";
 
 export interface EventHook<E> {
 	readonly type: string;

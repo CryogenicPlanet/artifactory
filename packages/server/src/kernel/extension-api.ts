@@ -15,7 +15,8 @@ import type { SqlClient } from "effect/unstable/sql";
 import type { Messages } from "../ext/core/messages.ts";
 import type { Publication } from "./publication.ts";
 import type { Identity } from "./identity.ts";
-import type { EventRecord } from "./boot-channel.ts";
+import type { EventRecord } from "@comms/protocol/events";
+
 import type { ExtensionData } from "./extension-data.ts";
 import type { ExtensionEffects } from "./extension-effects.ts";
 import type { Work } from "./extension-work.ts";

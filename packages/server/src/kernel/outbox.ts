@@ -1,6 +1,7 @@
 import { Clock, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { type BootChannel, EventRecord, KernelError } from "./boot-channel.ts";
+import { EventRecord } from "@comms/protocol/events";
+import { type BootChannel, KernelError } from "./boot-channel.ts";
 import { writerGate } from "./database.ts";
 import { poisonUncertainWriter } from "./lifecycle.ts";
 

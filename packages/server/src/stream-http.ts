@@ -1,37 +1,16 @@
-import { errorSchemas } from "./error-contract.ts";
-import { QueryCursor, QueryLimit } from "./query-number.ts";
+import { QueryCursor } from "@comms/protocol/query-number";
 import type { Api as ExtensionApi } from "./kernel/extension-api.ts";
-import type { Api } from "./ext/core/api.ts";
+import type { CoreApi as Api } from "@comms/protocol";
 import { Effect, Layer, Schema, Stream } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
-import { HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { refusal } from "./conversation-request.ts";
-import { EventRecord, KernelError } from "./kernel/boot-channel.ts";
-import { RequestValidation, layer } from "./request-schema.ts";
+import { EventRecord } from "@comms/protocol/events";
+import { KernelError } from "./kernel/boot-channel.ts";
+
+import { layer } from "./request-schema.ts";
 
 const encodeEvent = Schema.encodeSync(Schema.fromJsonString(EventRecord));
-const query = Schema.Struct({
-	since: Schema.optionalKey(QueryCursor),
-	limit: Schema.optionalKey(QueryLimit),
-	topic: Schema.optionalKey(Schema.String),
-	types: Schema.optionalKey(Schema.String),
-	agent: Schema.optionalKey(Schema.String),
-	instance: Schema.optionalKey(Schema.String),
-	level: Schema.optionalKey(Schema.String),
-});
-export const streamGroup = HttpApiGroup.make("stream")
-	.add(
-		HttpApiEndpoint.get("events", "/api/stream", {
-			error: errorSchemas,
-			query,
-			success: Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/event-stream" })),
-		}).annotate(
-			OpenApi.Description,
-			"Tail published events with read scope. Filter by topic subtree, types, agent, instance or level. Resume from since or Last-Event-ID; omitted since begins now. Heartbeats every 10 seconds. App replacement closes the stream; reconnect using the last received event id.",
-		),
-	)
-	.middleware(RequestValidation);
-
 export const streamHandlers = (api: typeof Api, extension: ExtensionApi) =>
 	HttpApiBuilder.group(api, "stream", (handlers) =>
 		handlers.handle("events", ({ query, request }) =>

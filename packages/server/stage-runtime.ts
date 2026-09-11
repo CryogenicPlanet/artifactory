@@ -12,6 +12,10 @@ Effect.gen(function* () {
 	for (const launcher of ["main.ts", "start.ts"]) yield* fs.remove(path.join(target, launcher));
 	for (const file of ["package.json", "bun.lock"])
 		yield* fs.copyFile(path.join(server, "runtime", file), path.join(target, file));
+	const protocol = path.resolve(server, "../protocol");
+	yield* fs.makeDirectory(path.join(target, "protocol"));
+	for (const file of ["src", "docs", "package.json"])
+		yield* fs.copy(path.join(protocol, file), path.join(target, "protocol", file));
 	const ui = path.resolve(server, "../ui");
 	yield* fs.makeDirectory(path.join(target, "ui"));
 	for (const file of ["src", "index.html", "vite.config.ts"])

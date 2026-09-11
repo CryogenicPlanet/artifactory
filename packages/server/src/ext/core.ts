@@ -1,4 +1,5 @@
-import { Api as CoreApi, coreHandlers } from "./core/api.ts";
+import { CoreApi } from "@comms/protocol";
+import { coreHandlers } from "./core/api.ts";
 import type { Api } from "../kernel/extension-api.ts";
 
 /** Core owns the product routes; later extensions can replace them through the same API. */

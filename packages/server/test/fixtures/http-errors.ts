@@ -1,10 +1,10 @@
 import { expect } from "bun:test";
-import { Api } from "../../src/ext/core/api.ts";
+import { Api } from "@comms/protocol";
 import { SystemApi } from "../../src/conversation.ts";
 import { definition as subscriptionApi } from "../../src/ext/subscriptions/index.ts";
 import { respond } from "../../src/ext/subscriptions/response.ts";
 import { SubscriptionError } from "../../src/ext/subscriptions/contract.ts";
-import { ErrorEnvelope } from "../../src/error-contract.ts";
+import { ErrorEnvelope } from "@comms/protocol/errors";
 import { KernelError } from "../../src/kernel/boot-channel.ts";
 import { failure, refusal } from "../../src/conversation-request.ts";
 import { layer as bodyLayer } from "../../src/request-schema.ts";

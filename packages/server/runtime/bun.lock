@@ -5,6 +5,7 @@
     "": {
       "name": "comms-runtime",
       "dependencies": {
+        "@comms/protocol": "workspace:*",
         "@effect/atom-react": "4.0.0-rc.113",
         "@effect/platform-bun": "4.0.0-rc.113",
         "@effect/sql-sqlite-bun": "4.0.0-rc.113",
@@ -21,6 +22,13 @@
         "scheduler": "0.27.0",
         "tailwindcss": "4.3.3",
         "vite": "8.2.2",
+      },
+    },
+    "protocol": {
+      "name": "@comms/protocol",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "4.0.0-rc.113",
       },
     },
   },
@@ -76,6 +84,8 @@
     "@chevrotain/types": ["@chevrotain/types@11.1.2", "", {}, "sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw=="],
 
     "@chevrotain/utils": ["@chevrotain/utils@11.1.2", "", {}, "sha512-4mudFAQ6H+MqBTfqLmU7G1ZwRzCLfJEooL/fsF6rCX5eePMbGhoy5n4g+G4vlh2muDcsCTJtL+uKbOzWxs5LHA=="],
+
+    "@comms/protocol": ["@comms/protocol@workspace:protocol"],
 
     "@effect/atom-react": ["@effect/atom-react@4.0.0-rc.113", "", { "peerDependencies": { "effect": "^4.0.0-rc.113", "react": ">=19.0.0 <20.0.0", "scheduler": ">=0.25.0 <0.28.0" } }, "sha512-P5MA9czW1Lgl6IC0xkCKZop/h6Rh0yxTOu/9ZEX2dzJ01Ff6PklTkx2/70TqQcVRhj6yvJu9cqDz4Xde/FyijA=="],
 

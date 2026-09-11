@@ -1,6 +1,6 @@
 # @comms/server
 
-Editable application API and board host, supervised by boot. Start with `src/server.ts` (child wiring), `src/ext/core/api.ts` (product HTTP contract), and `src/kernel/publication.ts` (transactions and publication). `src/main.ts` launches boot; it must never be used as the child entry.
+Editable application API and board host, supervised by boot. Start with `src/server.ts` (child wiring), `src/ext/core/api.ts` (product HTTP handlers), and `src/kernel/publication.ts` (transactions and publication). `src/main.ts` launches boot; it must never be used as the child entry.
 
 Run `bun run start` at the repository root. Boot defaults to `127.0.0.1:8080`; keep this development listener local. Set an explicit `DATA_DIR` consistently across commands. Start scripts stage an editable runtime seed; existing installations retain their source. Boot prepares dependencies/UI and runs immutable generation snapshots. See [deployment](../../../docs/deployment.md) for the current container limits.
 
@@ -41,3 +41,5 @@ Hourly backups are requested by the editable app at each UTC hour while live. Th
 Retained HttpApi endpoints declare status-specific `{error:{code,message,hint,retriable}}` schemas from the exhaustive app error policy. Typed handler refusals and request validation reach HttpApi's error encoder; raw router boundaries use the same codecs. Known storage-pressure refusals remain 507 and non-retriable, and scope/conflict errors retain actionable hints. Unknown failures or mixed failure/defect causes return a route-named 500 `handler_failed`, omit thrown contents, and are never classified as an unchanged-retry condition. Subscription refusals retain their extension-owned literal policy. Pure interruption stays interrupted; errors after long-poll/SSE headers keep the existing drained-envelope or stream-close behavior.
 
 Filesystem editing is the bootloader's raw recovery interface: `/api/fs/pages/*` aliases `/_boot/fs/pages/*`, and page undo also remains boot-owned. An authorized `fs` caller can repair archived or deleted topic pages even while the app is unavailable. These routes enforce filesystem safety and durability, not the app's topic policy. App-owned operations such as topic move enforce their own topic admission; no separate app page-authoring endpoint or boot-to-app page-policy callback exists.
+
+The shared HTTP declarations and wire schemas live in `@comms/protocol`, copied into the editable runtime at `app/protocol`. Browser and server consume the same endpoint declarations. Canonical topic endpoints encode the complete path as one URL parameter; raw nested topic URLs and the root alias remain accepted by the same handlers.

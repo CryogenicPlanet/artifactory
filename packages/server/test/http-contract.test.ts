@@ -1,6 +1,7 @@
+import { RequestValidation } from "@comms/protocol/request-validation";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { errorSchemas } from "../src/error-contract.ts";
+import { errorSchemas } from "@comms/protocol/errors";
 import { Cause, Data, Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
@@ -8,7 +9,7 @@ import { ConnectionError, SqlError, SqlSyntaxError } from "effect/unstable/sql/S
 import { expect, it } from "vitest";
 import { failure, refusal } from "../src/conversation-request.ts";
 import { KernelError } from "../src/kernel/boot-channel.ts";
-import { boundedRequest, RequestValidation, layer as bodyLayer } from "../src/request-schema.ts";
+import { boundedRequest, layer as bodyLayer } from "../src/request-schema.ts";
 
 it("preserves actionable typed refusals and only retries known infrastructure failures", async () => {
 	const request = HttpServerRequest.fromWeb(new Request("http://localhost/api/messages?secret=not-public"));

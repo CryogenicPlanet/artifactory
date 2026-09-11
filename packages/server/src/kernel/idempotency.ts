@@ -1,6 +1,7 @@
 import { Clock, type Crypto, Effect, Option, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { type EventRecord, KernelError } from "./boot-channel.ts";
+import { type EventRecord } from "@comms/protocol/events";
+import { KernelError } from "./boot-channel.ts";
 
 export interface Idempotency<A> {
 	readonly instance: string;

@@ -11,7 +11,8 @@ it("binds core handlers to public capabilities and protects generic extension mu
 		join(seed, "ext/core.ts"),
 		`import { Effect } from "effect";
 import type { Api } from "../kernel/extension-api.ts";
-import { Api as CoreApi, coreHandlers } from "./core/api.ts";
+import { Api as CoreApi } from "@comms/protocol";
+import { coreHandlers } from "./core/api.ts";
 export default (api: Api) => {
  const calls: Record<string, number> = {};
  const record = (name, effect) => Effect.sync(() => { calls[name] = (calls[name] ?? 0) + 1; }).pipe(Effect.andThen(effect));

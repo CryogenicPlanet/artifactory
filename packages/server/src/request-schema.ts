@@ -1,7 +1,6 @@
-import { errorSchemas } from "./error-contract.ts";
+import { RequestValidation } from "@comms/protocol/request-validation";
 import { Effect, Layer, Schema, Stream } from "effect";
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { HttpApiMiddleware } from "effect/unstable/httpapi";
 import { refusal } from "./conversation-request.ts";
 import { KernelError } from "./kernel/boot-channel.ts";
 
@@ -30,13 +29,6 @@ export const boundedRequest = (maximum: number) =>
 		return bounded;
 	});
 
-/** rc113's HttpApi decoder ignores excess keys and Bun request.text has no byte limit.
- * Validate the declared wire schemas strictly and bound the body before .handle decodes it.
- */
-export class RequestValidation extends HttpApiMiddleware.Service<RequestValidation>()(
-	"comms/server/RequestValidation",
-	{ error: errorSchemas },
-) {}
 export const layer = (maximum: number) =>
 	Layer.succeed(RequestValidation)((handler, { endpoint }) =>
 		refusal(

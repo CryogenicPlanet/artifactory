@@ -1,72 +1,9 @@
+import { EventRecord, EventPage } from "@comms/protocol/events";
+import { KernelErrorCode } from "@comms/protocol/error-code";
 import { Config, Context, Deferred, Effect, Layer, Redacted, Ref, Schema, Semaphore } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
-export const KernelErrorCode = Schema.Literals([
-	"app_schema_unsupported",
-	"author_required",
-	"batch_missing",
-	"backup_budget",
-	"invalid_storage_sample",
-	"unsafe_artifact_path",
-	"boot_unavailable",
-	"boot_handler_failed",
-	"cursor_ahead",
-	"event_cursor_invalid",
-	"event_storage_over_budget",
-	"event_storage_unavailable",
-	"extension_migration_conflict",
-	"extension_migration_invalid",
-	"generation_not_live",
-	"health_context_invalid",
-	"health_create_invalid",
-	"health_failed",
-	"health_read_invalid",
-	"health_response_too_large",
-	"health_route_failed",
-	"idempotency_conflict",
-	"idempotency_migration_invalid",
-	"input_invalid",
-	"message_not_found",
-	"query_invalid",
-	"rehearsal_append_forbidden",
-	"rehearsal_events_forbidden",
-	"rehearsal_reservation_conflict",
-	"scope_required",
-	"sql_unsupported",
-	"sql_query_invalid",
-	"stale_writer",
-	"storage_headroom",
-	"storage_measurement_failed",
-	"topic_move_evidence_invalid",
-	"topic_move_pending",
-	"public_pages_limit",
-	"sql_publication_pending",
-	"topic_archived",
-	"topic_exists",
-	"topic_not_found",
-	"unsupported_media_type",
-	"webhook_response_too_large",
-]);
 export class KernelError extends Schema.TaggedError<KernelError>()("KernelError", { code: KernelErrorCode }) {}
-export const EventRecord = Schema.Struct({
-	seq: Schema.Int,
-	at: Schema.Int,
-	type: Schema.String,
-	level: Schema.Literals(["debug", "info", "warn", "error"]),
-	actor: Schema.String,
-	instance: Schema.NullOr(Schema.String),
-	generation: Schema.Int,
-	request_id: Schema.NullOr(Schema.String),
-	topic: Schema.NullOr(Schema.String),
-	message_id: Schema.NullOr(Schema.String),
-	payload: Schema.Json,
-});
-export const EventPage = Schema.Struct({
-	items: Schema.Array(EventRecord),
-	cursor: Schema.Int,
-	timed_out: Schema.Boolean,
-	drained: Schema.Boolean,
-});
 export interface EventQuery {
 	readonly since?: number;
 	readonly limit: number;

@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { HttpApiSchema } from "effect/unstable/httpapi";
-import { KernelErrorCode, type KernelError } from "./kernel/boot-channel.ts";
+import { KernelErrorCode } from "./error-code.ts";
+
 export const policy = {
 	boot_handler_failed: {
 		status: 500,
@@ -223,7 +224,7 @@ export const policy = {
 		hint: "Change the webhook receiver to return a response under 64 KiB.",
 	},
 } as const satisfies Readonly<
-	Record<KernelError["code"], { readonly status: number; readonly message: string; readonly hint: string }>
+	Record<typeof KernelErrorCode.Type, { readonly status: number; readonly message: string; readonly hint: string }>
 >;
 
 /** The same status-specific envelope codecs describe and encode app refusals. */

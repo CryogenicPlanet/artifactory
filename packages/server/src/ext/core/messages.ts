@@ -1,41 +1,20 @@
+import { Message, MessageInput } from "@comms/protocol/messages";
 import { Publication } from "../../kernel/publication.ts";
 import type { Identity } from "../../kernel/identity.ts";
 import type { PageMoveIO } from "./topic-page-continuation.ts";
 import { Context, Crypto, DateTime, Effect, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { BootChannel, type EventRecord, KernelError } from "../../kernel/boot-channel.ts";
-import { mutateTopic, type TopicMetaInput, type TopicArchiveInput } from "./topic-operations.ts";
-import { mutateMessage, type MessagePatch } from "./message-operations.ts";
+import { type EventRecord } from "@comms/protocol/events";
+import { BootChannel, KernelError } from "../../kernel/boot-channel.ts";
+import { type TopicMetaInput, type TopicArchiveInput } from "@comms/protocol/topic-operations";
+import { mutateTopic } from "./topic-operations.ts";
+import { type MessagePatch } from "@comms/protocol/message-patch";
+import { mutateMessage } from "./message-operations.ts";
 import { publishedMessages } from "./published-messages.ts";
 import { markRead } from "./read-marks.ts";
 import { moveTopic } from "./topic-move.ts";
 import { mentionsIn } from "./message-mentions.ts";
 
-export const Message = Schema.Struct({
-	id: Schema.String,
-	seq: Schema.Int,
-	topic: Schema.String,
-	agent: Schema.String,
-	instance: Schema.String,
-	body: Schema.String,
-	tags: Schema.Array(Schema.String),
-	meta: Schema.JsonObject,
-	created_at: Schema.Int,
-	edited_at: Schema.NullOr(Schema.Int),
-	deleted_at: Schema.NullOr(Schema.Int),
-});
-export const Envelope = Schema.Struct({
-	items: Schema.Array(Message),
-	cursor: Schema.Int,
-	timed_out: Schema.Boolean,
-	drained: Schema.Boolean,
-});
-export const MessageInput = Schema.Struct({
-	topic: Schema.String,
-	body: Schema.String,
-	tags: Schema.optionalKey(Schema.Array(Schema.String)),
-	meta: Schema.optionalKey(Schema.JsonObject),
-});
 export const StoredMessage = Schema.Struct({
 	...Message.fields,
 	tags: Schema.fromJsonString(Schema.Array(Schema.String)),

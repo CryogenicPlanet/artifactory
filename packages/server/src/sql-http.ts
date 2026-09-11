@@ -1,4 +1,4 @@
-import { errorSchemas } from "./error-contract.ts";
+import { errorSchemas } from "@comms/protocol/errors";
 import { Effect, Layer, Schema } from "effect";
 import { HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi";
 import type { SystemApi } from "./conversation.ts";
@@ -7,7 +7,8 @@ import { Publication } from "./kernel/publication.ts";
 import { readSql, queryShape, SqlInput } from "./kernel/sql-read.ts";
 import { SqlRows } from "./kernel/sql-result.ts";
 import { SqlWriteResult } from "./kernel/sql-write.ts";
-import { RequestValidation, layer as bodyLayer } from "./request-schema.ts";
+import { RequestValidation } from "@comms/protocol/request-validation";
+import { layer as bodyLayer } from "./request-schema.ts";
 
 export const sqlGroup = HttpApiGroup.make("sql").add(
 	HttpApiEndpoint.post("query", "/api/sql", {

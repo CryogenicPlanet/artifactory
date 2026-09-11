@@ -1,4 +1,4 @@
-import { policy, encodeError, ErrorEnvelope } from "./error-contract.ts";
+import { policy, encodeError, ErrorEnvelope } from "@comms/protocol/errors";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError";
 import { Cause, Effect, Option, Schema } from "effect";

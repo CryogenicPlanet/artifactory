@@ -11,6 +11,7 @@
 		"start": "bun ../server/stage-runtime.ts && bun dev.ts"
 	},
 	"dependencies": {
+		"@comms/protocol": "workspace:*",
 		"@comms/server": "workspace:*",
 		"@effect/atom-react": "4.0.0-rc.113",
 		"@effect/platform-bun": "4.0.0-rc.113",

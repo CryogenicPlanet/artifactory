@@ -4,7 +4,8 @@ import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Config, Console, Effect, Layer, Ref, Schema } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
-import { BootChannel, layer as channelLayer, EventRecord } from "../../src/kernel/boot-channel.ts";
+import { EventRecord } from "@comms/protocol/events";
+import { BootChannel, layer as channelLayer } from "../../src/kernel/boot-channel.ts";
 import { writerGate } from "../../src/kernel/database.ts";
 export const run = () =>
 	Effect.gen(function* () {

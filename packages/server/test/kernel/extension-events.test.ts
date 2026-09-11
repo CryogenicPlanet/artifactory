@@ -1,6 +1,7 @@
 import { Deferred, Effect, Fiber, Ref } from "effect";
 import { expect, it } from "vitest";
-import { KernelError, type EventRecord } from "../../src/kernel/boot-channel.ts";
+import { type EventRecord } from "@comms/protocol/events";
+import { KernelError } from "../../src/kernel/boot-channel.ts";
 import { runEvents } from "../../src/kernel/extension-events.ts";
 
 const event = (seq: number): typeof EventRecord.Type => ({

@@ -1,13 +1,13 @@
+import { TopicMove } from "@comms/protocol/topic-move";
 import { Crypto, DateTime, Effect, Option, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { type BootChannel, type EventRecord, KernelError } from "../../kernel/boot-channel.ts";
+import { type EventRecord } from "@comms/protocol/events";
+import { type BootChannel, KernelError } from "../../kernel/boot-channel.ts";
 import { validTopic } from "./messages.ts";
 import type { Identity } from "../../kernel/identity.ts";
 import { HealthProbe } from "../../kernel/health-probe.ts";
 import type { Mutate } from "../../kernel/mutate.ts";
 import { PageContinuation, pendingPageMove, type PageMoveIO } from "./topic-page-continuation.ts";
-
-export const TopicMove = Schema.Struct({ from: Schema.String, to: Schema.String, seq: Schema.Int });
 
 export const moveTopic = (
 	sql: SqlClient,

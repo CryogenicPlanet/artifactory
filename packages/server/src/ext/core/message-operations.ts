@@ -1,16 +1,12 @@
+import type { MessagePatch } from "@comms/protocol/message-patch";
 import { DateTime, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { type BootChannel, KernelError } from "../../kernel/boot-channel.ts";
 import { mentionsIn } from "./message-mentions.ts";
 import type { Mutate } from "../../kernel/mutate.ts";
-import { Message, MessageInput, StoredMessage } from "./messages.ts";
+import { Message, MessageInput } from "@comms/protocol/messages";
+import { StoredMessage } from "./messages.ts";
 import type { Identity } from "../../kernel/identity.ts";
-
-export const MessagePatch = Schema.Struct({
-	body: Schema.optionalKey(Schema.String),
-	tags: Schema.optionalKey(Schema.Array(Schema.String)),
-	meta: Schema.optionalKey(Schema.JsonObject),
-});
 
 // Called under Messages' permit through SQL commit and immediate outbox publication.
 export const mutateMessage = (

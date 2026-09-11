@@ -1,5 +1,5 @@
 import { Clock, Effect } from "effect";
-import type { Envelope } from "./messages.ts";
+import type { Envelope } from "@comms/protocol/messages";
 
 /** Waiters share the publication signal and keep the last fully delivered cursor on failure. */
 export const waitForMessages = <E, R>(options: {

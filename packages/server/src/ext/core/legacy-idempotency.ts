@@ -1,6 +1,7 @@
 import { Clock, Crypto, Effect, Option, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { EventRecord, KernelError } from "../../kernel/boot-channel.ts";
+import { EventRecord } from "@comms/protocol/events";
+import { KernelError } from "../../kernel/boot-channel.ts";
 import {
 	lookupIdempotency,
 	operationalInput,

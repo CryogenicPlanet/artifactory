@@ -6,7 +6,8 @@ import { Cause, Console, Crypto, Deferred, Effect, Exit, Fiber, Layer, Ref, Sche
 import { SqlClient, Statement } from "effect/unstable/sql";
 import { Reactivity } from "effect/unstable/reactivity";
 import { Events, eventsSchema, layer as eventsLayer } from "../../../boot/src/events.ts";
-import { BootChannel, type EventRecord, KernelError } from "../../src/kernel/boot-channel.ts";
+import { type EventRecord } from "@comms/protocol/events";
+import { BootChannel, KernelError } from "../../src/kernel/boot-channel.ts";
 import { makeOutboxRelay } from "../../src/kernel/outbox.ts";
 import { HealthProbe, layer as probeLayer } from "../../src/kernel/health-probe.ts";
 import { HttpServerResponse } from "effect/unstable/http";

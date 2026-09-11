@@ -1,6 +1,7 @@
 import { HealthProbe } from "./health-probe.ts";
 import { DateTime, Effect, Option, Ref, Schema } from "effect";
-import { type BootChannel, EventRecord, KernelError } from "./boot-channel.ts";
+import { EventRecord } from "@comms/protocol/events";
+import { type BootChannel, KernelError } from "./boot-channel.ts";
 import { Lifecycle } from "./lifecycle.ts";
 import type { Mutate } from "./mutate.ts";
 import { operationalInput } from "./idempotency.ts";

@@ -1,31 +1,11 @@
-import { errorSchemas } from "../../error-contract.ts";
 import type { Api as ExtensionApi } from "../../kernel/extension-api.ts";
-import { RequestValidation, layer as bodyLayer } from "../../request-schema.ts";
-import { Effect, Layer, Schema } from "effect";
-import { HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi";
-import type { Api } from "./api.ts";
+
+import { layer as bodyLayer } from "../../request-schema.ts";
+import { Effect, Layer } from "effect";
+import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi";
+import type { CoreApi as Api } from "@comms/protocol";
 import { refusal } from "../../conversation-request.ts";
 import { KernelError } from "../../kernel/boot-channel.ts";
-const Me = Schema.Struct({
-	agent: Schema.String,
-	instance: Schema.String,
-	label: Schema.String,
-	kind: Schema.Literals(["agent", "human"]),
-	scopes: Schema.Array(Schema.String),
-	expires_at: Schema.Int,
-});
-export const profilesGroup = HttpApiGroup.make("profiles")
-	.add(
-		HttpApiEndpoint.get("me", "/api/me", {
-			error: errorSchemas,
-			query: Schema.Record(Schema.String, Schema.Never),
-			success: HttpApiSchema.WithHeaders(Me, { "cache-control": Schema.Literal("no-store") }),
-		}).annotate(
-			OpenApi.Description,
-			"Read verified caller identity, granted scopes and credential expiry in epoch milliseconds. Requires read. No credential is returned.",
-		),
-	)
-	.middleware(RequestValidation);
 export const profilesHandlers = (api: typeof Api, extension: ExtensionApi) =>
 	HttpApiBuilder.group(api, "profiles", (handlers) =>
 		handlers.handle("me", ({ request }) =>

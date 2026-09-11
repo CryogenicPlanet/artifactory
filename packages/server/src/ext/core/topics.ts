@@ -1,32 +1,14 @@
+import { TopicSummary } from "@comms/protocol/topics";
 import { Context, Effect, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "../../kernel/boot-channel.ts";
-import { Message, Messages, StoredMessage, validTopic } from "./messages.ts";
+
+import { Messages, StoredMessage, validTopic } from "./messages.ts";
 import type { Identity } from "../../kernel/identity.ts";
 import { publishedTopics } from "./published-topics.ts";
 import { publishedMessages } from "./published-messages.ts";
 import { Pages } from "./pages.ts";
 
-export const TopicSummary = Schema.Struct({
-	path: Schema.String,
-	name: Schema.String,
-	meta: Schema.JsonObject,
-	last_seq: Schema.Int,
-	unread: Schema.Int,
-	archived_at: Schema.NullOr(Schema.Int),
-});
-export const TopicResult = Schema.Struct({
-	path: Schema.String,
-	meta: Schema.JsonObject,
-	archived_at: Schema.NullOr(Schema.Int),
-	archived_by: Schema.NullOr(Schema.String),
-	subtopics: Schema.Array(TopicSummary),
-	messages: Schema.Array(Message),
-	fence: Schema.Int,
-	unread: Schema.Int,
-	index: Schema.NullOr(Schema.String),
-	pages: Schema.Array(Schema.String),
-});
 const StoredTopic = Schema.Struct({ ...TopicSummary.fields, meta: Schema.fromJsonString(Schema.JsonObject) });
 export const makeTopics = (sql: SqlClient.SqlClient, read: Messages["Service"]["read"], pages: Pages["Service"]) => {
 	const detail = (identity: Identity, path: string, depth = 1, archived = false) =>

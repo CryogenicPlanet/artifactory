@@ -4,7 +4,8 @@ import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Clock, Console, Crypto, Effect, Option, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { EventRecord } from "../../src/kernel/boot-channel.ts";
+import { EventRecord } from "@comms/protocol/events";
+
 import {
 	type Idempotency,
 	lookupIdempotency,

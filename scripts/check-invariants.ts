@@ -32,6 +32,7 @@ function checkInvariants() {
 			if (specifier.startsWith("@comms/")) {
 				const dependency = specifier.split("/")[1];
 				const allowed =
+					((owner === "server" || owner === "ui") && dependency === "protocol") ||
 					(owner === "server" && dependency === "boot") ||
 					(owner === "ui" && dependency === "server" && !label.startsWith(`packages${sep}ui${sep}src${sep}`));
 				if (!allowed)

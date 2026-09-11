@@ -1,58 +1,23 @@
-import { errorSchemas } from "../../error-contract.ts";
-import { QueryCursor, QueryLimit, queryInteger } from "../../query-number.ts";
+import { CoreApi as Api } from "@comms/protocol";
+
 import type { Api as ExtensionApi } from "../../kernel/extension-api.ts";
-import { streamGroup, streamHandlers } from "../../stream-http.ts";
-import { RequestValidation, layer as bodyLayer } from "../../request-schema.ts";
-import { profilesGroup, profilesHandlers } from "./profiles-http.ts";
+import { streamHandlers } from "../../stream-http.ts";
+
+import { layer as bodyLayer } from "../../request-schema.ts";
+import { profilesHandlers } from "./profiles-http.ts";
 import { DateTime, Effect, Layer, Schema, Stream } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
-import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { refusal } from "../../conversation-request.ts";
-import { topicManagementGroup, topicManagementHandlers } from "./topic-management-http.ts";
-import { messageGroup, messageHandlers } from "./message-http.ts";
-import { topicsGroup, topicHandlers } from "./topics-http.ts";
+import { topicManagementHandlers } from "./topic-management-http.ts";
+import { messageHandlers } from "./message-http.ts";
+import { topicHandlers } from "./topics-http.ts";
 import { KernelError } from "../../kernel/boot-channel.ts";
-import { Envelope, Message, MessageInput, validTopic } from "./messages.ts";
+import { Envelope } from "@comms/protocol/messages";
+import { validTopic } from "./messages.ts";
 import { waitForMessages } from "./message-wait.ts";
 import { markView } from "./read-view.ts";
 
-const flag = Schema.optionalKey(Schema.Literals(["0", "1"]));
-const query = Schema.Struct({
-	since: Schema.optionalKey(QueryCursor),
-	topic: Schema.optionalKey(Schema.String),
-	recursive: flag,
-	tag: Schema.optionalKey(Schema.String),
-	agent: Schema.optionalKey(Schema.String),
-	q: Schema.optionalKey(Schema.String),
-	mentions: Schema.optionalKey(Schema.String),
-	exclude_self: flag,
-	newest: flag,
-	mark: flag,
-	limit: Schema.optionalKey(QueryLimit),
-	wait: Schema.optionalKey(queryInteger(0, 60)),
-}).annotate({ parseOptions: { onExcessProperty: "error" } });
-const conversationGroup = HttpApiGroup.make("conversation").add(
-	HttpApiEndpoint.post("create", "/api/messages", {
-		error: errorSchemas,
-		payload: MessageInput.annotate({ parseOptions: { onExcessProperty: "error" } }),
-		success: Message,
-	}).annotate(
-		OpenApi.Description,
-		"Create a markdown message and missing topic ancestors. Requires write. Idempotency-Key is scoped to the authenticated instance. Success follows durable event publication.",
-	),
-	HttpApiEndpoint.get("messages", "/api/messages", { error: errorSchemas, query, success: Envelope }).annotate(
-		OpenApi.Description,
-		"Read published messages. since is exclusive and defaults to now; since=0 reads history. newest=1 returns latest limit in ascending sequence order. topic/subtree OR comma-list mentions selects addressed messages; other filters combine with AND. exclude_self=1 and waits exclude this instance. cursor is considered-through, including empty results. Views mark highest returned seq at topic or root; mark=0 peeks. wait up to60 seconds sends whitespace heartbeats and drains on swap.",
-	),
-);
-const boundedConversationGroup = conversationGroup.middleware(RequestValidation);
-export const Api = HttpApi.make("comms")
-	.add(topicsGroup)
-	.add(topicManagementGroup)
-	.add(messageGroup)
-	.add(profilesGroup)
-	.add(streamGroup)
-	.add(boundedConversationGroup);
 const handlers = (extension: ExtensionApi) =>
 	HttpApiBuilder.group(Api, "conversation", (handlers) =>
 		handlers

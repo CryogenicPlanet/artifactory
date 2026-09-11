@@ -1,7 +1,8 @@
 import { Cause, type Crypto, Effect, Option, Ref, Schema, type Semaphore } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { type BootChannel, EventRecord, KernelError } from "./boot-channel.ts";
+import { EventRecord } from "@comms/protocol/events";
+import { type BootChannel, KernelError } from "./boot-channel.ts";
 import { writerGate } from "./database.ts";
 import { HealthProbe } from "./health-probe.ts";
 import { assertWriterHealthy, poisonUncertainWriter } from "./lifecycle.ts";

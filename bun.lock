@@ -28,11 +28,19 @@
         "effect": "4.0.0-rc.113",
       },
     },
+    "packages/protocol": {
+      "name": "@comms/protocol",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "4.0.0-rc.113",
+      },
+    },
     "packages/server": {
       "name": "@comms/server",
       "version": "0.0.0",
       "dependencies": {
         "@comms/boot": "workspace:*",
+        "@comms/protocol": "workspace:*",
         "@effect/platform-bun": "4.0.0-rc.113",
         "@effect/sql-sqlite-bun": "4.0.0-rc.113",
         "@tailwindcss/browser": "4.3.3",
@@ -47,6 +55,7 @@
       "name": "@comms/ui",
       "version": "0.0.0",
       "dependencies": {
+        "@comms/protocol": "workspace:*",
         "@comms/server": "workspace:*",
         "@effect/atom-react": "4.0.0-rc.113",
         "@effect/platform-bun": "4.0.0-rc.113",
@@ -123,6 +132,8 @@
     "@chevrotain/utils": ["@chevrotain/utils@11.1.2", "", {}, "sha512-4mudFAQ6H+MqBTfqLmU7G1ZwRzCLfJEooL/fsF6rCX5eePMbGhoy5n4g+G4vlh2muDcsCTJtL+uKbOzWxs5LHA=="],
 
     "@comms/boot": ["@comms/boot@workspace:packages/boot"],
+
+    "@comms/protocol": ["@comms/protocol@workspace:packages/protocol"],
 
     "@comms/server": ["@comms/server@workspace:packages/server"],
 

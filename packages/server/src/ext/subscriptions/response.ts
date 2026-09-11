@@ -1,6 +1,6 @@
 import { Cause, Effect, Schema } from "effect";
 import { refusal } from "../../conversation-request.ts";
-import { errorSchema, errorSchemas } from "../../error-contract.ts";
+import { errorSchema, errorSchemas } from "@comms/protocol/errors";
 import { SubscriptionError } from "./contract.ts";
 
 const policy = {

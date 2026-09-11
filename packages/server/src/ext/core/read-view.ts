@@ -1,5 +1,6 @@
 import { Effect } from "effect";
-import type { Message } from "./messages.ts";
+import type { Message } from "@comms/protocol/messages";
+
 import type { RequestContext } from "../../kernel/extension-api.ts";
 
 /** Core and third-party views use the same caller-bound automatic mark operation. */

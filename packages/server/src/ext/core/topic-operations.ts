@@ -1,18 +1,13 @@
+import type { TopicMetaInput, TopicArchiveInput } from "@comms/protocol/topic-operations";
+import { TopicMutation } from "@comms/protocol/topic-operations";
 import { DateTime, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { type BootChannel, type EventRecord, KernelError } from "../../kernel/boot-channel.ts";
+import { type EventRecord } from "@comms/protocol/events";
+import { type BootChannel, KernelError } from "../../kernel/boot-channel.ts";
 import type { Mutate } from "../../kernel/mutate.ts";
 import { validTopic } from "./messages.ts";
 import type { Identity } from "../../kernel/identity.ts";
 
-export const TopicMetaInput = Schema.Struct({ meta: Schema.JsonObject });
-export const TopicArchiveInput = Schema.Struct({ archived: Schema.Boolean });
-export const TopicMutation = Schema.Struct({
-	path: Schema.String,
-	meta: Schema.JsonObject,
-	archived_at: Schema.NullOr(Schema.Int),
-	seq: Schema.Int,
-});
 const StoredTopic = Schema.Struct({
 	deleted_at: Schema.NullOr(Schema.Int),
 	path: Schema.String,

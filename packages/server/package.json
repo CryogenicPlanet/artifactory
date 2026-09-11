@@ -16,6 +16,7 @@
 	},
 	"dependencies": {
 		"@comms/boot": "workspace:*",
+		"@comms/protocol": "workspace:*",
 		"@effect/platform-bun": "4.0.0-rc.113",
 		"@effect/sql-sqlite-bun": "4.0.0-rc.113",
 		"@tailwindcss/browser": "4.3.3",

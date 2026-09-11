@@ -4,7 +4,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Schema } from "effect";
 import { expect, it, type TestContext } from "vitest";
 import { conversation } from "../../fixtures/conversation.ts";
-import { EventRecord } from "../../../src/kernel/boot-channel.ts";
+import { EventRecord } from "@comms/protocol/events";
+
 const Envelope = Schema.Struct({ subscription_id: Schema.String, event: EventRecord });
 const receipt = Schema.Struct({ id: Schema.String, since: Schema.Int });
 async function receiver(test: TestContext) {
