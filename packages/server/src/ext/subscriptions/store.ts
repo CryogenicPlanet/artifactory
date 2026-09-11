@@ -13,7 +13,6 @@ export const makeStore = (ctx: Context) => {
 	);
 	return {
 		visible,
-		admit: ctx.mutate(Effect.void),
 		create: (who: RequestContext, input: Input, key: string | null) =>
 			Effect.gen(function* () {
 				const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Input))(input);
@@ -23,19 +22,18 @@ export const makeStore = (ctx: Context) => {
 							Effect.flatMap(rows),
 							Effect.flatMap((items) =>
 								items[0] && items[0].created_seq > fence
-									? Effect.fail(new SubscriptionError({ code: "subscription_unavailable", status: 503 }))
+									? Effect.fail(new SubscriptionError({ code: "subscription_unavailable" }))
 									: Effect.succeed(items[0]),
 							),
 						),
 					);
 					if (prior) {
 						if ((yield* Schema.encodeEffect(Schema.fromJsonString(Input))(prior.input)) !== encoded)
-							return yield* new SubscriptionError({ code: "idempotency_conflict", status: 409 });
+							return yield* new SubscriptionError({ code: "idempotency_conflict" });
 						return created(prior);
 					}
 				}
-				if ((yield* visible).length >= 32)
-					return yield* new SubscriptionError({ code: "subscription_limit", status: 409 });
+				if ((yield* visible).length >= 32) return yield* new SubscriptionError({ code: "subscription_limit" });
 				const crypto = yield* Crypto.Crypto;
 				const id = "sub_" + Buffer.from(yield* crypto.randomBytes(12)).toString("hex"),
 					at = (yield* DateTime.nowAsDate).getTime(),
@@ -56,7 +54,7 @@ export const makeStore = (ctx: Context) => {
 					),
 				);
 				if (!found || (who.kind !== "human" && found.instance !== who.instance))
-					return yield* new SubscriptionError({ code: "subscription_not_found", status: 404 });
+					return yield* new SubscriptionError({ code: "subscription_not_found" });
 				if (found.deleted_seq === null)
 					yield* ctx.emit("subscription.deleted", {}, (seq) =>
 						sql`UPDATE webhook_subscriptions SET deleted_seq=${seq} WHERE id=${id} AND deleted_seq IS NULL`.pipe(
@@ -64,7 +62,7 @@ export const makeStore = (ctx: Context) => {
 						),
 					);
 				else if (found.deleted_seq > (yield* ctx.read((fence) => Effect.succeed(fence))))
-					return yield* new SubscriptionError({ code: "subscription_unavailable", status: 503 });
+					return yield* new SubscriptionError({ code: "subscription_unavailable" });
 			}),
 		checkpoint: (row: Stored, cursor: number, error: string | null) =>
 			ctx.mutate(

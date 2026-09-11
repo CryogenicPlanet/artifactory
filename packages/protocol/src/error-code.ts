@@ -45,5 +45,4 @@ export const KernelErrorCode = Schema.Literals([
 	"topic_exists",
 	"topic_not_found",
 	"unsupported_media_type",
-	"webhook_response_too_large",
 ]);

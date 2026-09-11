@@ -1,7 +1,7 @@
 import { respond, subscriptionErrors } from "./response.ts";
 import { Effect, Schema, Semaphore } from "effect";
 import type { Api, BackgroundContext } from "../../kernel/extension-api.ts";
-import { FetchHttpClient, HttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
 import { Input, created, SubscriptionError, validate } from "./contract.ts";
 import { makeStore } from "./store.ts";
@@ -64,7 +64,6 @@ export default (api: Api) =>
  UNIQUE(instance,idempotency_key))`,
 			{ protect: true },
 		);
-		const client = yield* HttpClient.HttpClient.pipe(Effect.provide(FetchHttpClient.layer));
 		const gate = yield* Semaphore.make(1);
 		api.mount(
 			definition,
@@ -78,7 +77,7 @@ export default (api: Api) =>
 								const request = yield* HttpServerRequest.HttpServerRequest;
 								const input = yield* Effect.try({
 									try: () => validate(payload),
-									catch: () => new SubscriptionError({ code: "input_invalid", status: 400 }),
+									catch: () => new SubscriptionError({ code: "input_invalid" }),
 								});
 								const key = request.headers["idempotency-key"] ?? null;
 								if (
@@ -89,7 +88,7 @@ export default (api: Api) =>
 											(character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
 										))
 								)
-									return yield* new SubscriptionError({ code: "input_invalid", status: 400 });
+									return yield* new SubscriptionError({ code: "input_invalid" });
 								return yield* gate.withPermit(makeStore(ctx).create(ctx, input, key));
 							}),
 						),
@@ -127,7 +126,7 @@ export default (api: Api) =>
 		);
 		api.on("start", (event: { readonly reason: "live" | "rehearsal" }, ctx: BackgroundContext) =>
 			event.reason === "live"
-				? runDelivery(ctx, makeStore(ctx), gate, client).pipe(Effect.forkScoped, Effect.asVoid)
+				? runDelivery(ctx, makeStore(ctx), gate, api.effects).pipe(Effect.forkScoped, Effect.asVoid)
 				: Effect.void,
 		);
 	});

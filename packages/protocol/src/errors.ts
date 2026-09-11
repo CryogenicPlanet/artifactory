@@ -228,11 +228,6 @@ export const policy = {
 		message: "Rehearsal sequence reservations conflict.",
 		hint: "Fix the edited mutation to use one correctly sized reservation per transaction.",
 	},
-	webhook_response_too_large: {
-		status: 500,
-		message: "The webhook response exceeded its size limit.",
-		hint: "Change the webhook receiver to return a response under 64 KiB.",
-	},
 } as const satisfies Readonly<
 	Record<typeof KernelErrorCode.Type, { readonly status: number; readonly message: string; readonly hint: string }>
 >;

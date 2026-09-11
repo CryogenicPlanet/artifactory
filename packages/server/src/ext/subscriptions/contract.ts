@@ -6,13 +6,12 @@ export class SubscriptionError extends Schema.TaggedError<SubscriptionError>()("
 	code: Schema.Literals([
 		"input_invalid",
 		"idempotency_conflict",
+		"event_cursor_invalid",
 		"subscription_limit",
 		"subscription_not_found",
 		"subscription_unavailable",
 		"webhook_response_too_large",
-		"event_cursor_invalid",
 	]),
-	status: Schema.Literals([400, 404, 409, 503]),
 }) {}
 const Filter = Schema.Struct({
 	topic: Schema.optionalKey(Schema.String),
@@ -50,7 +49,7 @@ export const validate = (input: Input): Input => {
 		url.hash ||
 		input.deliver.url.length > 2048
 	)
-		throw new SubscriptionError({ code: "input_invalid", status: 400 });
+		throw new SubscriptionError({ code: "input_invalid" });
 	const { filter } = input;
 	if (
 		(filter.topic !== undefined && !validTopic(filter.topic)) ||
@@ -61,7 +60,7 @@ export const validate = (input: Input): Input => {
 				filter.types.join(",").length > 512 ||
 				filter.types.some((t) => !/^(?:[a-zA-Z0-9_.-]+\*?|\*)$/.test(t))))
 	)
-		throw new SubscriptionError({ code: "input_invalid", status: 400 });
+		throw new SubscriptionError({ code: "input_invalid" });
 	return {
 		filter: {
 			...(filter.topic === undefined ? {} : { topic: filter.topic }),

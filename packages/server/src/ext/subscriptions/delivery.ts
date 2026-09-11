@@ -1,28 +1,31 @@
 import { Cause, DateTime, Effect, type Semaphore, Stream } from "effect";
-import { FetchHttpClient, type HttpClient, HttpClientRequest } from "effect/unstable/http";
-import type { BackgroundContext } from "../../kernel/extension-api.ts";
+import { FetchHttpClient, HttpClientRequest } from "effect/unstable/http";
+import type { Api, BackgroundContext } from "../../kernel/extension-api.ts";
 import type { makeStore } from "./store.ts";
 import { type Stored, SubscriptionError } from "./contract.ts";
 
 type Event = Effect.Success<ReturnType<BackgroundContext["events"]["query"]>>["items"][number];
-export const deliver = (client: HttpClient.HttpClient, row: Stored, event: Event) =>
+export const deliver = (effects: Pick<Api["effects"], "fetch">, row: Stored, event: Event) =>
 	Effect.gen(function* () {
 		const request = HttpClientRequest.post(row.input.deliver.url).pipe(
 			HttpClientRequest.bodyJsonUnsafe({ subscription_id: row.id, event }),
 			HttpClientRequest.setHeader("x-comms-delivery-id", `${row.id}:${event.seq}`),
 		);
-		const response = yield* client.execute(request);
-		let bytes = 0;
-		if (response.status !== 204 && response.status !== 205)
-			yield* response.stream.pipe(
-				Stream.runForEach((chunk) => {
-					bytes += chunk.byteLength;
-					return bytes > 65536
-						? Effect.fail(new SubscriptionError({ code: "webhook_response_too_large", status: 503 }))
-						: Effect.void;
-				}),
-			);
-		return response.status;
+		return yield* effects.fetch(request, (response) =>
+			Effect.gen(function* () {
+				let bytes = 0;
+				if (response.status !== 204 && response.status !== 205)
+					yield* response.stream.pipe(
+						Stream.runForEach((chunk) => {
+							bytes += chunk.byteLength;
+							return bytes > 65536
+								? Effect.fail(new SubscriptionError({ code: "webhook_response_too_large" }))
+								: Effect.void;
+						}),
+					);
+				return response.status;
+			}),
+		);
 	}).pipe(
 		Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual", credentials: "omit" }),
 		Effect.timeout("2 seconds"),
@@ -31,9 +34,9 @@ export const deliver = (client: HttpClient.HttpClient, row: Stored, event: Event
 /** The start scope cancels this worker and its network requests before replacement jobs begin. */
 export const runDelivery = (
 	ctx: Pick<BackgroundContext, "read" | "events">,
-	store: Pick<ReturnType<typeof makeStore>, "visible" | "admit" | "checkpoint">,
+	store: Pick<ReturnType<typeof makeStore>, "visible" | "checkpoint">,
 	gate: Semaphore.Semaphore,
-	client: HttpClient.HttpClient,
+	effects: Pick<Api["effects"], "fetch">,
 ) =>
 	Effect.gen(function* () {
 		while (true) {
@@ -60,22 +63,25 @@ export const runDelivery = (
 							// Release between deliveries so deletion waits behind only one bounded attempt.
 							const accepted = yield* gate.withPermit(
 								Effect.gen(function* () {
+									// This fresh read checks the durable writer epoch. The gate also excludes deletion
+									// until dispatch finishes; effects.fetch separately admits only live work.
 									const row = (yield* store.visible).find((item) => item.id === previous.id);
 									if (!row || row.deleted_seq !== null) return false;
 									if (!Number.isSafeInteger(event.seq) || event.seq <= row.cursor || event.seq > page.cursor)
-										return yield* new SubscriptionError({ code: "event_cursor_invalid", status: 503 });
+										return yield* new SubscriptionError({ code: "event_cursor_invalid" });
 									const visible =
 										!(row.human === 0 && event.type === "http.request" && event.actor !== row.agent) &&
 										(row.input.filter.agent === undefined || event.actor === row.input.filter.agent);
 									if (visible) {
-										yield* store.admit;
-										const outcome = yield* deliver(client, row, event).pipe(Effect.result);
-										const delivered = outcome._tag === "Success" && outcome.success >= 200 && outcome.success < 300;
+										const outcome = yield* deliver(effects, row, event).pipe(Effect.result);
+										const response = outcome._tag === "Success" ? outcome.success : undefined;
+										if (response?.status === "suppressed") return false;
+										const delivered = response !== undefined && response.value >= 200 && response.value < 300;
 										if (!delivered) {
 											yield* store.checkpoint(
 												row,
 												row.cursor,
-												outcome._tag === "Success" ? `http_${outcome.success}` : "transport_failed",
+												response === undefined ? "transport_failed" : `http_${response.value}`,
 											);
 											return false;
 										}

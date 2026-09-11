@@ -1,14 +1,13 @@
 import { Cause, Effect, Schema } from "effect";
 import { refusal } from "../../conversation-request.ts";
-import { errorSchema, errorSchemas } from "@comms/protocol/errors";
+import { errorSchema, errorSchemas, policy as sharedPolicy } from "@comms/protocol/errors";
+import type { KernelErrorCode } from "@comms/protocol/error-code";
 import { SubscriptionError } from "./contract.ts";
 
 const policy = {
-	input_invalid: { status: 400, hint: "Check /api and supply a valid webhook URL and subscription filter." },
-	idempotency_conflict: {
-		status: 409,
-		hint: "Retry the original unchanged subscription request with its original Idempotency-Key. Use a new key only for a new subscription.",
-	},
+	input_invalid: sharedPolicy.input_invalid,
+	idempotency_conflict: sharedPolicy.idempotency_conflict,
+	event_cursor_invalid: sharedPolicy.event_cursor_invalid,
 	subscription_limit: { status: 409, hint: "Remove an unused subscription before creating another." },
 	subscription_not_found: {
 		status: 404,
@@ -18,16 +17,22 @@ const policy = {
 		status: 503,
 		hint: "Retry the unchanged request with the same Idempotency-Key after publication recovers.",
 	},
-	webhook_response_too_large: { status: 503, hint: "Change the webhook receiver to return a response under 64 KiB." },
-	event_cursor_invalid: {
-		status: 503,
-		hint: "Inspect the subscription event consumer and repair its cursor before retrying.",
-	},
+	webhook_response_too_large: { status: 500, hint: "Change the webhook receiver to return a response under 64 KiB." },
 } as const satisfies Readonly<Record<SubscriptionError["code"], { readonly status: number; readonly hint: string }>>;
-const ownErrors = Object.freeze(
-	SubscriptionError.fields.code.literals.map((code) => errorSchema(code, policy[code].status)),
-);
+const ownCodes = SubscriptionError.fields.code.literals.filter(
+	(code) => code !== "input_invalid" && code !== "idempotency_conflict" && code !== "event_cursor_invalid",
+) satisfies ReadonlyArray<Exclude<SubscriptionError["code"], typeof KernelErrorCode.Type>>;
+const ownErrors = Object.freeze(ownCodes.map((code) => errorSchema(code, policy[code].status)));
 export const subscriptionErrors = Object.freeze([...errorSchemas, ...ownErrors]);
+
+const envelope = <Code extends SubscriptionError["code"]>(code: Code) => ({
+	error: {
+		code,
+		message: "Subscription request failed.",
+		hint: policy[code].hint,
+		retriable: policy[code].status === 503,
+	},
+});
 
 export const respond = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	effect.pipe(
@@ -48,10 +53,10 @@ export const respond = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 				if (own?._tag !== "Fail" || !Schema.is(SubscriptionError)(own.error))
 					return yield* refusal(Effect.failCause(cause));
 				const { code } = own.error;
-				const { status, hint } = policy[code];
-				return yield* Effect.fail({
-					error: { code, message: "Subscription request failed.", hint, retriable: status === 503 },
-				});
+				// Keep shared and extension envelopes distinct in the declared HTTP error union.
+				if (code === "input_invalid" || code === "idempotency_conflict" || code === "event_cursor_invalid")
+					return yield* Effect.fail(envelope(code));
+				return yield* Effect.fail(envelope(code));
 			}),
 		),
 	);

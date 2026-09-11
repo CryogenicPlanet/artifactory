@@ -90,10 +90,11 @@ const core = async () => {
 
 const subscriptions = async () => {
 	const api = subscriptionApi;
-	const known = new SubscriptionError({ code: "subscription_limit", status: 409 });
+	const known = new SubscriptionError({ code: "subscription_limit" });
 	for (const [effect, status, code] of [
 		[Effect.fail(known), 409, "subscription_limit"],
-		[Effect.fail(new SubscriptionError({ code: "event_cursor_invalid", status: 503 })), 503, "event_cursor_invalid"],
+		[Effect.fail(new SubscriptionError({ code: "event_cursor_invalid" })), 500, "event_cursor_invalid"],
+		[Effect.fail(new SubscriptionError({ code: "webhook_response_too_large" })), 500, "webhook_response_too_large"],
 		[Effect.fail(new KernelError({ code: "scope_required" })), 403, "scope_required"],
 		[Effect.fail(new KernelError({ code: "storage_headroom" })), 507, "storage_headroom"],
 		[Effect.fail("private unknown"), 500, "handler_failed"],
@@ -135,7 +136,7 @@ const subscriptions = async () => {
 			);
 			expect(Schema.is(codec)(body), `${code} under ${declaredStatus}`).toBe(Number(declaredStatus) === status);
 		}
-		if (status === 500)
+		if (code === "handler_failed")
 			expect(body).toMatchObject({ error: { message: "Handler failed for GET /api/subscriptions." } });
 		expect(JSON.stringify(body)).not.toContain("private");
 	}
