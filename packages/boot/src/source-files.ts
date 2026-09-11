@@ -42,6 +42,9 @@ const make = (dataDirectory: string) =>
 						: Effect.void;
 				}),
 			);
+		// Physical source diagnostics remain readable while a page move awaits recovery.
+		const committedRead = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+			semaphore.withPermit(Effect.andThen(journal.ready, effect));
 		const guard = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 			semaphore.withPermit(Effect.andThen(journal.ready, Effect.andThen(pageMoveReady(), effect)));
 		const validate = (name: string) =>
@@ -171,9 +174,9 @@ const make = (dataDirectory: string) =>
 				semaphore.withPermit(
 					Effect.andThen(journal.ready, Effect.andThen(available, Effect.andThen(pageMoveReady(id), effect))),
 				),
-			read: (name: string, owner?: Ownership) => guard(read(name, owner)),
+			read: (name: string, owner?: Ownership) => (owner ? guard : committedRead)(read(name, owner)),
 			browse: (name: string, owner?: Ownership) =>
-				guard(
+				(owner ? guard : committedRead)(
 					Effect.gen(function* () {
 						const committed = yield* io.list(name);
 						const items = new Map((committed ?? []).map((item) => [item.name, item]));
@@ -193,7 +196,7 @@ const make = (dataDirectory: string) =>
 						return [...items.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 					}),
 				),
-			history: (name: string) => guard(Effect.andThen(validate(name), journal.history(name))),
+			history: (name: string) => committedRead(Effect.andThen(validate(name), journal.history(name))),
 			previous: (batch: string) => guard(journal.previous(batch)),
 			stage: (owner: Ownership, name: string, content: Uint8Array | null, baseVersion?: string | null) =>
 				guard(

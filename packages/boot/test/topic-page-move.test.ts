@@ -55,7 +55,7 @@ describe("recoverable topic page directory move", () => {
 		expect(await env.call({ op: "prepare" })).toEqual({ page_source: true });
 		expect(await readFile(join(env.root, "pages/old/page.md"), "utf8")).toBe("original page");
 		await expect(stat(join(env.root, "pages/new"))).rejects.toMatchObject({ code: "ENOENT" });
-		expect(await env.call({ op: "read" })).toMatchObject({ error: "publication_pending" });
+		expect(await env.call({ op: "read" })).toEqual([{ name: "old", type: "directory" }]);
 		expect(await env.call({ op: "recover" })).toMatchObject({ error: "publication_pending" });
 		expect(await env.call({ op: "prepare", id: "another" })).toMatchObject({ error: "publication_pending" });
 		await env.call({ op: "abort" });
@@ -76,7 +76,7 @@ describe("recoverable topic page directory move", () => {
 			expect((await stat(join(env.root, "pages/new/target/empty"))).isDirectory()).toBe(true);
 			expect(await readFile(join(env.root, "pages/new/target/page.md"), "utf8")).toBe("original page");
 			expect((await stat(join(env.root, "pages/new/target/page.md"))).mode & 0o777).toBe(0o600);
-			expect(await env.call({ op: "read" })).toMatchObject({ error: "publication_pending" });
+			expect(await env.call({ op: "read" })).toEqual([{ name: "new", type: "directory" }]);
 			await env.call({ op: "finish" });
 			await env.call({ op: "finish" });
 			await writeFile(join(env.root, "pages/new/target/page.md"), "later edit");
@@ -92,7 +92,10 @@ describe("recoverable topic page directory move", () => {
 		await env.call({ op: "prepare", id: "second", from: "new/target", to: "final" });
 		await env.call({ op: "publish", id: "second" });
 		expect(await env.call({ op: "finish" })).toBe(null);
-		expect(await env.call({ op: "read" })).toMatchObject({ error: "publication_pending" });
+		expect(await env.call({ op: "read" })).toEqual([
+			{ name: "final", type: "directory" },
+			{ name: "new", type: "directory" },
+		]);
 		expect(await env.call({ op: "finish", id: "second" })).toBe(null);
 		expect(await env.sql("SELECT state FROM topic_page_moves ORDER BY id")).toEqual([
 			{ state: "completed" },
