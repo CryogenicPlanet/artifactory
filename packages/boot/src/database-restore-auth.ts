@@ -1,3 +1,4 @@
+import { decodeRows } from "./decode-rows.ts";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AuthError } from "./auth.ts";
@@ -19,16 +20,12 @@ export const resolveRestoreTarget = (params: RestoreSelection) =>
 		else {
 			const generation =
 				(yield* sql`SELECT good,snapshot_dir,backup_id FROM generations WHERE n=${params.generation}`.pipe(
-					Effect.flatMap(
-						Schema.decodeUnknownEffect(
-							Schema.Array(
-								Schema.Struct({
-									good: Schema.Int,
-									snapshot_dir: Schema.NullOr(Schema.String),
-									backup_id: Schema.NullOr(Schema.String),
-								}),
-							),
-						),
+					decodeRows(
+						Schema.Struct({
+							good: Schema.Int,
+							snapshot_dir: Schema.NullOr(Schema.String),
+							backup_id: Schema.NullOr(Schema.String),
+						}),
 					),
 				))[0];
 			if (!generation || generation.good !== 1 || generation.snapshot_dir === null)
@@ -37,9 +34,7 @@ export const resolveRestoreTarget = (params: RestoreSelection) =>
 			id = generation.backup_id;
 		}
 		const backup = (yield* sql`SELECT published_through FROM backups WHERE id=${id}`.pipe(
-			Effect.flatMap(
-				Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ published_through: Schema.NullOr(Schema.Int) }))),
-			),
+			decodeRows(Schema.Struct({ published_through: Schema.NullOr(Schema.Int) })),
 		))[0];
 		if (!backup) return yield* new AuthError({ code: "backup_not_found" });
 		if (
@@ -82,7 +77,7 @@ export const makeDatabaseRestoreAuth = <E, R>(
 								return yield* new AuthError({ code: "session_invalid" });
 						});
 						const receipt = (yield* sql`SELECT * FROM db_restore_requests WHERE proof_id=${proof.id}`.pipe(
-							Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(DatabaseRestoreRequest))),
+							decodeRows(DatabaseRestoreRequest),
 						))[0];
 						if (receipt) {
 							yield* liveSession;
@@ -96,7 +91,7 @@ export const makeDatabaseRestoreAuth = <E, R>(
 							yield* liveSession;
 							const saved =
 								(yield* sql`SELECT * FROM db_restore_requests WHERE session_id=${sessionId} AND idempotency_key=${params.idempotency_key}`.pipe(
-									Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(DatabaseRestoreRequest))),
+									decodeRows(DatabaseRestoreRequest),
 								))[0];
 							if (saved) {
 								if (!sameSelection(saved, params)) return yield* new AuthError({ code: "idempotency_conflict" });

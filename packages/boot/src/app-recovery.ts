@@ -1,3 +1,4 @@
+import { decodeRows } from "./decode-rows.ts";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -31,28 +32,18 @@ export const fenceAppStore = (filename: string, epoch: string, rejectedAttempt?:
 						if (!pending.pending_id) return null;
 						const batches =
 							yield* sql`SELECT id,from_seq,to_seq,count FROM mutation_batches WHERE id=${pending.pending_id}`.pipe(
-								Effect.flatMap(
-									Schema.decodeUnknownEffect(
-										Schema.Array(
-											Schema.Struct({
-												id: Schema.String,
-												from_seq: Schema.Int,
-												to_seq: Schema.Int,
-												count: Schema.Int,
-											}),
-										),
-									),
+								decodeRows(
+									Schema.Struct({
+										id: Schema.String,
+										from_seq: Schema.Int,
+										to_seq: Schema.Int,
+										count: Schema.Int,
+									}),
 								),
 							);
 						const rows =
 							yield* sql`SELECT seq,transaction_id,event FROM outbox WHERE transaction_id=${pending.pending_id} OR seq BETWEEN ${pending.pending_from} AND ${pending.pending_to} ORDER BY seq`.pipe(
-								Effect.flatMap(
-									Schema.decodeUnknownEffect(
-										Schema.Array(
-											Schema.Struct({ seq: Schema.Int, transaction_id: Schema.String, event: Schema.String }),
-										),
-									),
-								),
+								decodeRows(Schema.Struct({ seq: Schema.Int, transaction_id: Schema.String, event: Schema.String })),
 							);
 						if (!batches[0] && rows.length === 0) return null;
 						const batch = batches[0];
