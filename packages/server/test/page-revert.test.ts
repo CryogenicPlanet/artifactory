@@ -1,17 +1,24 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { Schema } from "effect";
 import { request } from "node:http";
-import { symlink, writeFile } from "node:fs/promises";
+import { readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
 // Background app mutations can reserve between calls; retry only the explicit refusal before publication.
 const pagePublication = async (send: () => Promise<Response>) => {
-	const pending = Schema.Struct({ error: Schema.Struct({ code: Schema.Literal("publication_pending") }) });
+	const pending = Schema.Struct({
+		error: Schema.Struct({ code: Schema.Literal("publication_pending"), retriable: Schema.Literal(true) }),
+	});
+	const deadline = Date.now() + 2000;
 	for (let attempt = 0; ; attempt++) {
 		const response = await send();
-		if (attempt === 4 || response.status !== 503 || !Schema.is(pending)(await response.clone().json())) return response;
+		if (response.status !== 503) return response;
+		const body = await response.clone().text();
+		const decoded = Schema.decodeUnknownExit(Schema.fromJsonString(pending))(body);
+		if (Date.now() >= deadline || decoded._tag === "Failure")
+			throw new Error(`Page publication refused (${response.status}, attempt ${attempt + 1}): ${body}`);
 		await response.body?.cancel();
 		await delay(20);
 	}
@@ -144,11 +151,13 @@ it("reauthenticates held page undo bodies and refuses page symlinks before journ
 	await app.ready(cookie);
 	expect(
 		(
-			await fetch(`${app.url}/api/fs/pages/undo/note.md`, {
-				method: "PUT",
-				headers: { cookie, origin: "https://comms.test" },
-				body: "keep",
-			})
+			await pagePublication(() =>
+				fetch(`${app.url}/api/fs/pages/undo/note.md`, {
+					method: "PUT",
+					headers: { cookie, origin: "https://comms.test" },
+					body: "keep",
+				}),
+			)
 		).status,
 	).toBe(200);
 	const versionsBefore = await fixture.sql("SELECT COUNT(*) AS n FROM versions", "boot.db");
@@ -181,4 +190,49 @@ it("reauthenticates held page undo bodies and refuses page symlinks before journ
 	});
 	expect(await fixture.sql("SELECT * FROM source_changes", "boot.db")).toEqual([]);
 	expect(await fixture.sql("SELECT COUNT(*) AS n FROM versions", "boot.db")).toEqual(versionsBefore);
+}, 15000);
+
+it("refuses a raw page write before journaling while an app publication is reserved", async (test) => {
+	const fixture = await conversation(test),
+		app = await fixture.launch();
+	await app.setup();
+	const cookie = await app.login();
+	await app.ready(cookie);
+	const put = () =>
+		fetch(`${app.url}/api/fs/pages/reserved.md`, {
+			method: "PUT",
+			headers: { cookie, origin: "https://comms.test" },
+			body: "written only after release",
+		});
+	// Claim only an idle allocator, without replacing a real in-flight app reservation.
+	await expect
+		.poll(() =>
+			fixture.sql(
+				"UPDATE seq SET pending_id='page-fixture-held' WHERE pending_id IS NULL RETURNING pending_id",
+				"boot.db",
+			),
+		)
+		.toEqual([{ pending_id: "page-fixture-held" }]);
+	try {
+		const response = await put();
+		const body = await response.json();
+		expect(response.status, JSON.stringify(body)).toBe(503);
+		expect(body).toMatchObject({ error: { code: "publication_pending", retriable: true } });
+		for (const table of ["versions", "source_batches", "source_changes"])
+			expect(await fixture.sql(`SELECT * FROM ${table}`, "boot.db")).toEqual([]);
+		await expect(readFile(join(fixture.root, "pages/reserved.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+		// A valid app reservation may outlive the former five-attempt (80ms) fixture budget.
+		const released = delay(150).then(() =>
+			fixture.sql("UPDATE seq SET pending_id=NULL WHERE pending_id='page-fixture-held'", "boot.db"),
+		);
+		try {
+			const accepted = await pagePublication(put);
+			expect(accepted.status, await accepted.clone().text()).toBe(200);
+		} finally {
+			await released;
+		}
+	} finally {
+		await fixture.sql("UPDATE seq SET pending_id=NULL WHERE pending_id='page-fixture-held'", "boot.db");
+	}
+	expect(await readFile(join(fixture.root, "pages/reserved.md"), "utf8")).toBe("written only after release");
 }, 15000);
