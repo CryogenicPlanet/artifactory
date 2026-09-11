@@ -408,12 +408,12 @@ it("boot diagnostics expose recovery failures behind a stuck app fence without e
 		},
 	});
 	await app.run({ op: "boot", event: { ...event(0), type: "http.request" } });
-	expect(await app.run({ op: "diagnostics", limit: 1 })).toMatchObject({ success: { items: [{ seq: 4 }], cursor: 5 } });
+	expect(await app.run({ op: "diagnostics", limit: 1 })).toMatchObject({ success: { items: [{ seq: 5 }], cursor: 5 } });
 	expect(await app.run({ op: "diagnostics", since: 0, limit: 1 })).toMatchObject({
 		success: { items: [{ seq: 1 }], cursor: 1 },
 	});
 	expect(await app.run({ op: "diagnostics", since: 1, limit: 1 })).toMatchObject({
-		success: { items: [{ seq: 4 }], cursor: 5 },
+		success: { items: [{ seq: 4 }], cursor: 4 },
 	});
 	expect(await app.run({ op: "diagnostics", since: 6 })).toMatchObject({ failure: { code: "cursor_ahead" } });
 	expect(await app.sql("SELECT count(*) AS n FROM events")).toEqual([{ n: 5 }]);

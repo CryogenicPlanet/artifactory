@@ -20,7 +20,7 @@ export const streamGroup = HttpApiGroup.make("stream")
 			success: Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/event-stream" })),
 		}).annotate(
 			OpenApi.Description,
-			"Tail published events with read scope. Filter by topic subtree, types, agent, instance or level. Resume from since or Last-Event-ID; omitted since begins now. Heartbeats every 10 seconds. App replacement closes the stream; reconnect using the last received event id.",
+			"Tail published events with read scope. Boot http.request records are excluded; read them through authenticated /_boot/events. Filter by topic subtree, types, agent, instance or level. Resume from since or Last-Event-ID; omitted since begins now. Heartbeats every 10 seconds. App replacement closes the stream; reconnect using the last received event id.",
 		),
 	)
 	.middleware(RequestValidation);

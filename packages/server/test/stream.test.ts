@@ -53,7 +53,7 @@ async function token(
 	return { authorization: `Bearer ${value}` };
 }
 
-it("app SSE resumes and filters at the boot publication boundary without leaking another actor's request events", async (test) => {
+it("app SSE resumes and filters at the boot publication boundary without exposing request diagnostics to editable streams", async (test) => {
 	const fixture = await conversation(test),
 		app = await fixture.launch();
 	await app.setup();
@@ -84,10 +84,15 @@ it("app SSE resumes and filters at the boot publication boundary without leaking
 	expect(messages.text()).not.toContain("before resume");
 	await app.post("/api/messages", { topic: "stream/thread", body: "after resume" }, cookie);
 	await expect.poll(messages.text).toContain("after resume");
-	const ownRequests = await tail(test, `${app.url}/api/stream?since=0&types=http.request&limit=1`, credentials);
+	const requestStreams = await Promise.all([
+		tail(test, `${app.url}/api/stream?since=0&types=http.request&limit=1`, credentials),
+		tail(test, `${app.url}/api/stream?since=0&types=http.request&limit=1`, { cookie }),
+	]);
 	await fetch(`${app.url}/api/me`, { headers: credentials });
-	await expect.poll(ownRequests.text).toContain('"actor":"codex"');
-	expect(ownRequests.text()).not.toContain('"actor":"rahul"');
+	for (const stream of requestStreams) {
+		await expect.poll(stream.text).toContain(": heartbeat");
+		expect(stream.text()).not.toContain("data:");
+	}
 	const resumed = await tail(test, `${app.url}/api/stream?types=message.*&topic=stream`, {
 		...credentials,
 		"last-event-id": String(first.seq),
@@ -214,8 +219,13 @@ it("app event queries preserve filtered cursors, exclude self before pagination 
 	expect(empty).toMatchObject({ items: [], timed_out: true, drained: false });
 	expect(empty.cursor).toBeGreaterThanOrEqual(other.seq);
 	const requests = await (await query("since=0&types=http.request&limit=200")).json();
-	expect(requests.items.length).toBeGreaterThan(0);
-	for (const record of requests.items) expect(record.actor).toBe("codex");
+	expect(requests.items).toEqual([]);
+	const humanRequests = await (await query("since=0&types=http.request&limit=200", { cookie })).json();
+	expect(humanRequests.items).toEqual([]);
+	const diagnostics = await (await fetch(`${app.url}/_boot/events?since=0&limit=200`, { headers: credentials })).json();
+	const ownRequests = diagnostics.items.filter((record: { type: string }) => record.type === "http.request");
+	expect(ownRequests.length).toBeGreaterThan(0);
+	for (const record of ownRequests) expect(record.actor).toBe("codex");
 }, 15000);
 
 it("proxy closes app event waits on credential expiry, revocation and disconnect without leaking later events", async (test) => {

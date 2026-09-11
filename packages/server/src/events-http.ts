@@ -26,7 +26,6 @@ export const eventsHandlers = (api: typeof CoreApi, extension: ExtensionApi) =>
 						...(query.agent === undefined ? {} : { agent: query.agent }),
 						...(query.instance === undefined ? {} : { instance: query.instance }),
 						...(query.level === undefined ? {} : { level: query.level }),
-						...(ctx.kind === "agent" ? { requestActor: ctx.agent } : {}),
 						...(wait > 0 ? { excludeMessageInstance: ctx.instance } : {}),
 					};
 					const current = yield* ctx.events.query(input);

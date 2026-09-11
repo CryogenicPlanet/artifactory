@@ -114,7 +114,7 @@ const routes = [
 		"get",
 		["/_boot/events"],
 		"read",
-		"Read bounded boot recovery diagnostics while the app is unavailable. Read scope; private current failure detail additionally requires human or fs authority. Optional since (exclusive), limit (1–200) and wait (0–60 seconds); defaults to the latest 100 events. Diagnostic cursors are not application event cursors; pending app publication cannot hide boot failures. Application event browsing belongs to /api/events.",
+		"Read bounded boot recovery diagnostics and boot-written request records while the app is unavailable. Agents see only their own request records; humans see all. Read scope; private current failure detail additionally requires human or fs authority. Optional since (exclusive), limit (1–200) and wait (0–60 seconds); defaults to the latest 100 events. Diagnostic cursors are not application event cursors; pending app publication cannot hide boot failures. Application event browsing belongs to /api/events.",
 	],
 	[
 		"post",

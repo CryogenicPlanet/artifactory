@@ -203,3 +203,39 @@ it("boot event waits stop on revocation and captured expiry before delivering ne
 		expect(await waiting).toMatchObject({ items: [], drained: true, timed_out: false });
 	}
 });
+
+it("private child queries cannot widen request diagnostics with absent or forged caller metadata", async (test) => {
+	const app = await launch(test);
+	await app.post("/emit", event({ type: "http.request", actor: "codex", payload: { path: "/own" } }));
+	await app.post("/emit", event({ type: "http.request", actor: "claude", payload: { path: "/other" } }));
+	for (const suffix of ["", "&request_actor=codex", "&request_actor=claude"]) {
+		const response = await app.get(`/_boot/events?since=0&types=http.request${suffix}`, {
+			headers: { "x-boot-secret": "fixture-secret", "x-comms-agent": "claude", "x-comms-auth-kind": "human" },
+		});
+		expect(await json(response)).toMatchObject({ items: [], cursor: 2 });
+	}
+	const own = await json(await app.get("/_boot/events?since=0", { headers: { "x-read-only": "1" } }));
+	expect(own).toMatchObject({ items: [{ actor: "codex", payload: { path: "/own" } }], cursor: 2 });
+	expect(JSON.stringify(own)).not.toContain("/other");
+	const human = await json(await app.get("/_boot/events?since=0", { headers: { "x-test-human": "1" } }));
+	expect(human).toMatchObject({ items: [{ actor: "codex" }, { actor: "claude" }], cursor: 2 });
+	expect((await app.get("/_boot/events?since=0&request_actor=claude")).status).toBe(400);
+	await app.post("/emit", event({ type: "message.created" }));
+	expect(
+		await json(await app.get("/_boot/events?since=0", { headers: { "x-boot-secret": "fixture-secret" } })),
+	).toMatchObject({ items: [{ type: "message.created" }], cursor: 3 });
+});
+
+it("revalidates public authority before returning an empty diagnostic cursor", async (test) => {
+	const app = await launch(test);
+	const issued = await (await app.post("/token", {})).json();
+	const reading = app.get("/_boot/events?since=0", {
+		headers: { authorization: `Bearer ${issued.token}`, "x-block-query": "1" },
+	});
+	await expect.poll(async () => json(await app.get("/query-state"))).toMatchObject({ blockedReads: 1 });
+	await app.post("/revoke", {});
+	await app.post("/release-query", {});
+	const response = await reading;
+	expect(response.status).toBe(401);
+	expect(await json(response)).toMatchObject({ error: { code: "credential_invalid" } });
+});

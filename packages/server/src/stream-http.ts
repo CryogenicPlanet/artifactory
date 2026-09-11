@@ -36,7 +36,6 @@ export const streamHandlers = (api: typeof Api, extension: ExtensionApi) =>
 						...(query.agent === undefined ? {} : { agent: query.agent }),
 						...(query.instance === undefined ? {} : { instance: query.instance }),
 						...(query.level === undefined ? {} : { level: query.level }),
-						...(ctx.kind === "agent" ? { requestActor: ctx.agent } : {}),
 					};
 					const first = yield* ctx.events.query(input);
 					const pages = Stream.unfold(first, (page) =>

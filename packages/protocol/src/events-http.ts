@@ -22,7 +22,7 @@ export const eventsGroup = HttpApiGroup.make("events")
 			}),
 		}).annotate(
 			OpenApi.Description,
-			"Query published events with read scope, filtered by topic subtree, types, agent, instance or level. Omitted since begins now. Wait up to 60 seconds; waiting excludes messages from the caller's instance before pagination. Agent request diagnostics are limited to the caller. App replacement drains pending waits; reconnect from the returned cursor.",
+			"Query published events with read scope, filtered by topic subtree, types, agent, instance or level. Omitted since begins now. Wait up to 60 seconds; waiting excludes messages from the caller's instance before pagination. Boot http.request records are excluded; query authenticated /_boot/events for request diagnostics. App replacement drains pending waits; reconnect from the returned cursor.",
 		),
 	)
 	.middleware(RequestValidation);

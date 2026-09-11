@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
-it("enrolls two agents with signed approval, isolates scopes and attribution, filters request events before pagination", async (test) => {
+it("enrolls two agents with signed approval, isolates scopes and attribution, keeps request diagnostics direct and filters them before pagination", async (test) => {
 	const fixture = await conversation(test),
 		app = await fixture.launch();
 	await app.setup();
@@ -116,14 +116,20 @@ it("enrolls two agents with signed approval, isolates scopes and attribution, fi
 		await fixture.sql(`INSERT INTO events(seq,event) VALUES(${seq},'${JSON.stringify(event)}')`, "boot.db");
 	}
 	await fixture.sql("UPDATE seq SET next=1003,published_through=1002", "boot.db");
-	const filtered = await (await call("/api/events?since=999&limit=1", codex.pair.access)).json();
+	for (const access of [codex.pair.access, claude.pair.access]) {
+		const appEvents = await (await call("/api/events?since=999&limit=1", access)).json();
+		expect(appEvents).toMatchObject({ items: [], cursor: 1002 });
+	}
+	const appHuman = await fetch(`${app.url}/api/events?since=999`, { headers: { cookie } });
+	expect((await appHuman.json()).items).toEqual([]);
+	const filtered = await (await call("/_boot/events?since=999&limit=1", codex.pair.access)).json();
 	expect(filtered.items.map((event: { actor: string }) => event.actor)).toEqual(["codex"]);
 	expect(filtered.cursor).toBe(1002);
-	expect(await (await call("/api/events?since=1001&limit=1", codex.pair.access)).json()).toMatchObject({
+	expect(await (await call("/_boot/events?since=1001&limit=1", codex.pair.access)).json()).toMatchObject({
 		items: [],
 		cursor: 1002,
 	});
-	const human = await fetch(`${app.url}/api/events?since=999`, { headers: { cookie } });
+	const human = await fetch(`${app.url}/_boot/events?since=999`, { headers: { cookie } });
 	expect((await human.json()).items).toHaveLength(3);
 	await app.stop();
 	const resumed = await fixture.launch();

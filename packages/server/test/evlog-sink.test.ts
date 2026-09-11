@@ -54,15 +54,9 @@ export default api => api.route("GET", "/api/trace", { description: "Trace verif
 				level: "warn",
 				data: { message: "trace-test [redacted]", failure: false },
 			}),
-			expect.objectContaining({
-				message: "http.request",
-				topic: null,
-				data: expect.objectContaining({ method: "GET", path: "/api/trace", status: 200 }),
-			}),
 		]),
 	);
-	for (const row of rows.filter((row) => row.message === "http.request"))
-		expect(row.data).not.toHaveProperty("annotations");
+	expect(rows.filter((row) => row.message === "http.request")).toEqual([]);
 	for (const row of rows)
 		expect(row).toMatchObject({ timestamp: expect.any(String), level: expect.any(String), seq: expect.any(Number) });
 	expect((await fetch(`${app.url}/api/evlog?since=-1`, { headers: { cookie } })).status).toBe(400);
@@ -77,7 +71,7 @@ export default api => api.route("GET", "/api/trace", { description: "Trace verif
 	expect((await fetch(`${app.url}/api/trace`, { headers })).status).toBe(200);
 	await expect
 		.poll(async () => await (await fetch(`${app.url}/api/evlog?since=0`, { headers })).text())
-		.toContain('"agent":"codex"');
+		.toContain("trace-test [redacted]");
 	const agentResponse = await fetch(`${app.url}/api/evlog?since=0`, { headers });
 	const agentRows = (await agentResponse.text())
 		.trim()
@@ -85,8 +79,7 @@ export default api => api.route("GET", "/api/trace", { description: "Trace verif
 		.filter(Boolean)
 		.map((line) => JSON.parse(line));
 	const requestRows = agentRows.filter((row) => row.message === "http.request");
-	expect(requestRows.length).toBeGreaterThan(0);
-	for (const row of requestRows) expect(row.agent).toBe("codex");
+	expect(requestRows).toEqual([]);
 	const agentThrough = agentResponse.headers.get("x-evlog-through");
 	const agentDone = await fetch(`${app.url}/api/evlog?since=${agentThrough}&until=${agentThrough}`, { headers });
 	expect(await agentDone.text()).toBe("");

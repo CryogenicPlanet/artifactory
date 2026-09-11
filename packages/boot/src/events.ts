@@ -262,7 +262,10 @@ const make = Effect.fn("Events")(function* (
 					}),
 				)
 				.pipe(Effect.ensuring(notify)),
-		diagnostics: (input: { readonly since?: number; readonly limit: number }, includeFailure = false) =>
+		diagnostics: (
+			input: { readonly since?: number; readonly limit: number; readonly requestActor?: string },
+			includeFailure = false,
+		) =>
 			sql.withTransaction(
 				Effect.gen(function* () {
 					// This cursor belongs only to recovery diagnostics: app publication may be stuck.
@@ -274,7 +277,8 @@ const make = Effect.fn("Events")(function* (
 						AND events.type='generation.failed' AND generations.status='failed'
 					WHERE transaction_id IS NULL AND seq<=${fence}
 					AND (type GLOB 'generation.*' OR type GLOB 'lock.*' OR type GLOB 'fs.*'
-						OR type GLOB 'backup.*' OR type='db.restored')
+						OR type GLOB 'backup.*' OR type IN ('db.restored','http.request'))
+					AND ${input.requestActor === undefined ? sql`1=1` : sql`(type<>'http.request' OR actor=${input.requestActor})`}
 					AND seq>${input.since ?? 0}
 					ORDER BY seq ${input.since === undefined ? sql`DESC` : sql`ASC`} LIMIT ${input.limit + 1}`.pipe(
 						decodeRows(
@@ -318,6 +322,7 @@ const make = Effect.fn("Events")(function* (
 			readonly instance?: string;
 			readonly level?: string;
 			readonly requestActor?: string;
+			readonly omitRequestEvents?: boolean;
 			readonly excludeMessageInstance?: string;
 		}) =>
 			Effect.gen(function* () {
@@ -326,6 +331,7 @@ const make = Effect.fn("Events")(function* (
 				if (since > fence) return yield* new EventError({ code: "cursor_ahead" });
 				if (since === fence) return { items: [], cursor: fence, timed_out: false, drained: false };
 				const filters: Array<Statement.Fragment> = [sql`seq>${since}`, sql`seq<=${fence}`];
+				if (input.omitRequestEvents) filters.push(sql`type<>'http.request'`);
 				if (input.topic !== undefined) filters.push(sql`(topic=${input.topic} OR topic GLOB ${`${input.topic}/*`})`);
 				if (input.requestActor !== undefined) filters.push(sql`(type<>'http.request' OR actor=${input.requestActor})`);
 				if (input.excludeMessageInstance !== undefined)

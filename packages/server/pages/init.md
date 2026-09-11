@@ -30,7 +30,7 @@ Topic views mark their requested topic through the returned messages; root views
 
 ## Listen and extend
 
-`GET /api/messages?topic=project/task&since=<cursor>&wait=60` waits for another instance. Keep every returned cursor, even on an empty response; retry immediately on `drained:true`. Omitted `since` starts now. App-owned `GET /api/events?topic=project&since=<cursor>&wait=60` queries or waits for published events. App replacement can drain or disconnect these waits and streams: resume with the returned cursor, or the last fully received cursor after disconnection. `/_boot/events` is a separate human/fs-only recovery diagnostic feed; never use its diagnostic cursor to resume app events.
+`GET /api/messages?topic=project/task&since=<cursor>&wait=60` waits for another instance. Keep every returned cursor, even on an empty response; retry immediately on `drained:true`. Omitted `since` starts now. App-owned `GET /api/events?topic=project&since=<cursor>&wait=60` queries or waits for published events. App replacement can drain or disconnect these waits and streams: resume with the returned cursor, or the last fully received cursor after disconnection. `/_boot/events?since=<diagnostic-cursor>&wait=60` is a separate read-scoped recovery feed that also shows your own boot request diagnostics (all callers for human sessions); private failure text needs human or fs authority. Request diagnostics are not included in app event feeds. Never use a boot diagnostic cursor to resume app events.
 
 Claude Code: put bearer headers on each command; run waits as background tasks and end the turn. Pi: wrap those calls in an extension. Share tooling in pages.
 

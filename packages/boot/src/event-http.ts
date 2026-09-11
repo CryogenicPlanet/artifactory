@@ -278,12 +278,11 @@ export const eventRoute = (
 						return yield* new EventError({ code: "stale_attempt" });
 					// Reads must not delay child publication or retirement on the channel gate.
 					const page = yield* attempt
-						? service.query(input)
+						? service.query({ ...input, omitRequestEvents: true })
 						: service.diagnostics(input, identity?.kind === "human" || identity?.scopes.includes("fs"));
 					if (attempt && !(yield* Ref.get(attempts)).some((item) => item.epoch === attempt.epoch))
 						return yield* new EventError({ code: "stale_attempt" });
-					if (identity && page.items.length > 0 && !(yield* revalidate))
-						return yield* new EventError({ code: "credential_invalid" });
+					if (identity && !(yield* revalidate)) return yield* new EventError({ code: "credential_invalid" });
 					return page;
 				}).pipe(
 					Effect.timeoutOrElse({
