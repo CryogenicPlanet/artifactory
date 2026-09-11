@@ -6,6 +6,7 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 export class KernelError extends Schema.TaggedError<KernelError>()("KernelError", { code: KernelErrorCode }) {}
 export interface EventQuery {
 	readonly since?: number;
+	readonly wait?: number;
 	readonly limit: number;
 	readonly types?: ReadonlyArray<string>;
 	readonly topic?: string;
@@ -208,12 +209,13 @@ const make = Effect.gen(function* () {
 		events: (input: EventQuery) => {
 			const params = new URLSearchParams({ limit: String(input.limit) });
 			if (input.since !== undefined) params.set("since", String(input.since));
+			if (input.wait !== undefined) params.set("wait", String(input.wait));
 			if (input.types?.length) params.set("types", input.types.join(","));
 			if (input.topic !== undefined) params.set("topic", input.topic);
 			for (const field of ["agent", "instance", "level"] as const)
 				if (input[field] !== undefined) params.set(field, input[field]);
 			if (input.requestActor !== undefined) params.set("request_actor", input.requestActor);
-			return request(`/_boot/events?${params}`, EventPage);
+			return request(`/_boot/events?${params}`, EventPage, undefined, input.wait ? input.wait * 1000 + 5000 : 1500);
 		},
 		reserve: (transaction: string, count: number) => request("/_boot/seq/reserve", Range, { transaction, count }),
 		append: (batch: Batch) => request("/_boot/events/append", fenceSchema, batch).pipe(Effect.tap(advance)),
