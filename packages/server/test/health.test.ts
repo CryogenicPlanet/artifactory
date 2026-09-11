@@ -37,10 +37,10 @@ it("runs actual message/read/topic routes and rolls back every probe row without
 	]);
 	expect(
 		await fixture.sql(
-			"SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type') NOT IN ('ext.loaded','pages.public')",
+			"SELECT type FROM events WHERE type NOT IN ('ext.loaded','pages.public','http.request') ORDER BY seq",
 			"boot.db",
 		),
-	).toEqual([{ count: 0 }]);
+	).toEqual([{ type: "generation.starting" }, { type: "generation.live" }]);
 	const posted = await app.post("/api/messages", { topic: "after-health", body: "ordinary writes publish" }, cookie);
 	expect(posted.status).toBe(200);
 	expect(await fixture.sql("SELECT COUNT(*) count FROM messages")).toEqual([{ count: 1 }]);
@@ -77,7 +77,10 @@ for (const kind of ["create", "read", "topic"])
 			.toBe("failed");
 		for (const table of ["messages", "topics", "outbox", "mutation_batches", "idempotency"])
 			expect(await fixture.sql(`SELECT COUNT(*) count FROM ${table}`)).toEqual([{ count: 0 }]);
-		expect(await fixture.sql("SELECT COUNT(*) count FROM events", "boot.db")).toEqual([{ count: 0 }]);
+		expect(await fixture.sql("SELECT type FROM events WHERE type != 'http.request' ORDER BY seq", "boot.db")).toEqual([
+			{ type: "generation.starting" },
+			{ type: "generation.failed" },
+		]);
 	}, 25000);
 
 it("rehearses a WAL-inclusive SQLite clone without changing live rows, epoch or sequence allocator", async (test) => {

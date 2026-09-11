@@ -102,7 +102,9 @@ it("closes the old child after boot SIGKILL and publishes its previously committ
 	await next.ready(cookie);
 	await expect(fetch(`${orphan}/write`, { method: "POST" })).rejects.toThrow();
 	expect(await fixture.sql("SELECT id FROM orphan_writes")).toEqual([{ id: "admitted" }]);
-	expect(await (await fetch(`${next.url}/api/events?since=0`, { headers: { cookie } })).json()).toMatchObject({
+	expect(
+		await (await fetch(`${next.url}/api/events?since=0&types=message.created`, { headers: { cookie } })).json(),
+	).toMatchObject({
 		items: [{ payload: { body: "committed by admitted orphan" } }],
 	});
 }, 20000);
