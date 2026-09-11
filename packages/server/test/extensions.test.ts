@@ -11,7 +11,8 @@ it("loads optional extensions independently with described overrides and verifie
 	const seed = join(fixture.root, "seed");
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
 	const route = (body: string, core = false) =>
-		`import {Api as CoreApi,coreHandlers} from "./core/api.ts";
+		`import {CoreApi} from "@comms/protocol";
+import {coreHandlers} from "./core/api.ts";
 export default api => {${core ? "api.mount(CoreApi,coreHandlers(api));" : ""}api.route("GET", "/api/example", {description:"Example override",scope:"read",handler:async (req,ctx)=>Response.json(${body})});};`;
 	await writeFile(join(seed, "ext/core.ts"), route('"core"', true));
 	await writeFile(

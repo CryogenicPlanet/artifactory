@@ -21,7 +21,8 @@ it("loads packages in order, rejects a second core override atomically, and reta
 	};
 	await writeFile(
 		join(seed, "ext/core.ts"),
-		`import {Api as CoreApi,coreHandlers} from "./core/api.ts";
+		`import {CoreApi} from "@comms/protocol";
+import {coreHandlers} from "./core/api.ts";
 export default api=>{api.mount(CoreApi,coreHandlers(api));api.route("GET","/api/package-order",{description:"Core package ordering",scope:"read",handler:async()=>Response.json("core file")});};`,
 	);
 	await writeFile(join(seed, "ext/a-first.ts"), route("first file"));
