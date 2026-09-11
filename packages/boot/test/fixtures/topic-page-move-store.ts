@@ -8,6 +8,8 @@ import { SourceFiles, layer as sourceLayer } from "../../src/source-files.ts";
 import { TopicPageMove, layer as moveLayer } from "../../src/topic-page-move.ts";
 import { topicPageMoveSchema } from "../../src/topic-page-move-schema.ts";
 
+import { legacyPageMovePreparation } from "./legacy-page-move-preparation.ts";
+
 const Input = Schema.Struct({
 	op: Schema.Literals([
 		"prepare",
@@ -52,10 +54,10 @@ const main = Effect.gen(function* () {
 			yield* topicPageMoveSchema;
 		return yield* Effect.gen(function* () {
 			const moves = yield* TopicPageMove;
+			const prepare = yield* legacyPageMovePreparation(root);
 			const files = yield* SourceFiles;
 			const id = input.id ?? "move-one";
-			if (input.op === "prepare")
-				return yield* moves.prepare(id, input.from ?? "old", input.to ?? "new/target", "human");
+			if (input.op === "prepare") return yield* prepare(id, input.from ?? "old", input.to ?? "new/target", "human");
 			if (input.op === "publish") yield* moves.publish(id);
 			if (input.op === "abort") yield* moves.abort(id);
 			if (input.op === "finish") yield* moves.finish(id);
@@ -70,7 +72,7 @@ const main = Effect.gen(function* () {
 			}
 			if (input.op === "prepared_source") {
 				yield* files.preparePages("human", [{ path: "pages/other.md", content: new TextEncoder().encode("other") }]);
-				return yield* moves.prepare(id, "old", "new/target", "human");
+				return yield* prepare(id, "old", "new/target", "human");
 			}
 			return null;
 		}).pipe(

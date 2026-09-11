@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Cause, Console, Crypto, Effect, Exit, Ref, Schema, Semaphore } from "effect";
+import { Cause, Console, Crypto, Deferred, Effect, Exit, Fiber, Layer, Ref, Schema, Semaphore } from "effect";
 import { SqlClient, Statement } from "effect/unstable/sql";
 import { Reactivity } from "effect/unstable/reactivity";
 import { Events, eventsSchema, layer as eventsLayer } from "../../../boot/src/events.ts";
@@ -10,6 +10,8 @@ import { makeOutboxRelay } from "../../src/kernel/outbox.ts";
 import { HealthProbe, layer as probeLayer } from "../../src/kernel/health-probe.ts";
 import { HttpServerResponse } from "effect/unstable/http";
 import { probeHealth } from "../../src/kernel/health.ts";
+import { Messages, layer as messagesLayer } from "../../src/kernel/messages.ts";
+import { Lifecycle, layer as lifecycleLayer } from "../../src/kernel/lifecycle.ts";
 import { makeMutate } from "../../src/kernel/mutate.ts";
 
 const program = Effect.gen(function* () {
@@ -26,11 +28,13 @@ const program = Effect.gen(function* () {
 			const reservations: Array<{ transaction: string; count: number }> = [];
 			const aborts: string[] = [];
 			let appendFailed = false;
+			let appends = 0;
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
 			const boot: BootChannel["Service"] = {
 				epoch,
 				filename: `${root}/app.db`,
 				generation: 1,
+				backup: Effect.void,
 				changed: (after) => events.changed(after).pipe(Effect.mapError(unavailable)),
 				fence: events.state.pipe(
 					Effect.map(({ published_through }) => ({ published_through })),
@@ -52,6 +56,7 @@ const program = Effect.gen(function* () {
 					}),
 				append: (batch) =>
 					Effect.gen(function* () {
+						appends++;
 						const result = yield* events.append(batch, epoch).pipe(Effect.mapError(unavailable));
 						if (mode === "crash-after-ack") process.exit(72);
 						if (mode === "append-lost" && !appendFailed) {
@@ -63,6 +68,9 @@ const program = Effect.gen(function* () {
 			};
 			yield* Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				const lifecycle = yield* Lifecycle;
+				yield* Ref.set(lifecycle.state, "live");
+				yield* Ref.set(lifecycle.healthy, true);
 				if (mode !== "restart-after-ack") {
 					yield* sql`CREATE TABLE kernel_writer(singleton INTEGER PRIMARY KEY,epoch TEXT NOT NULL)`;
 					yield* sql`INSERT INTO kernel_writer VALUES(1,${epoch})`;
@@ -80,17 +88,23 @@ const program = Effect.gen(function* () {
 				}).pipe(Effect.andThen(makeOutboxRelay(sql, boot)));
 				// Exercise the real Effect transaction finalizer with a failing driver control statement.
 				const mutationSql =
-					mode === "commit-defect" || mode.endsWith("rollback-defect")
+					mode.endsWith("commit-defect") || mode.endsWith("rollback-defect")
 						? yield* SqlClient.make({
 								acquirer: sql.reserve,
 								transactionAcquirer: sql.reserve,
 								compiler: Statement.makeCompilerSqlite(),
 								transactionService: sql.transactionService,
 								spanAttributes: [],
-								...(mode === "commit-defect" ? { commit: "INVALID COMMIT" } : { rollback: "INVALID ROLLBACK" }),
+								...(mode.endsWith("commit-defect") ? { commit: "INVALID COMMIT" } : { rollback: "INVALID ROLLBACK" }),
 							}).pipe(Effect.provide(Reactivity.layer))
 						: sql;
-				const mutate = makeMutate(mutationSql, crypto, boot, relay, mutex);
+				const mutate = makeMutate(
+					mode === "relay-commit-defect" ? sql : mutationSql,
+					crypto,
+					boot,
+					mode === "relay-commit-defect" ? makeOutboxRelay(mutationSql, boot) : relay,
+					mutex,
+				);
 				const event = (seq: number): typeof EventRecord.Type => ({
 					seq,
 					at: 1,
@@ -118,7 +132,75 @@ const program = Effect.gen(function* () {
 					assert.equal((yield* sql`SELECT * FROM outbox`).length, 0);
 					assert.equal((yield* sql`SELECT * FROM idempotency`).length, 0);
 				});
-				if (mode === "receipt") {
+				if (mode === "poisoned-commit-defect") {
+					yield* Effect.gen(function* () {
+						const messages = yield* Messages;
+						const entered = yield* Deferred.make<void>();
+						const release = yield* Deferred.make<void>();
+						const first = yield* messages
+							.mutate({
+								body: (reserve) =>
+									Effect.gen(function* () {
+										const range = yield* reserve(1);
+										yield* sql`INSERT INTO domain VALUES('uncommitted')`;
+										yield* Deferred.succeed(entered, undefined);
+										yield* Deferred.await(release);
+										return { outcome: "uncommitted", events: [event(range.from)] };
+									}),
+							})
+							.pipe(Effect.exit, Effect.forkScoped);
+						yield* Deferred.await(entered);
+						// All three calls enter while healthy and queue behind the active transaction.
+						// Their health check must run after acquiring the same writer permit.
+						const queued = [];
+						for (const operation of [
+							messages.change(Effect.die("queued mutation must not execute")).pipe(Effect.asVoid),
+							messages.relay,
+							messages
+								.moveTopic(
+									{ agent: "test", instance: "instance", request: "move", kind: "human" },
+									"source",
+									"destination",
+									{
+										prepare: () => Effect.die("queued move must not prepare pages"),
+										finish: () => Effect.die("queued move must not finish pages"),
+									},
+								)
+								.pipe(Effect.asVoid),
+						])
+							queued.push(yield* operation.pipe(Effect.exit, Effect.forkScoped({ startImmediately: true })));
+						yield* Deferred.succeed(release, undefined);
+						const failed = yield* Fiber.join(first);
+						assert.ok(Exit.isFailure(failed));
+						assert.ok(Cause.hasDies(failed.cause));
+						assert.equal(yield* Ref.get(lifecycle.healthy), false);
+						for (const fiber of queued) {
+							const result = yield* Fiber.join(fiber);
+							assert.ok(Exit.isFailure(result));
+							assert.equal(result.cause.reasons.length, 1);
+							const reason = result.cause.reasons[0];
+							assert.ok(reason && Cause.isFailReason(reason));
+							assert.ok(Schema.is(KernelError)(reason.error));
+							assert.equal(reason.error.code, "boot_unavailable");
+						}
+						assert.equal(appends, 0);
+						assert.equal(aborts.length, 0);
+						assert.equal(reservations.length, 1);
+						const pending = yield* events.state;
+						assert.equal(pending.pending_id, reservations[0]?.transaction);
+						assert.equal(pending.published_through, 0);
+						// The failed finalizer really left uncommitted data on this connection.
+						assert.deepEqual(yield* records(), [{ value: "uncommitted" }]);
+						assert.equal((yield* sql`SELECT * FROM outbox`).length, 1);
+						yield* sql`ROLLBACK`;
+						yield* assertEmpty;
+						assert.deepEqual(yield* events.state, pending);
+					}).pipe(
+						Effect.provide(messagesLayer),
+						Effect.provideService(SqlClient.SqlClient, mutationSql),
+						Effect.provideService(BootChannel, boot),
+					);
+				} else if (mode === "receipt") {
 					const run = (value: string) =>
 						mutate({
 							idempotency: receipt,
@@ -143,6 +225,7 @@ const program = Effect.gen(function* () {
 						assert.equal(Schema.is(KernelError)(conflict.failure) && conflict.failure.code, "idempotency_conflict");
 				} else if (
 					mode === "variable-batch" ||
+					mode === "relay-commit-defect" ||
 					mode === "append-lost" ||
 					mode === "crash-after-ack" ||
 					mode === "restart-after-ack" ||
@@ -158,6 +241,32 @@ const program = Effect.gen(function* () {
 									return { outcome: value, events: [event(range.from), event(range.from + 1), event(range.to)] };
 								}),
 						});
+					if (mode === "relay-commit-defect") {
+						const failed = yield* run("original").pipe(Effect.exit);
+						assert.ok(Exit.isFailure(failed));
+						assert.ok(Cause.hasDies(failed.cause));
+						assert.equal(yield* Ref.get(lifecycle.healthy), false);
+						assert.equal(appends, 1);
+						assert.equal(aborts.length, 0);
+						assert.equal(reservations.length, 1);
+						assert.equal((yield* events.state).published_through, 3);
+						// Failed cleanup COMMIT left an open transaction hiding the committed outbox.
+						assert.equal((yield* sql`SELECT * FROM outbox`).length, 0);
+						yield* Effect.gen(function* () {
+							const messages = yield* Messages;
+							for (const next of [messages.relay, messages.change(Effect.die("must not mutate"))]) {
+								const denied = yield* next.pipe(Effect.result);
+								assert.equal(denied._tag, "Failure");
+								if (denied._tag === "Failure")
+									assert.equal(Schema.is(KernelError)(denied.failure) && denied.failure.code, "boot_unavailable");
+							}
+						}).pipe(Effect.provide(messagesLayer), Effect.provideService(BootChannel, boot));
+						assert.equal(appends, 1);
+						yield* sql`ROLLBACK`;
+						assert.deepEqual(yield* records(), [{ value: "original" }]);
+						assert.equal((yield* sql`SELECT * FROM outbox`).length, 3);
+						return yield* Console.log("MUTATION_VERIFIED");
+					}
 					if (mode === "cleanup-failed")
 						yield* sql`CREATE TRIGGER fail_cleanup BEFORE DELETE ON outbox BEGIN SELECT RAISE(ABORT,'cleanup unavailable'); END`;
 					if (mode === "append-lost" || mode === "cleanup-failed") {
@@ -185,6 +294,23 @@ const program = Effect.gen(function* () {
 					assert.equal((yield* sql`SELECT * FROM outbox`).length, 0);
 					assert.equal((yield* sql`SELECT * FROM mutation_batches`).length, 1);
 					assert.equal(aborts.length, 0);
+				} else if (mode === "probe-mutation-rollback-defect") {
+					const result = yield* mutate({
+						body: (reserve) =>
+							Effect.gen(function* () {
+								yield* reserve(1);
+								yield* sql`INSERT INTO domain VALUES('unconfirmed probe')`;
+								return yield* unavailable();
+							}),
+					}).pipe(Effect.provide(probeLayer), Effect.exit);
+					assert.ok(Exit.isFailure(result));
+					assert.ok(Cause.hasDies(result.cause));
+					assert.ok(result.cause.reasons.some(Cause.isFailReason));
+					assert.equal(yield* Ref.get(lifecycle.healthy), true);
+					assert.equal(aborts.length, 0);
+					assert.equal(reservations.length, 1);
+					assert.equal(relays, 0);
+					assert.equal((yield* events.state).pending_id, reservations[0]?.transaction);
 				} else if (mode === "health-rollback-defect") {
 					const dispatch = mutate({
 						body: (reserve) =>
@@ -204,6 +330,7 @@ const program = Effect.gen(function* () {
 					assert.equal(aborts.length, 0);
 					assert.equal(reservations.length, 1);
 					assert.equal(relays, 0);
+					assert.equal(yield* Ref.get(lifecycle.healthy), true);
 					assert.equal((yield* events.state).pending_id, reservations[0]?.transaction);
 				} else if (mode === "probe") {
 					yield* Effect.gen(function* () {
@@ -278,7 +405,8 @@ const program = Effect.gen(function* () {
 							}),
 					}).pipe(Effect.exit);
 					assert.ok(Exit.isFailure(result));
-					if (mode === "commit-defect" || mode.endsWith("rollback-defect")) assert.ok(Cause.hasDies(result.cause));
+					if (mode.endsWith("commit-defect") || mode.endsWith("rollback-defect"))
+						assert.ok(Cause.hasDies(result.cause));
 					if (mode !== "commit-defect" && mode !== "rollback-defect") yield* assertEmpty;
 					if (mode === "reserve-lost") {
 						assert.equal(reservations.length, 2);
@@ -295,7 +423,7 @@ const program = Effect.gen(function* () {
 				}
 				yield* Console.log("MUTATION_VERIFIED");
 			}).pipe(Effect.provide(SqliteClient.layer({ filename: boot.filename, disableWAL: true })));
-		}).pipe(Effect.provide(eventsLayer));
+		}).pipe(Effect.provide(eventsLayer(Effect.void)));
 	}).pipe(Effect.provide(SqliteClient.layer({ filename: `${root}/boot.db`, disableWAL: true })));
-}).pipe(Effect.scoped, Effect.provide(BunServices.layer));
+}).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(lifecycleLayer, BunServices.layer)));
 program.pipe(BunRuntime.runMain);

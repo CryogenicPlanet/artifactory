@@ -276,23 +276,12 @@ it("rejects unprepared and malformed moves and rolls routing back with publicati
 			failure: { code: "topic_move_invalid" },
 		});
 	}
-	expect(await app.run({ op: "append", batch })).toMatchObject({
-		_tag: "Failure",
-		failure: { code: "topic_move_unprepared" },
-	});
 	await app.sql("INSERT INTO topic_moves VALUES('move','a','b','family',NULL,'hash','prepared',NULL)");
 	expect(await app.run({ op: "append", batch })).toMatchObject({
 		_tag: "Failure",
 		failure: { code: "topic_move_unprepared" },
 	});
 	await app.sql("UPDATE topic_moves SET state='pages_published'");
-	const longDestination = "x".repeat(200);
-	await app.sql(`UPDATE topic_moves SET to_path='${longDestination}'`);
-	expect(await append("a", longDestination)).toMatchObject({
-		_tag: "Failure",
-		failure: { code: "topic_move_invalid" },
-	});
-	await app.sql("UPDATE topic_moves SET to_path='b'");
 	await app.sql(
 		"CREATE TRIGGER fail_move BEFORE INSERT ON events WHEN NEW.seq=2 BEGIN SELECT RAISE(ABORT,'injected'); END",
 	);
@@ -356,4 +345,26 @@ it("migrates indexed projections without changing routed topics, JSON bytes or p
 	expect(
 		await app.run({ op: "query", since: 0, topic: "moved", types: ["message.*"], agent: "rahul", level: "info" }),
 	).toMatchObject({ success: { items: [{ ...event(1), instance: null, topic: "moved/thread" }], cursor: 1 } });
+}, 15000);
+
+it("publishes an app-owned move with long historical routing and recovers without a boot intent", async (test) => {
+	const app = await store(test);
+	await app.run({ op: "recover", epoch: "old" });
+	await app.run({ op: "boot", event: { ...event(1), topic: "a/" + "z".repeat(198) } });
+	const destination = "b".repeat(200);
+	await app.run({ op: "reserve", epoch: "old", transaction: "app-move" });
+	const moved = { ...event(2), type: "topic.moved", topic: destination, payload: { from: "a", to: destination } };
+	await app.sql("INSERT INTO mutation_batches VALUES('app-move',2,2,1)", "comms.db");
+	await app.sql(`INSERT INTO outbox VALUES(2,'app-move','${JSON.stringify(moved)}',NULL)`, "comms.db");
+	expect(await app.run({ op: "recover", epoch: "next" })).toMatchObject({ _tag: "Success" });
+	expect(await app.run({ op: "query", since: 0, topic: destination })).toMatchObject({
+		success: {
+			items: [
+				{ seq: 1, topic: destination + "/" + "z".repeat(198) },
+				{ seq: 2, topic: destination },
+			],
+			cursor: 2,
+		},
+	});
+	expect(await app.sql("SELECT id FROM topic_moves")).toEqual([]);
 }, 15000);

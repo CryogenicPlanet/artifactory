@@ -18,7 +18,7 @@ const run = Effect.gen(function* () {
 	yield* initializeBootSchema;
 	const context = yield* Layer.build(
 		layer({ rpId: "comms.test", expectedOrigin: "https://comms.test" }).pipe(
-			Layer.provide(Layer.mergeAll(eventsLayer, editLockLayer)),
+			Layer.provide(Layer.mergeAll(eventsLayer(Effect.void), editLockLayer)),
 		),
 	);
 	const auth = Context.get(context, Auth);

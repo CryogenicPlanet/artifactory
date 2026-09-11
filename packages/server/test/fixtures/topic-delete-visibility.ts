@@ -28,6 +28,7 @@ const program = Effect.gen(function* () {
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 1,
+				backup: Effect.void,
 				changed: (after) =>
 					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
@@ -49,7 +50,9 @@ const program = Effect.gen(function* () {
 						topics = yield* Topics,
 						sql = yield* SqlClient.SqlClient;
 					const fs = yield* FileSystem.FileSystem;
-					yield* Ref.set((yield* Lifecycle).state, "live");
+					const lifecycle = yield* Lifecycle;
+					yield* Ref.set(lifecycle.healthy, true);
+					yield* Ref.set(lifecycle.state, "live");
 					const who = { agent: "codex", instance: "family", request: "request", kind: "agent" as const };
 					const reader = { ...who, instance: "reader" };
 					yield* fs.makeDirectory(`${root}/pages/project/page-only`, { recursive: true });
@@ -131,7 +134,7 @@ const program = Effect.gen(function* () {
 				Effect.provide(SqliteClient.layer({ filename: channel.filename, disableWAL: true })),
 				Effect.provideService(BootChannel, channel),
 			);
-		}).pipe(Effect.provide(recoveryLayer(`${root}/comms.db`).pipe(Layer.provideMerge(eventsLayer))));
+		}).pipe(Effect.provide(recoveryLayer(`${root}/comms.db`).pipe(Layer.provideMerge(eventsLayer(Effect.void)))));
 	}).pipe(Effect.provide(SqliteClient.layer({ filename: `${root}/boot.db`, disableWAL: true })));
 }).pipe(Effect.scoped, Effect.provide(BunServices.layer));
 program.pipe(BunRuntime.runMain);

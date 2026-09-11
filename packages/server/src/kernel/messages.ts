@@ -1,3 +1,6 @@
+import { assertSqlPublished } from "./sql-publication.ts";
+import { makeReadSnapshot } from "./read-snapshot.ts";
+import type { PageMoveIO } from "./topic-page-continuation.ts";
 import { Context, Crypto, DateTime, Effect, Layer, Option, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { BootChannel, type EventRecord, KernelError } from "./boot-channel.ts";
@@ -8,10 +11,13 @@ import { HealthProbe } from "./health-probe.ts";
 import { markRead } from "./read-marks.ts";
 import { recordOperationalEvent, type OperationalEvent } from "./operational-events.ts";
 import { deleteTopic } from "./topic-delete.ts";
-import { moveTopic, type TopicMoveCommand } from "./topic-move.ts";
+import { moveTopic } from "./topic-move.ts";
 import { makeOutboxRelay } from "./outbox.ts";
 import { mentionsIn } from "./message-mentions.ts";
+import { assertWriterHealthy } from "./lifecycle.ts";
 import { makeMutate } from "./mutate.ts";
+import { writeSql } from "./sql-write.ts";
+import type { SqlInput } from "./sql-read.ts";
 
 export const Message = Schema.Struct({
 	id: Schema.String,
@@ -160,8 +166,12 @@ const make = Effect.gen(function* () {
 		});
 	const fence = Effect.gen(function* () {
 		const probe = Option.getOrNull(yield* Effect.serviceOption(HealthProbe));
-		return probe ? { published_through: yield* Ref.get(probe.ceiling) } : yield* boot.fence;
+		if (probe) return { published_through: yield* Ref.get(probe.ceiling) };
+		const value = yield* boot.fence;
+		yield* assertSqlPublished(sql, boot.epoch, value.published_through);
+		return value;
 	});
+	const read = makeReadSnapshot(sql, boot.epoch, mutex, fence, relay);
 	const list = (input: {
 		readonly since?: number;
 		readonly topic?: string;
@@ -174,10 +184,8 @@ const make = Effect.gen(function* () {
 		readonly q?: string;
 		readonly mentions?: ReadonlyArray<string>;
 	}) =>
-		sql.withTransaction(
+		read((ceiling) =>
 			Effect.gen(function* () {
-				yield* sql`SELECT epoch FROM kernel_writer`;
-				const ceiling = (yield* fence).published_through;
 				const since = input.since ?? (input.newest ? 0 : ceiling);
 				if (
 					!Number.isSafeInteger(since) ||
@@ -238,10 +246,8 @@ const make = Effect.gen(function* () {
 			}),
 		);
 	const get = (id: string) =>
-		sql.withTransaction(
+		read((ceiling) =>
 			Effect.gen(function* () {
-				yield* sql`SELECT epoch FROM kernel_writer`;
-				const ceiling = (yield* fence).published_through;
 				const rows =
 					yield* sql`WITH visible_messages AS (${publishedMessages(sql, ceiling)}) SELECT * FROM visible_messages WHERE id=${id} AND deleted_at IS NULL`.pipe(
 						Effect.flatMap(messageRows),
@@ -252,10 +258,14 @@ const make = Effect.gen(function* () {
 		);
 	return {
 		create,
+		writeSql: (who: Identity, input: typeof SqlInput.Type, key?: string) =>
+			writeSql(sql, mutate, crypto, boot, who, input, key),
 		mutate,
 		change: <A, E, R>(change: Effect.Effect<A, E, R>) =>
 			mutate({ body: () => change.pipe(Effect.map((outcome) => ({ outcome, events: [] }))) }),
-		moveTopic: (input: typeof TopicMoveCommand.Type) => mutex.withPermit(moveTopic(sql, crypto, boot, input)),
+		moveTopic: (identity: Identity, from: string, to: string, pages: PageMoveIO, key?: string) =>
+			moveTopic(sql, mutate, boot, identity, from, to, pages, key),
+		read,
 		topic: (
 			identity: Identity,
 			path: string,
@@ -273,7 +283,7 @@ const make = Effect.gen(function* () {
 			markRead(sql, mutate, identity, input),
 		recordEvent: <E = never>(input: OperationalEvent, change?: (seq: number) => Effect.Effect<void, E>) =>
 			recordOperationalEvent(mutate, boot, input, change),
-		relay: mutex.withPermit(relay),
+		relay: mutex.withPermit(assertWriterHealthy.pipe(Effect.andThen(relay))),
 		quiesce: mutex.withPermit(Effect.void),
 		changed: boot.changed,
 		fence,

@@ -133,6 +133,6 @@ const main = Effect.gen(function* () {
 			{ type: null, actor: null, instance: null, level: null, topic: "routed" },
 		]);
 		yield* Console.log("event filters and indexes verified");
-	}).pipe(Effect.provide(layer));
+	}).pipe(Effect.provide(layer(Effect.void)));
 }).pipe(Effect.scoped, Effect.provide(SqliteClient.layer({ filename: ":memory:", disableWAL: true })));
 main.pipe(BunRuntime.runMain);

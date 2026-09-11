@@ -37,7 +37,7 @@ export const tokenSession = Effect.gen(function* () {
 	};
 	const context = yield* Layer.build(
 		layer({ rpId: "comms.test", expectedOrigin: "https://comms.test" }).pipe(
-			Layer.provideMerge(Layer.mergeAll(eventsLayer, editLockLayer)),
+			Layer.provideMerge(Layer.mergeAll(eventsLayer(Effect.void), editLockLayer)),
 		),
 	).pipe(Effect.provideService(Console.Console, captured));
 	const auth = Context.get(context, Auth),

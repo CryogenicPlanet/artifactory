@@ -1,4 +1,7 @@
-import { Config, Context, Deferred, Effect, Layer, Ref, Semaphore } from "effect";
+import { Cause, Config, Context, Deferred, Effect, Layer, Option, Ref, Semaphore } from "effect";
+
+import { KernelError } from "./boot-channel.ts";
+import { HealthProbe } from "./health-probe.ts";
 
 export type State = "starting" | "rehearsal" | "candidate" | "accepted" | "live" | "frozen" | "draining";
 const make = Effect.gen(function* () {
@@ -17,3 +20,23 @@ const make = Effect.gen(function* () {
 });
 export class Lifecycle extends Context.Service<Lifecycle, Effect.Success<typeof make>>()("comms/server/Lifecycle") {}
 export const layer = Layer.effect(Lifecycle, make);
+
+/** Standalone database tools have no lifecycle; active children stop using an uncertain connection. */
+export const assertWriterHealthy = Effect.gen(function* () {
+	const lifecycle = Option.getOrNull(yield* Effect.serviceOption(Lifecycle));
+	if (
+		lifecycle &&
+		!["starting", "candidate", "rehearsal"].includes(yield* Ref.get(lifecycle.state)) &&
+		!(yield* Ref.get(lifecycle.healthy))
+	)
+		return yield* new KernelError({ code: "boot_unavailable" });
+});
+
+/** A finalizer defect leaves the connection uncertain until its keeper proves closure. */
+export const poisonUncertainWriter = (cause: Cause.Cause<unknown>) =>
+	Effect.gen(function* () {
+		if (cause.reasons.length > 0 && cause.reasons.every(Cause.isFailReason)) return;
+		if (Option.isSome(yield* Effect.serviceOption(HealthProbe))) return;
+		const lifecycle = Option.getOrNull(yield* Effect.serviceOption(Lifecycle));
+		if (lifecycle) yield* Ref.set(lifecycle.healthy, false);
+	});

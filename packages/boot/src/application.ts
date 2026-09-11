@@ -44,7 +44,7 @@ export const prepareGeneration = Effect.fn("prepareGeneration")(function* (optio
 	const sources = yield* SourceFiles;
 	const sql = yield* SqlClient.SqlClient;
 	const existing = yield* generations.list;
-	const good = existing.filter((generation) => generation.good === 1);
+	const good = existing.filter((generation) => generation.good === 1 && generation.snapshot_dir !== null);
 	if (options.seedPagesDirectory && (yield* sql`SELECT key FROM settings WHERE key='pages_seeded'`).length === 0) {
 		const seed = sources.withCommitted(seedPages(options));
 		// Optional first-time page seeding cannot veto recovery from an immutable healthy app snapshot.

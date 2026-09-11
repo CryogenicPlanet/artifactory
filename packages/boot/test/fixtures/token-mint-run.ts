@@ -49,7 +49,7 @@ const run = Effect.gen(function* () {
 		}).pipe(
 			Effect.provide(
 				layer({ rpId: "comms.test", expectedOrigin: "https://comms.test" }).pipe(
-					Layer.provide(Layer.mergeAll(eventsLayer, editLockLayer)),
+					Layer.provide(Layer.mergeAll(eventsLayer(Effect.void), editLockLayer)),
 				),
 			),
 		);

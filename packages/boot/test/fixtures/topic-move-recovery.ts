@@ -7,8 +7,10 @@ import { AppRecovery, layer as recoveryLayer } from "../../src/app-recovery.ts";
 import { Events, layer as eventsLayer, EventRecord } from "../../src/events.ts";
 import { layer as sourceLayer } from "../../src/source-files.ts";
 import { layer as lockLayer } from "../../src/edit-lock.ts";
-import { TopicPageMove, layer as pagesLayer } from "../../src/topic-page-move.ts";
+import { layer as pagesLayer } from "../../src/topic-page-move.ts";
 import { moveRecovery } from "../../src/topic-move-recovery.ts";
+import { legacyPageMovePreparation } from "./legacy-page-move-preparation.ts";
+
 const Input = Schema.Struct({
 	op: Schema.Literals(["seed", "recover"]),
 	committed: Schema.optionalKey(Schema.Boolean),
@@ -25,7 +27,7 @@ const main = Effect.gen(function* () {
 		afterResolve: input.pause === "events" ? pause : moveRecovery.afterResolve,
 	};
 	const services = Layer.mergeAll(
-		eventsLayer,
+		eventsLayer(Effect.void),
 		pagesLayer(root).pipe(Layer.provideMerge(sourceLayer(root).pipe(Layer.provide(lockLayer)))),
 	);
 	const program = Effect.gen(function* () {
@@ -40,7 +42,7 @@ const main = Effect.gen(function* () {
 			}
 			yield* recovery.prepare("original");
 			yield* sql`INSERT INTO topic_moves(id,from_path,to_path,instance,request_key,request_hash,state) VALUES('move','old','new','human','retry','bound','prepared')`;
-			yield* (yield* TopicPageMove).prepare("move", "old", "new", "human");
+			yield* (yield* legacyPageMovePreparation(root))("move", "old", "new", "human");
 			const range = yield* events.reserve("move", 1, "original");
 			if (input.committed) {
 				const event = yield* Schema.encodeEffect(Schema.fromJsonString(EventRecord))({

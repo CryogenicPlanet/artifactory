@@ -42,7 +42,7 @@ const make = (dataDirectory: string) =>
 		// Retain identity and a hash of every entry, including empty directories. No page bytes are duplicated.
 		// Historical page versions retain their original paths; the move does not rewrite immutable undo receipts.
 		// These checks detect ordinary external edits; same-UID adversarial filesystem races remain out of scope.
-		const tree = (name: string, movedTo?: string) =>
+		const tree = (name: string) =>
 			Effect.gen(function* () {
 				const root = yield* io.resolve(name, false, true);
 				if (!root.exists) return null;
@@ -54,12 +54,6 @@ const make = (dataDirectory: string) =>
 					if (current === undefined) return yield* Effect.die("Missing page directory entry");
 					const target = yield* io.resolve(current, false, true);
 					if (!target.exists) return yield* rejected(current);
-					if (
-						target.type === "Directory" &&
-						movedTo !== undefined &&
-						`${movedTo}${current.slice(name.length)}`.length > 206
-					)
-						return yield* rejected(current, "invalid_path");
 					const info = yield* fs.stat(target.absolute);
 					const identity = `${info.dev}:${Option.getOrNull(info.ino)}`;
 					const content = target.type === "File" ? yield* digest(yield* fs.readFile(target.absolute)) : null;
@@ -99,29 +93,7 @@ const make = (dataDirectory: string) =>
 				}),
 			);
 		return {
-			prepare: (id: string, from: string, to: string, agent: string) =>
-				files.withPageMove(
-					id,
-					Effect.gen(function* () {
-						const fromName = `pages/${from}`;
-						const toName = `pages/${to}`;
-						if (!validSourcePath(fromName) || !validSourcePath(toName) || from.length > 200 || to.length > 200)
-							return yield* rejected(fromName, "invalid_path");
-						if (from === to || from.startsWith(`${to}/`) || to.startsWith(`${from}/`))
-							return yield* rejected(toName, "path_conflict");
-						const saved = yield* lookup(id);
-						if (saved) {
-							if (saved.from_path !== fromName || saved.to_path !== toName || saved.agent !== agent)
-								return yield* new SourceRejected({ code: "idempotency_conflict", path: id });
-							return { page_source: saved.tree !== null };
-						}
-						if ((yield* io.resolve(toName, false, true)).exists) return yield* rejected(toName, "path_conflict");
-						const captured = yield* tree(fromName, toName);
-						yield* sql`INSERT INTO topic_page_moves (id,from_path,to_path,agent,tree,state) VALUES (${id},${fromName},${toName},${agent},${captured},'prepared')`;
-						return { page_source: captured !== null };
-					}),
-				),
-			// Only the coordinator may call this, after positive durable app-commit evidence.
+			// Legacy recovery calls this only after positive durable app-commit evidence.
 			publish: (id: string) =>
 				files.withPageMove(
 					id,

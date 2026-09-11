@@ -55,7 +55,8 @@ it("restores a retained generation's whole source and manifest through cutover w
 		{ good: 1 },
 		{ good: 1 },
 	]);
-}, 60000);
+	// Whole-source restore prepares three generations, including synced dependency copies.
+}, 180000);
 
 it("refuses invalid, mixed and unavailable generation selectors and preserves unrelated staging", async (test) => {
 	const fixture = await conversation(test),

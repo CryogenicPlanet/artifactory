@@ -20,7 +20,7 @@ const statusSchema = Schema.Struct({
 	traffic: Schema.Struct({ frozen: Schema.Boolean, admitted: Schema.Int, queued: Schema.Int }),
 });
 
-/** Accelerates only a disposable boot copy; all capture/process behavior stays real. */
+/** Accelerates the app cron in a disposable source copy; channel/capture/process behavior stays real. */
 export async function storageFixture(test: TestContext) {
 	const fixture = await conversation(test);
 	const execute = promisify(execFile);
@@ -43,28 +43,33 @@ export async function storageFixture(test: TestContext) {
 	await symlink(join(import.meta.dirname, "../../../boot/node_modules"), join(boot, "node_modules"));
 	await mkdir(join(fixture.root, "packages/server"), { recursive: true });
 	await symlink(join(import.meta.dirname, "../../node_modules"), join(fixture.root, "packages/server/node_modules"));
-	const indexPath = join(boot, "src/index.ts");
-	const index = await readFile(indexPath, "utf8");
-	const initialize = "yield* initializeBootSchema;";
-	expect(index.split(initialize)).toHaveLength(2);
-	await writeFile(
-		indexPath,
-		index.replace(
-			initialize,
-			`${initialize}\nconst maintenanceSql = yield* SqlClient.SqlClient;
-  yield* maintenanceSql\`INSERT OR IGNORE INTO settings(key,value) VALUES('backup.hourly_attempt_at','4102444800000')\`;`,
-		),
-	);
-	const maintenancePath = join(boot, "src/storage-maintenance.ts");
-	const maintenance = await readFile(maintenancePath, "utf8");
-	const pause = 'yield* Effect.sleep("1 minute");';
-	expect(maintenance.split(pause)).toHaveLength(2);
+	const server = join(fixture.root, "packages/server/src");
+	await cp(join(import.meta.dirname, "../../src"), server, { recursive: true });
+	const schedulePath = join(server, "backup-schedule.ts");
+	const schedule = await readFile(schedulePath, "utf8");
+	const cronImport = 'import { parseCron, runCron } from "./kernel/extension-cron.ts";';
+	expect(schedule.split(cronImport)).toHaveLength(2);
 	const tick = join(fixture.root, "maintenance-tick");
+	const requested = join(fixture.root, "hourly-request");
 	await writeFile(
-		maintenancePath,
-		`import { FileSystem } from "effect";\n${maintenance}`.replace(
-			pause,
-			`const tickFs = yield* FileSystem.FileSystem; yield* tickFs.writeFileString(${JSON.stringify(tick + ".tmp")}, String((yield* DateTime.nowAsDate).getTime())); yield* tickFs.rename(${JSON.stringify(tick + ".tmp")}, ${JSON.stringify(tick)});\nyield* Effect.sleep("100 millis");`,
+		schedulePath,
+		schedule.replace(
+			cronImport,
+			`
+import { Clock, FileSystem } from "effect";
+import { parseCron } from "./kernel/extension-cron.ts";
+const runCron = <E, R>(_schedule: unknown, run: (at: number) => Effect.Effect<void, E, R>) => Effect.gen(function* () {
+ const fs = yield* FileSystem.FileSystem;
+ while (true) {
+  if (yield* fs.exists(${JSON.stringify(requested)})) {
+   yield* fs.remove(${JSON.stringify(requested)});
+   yield* run(yield* Clock.currentTimeMillis);
+  }
+  yield* fs.writeFileString(${JSON.stringify(tick + ".tmp")}, String(yield* Clock.currentTimeMillis));
+  yield* fs.rename(${JSON.stringify(tick + ".tmp")}, ${JSON.stringify(tick)});
+  yield* Effect.sleep("100 millis");
+ }
+});`,
 		),
 	);
 	const cutoverPath = join(boot, "src/cutover.ts");
@@ -83,10 +88,8 @@ export async function storageFixture(test: TestContext) {
 			)
 			.replace(endReload, ")));\n\tconst optionsSource = options;"),
 	);
-	const launch = () =>
-		fixture.launch(join(import.meta.dirname, "../../src/server.ts"), join(boot, "test/fixtures/launcher.ts"));
-	const force = (kind: "hourly") =>
-		sql(`UPDATE settings SET value='0' WHERE key='backup.${kind}_attempt_at'`, "boot.db");
+	const launch = () => fixture.launch(join(server, "server.ts"), join(boot, "test/fixtures/launcher.ts"));
+	const force = (_kind: "hourly") => writeFile(requested, "due");
 	const backups = async () =>
 		Schema.decodeUnknownSync(backupRows)(
 			await sql("SELECT id,path,reason,published_through,generation FROM backups ORDER BY taken_at,id", "boot.db"),

@@ -90,53 +90,6 @@ it.for(["selection", "lock-release"] as const)(
 	},
 );
 
-it("releases a failed move's request gate and permits an edit to recover the app in the same boot process", async (test) => {
-	const fixture = await storageFixture(test);
-	await exposeRequestGate(fixture.root);
-	const filename = join(fixture.root, "packages/boot/src/topic-move.ts");
-	const source = await readFile(filename, "utf8");
-	const needle = "const resolved = yield* recovery.prepare(active.attempt.epoch).pipe(Effect.exit);";
-	expect(source.split(needle)).toHaveLength(2);
-	await writeFile(
-		filename,
-		source
-			.replace(
-				"yield* recovery.prepare(active.attempt.epoch);",
-				'yield* Effect.fail(new ChildError({ code: "move_fixture_recovery_failure" }));',
-			)
-			.replace(
-				needle,
-				'const resolved = yield* Effect.fail(new ChildError({ code: "move_fixture_recovery_failure" })).pipe(Effect.exit);',
-			),
-	);
-	const app = await fixture.launch();
-	await app.setup();
-	const cookie = await app.login();
-	await app.ready(cookie);
-	expect((await app.post("/api/messages", { topic: "source", body: "preserved" }, cookie)).status).toBe(200);
-	// Fail both reconciliation attempts before creating an intent; the owner must still be retired.
-	const response = await app.post("/api/topics/source/move", { to: "destination" }, cookie);
-	expect(response.status).toBe(503);
-	expect(await gates(app.url, cookie)).toEqual({ traffic: { frozen: false }, fixture_requests: { frozen: false } });
-	expect((await fetch(`${app.url}/api/messages?since=0`, { headers: { cookie } })).status).toBe(503);
-	expect((await fetch(`${app.url}/auth/login`)).status).toBe(200);
-	expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual([{ body: "preserved" }]);
-	expect(await fixture.sql("SELECT COUNT(*) count FROM child_attempts WHERE opened=1 AND closed=0", "boot.db")).toEqual(
-		[{ count: 0 }],
-	);
-	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const appSource = await readFile(join(fixture.root, "app/server.ts"), "utf8");
-	const repaired = await fetch(`${app.url}/api/fs/app/server.ts`, {
-		method: "PUT",
-		headers: { cookie, origin: "https://comms.test" },
-		body: `${appSource}\n// recovery edit\n`,
-	});
-	expect(repaired.status, await repaired.clone().text()).toBe(200);
-	await app.ready(cookie);
-	expect((await fetch(`${app.url}/api/messages?since=0`, { headers: { cookie } })).status).toBe(200);
-	expect((await app.post("/api/messages", { topic: "source", body: "after recovery" }, cookie)).status).toBe(200);
-}, 45000);
-
 it("resumes the live owner after a harmless topic move refusal", async (test) => {
 	const fixture = await storageFixture(test);
 	await exposeRequestGate(fixture.root);

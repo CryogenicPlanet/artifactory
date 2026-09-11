@@ -2,6 +2,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { DateTime, Effect, Ref, Schema, type Semaphore, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import type { BackupCaptureStore } from "./backup-http.ts";
+import type { Destination } from "./traffic.ts";
 import type { VerifiedIdentity } from "./enrollment.ts";
 import { publicEventResponse } from "./public-event-http.ts";
 import { Batch, type Events, EventError } from "./events.ts";
@@ -23,9 +25,13 @@ const failure = (code: string, status: number) =>
 				code,
 				message: "Event operation unavailable.",
 				hint:
-					code === "scope_required"
-						? "Re-enroll and ask the human to grant read scope."
-						: "Retry infrastructure failures; inspect authenticated boot status.",
+					status === 507
+						? "Free space on the data volume, then retry; existing publication and recovery remain available."
+						: code === "unsafe_artifact_path"
+							? "Inspect and repair boot-owned artifact paths before another request."
+							: code === "scope_required"
+								? "Re-enroll and ask the human to grant read scope."
+								: "Retry infrastructure failures; inspect authenticated boot status.",
 				retriable: status === 503,
 			},
 		},
@@ -51,14 +57,17 @@ export const eventRoute = (
 	attempts: Ref.Ref<readonly Attempt[]>,
 	identity: VerifiedIdentity | null,
 	gate: Semaphore.Semaphore,
+	route: Ref.Ref<Destination | null>,
 	revalidate: Effect.Effect<boolean> = Effect.succeed(true),
+	captures?: BackupCaptureStore,
 ) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const url = new URL(request.url, "http://localhost");
-		const internal = ["/_boot/seq", "/_boot/seq/reserve", "/_boot/seq/abort", "/_boot/events/append"].includes(
-			url.pathname,
-		);
+		const capture = url.pathname === "/_boot/db/backup" && request.headers["x-boot-secret"] !== undefined;
+		const internal =
+			capture ||
+			["/_boot/seq", "/_boot/seq/reserve", "/_boot/seq/abort", "/_boot/events/append"].includes(url.pathname);
 		const query = ["/_boot/events", "/api/events", "/_boot/stream", "/api/stream"].includes(url.pathname);
 		if (!internal && !query) return null;
 		let attempt: Attempt | null = null;
@@ -85,6 +94,27 @@ export const eventRoute = (
 		const bodyText = request.method === "POST" ? yield* readBody(request, Schema.Unknown).pipe(Effect.result) : null;
 		const service = yield* Ref.get(store);
 		if (!service) return failure("events_unavailable", 503);
+		if (capture) {
+			if (request.method !== "POST") return failure("method_invalid", 405);
+			if (url.search || bodyText?._tag !== "Success") return failure("body_invalid", 400);
+			const empty = yield* Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.Never), {
+				onExcessProperty: "error",
+			})(bodyText.success).pipe(Effect.result);
+			if (empty._tag === "Failure") return failure("body_invalid", 400);
+			const backup = captures ? yield* Ref.get(captures) : null;
+			if (!backup || !attempt) return failure("backup_unavailable", 503);
+			// Capture drains app writers, whose final publications need the channel gate.
+			// The operation gate revalidates this exact epoch before touching traffic.
+			return yield* backup.capture({ reason: "hourly", epoch: attempt.epoch }).pipe(
+				Effect.map(HttpServerResponse.jsonUnsafe),
+				Effect.catchTags({
+					StorageRejected: (error) => Effect.succeed(failure(error.code, 507)),
+					ArtifactRetentionRejected: (error) =>
+						Effect.succeed(failure(error.code, error.code === "unsafe_artifact_path" ? 409 : 507)),
+				}),
+				Effect.catchCause(() => Effect.succeed(failure("backup_unavailable", 503))),
+			);
+		}
 		if (url.pathname === "/_boot/seq" && request.method === "GET") {
 			const params = url.searchParams;
 			const after = Number(params.get("since") ?? "0");
@@ -156,9 +186,13 @@ export const eventRoute = (
 		return yield* gate
 			.withPermit(
 				Effect.gen(function* () {
+					let starting = false;
+					let completion = false;
 					if (attempt) {
 						const admitted = (yield* Ref.get(attempts)).find((item) => item.epoch === attempt?.epoch);
 						if (!admitted) return failure("stale_attempt", 403);
+						starting = admitted.state === "starting";
+						completion = admitted.state === "accepted" && (yield* Ref.get(route))?.epoch !== admitted.epoch;
 						if (admitted.state === "starting" && url.pathname === "/_boot/events/append")
 							return failure("child_not_live", 409);
 					}
@@ -169,7 +203,13 @@ export const eventRoute = (
 					if (request.method !== "POST") return failure("method_invalid", 405);
 					if (url.pathname === "/_boot/seq/reserve") {
 						const body = yield* Schema.decodeUnknownEffect(reserveBody)(bodyValue);
-						return HttpServerResponse.jsonUnsafe(yield* service.reserve(body.transaction, body.count, attempt.epoch));
+						return HttpServerResponse.jsonUnsafe(
+							yield* (starting || (completion && body.count === 1) ? service.reserveStartup : service.reserve)(
+								body.transaction,
+								body.count,
+								attempt.epoch,
+							),
+						);
 					}
 					if (url.pathname === "/_boot/seq/abort") {
 						const body = yield* Schema.decodeUnknownEffect(abortBody)(bodyValue);
@@ -178,6 +218,12 @@ export const eventRoute = (
 					}
 					if (url.pathname === "/_boot/events/append") {
 						const body = yield* Schema.decodeUnknownEffect(Batch)(bodyValue);
+						if (
+							completion &&
+							(yield* service.state).pending_id === body.transaction &&
+							(body.events.length !== 1 || body.events[0]?.type !== "pages.public")
+						)
+							return failure("completion_event_invalid", 409);
 						if (
 							(yield* service.state).pending_id === body.transaction &&
 							body.events.some((event) => event.generation !== attempt.generation)
@@ -191,6 +237,8 @@ export const eventRoute = (
 			.pipe(
 				Effect.catchTags({
 					EventError: (error) => Effect.succeed(failure(error.code, 409)),
+					EventStorageRejected: (error) => Effect.succeed(failure(error.code, 507)),
+					StorageRejected: (error) => Effect.succeed(failure(error.code, 507)),
 					SchemaError: () => Effect.succeed(failure("body_invalid", 400)),
 				}),
 				Effect.catchCause(() => Effect.succeed(failure("events_unavailable", 503))),

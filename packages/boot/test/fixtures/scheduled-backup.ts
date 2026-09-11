@@ -1,18 +1,20 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Database } from "bun:sqlite";
-import { Console, Deferred, Effect, Fiber, FileSystem, Layer, Ref, Semaphore } from "effect";
+import { Cause, Console, Deferred, Effect, Fiber, FileSystem, Layer, Ref, Schema, Semaphore } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
+import { ArtifactRetentionRejected } from "../../src/artifact-retention.ts";
 import { AppBackup, layer as backupLayer } from "../../src/app-backup.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../src/app-recovery.ts";
 import { layer as ownersLayer } from "../../src/child-attempts.ts";
+import { AuthError } from "../../src/auth.ts";
 import { ChildError } from "../../src/child-process.ts";
 import { type EventRecord, Events, layer as eventsLayer } from "../../src/events.ts";
 import { layer as generationsLayer } from "../../src/generations.ts";
 import { layer as kernelBootLayer } from "../../src/kernel-boot.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
-import { scheduledBackup } from "../../src/scheduled-backup.ts";
+import { databaseBackup } from "../../src/database-backup.ts";
 import type { ActiveChild, ChildStatus, Supervisor } from "../../src/supervisor.ts";
 import { traffic } from "../../src/traffic.ts";
 
@@ -139,8 +141,20 @@ const main = Effect.gen(function* () {
 			yield* sql`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES('fixture','hash','session','backup','restoring',0)`;
 		if (mode === "registration-failure")
 			yield* sql`CREATE TRIGGER reject_event BEFORE INSERT ON events WHEN json_extract(NEW.event,'$.type')='backup.taken' BEGIN SELECT RAISE(ABORT,'fixture'); END`;
-		const backup = yield* AppBackup;
-		const capture = (yield* scheduledBackup(supervisor).pipe(
+		const originalBackup = yield* AppBackup;
+		let cloneCalls = 0;
+		const backup = {
+			...originalBackup,
+			estimatedBytes:
+				mode === "quota-refusal" ? Effect.succeed(Number.MAX_SAFE_INTEGER) : originalBackup.estimatedBytes,
+			clone: (destination: string) =>
+				Effect.suspend(() => {
+					cloneCalls++;
+					return originalBackup.clone(destination);
+				}),
+		};
+		const authorized = yield* Ref.make(true);
+		const capture = (yield* databaseBackup(supervisor).pipe(
 			Effect.provideService(
 				AppBackup,
 				mode === "clone-failure" || mode === "interrupt"
@@ -157,7 +171,13 @@ const main = Effect.gen(function* () {
 						}
 					: backup,
 			),
-		)).capture;
+		)).capture({
+			reason: "hourly",
+			epoch: "original",
+			authorize: Effect.gen(function* () {
+				if (!(yield* Ref.get(authorized))) return yield* new AuthError({ code: "session_invalid" });
+			}),
+		});
 		const admitted = yield* Deferred.make<void>();
 		const releaseWrite = yield* Deferred.make<void>();
 		const writer = yield* Effect.scoped(
@@ -193,11 +213,28 @@ const main = Effect.gen(function* () {
 			}),
 		).pipe(Effect.forkChild);
 		yield* Deferred.await(admitted);
+		if (mode === "stale-request" || mode === "revoked-request") yield* supervisor.operationGate.take(1);
 		const saving = yield* (mode === "interrupt" ? capture.pipe(Effect.timeout("100 millis")) : capture).pipe(
 			Effect.exit,
 			Effect.forkChild,
 		);
-		if (mode !== "cutover" && mode !== "restore" && mode !== "move" && mode !== "source") yield* Deferred.await(frozen);
+		if (mode === "stale-request" || mode === "revoked-request") {
+			yield* Effect.yieldNow;
+			if (mode === "stale-request") {
+				yield* Ref.set(current, { ...active, attempt: { ...attempt, epoch: "replacement" } });
+				yield* Ref.set(routing.route, { ...destination, epoch: "replacement" });
+			} else yield* Ref.set(authorized, false);
+			yield* supervisor.operationGate.release(1);
+		}
+		if (
+			mode !== "revoked-request" &&
+			mode !== "stale-request" &&
+			mode !== "cutover" &&
+			mode !== "restore" &&
+			mode !== "move" &&
+			mode !== "source"
+		)
+			yield* Deferred.await(frozen);
 		yield* Deferred.succeed(releaseWrite, undefined);
 		yield* Fiber.join(writer);
 		const result = yield* Fiber.join(saving);
@@ -205,7 +242,7 @@ const main = Effect.gen(function* () {
 		const recordedEvents = yield* sql`SELECT event FROM events`;
 		let saved: unknown = null;
 		if (result._tag === "Success") {
-			const copy = new Database(result.value.path, { readonly: true });
+			const copy = new Database(`${root}/backups/${result.value.id}.db`, { readonly: true });
 			try {
 				saved = {
 					records: copy.query("SELECT * FROM records").all(),
@@ -215,8 +252,15 @@ const main = Effect.gen(function* () {
 				copy.close();
 			}
 		}
+		const failure = result._tag === "Failure" ? Cause.findError(result.cause) : null;
 		return {
 			outcome: result._tag,
+			quotaError:
+				failure?._tag === "Success" && Schema.is(ArtifactRetentionRejected)(failure.success)
+					? failure.success.code
+					: null,
+			cloneCalls,
+			sameChild: (yield* Ref.get(current)) === active,
 			files: yield* (yield* FileSystem.FileSystem)
 				.readDirectory(`${root}/backups`)
 				.pipe(Effect.orElseSucceed(() => [])),
@@ -236,7 +280,7 @@ const main = Effect.gen(function* () {
 				backupLayer(filename),
 				ownersLayer(root).pipe(Layer.provide(kernelBootLayer)),
 				generationsLayer,
-			).pipe(Layer.provideMerge(eventsLayer), Layer.provideMerge(boot)),
+			).pipe(Layer.provideMerge(eventsLayer(Effect.void)), Layer.provideMerge(boot)),
 		),
 	);
 }).pipe(

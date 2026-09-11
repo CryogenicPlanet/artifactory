@@ -5,9 +5,14 @@ export const KernelErrorCode = Schema.Literals([
 	"app_schema_unsupported",
 	"author_required",
 	"batch_missing",
+	"backup_budget",
+	"invalid_storage_sample",
+	"unsafe_artifact_path",
 	"boot_unavailable",
 	"cursor_ahead",
 	"event_cursor_invalid",
+	"event_storage_over_budget",
+	"event_storage_unavailable",
 	"extension_migration_conflict",
 	"extension_migration_invalid",
 	"generation_not_live",
@@ -22,13 +27,19 @@ export const KernelErrorCode = Schema.Literals([
 	"input_invalid",
 	"message_not_found",
 	"query_invalid",
-	"public_pages_limit",
 	"rehearsal_append_forbidden",
 	"rehearsal_events_forbidden",
 	"rehearsal_reservation_conflict",
 	"scope_required",
 	"sql_unsupported",
+	"sql_query_invalid",
 	"stale_writer",
+	"storage_headroom",
+	"storage_measurement_failed",
+	"topic_move_evidence_invalid",
+	"topic_move_pending",
+	"public_pages_limit",
+	"sql_publication_pending",
 	"topic_archived",
 	"topic_exists",
 	"topic_not_found",
@@ -86,6 +97,7 @@ const make = Effect.gen(function* () {
 			epoch,
 			filename,
 			generation,
+			backup: Effect.fail(new KernelError({ code: "generation_not_live" })),
 			changed: (_after: number): Effect.Effect<number, KernelError> => Effect.never,
 			fence: Ref.get(next).pipe(Effect.map((value) => ({ published_through: value - 1 }))),
 			reserve: (transaction: string, count: number) =>
@@ -122,11 +134,44 @@ const make = Effect.gen(function* () {
 					: HttpClientRequest.post(`${url}${path}`).pipe(HttpClientRequest.bodyJsonUnsafe(payload));
 			request = request.pipe(HttpClientRequest.setHeader("x-boot-secret", Redacted.value(secret)));
 			const response = yield* client.execute(request);
+			if (response.status === 409 && path === "/_boot/db/backup") {
+				const body = yield* response.json.pipe(
+					Effect.flatMap(
+						Schema.decodeUnknownEffect(
+							Schema.Struct({ error: Schema.Struct({ code: Schema.Literal("unsafe_artifact_path") }) }),
+						),
+					),
+				);
+				return yield* new KernelError({ code: body.error.code });
+			}
+			if (response.status === 507) {
+				const body = yield* response.json.pipe(
+					Effect.flatMap(
+						Schema.decodeUnknownEffect(
+							Schema.Struct({
+								error: Schema.Struct({
+									code: Schema.Literals([
+										"backup_budget",
+										"invalid_storage_sample",
+										"storage_headroom",
+										"storage_measurement_failed",
+										"event_storage_over_budget",
+										"event_storage_unavailable",
+									]),
+								}),
+							}),
+						),
+					),
+				);
+				return yield* new KernelError({ code: body.error.code });
+			}
 			if (response.status !== 200) return yield* new KernelError({ code: "boot_unavailable" });
 			return yield* response.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)));
 		}).pipe(
 			Effect.timeout(timeout),
-			Effect.mapError(() => new KernelError({ code: "boot_unavailable" })),
+			Effect.mapError((error) =>
+				Schema.is(KernelError)(error) ? error : new KernelError({ code: "boot_unavailable" }),
+			),
 		);
 	const scope = yield* Effect.scope;
 	const signal = yield* Ref.make(yield* Deferred.make<void>());
@@ -189,6 +234,7 @@ const make = Effect.gen(function* () {
 		epoch,
 		filename,
 		generation,
+		backup: request("/_boot/db/backup", Schema.Struct({ id: Schema.String }), {}, 20_000).pipe(Effect.asVoid),
 		fence,
 		changed,
 		events: (input: EventQuery) => {

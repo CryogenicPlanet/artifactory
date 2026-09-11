@@ -17,7 +17,7 @@ async function run(test: TestContext, mode: string) {
 	return value;
 }
 
-describe("scheduled quiesced backups", () => {
+describe("on-demand quiesced backups", () => {
 	it.for(["restore", "move", "source"])(
 		"refuses pending %s recovery before touching traffic or the child",
 		async (mode, test) => {
@@ -31,6 +31,24 @@ describe("scheduled quiesced backups", () => {
 		},
 	);
 
+	it("rejects a stale requesting epoch after waiting for another operation", async (test) => {
+		expect(await run(test, "stale-request")).toMatchObject({
+			outcome: "Failure",
+			calls: [],
+			rows: [],
+			current: "replacement",
+			traffic: { frozen: false },
+		});
+	});
+	it("rechecks authorization after waiting for another operation", async (test) => {
+		expect(await run(test, "revoked-request")).toMatchObject({
+			outcome: "Failure",
+			calls: [],
+			rows: [],
+			current: "original",
+			traffic: { frozen: false },
+		});
+	});
 	it("drains an admitted WAL write and reconciles publication before capture without restarting", async (test) => {
 		expect(await run(test, "success")).toMatchObject({
 			outcome: "Success",
@@ -59,6 +77,20 @@ describe("scheduled quiesced backups", () => {
 			rows: [],
 			current: null,
 			traffic: { frozen: true },
+		});
+	});
+	it("releases traffic and resumes the same child when the backup budget refuses capture", async (test) => {
+		expect(await run(test, "quota-refusal")).toMatchObject({
+			outcome: "Failure",
+			quotaError: "backup_budget",
+			calls: ["frozen", "live"],
+			cloneCalls: 0,
+			rows: [],
+			files: [],
+			sameChild: true,
+			current: "original",
+			epoch: { epoch: "original" },
+			traffic: { frozen: false, admitted: 0 },
 		});
 	});
 	it("resumes the same child and cleans an unregistered copy after clone failure", async (test) => {

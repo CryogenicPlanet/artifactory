@@ -1,4 +1,6 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema, Crypto } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import { requireHeadroom, storageHeadroom, type StorageRejected } from "./storage-headroom.ts";
 import type { SourceRejected } from "./source-schema.ts";
 import { sourceIO } from "./source-io.ts";
 import { sourceTreeFingerprint } from "./source-tree-publication.ts";
@@ -25,6 +27,10 @@ export const copySource = Effect.fn("copySource")(function* (sourceDirectory: st
 	const source = yield* fs.realPath(sourceDirectory);
 	const parent = yield* fs.realPath(path.dirname(destination));
 	const target = path.join(parent, path.basename(destination));
+	const headroom = yield* storageHeadroom(parent);
+	const volume = yield* headroom.sample;
+	yield* requireHeadroom(volume);
+	let copiedBytes = 0;
 	const relativeTarget = path.relative(source, target);
 	if (
 		relativeTarget === "" ||
@@ -35,13 +41,15 @@ export const copySource = Effect.fn("copySource")(function* (sourceDirectory: st
 	const copyTree = Effect.fn("copySource.tree")(function* (
 		relative: string,
 		to: string,
-	): Effect.fn.Return<void, SnapshotRejected | PlatformError> {
+	): Effect.fn.Return<void, SnapshotRejected | PlatformError | StorageRejected> {
 		const from = path.join(source, relative);
 		if ((yield* fs.realPath(from)) !== from) {
 			return yield* new SnapshotRejected({ path: from, reason: "Source symlinks are not allowed" });
 		}
 		const info = yield* fs.stat(from);
 		if (info.type === "File") {
+			copiedBytes += Number(info.size);
+			yield* requireHeadroom(volume, copiedBytes);
 			yield* fs.copyFile(from, to);
 			yield* fs.chmod(to, (info.mode & 0o111) !== 0 ? 0o750 : 0o640);
 		} else if (info.type === "Directory") {
@@ -69,7 +77,9 @@ export const copySource = Effect.fn("copySource")(function* (sourceDirectory: st
 export class Snapshots extends Context.Service<
 	Snapshots,
 	{
-		readonly create: (generation: number) => Effect.Effect<Snapshot, SnapshotRejected | PlatformError | SourceRejected>;
+		readonly create: (
+			generation: number,
+		) => Effect.Effect<Snapshot, SnapshotRejected | PlatformError | SourceRejected | StorageRejected>;
 	}
 >()("comms/boot/Snapshots") {}
 
@@ -79,6 +89,7 @@ export const layer = (options: { readonly sourceDirectory: string; readonly gene
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem;
 			const crypto = yield* Crypto.Crypto;
+			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 			const path = yield* Path.Path;
 			const source = yield* fs.realPath(options.sourceDirectory);
 			if ((yield* fs.stat(source)).type !== "Directory") {
@@ -112,6 +123,7 @@ export const layer = (options: { readonly sourceDirectory: string; readonly gene
 					const partial = path.join(reserved, ".partial");
 					const directory = path.join(reserved, "source");
 					yield* copySource(source, partial).pipe(
+						Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
 						Effect.provideService(FileSystem.FileSystem, fs),
 						Effect.provideService(Path.Path, path),
 					);

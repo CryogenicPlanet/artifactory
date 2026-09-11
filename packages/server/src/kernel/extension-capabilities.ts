@@ -68,13 +68,7 @@ export const extensionCapabilities = Effect.gen(function* () {
 							.pipe(Effect.provideService(Lifecycle, lifecycle), Effect.provideService(Crypto.Crypto, crypto));
 					}),
 				),
-			read: <A, E, R>(effect: (fence: number) => Effect.Effect<A, E, R>) =>
-				sql.withTransaction(
-					Effect.gen(function* () {
-						yield* sql`SELECT epoch FROM kernel_writer`;
-						return yield* effect((yield* messages.fence).published_through);
-					}),
-				),
+			read: messages.read,
 		};
 	};
 });

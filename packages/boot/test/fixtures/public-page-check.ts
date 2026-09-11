@@ -18,7 +18,9 @@ const main = Effect.gen(function* () {
 		const result = yield* Effect.gen(function* () {
 			return yield* (yield* PublicPages).check(process.argv[3] ?? "/p/");
 		}).pipe(
-			Effect.provide(publicPagesLayer(root, operationGate, channelGate, route).pipe(Layer.provide(eventsLayer))),
+			Effect.provide(
+				publicPagesLayer(root, operationGate, channelGate, route).pipe(Layer.provide(eventsLayer(Effect.void))),
+			),
 			Effect.result,
 		);
 		yield* Console.log(

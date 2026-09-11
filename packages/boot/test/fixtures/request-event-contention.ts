@@ -72,7 +72,7 @@ const main = Effect.gen(function* () {
 		);
 		yield* Console.log(`Listening ${HttpServer.formatAddress((yield* HttpServer.HttpServer).address)}`);
 		return yield* Effect.never;
-	}).pipe(Effect.provide(layer));
+	}).pipe(Effect.provide(layer(Effect.void)));
 }).pipe(
 	Effect.scoped,
 	Effect.provide(

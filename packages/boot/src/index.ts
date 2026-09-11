@@ -23,11 +23,12 @@ import { layer as preparationProcessLayer } from "./preparation-process.ts";
 import { makeBackupInventory, type BackupInventory } from "./backup-inventory.ts";
 import { requestEvents } from "./request-events.ts";
 import { proxy } from "./proxy.ts";
-import { topicMove, type TopicMove } from "./topic-move.ts";
 import { moveRecovery } from "./topic-move-recovery.ts";
 import { layer as topicPageMoveLayer } from "./topic-page-move.ts";
 import { layer as kernelBootLayer } from "./kernel-boot.ts";
-import { storageMaintenance } from "./storage-maintenance.ts";
+import { databaseBackup, type DatabaseBackup } from "./database-backup.ts";
+import { storageHeadroom } from "./storage-headroom.ts";
+import { makeEventStorage } from "./event-storage.ts";
 import { databaseRestore, type DatabaseRestore } from "./database-restore.ts";
 import { supervise } from "./supervisor.ts";
 
@@ -42,10 +43,11 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const restores = yield* Ref.make<DatabaseRestore | null>(null);
 	const publicPages = yield* Ref.make<PublicPages["Service"] | null>(null);
 	const backups = yield* Ref.make<BackupInventory | null>(null);
+	const captures = yield* Ref.make<DatabaseBackup | null>(null);
 	const requests = yield* requestEvents(events);
 	const stopping = yield* Ref.make(false);
 	const shutdown = yield* Ref.make<Effect.Effect<void>>(Effect.void);
-	const moves = yield* Ref.make<TopicMove | null>(null);
+	const headroom = yield* storageHeadroom(options.dataDirectory);
 	const sourceServices = sourceLayer(options.dataDirectory).pipe(Layer.provideMerge(editLockLayer));
 	const movePagesServices = topicPageMoveLayer(options.dataDirectory).pipe(Layer.provideMerge(sourceServices));
 	const supervisor = yield* supervise(options);
@@ -55,6 +57,9 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		yield* fs.makeDirectory(options.dataDirectory, { recursive: true, mode: 0o700 });
 		return yield* Effect.gen(function* () {
 			yield* initializeBootSchema;
+			const eventStorage = yield* makeEventStorage(headroom.sample);
+			const eventServices = eventsLayer(headroom.check().pipe(Effect.andThen(eventStorage.admit)));
+			yield* eventStorage.run.pipe(Effect.forkScoped);
 			yield* retainEvents.pipe(Effect.forkScoped);
 			return yield* Effect.gen(function* () {
 				yield* Ref.set(auth, yield* Auth);
@@ -65,7 +70,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 				const coordinator = yield* cutover(options, supervisor);
 				const restore = yield* databaseRestore(supervisor);
 				yield* Ref.set(restores, restore);
-				yield* Ref.set(moves, yield* topicMove(supervisor));
+				yield* Ref.set(captures, yield* databaseBackup(supervisor));
 				const moveRecovered = yield* Effect.gen(function* () {
 					const bootSql = yield* SqlClient.SqlClient;
 					const intents = yield* recoveryIntents(bootSql);
@@ -101,7 +106,6 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 				} else {
 					yield* Ref.set(publicPages, yield* PublicPages);
 					yield* run.pipe(Effect.catchCause(fail), Effect.forkScoped);
-					yield* (yield* storageMaintenance(supervisor)).run.pipe(Effect.forkScoped);
 				}
 				return yield* Effect.never;
 			}).pipe(
@@ -114,13 +118,13 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 							supervisor.operationGate,
 							child.channelGate,
 							child.traffic.route,
-						).pipe(Layer.provide(eventsLayer)),
+						).pipe(Layer.provide(eventServices)),
 						attemptsLayer(options.dataDirectory).pipe(Layer.provide(kernelBootLayer)),
 						backupLayer(path.join(options.dataDirectory, "comms.db")),
 						recoveryLayer(path.join(options.dataDirectory, "comms.db"), moveRecovery).pipe(
-							Layer.provideMerge(Layer.mergeAll(eventsLayer, movePagesServices)),
+							Layer.provideMerge(Layer.mergeAll(eventServices, movePagesServices)),
 						),
-						authLayer(options.auth).pipe(Layer.provide(Layer.mergeAll(eventsLayer, editLockLayer))),
+						authLayer(options.auth).pipe(Layer.provide(Layer.mergeAll(eventServices, editLockLayer))),
 					),
 				),
 			);
@@ -144,7 +148,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	yield* HttpRouter.add(
 		"*",
 		"/*",
-		proxy(child, auth, options.auth, events, editing, publicPages, requests, backups, restores, moves, stopping),
+		proxy(child, auth, options.auth, events, editing, publicPages, requests, backups, restores, captures, stopping),
 	).pipe((routes) => HttpRouter.serve(routes, { disableLogger: true }), Layer.build);
 	// Close admission and retire owners while the listener can still serve their publication calls.
 	yield* Effect.addFinalizer(() => Ref.set(stopping, true).pipe(Effect.andThen(Ref.get(shutdown)), Effect.flatten));

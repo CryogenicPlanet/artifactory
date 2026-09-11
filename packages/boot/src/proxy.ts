@@ -1,5 +1,5 @@
 import { databaseRestoreRoute, type DatabaseRestoreStore } from "./database-restore-http.ts";
-import { backupRoute, type BackupStore } from "./backup-http.ts";
+import { backupRoute, type BackupStore, type BackupCaptureStore } from "./backup-http.ts";
 import { Clock, Crypto, Effect, Ref } from "effect";
 import {
 	Cookies,
@@ -14,7 +14,6 @@ import { authenticate, authErrorResponse, authFailure, authRoute, sessionCookie,
 import { editRoute, type EditStore } from "./edit-http.ts";
 import { passkeyManagementRoute } from "./passkey-management-http.ts";
 import { accountRoute } from "./account-http.ts";
-import { topicMoveRoute, type TopicMoveStore } from "./topic-move-http.ts";
 import { tokenMintRoute } from "./token-mint-http.ts";
 import { tokenRoute } from "./token-http.ts";
 import { enrollmentRoute } from "./enrollment-http.ts";
@@ -29,6 +28,7 @@ GET /health        Bootloader liveness (independent of the child).
 GET /_boot/status  Child state and bounded stderr tail.
 GET /_boot/generations  Persistent generation history (also /api/generations).
 GET /_boot/db/backups  Human-only backup catalog.
+POST /_boot/db/backup  Capture a consistent app backup (human or fs scope).
 POST /_boot/db/restore  Human-only database restore with a fresh db.restore assertion.
 GET /api/events?since=0&wait=60  Read or wait for published events.
 GET /api/stream?since=0  SSE with cursor resume, independent of app swaps.
@@ -86,7 +86,7 @@ export const proxy = (
 	requests: RequestEvents,
 	backups: BackupStore,
 	restores: DatabaseRestoreStore,
-	moves: TopicMoveStore,
+	captures: BackupCaptureStore,
 	stopping?: Ref.Ref<boolean>,
 ) =>
 	Effect.gen(function* () {
@@ -112,7 +112,15 @@ export const proxy = (
 			path.startsWith("/_boot/seq") ||
 			path === "/_boot/events/append"
 		) {
-			const internal = yield* eventRoute(events, child.attempts, null, child.channelGate);
+			const internal = yield* eventRoute(
+				events,
+				child.attempts,
+				null,
+				child.channelGate,
+				child.traffic.route,
+				Effect.succeed(true),
+				captures,
+			);
 			if (internal) return internal;
 		}
 		if (stopping && (yield* Ref.get(stopping))) return authErrorResponse("boot_unavailable", 503);
@@ -122,7 +130,7 @@ export const proxy = (
 		if (passkeyResponse) return passkeyResponse;
 		const enrollmentResponse = yield* enrollmentRoute(authStore, authConfig);
 		if (enrollmentResponse) return enrollmentResponse;
-		const backupResponse = yield* backupRoute(authStore, backups);
+		const backupResponse = yield* backupRoute(authStore, backups, captures, authConfig);
 		if (backupResponse) return backupResponse;
 		if (restores) {
 			const restored = yield* databaseRestoreRoute(restores, authStore, authConfig);
@@ -174,10 +182,6 @@ export const proxy = (
 					identity
 						? HttpServerResponse.setHeader(response, "x-comms-token-expires", String(identity.expiresAt))
 						: response;
-				if (identity && auth && moves) {
-					const moved = yield* topicMoveRoute(moves, auth);
-					if (moved) return expires(moved);
-				}
 				if (identity && auth) {
 					const edited = yield* editRoute(editing, auth, identity);
 					if (edited) return expires(edited);
@@ -187,6 +191,7 @@ export const proxy = (
 					child.attempts,
 					identity,
 					child.channelGate,
+					child.traffic.route,
 					auth
 						? authenticate(auth, request).pipe(
 								Effect.map((current) => current.scopes.includes("read")),

@@ -23,7 +23,7 @@ const run = Effect.gen(function* () {
 			for (const value of values) if (typeof value === "string") output.push(value);
 		},
 	};
-	const dependencies = Layer.mergeAll(lockLayer, eventsLayer);
+	const dependencies = Layer.mergeAll(lockLayer, eventsLayer(Effect.void));
 	const restart = () =>
 		Layer.build(
 			authLayer({ rpId: "comms.test", expectedOrigin: "https://comms.test" }).pipe(Layer.provide(dependencies)),

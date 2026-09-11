@@ -36,6 +36,7 @@ it("migrates schema v1 preserving existing conversation and idempotency records"
 		"ALTER TABLE messages DROP COLUMN previous_mentions",
 		"DROP INDEX IF EXISTS outbox_unshipped",
 		"DROP INDEX IF EXISTS outbox_transaction",
+		"DROP TABLE topic_page_continuations",
 		"PRAGMA user_version=1",
 	])
 		await fixture.sql(statement);
@@ -45,7 +46,7 @@ it("migrates schema v1 preserving existing conversation and idempotency records"
 	const root = await (await fetch(resumed.url + "/api/topics?mark=0", { headers: { cookie } })).json();
 	expect(root.messages).toEqual([existing]);
 	expect(await (await resumed.post("/api/messages", input, cookie, "existing-key")).json()).toEqual(existing);
-	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 7 }]);
+	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 8 }]);
 	expect(await fixture.sql("SELECT archived_at FROM topics")).toEqual([{ archived_at: null }, { archived_at: null }]);
 }, 30000);
 

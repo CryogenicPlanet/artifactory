@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
+import { requireHeadroom, storageHeadroom, type StorageRejected } from "./storage-headroom.ts";
 import { SnapshotRejected } from "./snapshots.ts";
 
 /** Copies installed package links without letting them escape the installed tree.
@@ -8,10 +9,13 @@ export const copyPreparedTree = Effect.fn("copyPreparedTree")(function* (from: s
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const root = yield* fs.realPath(from);
+	const volume = yield* (yield* storageHeadroom(path.dirname(to))).sample;
+	yield* requireHeadroom(volume);
+	let copiedBytes = 0;
 	const copy = Effect.fn("copyPreparedTree.entry")(function* (
 		source: string,
 		target: string,
-	): Effect.fn.Return<void, PlatformError | SnapshotRejected> {
+	): Effect.fn.Return<void, PlatformError | SnapshotRejected | StorageRejected> {
 		const link = yield* fs.readLink(source).pipe(Effect.result);
 		if (link._tag === "Success") {
 			const resolved = yield* fs.realPath(source);
@@ -27,6 +31,8 @@ export const copyPreparedTree = Effect.fn("copyPreparedTree")(function* (from: s
 			for (const name of (yield* fs.readDirectory(source)).sort())
 				yield* copy(path.join(source, name), path.join(target, name));
 		} else if (info.type === "File") {
+			copiedBytes += Number(info.size);
+			yield* requireHeadroom(volume, copiedBytes);
 			yield* fs.copyFile(source, target);
 			yield* fs.chmod(target, info.mode & 0o111 ? 0o750 : 0o640);
 		} else

@@ -55,7 +55,10 @@ const main = Effect.gen(function* () {
 					yield* (yield* AppRecovery).prepare(input.epoch ?? "attempt");
 					return "ok";
 			}
-		}).pipe(Effect.provide(recoveryLayer(`${root}/comms.db`).pipe(Layer.provideMerge(eventsLayer))), Effect.result);
+		}).pipe(
+			Effect.provide(recoveryLayer(`${root}/comms.db`).pipe(Layer.provideMerge(eventsLayer(Effect.void)))),
+			Effect.result,
+		);
 		yield* Console.log(
 			yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
 				result._tag === "Success"

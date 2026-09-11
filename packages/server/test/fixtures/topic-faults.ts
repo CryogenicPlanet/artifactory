@@ -31,6 +31,7 @@ const program = Effect.gen(function* () {
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 1,
+				backup: Effect.void,
 				changed: (after) =>
 					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
@@ -138,7 +139,7 @@ const program = Effect.gen(function* () {
 				Effect.provide(SqliteClient.layer({ filename: channel.filename, disableWAL: true })),
 				Effect.provideService(BootChannel, channel),
 			);
-		}).pipe(Effect.provide(recoveryLayer(`${root}/comms.db`).pipe(Layer.provideMerge(eventsLayer))));
+		}).pipe(Effect.provide(recoveryLayer(`${root}/comms.db`).pipe(Layer.provideMerge(eventsLayer(Effect.void)))));
 	}).pipe(Effect.provide(SqliteClient.layer({ filename: `${root}/boot.db`, disableWAL: true })));
 }).pipe(Effect.scoped, Effect.provide(BunServices.layer));
 program.pipe(BunRuntime.runMain);

@@ -29,6 +29,7 @@ const program = Effect.gen(function* () {
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 2,
+				backup: Effect.void,
 				changed: (after) =>
 					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
@@ -70,6 +71,7 @@ const program = Effect.gen(function* () {
 					const one = data("one.ts", { agent: "human", instance: "human-session", request: "req", kind: "human" });
 					const two = data("two.ts");
 					const sql = yield* SqlClient.SqlClient;
+					yield* Ref.set(lifecycle.healthy, true);
 					for (const state of ["starting", "rehearsal", "candidate", "accepted", "frozen", "draining"] as const) {
 						yield* Ref.set(lifecycle.state, state);
 						assert.equal((yield* one.kv().set("key", 1).pipe(Effect.result))._tag, "Failure");
@@ -109,14 +111,17 @@ const program = Effect.gen(function* () {
 					yield* sql`UPDATE kernel_writer SET epoch='replaced'`;
 					assert.equal((yield* one.kv().set("key", 3).pipe(Effect.result))._tag, "Failure");
 					assert.equal((yield* one.log("example.done", {}).pipe(Effect.result))._tag, "Failure");
-					assert.equal(yield* one.kv().get("key"), null);
+					const staleRead = yield* one.kv().get("key").pipe(Effect.result);
+					assert.equal(staleRead._tag, "Failure");
+					if (staleRead._tag === "Failure")
+						assert.equal(staleRead.failure._tag === "KernelError" && staleRead.failure.code, "stale_writer");
 					yield* Console.log("EXTENSION_DATA_RECOVERED");
 				}).pipe(Effect.provide(Layer.mergeAll(messagesLayer, lifecycleLayer)));
 			}).pipe(
 				Effect.provide(SqliteClient.layer({ filename: channel.filename, disableWAL: true })),
 				Effect.provideService(BootChannel, channel),
 			);
-		}).pipe(Effect.provide(recoveryLayer(`${root}/comms.db`).pipe(Layer.provideMerge(eventsLayer))));
+		}).pipe(Effect.provide(recoveryLayer(`${root}/comms.db`).pipe(Layer.provideMerge(eventsLayer(Effect.void)))));
 	}).pipe(Effect.provide(SqliteClient.layer({ filename: `${root}/boot.db`, disableWAL: true })));
 }).pipe(Effect.scoped, Effect.provide(BunServices.layer));
 program.pipe(BunRuntime.runMain);

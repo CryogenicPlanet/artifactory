@@ -1,5 +1,7 @@
 import { Context, Deferred, Effect, Layer, Ref, Schema } from "effect";
 import { SqlClient, type Statement } from "effect/unstable/sql";
+import type { EventStorageRejected } from "./event-storage.ts";
+import type { StorageRejected } from "./storage-headroom.ts";
 import { movePublicPaths, projectPublicPath } from "./public-paths.ts";
 
 export const EventRecord = Schema.Struct({
@@ -50,7 +52,9 @@ export const eventsSchema = Effect.gen(function* () {
 	yield* sql`CREATE TABLE event_batches (id TEXT PRIMARY KEY, attempt TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER NOT NULL, state TEXT NOT NULL)`;
 });
 
-const make = Effect.gen(function* () {
+const make = Effect.fn("Events")(function* (
+	admitReservation: Effect.Effect<void, StorageRejected | EventStorageRejected>,
+) {
 	const sql = yield* SqlClient.SqlClient;
 	const state =
 		sql`SELECT next,published_through,pending_id,pending_attempt,pending_from,pending_to FROM seq WHERE singleton=1`.pipe(
@@ -128,6 +132,7 @@ const make = Effect.gen(function* () {
 							Effect.mapError(() => new EventError({ code: "topic_move_invalid" })),
 						);
 						if (
+							event.topic !== move.to ||
 							!validTopic(move.from) ||
 							!validTopic(move.to) ||
 							move.from === move.to ||
@@ -135,15 +140,13 @@ const make = Effect.gen(function* () {
 							move.to.startsWith(`${move.from}/`)
 						)
 							return yield* new EventError({ code: "topic_move_invalid" });
-						const intent = yield* sql`SELECT id FROM topic_moves WHERE id=${batch.transaction}
-							AND from_path=${move.from} AND to_path=${move.to} AND state='pages_published'
-							AND (seq IS NULL OR seq=${event.seq})`;
-						if (batch.events.length !== 1 || intent.length !== 1)
-							return yield* new EventError({ code: "topic_move_unprepared" });
-						const tooLong = yield* sql`SELECT seq FROM events WHERE
-							(topic=${move.from} OR substr(topic,1,length(${move.from})+1)=${`${move.from}/`})
-							AND length(topic)-length(${move.from})+length(${move.to})>200 LIMIT 1`;
-						if (tooLong.length) return yield* new EventError({ code: "topic_move_invalid" });
+						const legacy = yield* sql`SELECT id FROM topic_moves WHERE id=${batch.transaction}`;
+						if (legacy.length) {
+							const prepared =
+								yield* sql`SELECT id FROM topic_moves WHERE id=${batch.transaction} AND from_path=${move.from} AND to_path=${move.to} AND state='pages_published' AND (seq IS NULL OR seq=${event.seq})`;
+							if (batch.events.length !== 1 || prepared.length !== 1)
+								return yield* new EventError({ code: "topic_move_unprepared" });
+						}
 						yield* sql`UPDATE events SET topic=${move.to} || substr(topic,length(${move.from})+1)
 							WHERE topic=${move.from} OR substr(topic,1,length(${move.from})+1)=${`${move.from}/`}`;
 						yield* movePublicPaths(sql, move.from, move.to);
@@ -170,47 +173,52 @@ const make = Effect.gen(function* () {
 				yield* finish;
 			}),
 		);
+	const reserve = (transaction: string, count: number, attempt: string, purpose: "mutation" | "startup") =>
+		sql.withTransaction(
+			Effect.gen(function* () {
+				if (!transaction || transaction.length > 128 || !Number.isSafeInteger(count) || count < 1 || count > 256)
+					return yield* new EventError({ code: "reservation_invalid" });
+				const current = yield* state;
+				const previous =
+					yield* sql`SELECT attempt,from_seq,to_seq,state FROM event_batches WHERE id=${transaction}`.pipe(
+						Effect.flatMap(
+							Schema.decodeUnknownEffect(
+								Schema.Array(
+									Schema.Struct({
+										attempt: Schema.String,
+										from_seq: Schema.Int,
+										to_seq: Schema.Int,
+										state: Schema.String,
+									}),
+								),
+							),
+						),
+					);
+				if (previous[0]) {
+					const row = previous[0];
+					if (row.attempt !== attempt || row.to_seq - row.from_seq + 1 !== count || row.state !== "pending")
+						return yield* new EventError({ code: "reservation_conflict" });
+					return { transaction, from: row.from_seq, to: row.to_seq };
+				}
+				if (current.pending_id !== null) return yield* new EventError({ code: "publication_pending" });
+				const to = current.next + count - 1;
+				if (!Number.isSafeInteger(to + 1)) return yield* new EventError({ code: "sequence_exhausted" });
+				if (purpose === "mutation") yield* admitReservation;
+				yield* sql`INSERT INTO event_batches VALUES(${transaction},${attempt},${current.next},${to},'pending')`;
+				yield* sql`UPDATE seq SET next=${to + 1},pending_id=${transaction},pending_attempt=${attempt},pending_from=${current.next},pending_to=${to} WHERE singleton=1`;
+				return { transaction, from: current.next, to };
+			}),
+		);
 	return {
 		state,
 		changed,
 		stopWaiting: Ref.set(stopped, true).pipe(Effect.andThen(notify)),
 		append: (batch: Batch, attempt: string) => append(batch, attempt).pipe(Effect.ensuring(notify)),
 		abort: (transaction: string, attempt: string) => abort(transaction, attempt).pipe(Effect.ensuring(notify)),
-		reserve: (transaction: string, count: number, attempt: string) =>
-			sql.withTransaction(
-				Effect.gen(function* () {
-					if (!transaction || transaction.length > 128 || !Number.isSafeInteger(count) || count < 1 || count > 256)
-						return yield* new EventError({ code: "reservation_invalid" });
-					const current = yield* state;
-					const previous =
-						yield* sql`SELECT attempt,from_seq,to_seq,state FROM event_batches WHERE id=${transaction}`.pipe(
-							Effect.flatMap(
-								Schema.decodeUnknownEffect(
-									Schema.Array(
-										Schema.Struct({
-											attempt: Schema.String,
-											from_seq: Schema.Int,
-											to_seq: Schema.Int,
-											state: Schema.String,
-										}),
-									),
-								),
-							),
-						);
-					if (previous[0]) {
-						const row = previous[0];
-						if (row.attempt !== attempt || row.to_seq - row.from_seq + 1 !== count || row.state !== "pending")
-							return yield* new EventError({ code: "reservation_conflict" });
-						return { transaction, from: row.from_seq, to: row.to_seq };
-					}
-					if (current.pending_id !== null) return yield* new EventError({ code: "publication_pending" });
-					const to = current.next + count - 1;
-					if (!Number.isSafeInteger(to + 1)) return yield* new EventError({ code: "sequence_exhausted" });
-					yield* sql`INSERT INTO event_batches VALUES(${transaction},${attempt},${current.next},${to},'pending')`;
-					yield* sql`UPDATE seq SET next=${to + 1},pending_id=${transaction},pending_attempt=${attempt},pending_from=${current.next},pending_to=${to} WHERE singleton=1`;
-					return { transaction, from: current.next, to };
-				}),
-			),
+		reserve: (transaction: string, count: number, attempt: string) => reserve(transaction, count, attempt, "mutation"),
+		// Only boot-authenticated startup probes and unrouted policy completion use this reservation.
+		reserveStartup: (transaction: string, count: number, attempt: string) =>
+			reserve(transaction, count, attempt, "startup"),
 		writeBoot: (event: Omit<typeof EventRecord.Type, "seq">) =>
 			sql
 				.withTransaction(
@@ -295,5 +303,6 @@ const make = Effect.gen(function* () {
 			}),
 	};
 });
-export class Events extends Context.Service<Events, Effect.Success<typeof make>>()("comms/boot/Events") {}
-export const layer = Layer.effect(Events, make);
+export class Events extends Context.Service<Events, Effect.Success<ReturnType<typeof make>>>()("comms/boot/Events") {}
+export const layer = (admitReservation: Effect.Effect<void, StorageRejected | EventStorageRejected>) =>
+	Layer.effect(Events, make(admitReservation));

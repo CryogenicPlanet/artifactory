@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { expect, it } from "vitest";
 import { storageFixture } from "./fixtures/storage-maintenance.ts";
 
-it("captures acknowledged WAL data without changing live ownership and remembers scheduling across restart", async (test) => {
+it("captures acknowledged WAL data without changing live ownership and does not immediately repeat an app-scheduled backup across restart", async (test) => {
 	const fixture = await storageFixture(test),
 		app = await fixture.launch();
 	await app.setup();
@@ -52,10 +52,6 @@ it("captures acknowledged WAL data without changing live ownership and remembers
 	expect(await fixture.sql("SELECT opened,closed FROM child_attempts ORDER BY rowid", "boot.db")).toEqual([
 		{ opened: 1, closed: 0 },
 	]);
-	const attempts = await fixture.sql(
-		"SELECT key,value FROM settings WHERE key LIKE 'backup.%attempt_at' ORDER BY key",
-		"boot.db",
-	);
 	await app.stop();
 	const resumed = await fixture.launch(),
 		again = await resumed.login();
@@ -63,9 +59,7 @@ it("captures acknowledged WAL data without changing live ownership and remembers
 	await fixture.cycle();
 	await fixture.cycle();
 	expect(await fixture.backups()).toEqual([saved]);
-	expect(
-		await fixture.sql("SELECT key,value FROM settings WHERE key LIKE 'backup.%attempt_at' ORDER BY key", "boot.db"),
-	).toEqual(attempts);
+
 	expect(await readFile(saved.path)).toEqual(bytes);
 }, 30000);
 

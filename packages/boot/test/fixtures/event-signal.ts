@@ -46,7 +46,7 @@ Effect.gen(function* () {
 				return yield* Effect.die("Shutdown did not close event waits");
 		}
 		yield* Console.log(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.Int)))(results));
-	}).pipe(Effect.provide(layer));
+	}).pipe(Effect.provide(layer(Effect.void)));
 }).pipe(
 	Effect.scoped,
 	Effect.provide(Layer.mergeAll(SqliteClient.layer({ filename: ":memory:" }), BunServices.layer)),

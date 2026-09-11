@@ -2,6 +2,8 @@ import { recoveryIntents } from "./recovery-intents.ts";
 import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { GenerationPreparation } from "./generation-preparation.ts";
+import { artifactRetention, ArtifactRetentionRejected } from "./artifact-retention.ts";
+import { storageHeadroom, StorageRejected } from "./storage-headroom.ts";
 import { AppBackup } from "./app-backup.ts";
 import { AppRecovery } from "./app-recovery.ts";
 import type { ApplicationSource } from "./application.ts";
@@ -43,6 +45,8 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const crypto = yield* Crypto.Crypto;
+	const retention = yield* artifactRetention(options.dataDirectory);
+	const headroom = yield* storageHeadroom(options.dataDirectory);
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const freshEpoch = crypto.randomBytes(32).pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
 	const ready = yield* Ref.make(false);
@@ -110,6 +114,9 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					if (!(yield* Ref.get(ready)) || (yield* recoveryIntents(sql)).count > 0)
 						return yield* new ChildError({ code: "cutover_recovery_required" });
 					yield* supervisor.assertClosure;
+					const current = yield* Ref.get(supervisor.current);
+					yield* retention.prune(yield* headroom.sample, 0, current ? [current.generation.n] : []);
+					yield* headroom.check();
 					const proposal = yield* options.undo === undefined
 						? sources.prepare(owner)
 						: options.undo.generation !== undefined
@@ -200,6 +207,10 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
 							const saved = path.join(directory, `${id}.db`);
 							const fence = (yield* events.state).published_through;
+							yield* retention.prune(yield* headroom.sample, yield* backup.estimatedBytes, [
+								...(prior ? [prior.generation.n] : []),
+								...(generation ? [generation.n] : []),
+							]);
 							const bytes = Number(yield* backup.clone(saved));
 							yield* sql.withTransaction(
 								Effect.gen(function* () {
@@ -316,7 +327,13 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					yield* supervisor.child.traffic.release;
 					if (failedGeneration) yield* generations.failed(failedGeneration.n, error, stderr);
 					yield* refresh;
-					if (failure._tag === "Success" && Schema.is(FreezeTimeout)(failure.success)) return yield* failure.success;
+					if (
+						failure._tag === "Success" &&
+						(Schema.is(FreezeTimeout)(failure.success) ||
+							Schema.is(StorageRejected)(failure.success) ||
+							Schema.is(ArtifactRetentionRejected)(failure.success))
+					)
+						return yield* failure.success;
 					return {
 						generation: failedGeneration?.n ?? null,
 						status: "failed",

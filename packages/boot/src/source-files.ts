@@ -6,6 +6,7 @@ import { sourceIO, validSourcePath } from "./source-io.ts";
 import { sourceJournal, type UndoSelection } from "./source-journal.ts";
 import type { TreeEntry } from "./source-tree-publication.ts";
 import { SourceRejected, type Change, type Write } from "./source-schema.ts";
+import { storageHeadroom } from "./storage-headroom.ts";
 import { copySource } from "./snapshots.ts";
 
 interface Proposal {
@@ -30,6 +31,17 @@ const make = (dataDirectory: string) =>
 		const sql = yield* SqlClient.SqlClient;
 		const io = yield* sourceIO(dataDirectory);
 		const journal = yield* sourceJournal(io);
+		const headroom = yield* storageHeadroom(dataDirectory);
+		const checkChanges = (changes: readonly Change[]) =>
+			changes.some((change) => change.desired.content !== null)
+				? headroom.check(
+						changes.reduce(
+							(bytes, change) =>
+								bytes + 2 * (change.before.content?.byteLength ?? 0) + 3 * (change.desired.content?.byteLength ?? 0),
+							0,
+						),
+					)
+				: Effect.void;
 		const semaphore = yield* Semaphore.make(1);
 		const prepared = yield* Ref.make<Proposal | null>(null);
 		const pageMoveReady = (id?: string) =>
@@ -204,6 +216,7 @@ const make = (dataDirectory: string) =>
 						const current = yield* read(name, owner);
 						if (baseVersion !== undefined && current.sha !== baseVersion)
 							return yield* new SourceRejected({ code: "stale_base", path: name });
+						if (content !== null) yield* headroom.check(content.byteLength);
 						return yield* lock.stage(owner, name, content, current.mode);
 					}),
 				),
@@ -227,7 +240,9 @@ const make = (dataDirectory: string) =>
 								? text.split(edit.old_string).join(edit.new_string)
 								: text.slice(0, first) + edit.new_string + text.slice(first + edit.old_string.length);
 						}
-						return yield* lock.stage(owner, name, new TextEncoder().encode(text), current.mode);
+						const content = new TextEncoder().encode(text);
+						yield* headroom.check(content.byteLength);
+						return yield* lock.stage(owner, name, content, current.mode);
 					}),
 				),
 			proposalPaths: (id: string) =>
@@ -295,6 +310,8 @@ const make = (dataDirectory: string) =>
 								path: writes.find((write) => !write.path.startsWith("app/"))?.path ?? "",
 							});
 						yield* capture(writes);
+						if (writes.some((write) => write.content !== null))
+							yield* headroom.check(writes.reduce((bytes, write) => bytes + (write.content?.byteLength ?? 0), 0));
 						yield* lock.stageBatch(owner, writes, { requireEmpty: true });
 						return yield* prepare(owner);
 					}),
@@ -327,6 +344,7 @@ const make = (dataDirectory: string) =>
 					Effect.gen(function* () {
 						const value = yield* proposal(id);
 						if (value.owner) yield* pinned(value.owner);
+						yield* checkChanges(value.changes);
 						yield* Effect.uninterruptible(
 							Effect.gen(function* () {
 								yield* sql.withTransaction(
@@ -370,6 +388,7 @@ const make = (dataDirectory: string) =>
 						const value = yield* proposal(id);
 						if (!value.owner) return yield* new SourceRejected({ code: "invalid_path", path: "pages" });
 						yield* pinned(value.owner);
+						yield* checkChanges(value.changes);
 						const directory = yield* fs.makeTempDirectoryScoped({ directory: dataDirectory, prefix: ".proposal-" });
 						if (value.tree) {
 							const target = yield* sourceIO(directory);
@@ -383,6 +402,7 @@ const make = (dataDirectory: string) =>
 						if ((yield* fs.realPath(source)) !== source)
 							return yield* new SourceRejected({ code: "invalid_path", path: "app" });
 						yield* copySource(source, path.join(directory, "app"));
+						yield* checkChanges(value.changes);
 						const target = yield* sourceIO(directory);
 						for (const [index, change] of value.changes.entries())
 							yield* target.replace(change.path, change.desired, `${id}-${index}`);

@@ -13,10 +13,55 @@ export const requestErrorCode = (value: unknown): "input_invalid" | "query_inval
 	return undefined;
 };
 const policy = {
+	backup_budget: {
+		status: 507,
+		message: "Protected backups leave insufficient room in the backup budget.",
+		hint: "Review retained backups and protected recovery operations before requesting another copy.",
+	},
+	invalid_storage_sample: {
+		status: 507,
+		message: "Backup storage capacity could not be measured reliably.",
+		hint: "Restore storage measurement before requesting another copy.",
+	},
+	unsafe_artifact_path: {
+		status: 409,
+		message: "A retained artifact path failed its integrity check.",
+		hint: "Inspect the boot-owned artifact paths and preserve their recovery references before trying again.",
+	},
+	event_storage_over_budget: {
+		status: 507,
+		message: "Retained event pages exceed their storage budget.",
+		hint: "Inspect boot event storage maintenance and resolve protected or unprunable data before retrying the original request with its original Idempotency-Key.",
+	},
+	event_storage_unavailable: {
+		status: 507,
+		message: "The event storage budget could not be measured.",
+		hint: "Restore event storage measurement before retrying the original request with its original Idempotency-Key.",
+	},
+	storage_headroom: {
+		status: 507,
+		message: "The data volume has insufficient reserved headroom.",
+		hint: "Free space on the data volume, then retry the original request with its original Idempotency-Key.",
+	},
+	storage_measurement_failed: {
+		status: 507,
+		message: "The data volume's available capacity could not be measured.",
+		hint: "Restore the volume capacity probe before retrying the original request with its original Idempotency-Key.",
+	},
 	public_pages_limit: {
 		status: 500,
 		message: "The public page grant snapshot exceeds its activation limit.",
 		hint: "Reduce public topic grants to at most 4096 paths and 512 KiB of encoded paths, then reload. Inspect invalid public topic paths if the count remains over the limit.",
+	},
+	topic_move_evidence_invalid: {
+		status: 409,
+		message: "Page move ownership could not be verified.",
+		hint: "Inspect the original and destination page trees and retained move record. Preserve both; repair the conflicting path before retrying the original key.",
+	},
+	topic_move_pending: {
+		status: 409,
+		message: "An overlapping page move is unfinished.",
+		hint: "Retry the original unfinished move with its original Idempotency-Key if one was supplied before starting another overlapping move.",
 	},
 	idempotency_migration_invalid: {
 		status: 500,
@@ -61,7 +106,7 @@ const policy = {
 	idempotency_conflict: {
 		status: 409,
 		message: "The idempotency key belongs to a different request.",
-		hint: "Retry the original unchanged request with its original Idempotency-Key. Use a new key only for an intentionally new operation.",
+		hint: "Retry the original unchanged request with its original Idempotency-Key if one was supplied. Use a new key only for an intentionally new operation.",
 	},
 	topic_exists: {
 		status: 409,
@@ -91,7 +136,17 @@ const policy = {
 	sql_unsupported: {
 		status: 501,
 		message: "This SQL operation is not supported.",
-		hint: "Use one SELECT or WITH read query. Remove comments and semicolons; bind literal text as parameters. SQL writes are not implemented.",
+		hint: "Use one supported data or schema statement. Transaction control, PRAGMA, attachments, triggers, temporary objects and recovery tables are unavailable. Remove comments and semicolons; bind literal text as parameters.",
+	},
+	sql_query_invalid: {
+		status: 400,
+		message: "The SQL statement, parameters or returned values are invalid.",
+		hint: "Check statement syntax, parameter count and constraints. Cast BLOBs or unsafe integers to text, and keep returned JSON under 128 KiB.",
+	},
+	sql_publication_pending: {
+		status: 503,
+		message: "A SQL repair is committed but has not finished event publication.",
+		hint: "Retry the read after publication recovers. Retry a write only with its original unchanged Idempotency-Key.",
 	},
 	boot_unavailable: {
 		status: 503,

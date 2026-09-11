@@ -80,8 +80,9 @@ it.for([insertCutover, insertRestore, insertMove, insertSource] as const)(
 		const batches = await fixture.sql("SELECT * FROM source_batches", "boot.db");
 		const ownership = await fixture.sql("SELECT * FROM child_attempts", "boot.db");
 		const restores = await fixture.sql("SELECT * FROM db_restore_requests", "boot.db");
+		const backups = await fixture.sql("SELECT * FROM backups", "boot.db");
 		expect((await app.post("/api/reload", {}, cookie)).status).toBe(503);
-		expect((await app.post("/api/topics/old/move", { to: "new" }, cookie)).status).toBe(503);
+		expect((await app.post("/_boot/db/backup", {}, cookie)).status).toBe(503);
 		expect(
 			(
 				await fetch(`${app.url}/api/fs/pages/old/index.md`, {
@@ -107,6 +108,7 @@ it.for([insertCutover, insertRestore, insertMove, insertSource] as const)(
 				).status,
 			).toBe(503);
 		expect(await fixture.sql("SELECT * FROM db_restore_requests", "boot.db")).toEqual(restores);
+		expect(await fixture.sql("SELECT * FROM backups", "boot.db")).toEqual(backups);
 		expect(await fixture.sql("SELECT * FROM generations", "boot.db")).toEqual(generations);
 		expect(await fixture.sql("SELECT * FROM source_batches", "boot.db")).toEqual(batches);
 		expect(await fixture.sql("SELECT * FROM child_attempts", "boot.db")).toEqual(ownership);

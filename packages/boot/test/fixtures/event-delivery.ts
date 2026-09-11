@@ -8,6 +8,7 @@ import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { Auth, layer as authLayer } from "../../src/auth.ts";
 import { authenticate } from "../../src/auth-http.ts";
 import { layer as lockLayer } from "../../src/edit-lock.ts";
+import type { Destination } from "../../src/traffic.ts";
 import { eventRoute, type Attempt } from "../../src/event-http.ts";
 
 const main = Effect.gen(function* () {
@@ -28,6 +29,7 @@ const main = Effect.gen(function* () {
 			{ secret: "fixture-secret", epoch: "fixture", host, generation: 1, state: "live" },
 		]);
 		const gate = yield* Semaphore.make(1);
+		const route = yield* Ref.make<Destination | null>(null);
 		const handler = Effect.gen(function* () {
 			const request = yield* HttpServerRequest.HttpServerRequest;
 			if (request.url === "/token") {
@@ -72,6 +74,7 @@ const main = Effect.gen(function* () {
 									expiresAt: (yield* Clock.currentTimeMillis) + (request.headers["x-short-expiry"] ? 300 : 60000),
 								},
 					gate,
+					route,
 					request.headers.authorization
 						? authenticate(auth, request).pipe(
 								Effect.as(true),
@@ -90,7 +93,7 @@ const main = Effect.gen(function* () {
 	}).pipe(
 		Effect.provide(
 			authLayer({ rpId: "localhost", expectedOrigin: "http://localhost" }).pipe(
-				Layer.provideMerge(Layer.mergeAll(layer, lockLayer)),
+				Layer.provideMerge(Layer.mergeAll(layer(Effect.void), lockLayer)),
 			),
 		),
 	);

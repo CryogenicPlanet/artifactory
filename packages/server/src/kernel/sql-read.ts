@@ -1,71 +1,82 @@
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 import { BootChannel, KernelError } from "./boot-channel.ts";
+import { sqlRows } from "./sql-result.ts";
 
-export const SqlReadInput = Schema.Struct({
+export const SqlInput = Schema.Struct({
 	sql: Schema.String,
 	params: Schema.optionalKey(Schema.Array(Schema.Union([Schema.String, Schema.Finite, Schema.Null]))),
 });
-export const SqlReadResult = Schema.Struct({
-	rows: Schema.Array(Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Finite, Schema.Null]))),
-	truncated: Schema.Boolean,
-});
-
-/** Physical committed-row inspection; deliberately does not promise a publication cursor. */
-export const readSql = (input: typeof SqlReadInput.Type) =>
+export const sqlInput = (input: typeof SqlInput.Type) =>
 	Effect.gen(function* () {
-		const boot = yield* BootChannel;
-		const params = input.params ?? [];
 		if (
-			input.sql.length === 0 ||
+			input.sql.trim().length === 0 ||
 			new TextEncoder().encode(input.sql).byteLength > 16384 ||
-			params.length > 100 ||
-			params.some(
+			(input.params?.length ?? 0) > 100 ||
+			input.params?.some(
 				(value) =>
 					typeof value === "number" &&
 					(!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))),
 			)
 		)
 			return yield* new KernelError({ code: "input_invalid" });
-		// Conservatively reject separators and comments even inside literals. Bind such text as a parameter.
-		// Without them the caller cannot discard the wrapper's final LIMIT or introduce another statement.
-		if (!/^(SELECT|WITH)\b/i.test(input.sql.trim()) || /;|--|\/\*|\*\/|\0/.test(input.sql)) return null;
+		// No parser: separators, comments and NUL are deliberately unsupported, including inside SQL literals.
+		if (/;|--|\/\*|\*\/|\0/.test(input.sql)) return yield* new KernelError({ code: "sql_unsupported" });
+	});
+
+// SQLite compilation errors identify an unsupported query shape; unavailable stores must stay retriable.
+const compilationError = Schema.is(Schema.Struct({ code: Schema.Literal("SQLITE_ERROR") }));
+const statementError = Schema.is(
+	Schema.Struct({ code: Schema.Literals(["SQLITE_ERROR", "SQLITE_RANGE", "SQLITE_MISMATCH", "SQLITE_TOOBIG"]) }),
+);
+const nativeMessage = Schema.is(Schema.Struct({ message: Schema.String }));
+const bindingError = (cause: unknown) =>
+	nativeMessage(cause) && /^SQLite query expected \d+ values, received \d+$/.test(cause.message);
+export const sqlQueryFailure = (error: SqlError) =>
+	bindingError(error.reason.cause) ||
+	statementError(error.reason.cause) ||
+	["ConstraintError", "UniqueViolation"].includes(error.reason._tag)
+		? new KernelError({ code: "sql_query_invalid" })
+		: error;
+
+/** Let SQLite compile the SELECT wrapper; do not depend on its internal EXPLAIN opcodes. */
+export const queryShape = (input: typeof SqlInput.Type) =>
+	Effect.gen(function* () {
+		yield* sqlInput(input);
+		if (/^SELECT\b/i.test(input.sql.trim())) return true;
+		if (!/^WITH\b/i.test(input.sql.trim())) return false;
+		const boot = yield* BootChannel;
 		return yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			const result = yield* sql
-				.unsafe<Record<string, unknown>>(`SELECT * FROM (${input.sql}\n) LIMIT 201`, params)
-				.pipe(
-					Effect.provideService(SqlClient.SafeIntegers, true),
-					Effect.mapError(() => new KernelError({ code: "query_invalid" })),
-				);
-			const rows: Array<Record<string, string | number | null>> = [];
-			for (const source of result.slice(0, 200)) {
-				const entries: Array<[string, string | number | null]> = [];
-				for (const [key, raw] of Object.entries(source)) {
-					const value =
-						typeof raw === "bigint" && raw >= BigInt(Number.MIN_SAFE_INTEGER) && raw <= BigInt(Number.MAX_SAFE_INTEGER)
-							? Number(raw)
-							: raw;
-					if (
-						value !== null &&
-						typeof value !== "string" &&
-						(typeof value !== "number" ||
-							!Number.isFinite(value) ||
-							(Number.isInteger(value) && !Number.isSafeInteger(value)))
-					)
-						return yield* new KernelError({ code: "query_invalid" });
-					entries.push([key, value]);
-				}
-				rows.push(Object.fromEntries(entries));
-			}
-			const response = { rows, truncated: result.length > 200 };
-			if (
-				new TextEncoder().encode(yield* Schema.encodeEffect(Schema.fromJsonString(SqlReadResult))(response))
-					.byteLength > 131072
-			)
-				return yield* new KernelError({ code: "query_invalid" });
-			return response;
+			return yield* sql.unsafe(`EXPLAIN SELECT * FROM (${input.sql}\n) LIMIT 201`, input.params ?? []).pipe(
+				Effect.as(true),
+				Effect.catchIf(
+					(error) => compilationError(error.reason.cause),
+					// Do not compile the write here: retained results must replay even if a
+					// later schema repair removed the statement's original target.
+					() => Effect.succeed(false),
+				),
+				Effect.mapError(sqlQueryFailure),
+			);
+		}).pipe(
+			Effect.provide(
+				SqliteClient.layer({ filename: boot.filename, readonly: true, disableWAL: true, busyTimeout: "100 millis" }),
+			),
+		);
+	});
+/** Physical committed-row inspection; deliberately does not promise a publication cursor. */
+export const readSql = (input: typeof SqlInput.Type) =>
+	Effect.gen(function* () {
+		yield* sqlInput(input);
+		const boot = yield* BootChannel;
+		return yield* Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const rows = yield* sql
+				.unsafe<Record<string, unknown>>(`SELECT * FROM (${input.sql}\n) LIMIT 201`, input.params ?? [])
+				.pipe(Effect.provideService(SqlClient.SafeIntegers, true), Effect.mapError(sqlQueryFailure));
+			return yield* sqlRows(rows);
 		}).pipe(
 			Effect.provide(
 				SqliteClient.layer({ filename: boot.filename, readonly: true, disableWAL: true, busyTimeout: "100 millis" }),

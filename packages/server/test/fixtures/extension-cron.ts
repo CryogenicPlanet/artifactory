@@ -59,6 +59,7 @@ const run = Effect.gen(function* () {
 		epoch: "test",
 		filename: ":memory:",
 		generation: 1,
+		backup: Effect.void,
 		changed: () => Effect.never,
 		fence: Effect.succeed({ published_through: 0 }),
 		events: (input) => Effect.succeed({ items: [], cursor: input.since, timed_out: false, drained: false }),

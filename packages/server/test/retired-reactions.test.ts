@@ -26,6 +26,7 @@ it("removes reaction routes while preserving historical rows across restart", as
 		`INSERT INTO reaction_idempotency VALUES('legacy','key','m_old','+1','${outcome}')`,
 		"ALTER TABLE messages DROP COLUMN mentions",
 		"ALTER TABLE messages DROP COLUMN previous_mentions",
+		"DROP TABLE topic_page_continuations",
 		"PRAGMA user_version=6",
 	])
 		await fixture.sql(statement);

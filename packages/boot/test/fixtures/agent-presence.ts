@@ -89,7 +89,7 @@ const run = Effect.gen(function* () {
 	}).pipe(
 		Effect.provide(
 			authLayer({ rpId: "localhost", expectedOrigin: "http://localhost" }).pipe(
-				Layer.provide(Layer.mergeAll(eventsLayer, lockLayer)),
+				Layer.provide(Layer.mergeAll(eventsLayer(Effect.void), lockLayer)),
 			),
 		),
 	);

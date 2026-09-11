@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
@@ -117,4 +117,105 @@ it("denies unauthenticated and read-only moves without changing a topic named mo
 		(await (await fetch(app.url + `/api/messages?since=${original.seq - 1}&limit=1`, { headers: { cookie } })).json())
 			.items,
 	).toEqual([original]);
+}, 30000);
+
+it("isolates pending page moves and hides ownership markers after completion", async (test) => {
+	const fixture = await conversation(test);
+	for (const topic of ["original", "unrelated"]) {
+		await mkdir(join(fixture.root, "pages", topic), { recursive: true });
+		await writeFile(join(fixture.root, "pages", topic, "file.txt"), `${topic} bytes`);
+	}
+	const app = await fixture.launch();
+	await app.setup();
+	const cookie = await app.login();
+	await app.ready(cookie);
+	const get = (path: string) => fetch(app.url + path, { headers: { cookie } });
+	const put = (path: string, body: string) =>
+		fetch(app.url + path, {
+			method: "PUT",
+			headers: { cookie, origin: "https://comms.test" },
+			body,
+		});
+	await fixture.sql(
+		"CREATE TRIGGER reject_completion BEFORE INSERT ON outbox WHEN json_extract(NEW.event,'$.type')='topic.pages_moved' BEGIN SELECT RAISE(ABORT,'test completion failure'); END",
+	);
+	const failed = await app.post("/api/topics/original/move", { to: "destination" }, cookie, "pending-move");
+	expect(failed.status).toBeGreaterThanOrEqual(500);
+	expect(await fixture.sql("SELECT from_path,to_path,completed FROM topic_page_continuations")).toEqual([
+		{ from_path: "original", to_path: "destination", completed: 0 },
+	]);
+	expect(await readFile(join(fixture.root, "pages/destination/file.txt"), "utf8")).toBe("original bytes");
+	for (const path of ["original/file.txt", "destination/file.txt"]) {
+		const page = await get(`/p/${path}`);
+		expect(page.status, path).toBe(503);
+		expect(await page.json()).toMatchObject({ error: { code: "pages_move_pending", retriable: true } });
+		expect((await put(`/api/fs/pages/${path}`, "must not replace moved pages")).status, path).toBe(503);
+	}
+	expect(await (await get("/p/unrelated/file.txt")).text()).toBe("unrelated bytes");
+	expect((await put("/api/fs/pages/unrelated/file.txt", "still writable")).status).toBe(200);
+	expect(await (await get("/p/unrelated/file.txt")).text()).toBe("still writable");
+	expect((await app.post("/api/messages", { topic: "unrelated", body: "still accepts writes" }, cookie)).status).toBe(
+		200,
+	);
+	const pendingListing = await (await get("/p/")).text();
+	expect(pendingListing).toContain("unrelated/");
+	expect(pendingListing).not.toContain("destination/");
+	await fixture.sql("DROP TRIGGER reject_completion");
+	const finished = await app.post("/api/topics/original/move", { to: "destination" }, cookie, "pending-move");
+	expect(finished.status, await finished.clone().text()).toBe(200);
+	expect(await fixture.sql("SELECT completed FROM topic_page_continuations")).toEqual([{ completed: 1 }]);
+	expect(await (await get("/p/destination/file.txt")).text()).toBe("original bytes");
+	const marker = (await readdir(join(fixture.root, "pages/destination"))).find((name) =>
+		name.startsWith(".comms-move-"),
+	);
+	if (!marker) throw Error("Expected retained move ownership marker");
+	for (const path of ["/p/destination/", "/api/fs/pages/destination/"]) {
+		const listing = await get(path);
+		expect(listing.status).toBe(200);
+		expect(await listing.text()).not.toContain(".comms-move-");
+	}
+	for (const path of [`/p/destination/${marker}`, `/api/fs/pages/destination/${marker}`])
+		expect((await get(path)).status, path).toBe(400);
+}, 30000);
+
+it("rechecks stale anonymous grants after a public move and private source recreation", async (test) => {
+	const fixture = await conversation(test);
+	await mkdir(join(fixture.root, "pages/original"), { recursive: true });
+	await writeFile(join(fixture.root, "pages/original/file.txt"), "original public bytes");
+	const app = await fixture.launch();
+	await app.setup();
+	const cookie = await app.login();
+	await app.ready(cookie);
+	const grant = await fetch(app.url + "/api/topics/original", {
+		method: "PUT",
+		headers: { cookie, origin: "https://comms.test", "content-type": "application/json" },
+		body: JSON.stringify({ meta: { public: true } }),
+	});
+	expect(grant.status).toBe(200);
+	expect(await (await fetch(app.url + "/p/original/file.txt")).text()).toBe("original public bytes");
+	expect((await app.post("/api/topics/original/move", { to: "destination" }, cookie, "public-move")).status).toBe(200);
+	await mkdir(join(fixture.root, "pages/original"));
+	await writeFile(join(fixture.root, "pages/original/file.txt"), "replacement private bytes");
+	expect((await app.post("/api/messages", { topic: "original", body: "private replacement" }, cookie)).status).toBe(
+		200,
+	);
+	// Simulate the stale boot grant of a request admitted immediately before the move.
+	// Boot still supplies the genuine guarded header; app must recheck current SQL ownership.
+	await fixture.sql("INSERT INTO public_paths(path) VALUES('original')", "boot.db");
+	for (const method of ["GET", "HEAD"]) {
+		const response = await fetch(app.url + "/p/original/file.txt", { method });
+		expect(response.status, method).toBe(404);
+		expect(await response.text()).not.toContain("replacement private bytes");
+	}
+	// An unpublished regrant must not supersede the pinned published private image.
+	await fixture.sql(
+		`UPDATE topics SET meta='{"public":true}', updated_seq=999999, previous=json_object('meta',json('{}'),'archived_at',NULL,'deleted_at',NULL) WHERE path='original'`,
+	);
+	const unpublished = await fetch(app.url + "/p/original/file.txt");
+	expect(unpublished.status).toBe(404);
+	expect(await unpublished.text()).not.toContain("replacement private bytes");
+	expect(await (await fetch(app.url + "/p/destination/file.txt")).text()).toBe("original public bytes");
+	expect(await (await fetch(app.url + "/p/original/file.txt", { headers: { cookie } })).text()).toBe(
+		"replacement private bytes",
+	);
 }, 30000);

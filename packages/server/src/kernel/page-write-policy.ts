@@ -1,3 +1,4 @@
+import { pendingPageMove } from "./topic-page-continuation.ts";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -47,6 +48,7 @@ export const checkPageWrites = (filename: string, epoch: string, input: typeof P
 				if (writers.length !== 1 || writers[0]?.epoch !== epoch) return yield* new PageWriteUnavailable({});
 				for (const path of input.paths) {
 					const relative = path.slice("pages/".length);
+					if ((yield* pendingPageMove(sql, relative)).length) return yield* new PageWriteUnavailable({});
 					const rows = yield* sql`WITH visible_topics AS (${publishedTopics(sql, input.published_through)})
 				 SELECT archived_at,deleted_at FROM visible_topics WHERE path=${relative} OR substr(${relative},1,length(path)+1)=path||'/'`.pipe(
 						Effect.flatMap(

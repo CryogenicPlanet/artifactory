@@ -39,7 +39,7 @@ import { Extensions, layer as extensionsLayer } from "./kernel/ext.ts";
 import { failure } from "./conversation-request.ts";
 import { checkPageWrites, PageWriteCheck, PageWriteUnavailable } from "./kernel/page-write-policy.ts";
 import { reconstructPublicPages } from "./kernel/public-page-policy.ts";
-import { TopicMoveCommand } from "./kernel/topic-move.ts";
+import { backupSchedule } from "./backup-schedule.ts";
 
 type Handler = Effect.Effect<
 	HttpServerResponse.HttpServerResponse,
@@ -170,23 +170,9 @@ const server = Effect.gen(function* () {
 									return HttpServerResponse.jsonUnsafe(yield* checkPageWrites(boot.filename, boot.epoch, input));
 								}).pipe(Effect.catchCause(() => Effect.succeed(HttpServerResponse.empty({ status: 503 }))));
 							}
-							if (request.url === "/_kernel/topic-move" && request.method === "POST")
-								return yield* failure(
-									controlGate.withPermit(
-										Effect.gen(function* () {
-											if (Object.keys(request.headers).some((name) => name.startsWith("x-comms-")))
-												return HttpServerResponse.empty({ status: 403 });
-											if ((yield* Ref.get(lifecycle.state)) !== "frozen")
-												return HttpServerResponse.empty({ status: 409 });
-											const command = yield* request.json.pipe(
-												Effect.flatMap(Schema.decodeUnknownEffect(TopicMoveCommand, { onExcessProperty: "error" })),
-											);
-											return HttpServerResponse.jsonUnsafe(yield* messages.moveTopic(command));
-										}),
-									),
-								);
 							const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method);
 							if (
+								!(yield* Ref.get(lifecycle.healthy)) ||
 								!["accepted", "live", "frozen"].includes(state) ||
 								(mutation && state !== "accepted" && state !== "live")
 							)
@@ -232,6 +218,7 @@ const server = Effect.gen(function* () {
 							yield* Effect.sleep("100 millis");
 						}
 					}).pipe(Effect.forkScoped);
+					yield* backupSchedule.pipe(Effect.forkScoped);
 					return yield* Effect.never;
 				}).pipe(
 					Effect.provide(
@@ -259,7 +246,7 @@ const server = Effect.gen(function* () {
 					if (Object.keys(request.headers).some((name) => name.startsWith("x-comms-")))
 						return HttpServerResponse.empty({ status: 403 });
 					return HttpServerResponse.empty({
-						status: 200,
+						status: (yield* Ref.get(lifecycle.healthy)) ? 200 : 503,
 						headers: {
 							"x-comms-writer-epoch": boot.epoch,
 							"x-comms-kernel-protocol": "2",

@@ -1,6 +1,8 @@
 import { recoveryIntents } from "./recovery-intents.ts";
-import { Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
+import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { artifactRetention, ArtifactRetentionRejected } from "./artifact-retention.ts";
+import { storageHeadroom, StorageRejected } from "./storage-headroom.ts";
 import { AppBackup } from "./app-backup.ts";
 import { AppRecovery } from "./app-recovery.ts";
 import { Auth } from "./auth.ts";
@@ -27,6 +29,8 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 	const crypto = yield* Crypto.Crypto;
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
+	const retention = yield* artifactRetention(path.dirname(recovery.filename));
+	const headroom = yield* storageHeadroom(path.dirname(recovery.filename));
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const ready = yield* Ref.make(false);
 	const freshEpoch = crypto.randomBytes(32).pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
@@ -229,8 +233,14 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					}
 				});
 				const prepare = Effect.gen(function* () {
-					yield* saved(record.backup);
-					const generation = prior?.generation ?? (yield* generations.list).find((item) => item.good === 1);
+					const target = yield* saved(record.backup);
+					const estimated = yield* backup.estimatedBytes;
+					yield* retention.prune(yield* headroom.sample, estimated, prior ? [prior.generation.n] : []);
+					// Reserve room for both the safety copy and temporary restore copy before selecting replacement.
+					yield* headroom.check(estimated + target.bytes);
+					const generation =
+						prior?.generation ??
+						(yield* generations.list).find((item) => item.good === 1 && item.snapshot_dir !== null);
 					if (!generation) return yield* new ChildError({ code: "restore_snapshot_missing" });
 					// Pin another holder without consuming their staging; record and pin commit together.
 					yield* sql.withTransaction(
@@ -252,6 +262,9 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
 					const filename = path.join(directory, `${id}.db`);
 					const fence = (yield* events.state).published_through;
+					const frozenEstimate = yield* backup.estimatedBytes;
+					yield* retention.prune(yield* headroom.sample, frozenEstimate, [generation.n]);
+					yield* headroom.check(frozenEstimate + target.bytes);
 					const bytes = Number(yield* backup.clone(filename));
 					const at = (yield* DateTime.nowAsDate).getTime();
 					yield* sql.withTransaction(
@@ -288,7 +301,13 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 						if (latest.phase !== "authorized") return yield* Effect.failCause(prepared.cause);
 						// No replacement was selected. Resume the authoritative current store, never the requested backup.
 						if (latest.generation !== null) yield* close;
-						yield* sql`UPDATE db_restore_requests SET phase='failed',failure='restore_preparation_failed' WHERE proof_id=${record.proof_id}`;
+						const cause = Cause.findError(prepared.cause);
+						const failure =
+							cause._tag === "Success" &&
+							(Schema.is(StorageRejected)(cause.success) || Schema.is(ArtifactRetentionRejected)(cause.success))
+								? cause.success.code
+								: "restore_preparation_failed";
+						yield* sql`UPDATE db_restore_requests SET phase='failed',failure=${failure} WHERE proof_id=${record.proof_id}`;
 						yield* releaseLock(latest);
 						if (latest.generation !== null) yield* restart(latest);
 						return receipt(yield* read(record.proof_id));

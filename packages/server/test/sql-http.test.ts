@@ -62,7 +62,7 @@ it("inspects physical committed rows with scoped read authority and documents th
 			body: JSON.stringify({ sql }),
 		});
 	expect((await bearerQuery("SELECT count(*) AS count FROM messages")).status).toBe(200);
-	expect((await bearerQuery("DELETE FROM messages")).status).toBe(501);
+	expect((await bearerQuery("DELETE FROM messages")).status).toBe(403);
 	await fixture.sql(
 		`UPDATE tokens SET scopes='["write"]' WHERE family=(SELECT family FROM tokens WHERE agent='sql' LIMIT 1)`,
 		"boot.db",
@@ -75,7 +75,7 @@ it("inspects physical committed rows with scoped read authority and documents th
 	expect(discovery.paths["/api/sql"].post.description).toContain("physical committed");
 }, 30000);
 
-it("refuses writes, wrapper escapes, unsupported values and oversized output without modifying the app store", async (test) => {
+it("refuses wrapper escapes, unsupported values and oversized output without modifying the app store", async (test) => {
 	const fixture = await conversation(test),
 		app = await fixture.launch();
 	await app.setup();
@@ -86,13 +86,12 @@ it("refuses writes, wrapper escapes, unsupported values and oversized output wit
 	await fixture.sql("CREATE TABLE sql_safety(value INTEGER)");
 	await fixture.sql("INSERT INTO sql_safety VALUES(1)");
 	for (const sql of [
-		"UPDATE sql_safety SET value=2",
-		"DELETE FROM sql_safety",
-		"DROP TABLE sql_safety",
 		"PRAGMA writable_schema=1",
 		"ATTACH '/tmp/comms-sql-escape.db' AS escaped",
 		"VACUUM INTO '/tmp/comms-sql-escape.db'",
 		"COMMIT",
+		"INSERT OR ROLLBACK INTO sql_safety VALUES(2)",
+		"CREATE TABLE rollback_conflict(value TEXT UNIQUE ON CONFLICT ROLLBACK)",
 		"SELECT 1; DELETE FROM sql_safety",
 		"SELECT 1) UNION ALL SELECT 2\0",
 		"SELECT 1) UNION ALL SELECT 2 --",

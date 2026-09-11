@@ -4,6 +4,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import { type BootChannel, EventRecord, KernelError } from "./boot-channel.ts";
 import { writerGate } from "./database.ts";
 import { HealthProbe } from "./health-probe.ts";
+import { assertWriterHealthy, poisonUncertainWriter } from "./lifecycle.ts";
 import { lookupIdempotency, storeIdempotency, type Idempotency } from "./idempotency.ts";
 
 type Range = { readonly from: number; readonly to: number };
@@ -38,6 +39,7 @@ export const makeMutate =
 				return yield* new KernelError({ code: "input_invalid" });
 			return yield* mutex.withPermit(
 				Effect.gen(function* () {
+					if (!probe) yield* assertWriterHealthy;
 					if (input.guard) yield* input.guard;
 					if (!probe) yield* relay;
 					const transaction = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
@@ -96,8 +98,12 @@ export const makeMutate =
 						.pipe(Effect.exit);
 					if (result._tag === "Failure") {
 						// A rollback failure can contain both Fail and Die. Preserve the entire cause before resolving anything.
-						if (result.cause.reasons.length === 0 || !result.cause.reasons.every(Cause.isFailReason))
+						if (result.cause.reasons.length === 0 || !result.cause.reasons.every(Cause.isFailReason)) {
+							// Preserve uncertain transaction evidence. The keeper must close this
+							// connection before recovery decides whether to publish or abort.
+							yield* poisonUncertainWriter(result.cause);
 							return yield* Effect.failCause(result.cause);
+						}
 						if (!probe && count > 0) {
 							yield* boot.reserve(transaction, count);
 							yield* boot.abort(transaction);

@@ -1,4 +1,6 @@
 import { Context, Crypto, Effect, FileSystem, Layer, Path, Schema, Semaphore } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import { storageHeadroom, type StorageRejected } from "./storage-headroom.ts";
 import type { PlatformError } from "effect/PlatformError";
 import type { ChildError } from "./child-process.ts";
 import { PreparationProcess } from "./preparation-process.ts";
@@ -14,7 +16,7 @@ export class GenerationPreparation extends Context.Service<
 		readonly prepare: (
 			sourceDirectory: string,
 			snapshotDirectory: string,
-		) => Effect.Effect<void, PlatformError | SnapshotRejected | ChildError>;
+		) => Effect.Effect<void, PlatformError | SnapshotRejected | ChildError | StorageRejected>;
 	}
 >()("comms/boot/GenerationPreparation") {}
 
@@ -26,6 +28,8 @@ export const layer = (options: { readonly dataDirectory: string; readonly depend
 			const path = yield* Path.Path;
 			const crypto = yield* Crypto.Crypto;
 			const commands = yield* PreparationProcess;
+			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+			const headroom = yield* storageHeadroom(options.dataDirectory);
 			const gate = yield* Semaphore.make(1);
 			const digest = (bytes: Uint8Array) =>
 				crypto.digest("SHA-256", bytes).pipe(Effect.map((value) => Buffer.from(value).toString("hex")));
@@ -157,6 +161,7 @@ export const layer = (options: { readonly dataDirectory: string; readonly depend
 										const install = yield* fs.makeTempDirectoryScoped({ directory: temporary, prefix: "install-" });
 										yield* fs.writeFile(path.join(install, "package.json"), manifest);
 										yield* fs.writeFile(path.join(install, "bun.lock"), lockfile);
+										yield* headroom.check();
 										yield* commands.install(install);
 										if (!(yield* fs.exists(path.join(install, "node_modules"))))
 											yield* fs.makeDirectory(path.join(install, "node_modules"));
@@ -262,6 +267,7 @@ export const layer = (options: { readonly dataDirectory: string; readonly depend
 									yield* copyPreparedTree(path.join(dependencies, "node_modules"), path.join(work, "node_modules"));
 									yield* fs.writeFile(path.join(work, "package.json"), manifest);
 									const output = path.join(temporary, "board");
+									yield* headroom.check();
 									yield* commands.build(work, output);
 									const promotion = yield* fs.makeTempDirectoryScoped({
 										directory: path.join(artifacts, "ui"),
@@ -278,7 +284,11 @@ export const layer = (options: { readonly dataDirectory: string; readonly depend
 								// Board's static handler deliberately refuses a symlink root.
 								yield* copySource(path.join(built, "board"), `${snapshotDirectory}.board`);
 								yield* syncSnapshot;
-							}).pipe(Effect.provideService(FileSystem.FileSystem, fs), Effect.provideService(Path.Path, path)),
+							}).pipe(
+								Effect.provideService(FileSystem.FileSystem, fs),
+								Effect.provideService(Path.Path, path),
+								Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+							),
 						),
 					),
 			});

@@ -1,12 +1,27 @@
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Context, Effect, FileSystem, Layer, Path } from "effect";
+import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+
+import { storageHeadroom } from "./storage-headroom.ts";
 
 /** SQLite online copies include committed WAL pages. Call restore only after proving all owners closed. */
 const make = (filename: string) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
+		const headroom = yield* storageHeadroom(path.dirname(filename));
+		const estimatedBytes = Effect.scoped(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const counts = yield* sql`PRAGMA page_count`.pipe(
+					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ page_count: Schema.Int })))),
+				);
+				const sizes = yield* sql`PRAGMA page_size`.pipe(
+					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ page_size: Schema.Int })))),
+				);
+				return (counts[0]?.page_count ?? 0) * (sizes[0]?.page_size ?? 0);
+			}).pipe(Effect.provide(SqliteClient.layer({ filename, disableWAL: true }))),
+		);
 		const sync = (name: string) =>
 			Effect.scoped(
 				Effect.gen(function* () {
@@ -14,9 +29,11 @@ const make = (filename: string) =>
 				}),
 			);
 		return {
+			estimatedBytes,
 			clone: (destination: string) =>
 				Effect.scoped(
 					Effect.gen(function* () {
+						yield* headroom.check(yield* estimatedBytes);
 						const sql = yield* SqlClient.SqlClient;
 						yield* sql`PRAGMA busy_timeout = 2000`;
 						yield* sql`VACUUM INTO ${destination}`;

@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { BunServices } from "@effect/platform-bun";
 import * as BunCrypto from "@effect/platform-bun/BunCrypto";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import { it } from "@effect/vitest";
@@ -13,7 +14,7 @@ import { GenerationPreparation, layer } from "../src/generation-preparation.ts";
 import { PreparationProcess } from "../src/preparation-process.ts";
 import { copySource } from "../src/snapshots.ts";
 
-const platform = Layer.mergeAll(BunCrypto.layer, BunFileSystem.layer, Path.layer);
+const platform = Layer.mergeAll(BunServices.layer, BunCrypto.layer, BunFileSystem.layer, Path.layer);
 const fixture = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;

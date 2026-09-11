@@ -17,7 +17,8 @@ export const moveRecovery = Object.freeze({
 			const sql = yield* SqlClient.SqlClient;
 			const found = (yield* rows).find((row) => row.id === batch.transaction);
 			const event = batch.events[0];
-			if (!found || batch.events.length !== 1 || !event || event.type !== "topic.moved")
+			if (!found) return; // New app-owned moves need no boot page intent.
+			if (batch.events.length !== 1 || !event || event.type !== "topic.moved")
 				return yield* new TopicMoveError({ code: "topic_move_intent_missing" });
 			const payload = yield* Schema.decodeUnknownEffect(Schema.Struct({ from: Schema.String, to: Schema.String }))(
 				event.payload,

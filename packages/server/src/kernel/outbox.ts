@@ -2,6 +2,7 @@ import { Clock, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { type BootChannel, EventRecord, KernelError } from "./boot-channel.ts";
 import { writerGate } from "./database.ts";
+import { poisonUncertainWriter } from "./lifecycle.ts";
 
 const Transactions = Schema.Array(Schema.Struct({ transaction_id: Schema.String }));
 const Range = Schema.Array(Schema.Struct({ from_seq: Schema.Int, to_seq: Schema.Int, count: Schema.Int }));
@@ -90,5 +91,5 @@ export const makeOutboxRelay = (sql: SqlClient, boot: BootChannel["Service"]) =>
 		)`;
 			}),
 		);
-	});
+	}).pipe(Effect.tapCause(poisonUncertainWriter));
 };

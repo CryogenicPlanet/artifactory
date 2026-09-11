@@ -54,9 +54,9 @@ const main = Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`INSERT INTO public_paths VALUES ('guide')`;
 		const policy = yield* PublicPages.pipe(
-			Effect.provide(layer(root, operationGate, channelGate, route).pipe(Layer.provide(eventsLayer))),
+			Effect.provide(layer(root, operationGate, channelGate, route).pipe(Layer.provide(eventsLayer(Effect.void)))),
 		);
-		const events = yield* Events.pipe(Effect.provide(eventsLayer));
+		const events = yield* Events.pipe(Effect.provide(eventsLayer(Effect.void)));
 		yield* events.reserve("pending-page-admission", 1, "fixture");
 		let writes = 0;
 		const publish = Effect.sync(() => {

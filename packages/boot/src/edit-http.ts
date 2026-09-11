@@ -8,6 +8,8 @@ import type { VerifiedIdentity } from "./enrollment.ts";
 import { BreakLock } from "./lock-break-schema.ts";
 import type { PublicPages } from "./public-pages.ts";
 import type { SourceFiles } from "./source-files.ts";
+import { ArtifactRetentionRejected } from "./artifact-retention.ts";
+import { StorageRejected } from "./storage-headroom.ts";
 import { SourceRejected } from "./source-schema.ts";
 
 export interface Editing {
@@ -25,9 +27,13 @@ const errorResponse = (code: string, status: number, holder?: unknown) =>
 				code,
 				message: "Source edit refused.",
 				hint:
-					code === "topic_archived"
-						? "Unarchive the topic and its archived ancestors before changing its pages."
-						: "GET /_boot/status for diagnostics. POST /api/lock before app edits; repair staged source and POST /api/reload to retry.",
+					code === "unsafe_artifact_path"
+						? "Inspect the boot-owned artifact paths before retrying; no unsafe path was deleted."
+						: status === 507
+							? "Free space in DATA_DIR or expand its volume, then retry. Protected recovery artifacts are retained."
+							: code === "topic_archived"
+								? "Unarchive the topic and its archived ancestors before changing its pages."
+								: "GET /_boot/status for diagnostics. POST /api/lock before app edits; repair staged source and POST /api/reload to retry.",
 				retriable: status === 503,
 			},
 			...(holder === undefined ? {} : { lock: holder }),
@@ -233,6 +239,8 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 			);
 		}).pipe(
 			Effect.catch((error) => {
+				if (Schema.is(StorageRejected)(error) || Schema.is(ArtifactRetentionRejected)(error))
+					return Effect.succeed(errorResponse(error.code, error.code === "unsafe_artifact_path" ? 409 : 507));
 				if (Schema.is(FreezeTimeout)(error)) return Effect.succeed(errorResponse(error.code, 503));
 				if (Schema.is(EditRejected)(error))
 					return Effect.succeed(

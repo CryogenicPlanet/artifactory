@@ -1,13 +1,15 @@
+import { makePageContinuation, pendingPageMove } from "./topic-page-continuation.ts";
 import { Context, Effect, FileSystem, Layer, Option, Path, Ref, Schema, type PlatformError } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { BootChannel } from "./boot-channel.ts";
+import { assertSqlPublished } from "./sql-publication.ts";
 import { HealthProbe } from "./health-probe.ts";
 import { publishedTopics } from "./published-topics.ts";
 import { pageMarkdown } from "../page-markdown.ts";
 import { validTopic } from "./messages.ts";
 
 export class PageRejected extends Schema.TaggedError<PageRejected>()("PageRejected", {
-	code: Schema.Literals(["page_not_found", "page_path_invalid", "pages_unavailable"]),
+	code: Schema.Literals(["page_not_found", "page_path_invalid", "pages_unavailable", "pages_move_pending"]),
 }) {}
 const validPath = (name: string) =>
 	name === "" ||
@@ -29,6 +31,7 @@ const make = (directory: string) =>
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
 		const render = pageMarkdown();
+		const move = yield* makePageContinuation(directory);
 		const sql = yield* SqlClient.SqlClient;
 		const boot = yield* BootChannel;
 		const visible = (name: string) =>
@@ -36,8 +39,11 @@ const make = (directory: string) =>
 				.withTransaction(
 					Effect.gen(function* () {
 						yield* sql`SELECT epoch FROM kernel_writer`;
+						if ((yield* pendingPageMove(sql, name)).length)
+							return yield* new PageRejected({ code: "pages_move_pending" });
 						const probe = Option.getOrNull(yield* Effect.serviceOption(HealthProbe));
 						const ceiling = probe ? yield* Ref.get(probe.ceiling) : (yield* boot.fence).published_through;
+						if (!probe) yield* assertSqlPublished(sql, boot.epoch, ceiling);
 						const deleted =
 							yield* sql`WITH visible_topics AS (${publishedTopics(sql, ceiling)}) SELECT path FROM visible_topics WHERE deleted_at IS NOT NULL AND (path=${name} OR substr(${name},1,length(path)+1)=path||'/') LIMIT 1`;
 						if (deleted.length) return yield* new PageRejected({ code: "page_not_found" });
@@ -52,6 +58,7 @@ const make = (directory: string) =>
 		const resolve = Effect.fn("Pages.resolve")(
 			function* (name: string) {
 				if (!validPath(name)) return yield* new PageRejected({ code: "page_path_invalid" });
+				yield* visible(name);
 				const parent = yield* fs.realPath(path.dirname(directory));
 				const root = path.join(parent, path.basename(directory));
 				let target = root;
@@ -63,7 +70,6 @@ const make = (directory: string) =>
 				const info = yield* fs.stat(target);
 				if (info.type !== "File" && info.type !== "Directory")
 					return yield* new PageRejected({ code: "page_path_invalid" });
-				yield* visible(info.type === "Directory" ? name : name.split("/").slice(0, -1).join("/"));
 				return { absolute: target, type: info.type };
 			},
 			(effect) =>
@@ -87,6 +93,7 @@ const make = (directory: string) =>
 							Effect.gen(function* () {
 								yield* sql`SELECT epoch FROM kernel_writer`;
 								const ceiling = (yield* boot.fence).published_through;
+								yield* assertSqlPublished(sql, boot.epoch, ceiling);
 								return yield* sql`WITH visible_topics AS (${publishedTopics(sql, ceiling)})
 				 SELECT path,meta FROM visible_topics topic WHERE (parent=${name} OR (${name}='' AND parent IS NULL)) AND deleted_at IS NULL
 				 AND NOT EXISTS (SELECT 1 FROM visible_topics ancestor WHERE ancestor.deleted_at IS NOT NULL
@@ -125,7 +132,9 @@ const make = (directory: string) =>
 		const topic = Effect.fn("Pages.topic")(function* (name: string, depth = 1) {
 			const first = yield* entries(name).pipe(
 				Effect.catchTag("PageRejected", (error) =>
-					error.code === "page_not_found" ? Effect.succeed(null) : Effect.fail(error),
+					error.code === "page_not_found" || error.code === "pages_move_pending"
+						? Effect.succeed(null)
+						: Effect.fail(error),
 				),
 			);
 			if (!first) return { exists: false, index: null, pages: [], directories: [] };
@@ -152,7 +161,11 @@ const make = (directory: string) =>
 				directories,
 			};
 		});
-		return { resolve, entries, read, topic, render };
+		const publicTopic = (name: string, ceiling: number) =>
+			sql`WITH visible_topics AS (${publishedTopics(sql, ceiling)}) SELECT path FROM visible_topics WHERE path=${name} AND deleted_at IS NULL AND json_type(meta,'$.public')='true'`.pipe(
+				Effect.map((rows) => rows.length === 1),
+			);
+		return { resolve, entries, read, topic, render, move, publicTopic };
 	});
 /** Reads only the page tree supplied by boot. Paths never follow symlinks. */
 export class Pages extends Context.Service<Pages, Effect.Success<ReturnType<typeof make>>>()("comms/server/Pages") {}

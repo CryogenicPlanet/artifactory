@@ -1,3 +1,4 @@
+import { Pages } from "./kernel/pages.ts";
 import { RequestValidation, layer as bodyLayer } from "./request-schema.ts";
 import { Effect, Layer, Schema } from "effect";
 import { HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
@@ -32,7 +33,26 @@ export const topicManagementGroup = HttpApiGroup.make("topicManagement")
 export const topicManagementHandlers = (api: typeof Api) =>
 	HttpApiBuilder.group(api, "topicManagement", (handlers) =>
 		handlers
-			.handle("move", () => failure(Effect.fail(new KernelError({ code: "generation_not_live" }))))
+			.handle("move", ({ payload, request }) =>
+				failure(
+					Effect.gen(function* () {
+						const who = yield* identity("write");
+						const path = yield* Effect.try({
+							try: () =>
+								decodeURIComponent(new URL(request.url, "http://localhost").pathname.slice("/api/topics/".length)),
+							catch: () => new KernelError({ code: "input_invalid" }),
+						});
+						if (!path.endsWith("/move")) return yield* new KernelError({ code: "input_invalid" });
+						return yield* (yield* Messages).moveTopic(
+							who,
+							path.slice(0, -5),
+							payload.to,
+							(yield* Pages).move,
+							request.headers["idempotency-key"],
+						);
+					}),
+				),
+			)
 			.handle("meta", ({ payload, request }) =>
 				failure(
 					Effect.gen(function* () {

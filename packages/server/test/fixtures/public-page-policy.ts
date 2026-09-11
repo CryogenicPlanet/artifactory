@@ -25,6 +25,7 @@ const program = Effect.gen(function* () {
 		epoch,
 		filename: `${root}/app.db`,
 		generation: 1,
+		backup: Effect.void,
 		changed: () => Effect.never,
 		fence: Effect.sync(() => ({ published_through: ceiling })),
 		events: () => Effect.succeed({ items: [], cursor: ceiling, timed_out: false, drained: false }),

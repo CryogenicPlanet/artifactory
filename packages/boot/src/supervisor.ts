@@ -176,6 +176,10 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		});
 	const activate = (value: ActiveChild, state: "accepted" | "live" = "live") =>
 		Effect.gen(function* () {
+			if (state === "live" && (yield* Ref.get(routing.route))?.epoch !== value.attempt.epoch) {
+				yield* admit(value, "accepted");
+				yield* value.process.control("accepted");
+			}
 			yield* admit(value, state);
 			yield* value.process.control(state);
 			const alreadyWatching = (yield* Ref.get(current))?.attempt.epoch === value.attempt.epoch;

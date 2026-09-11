@@ -26,7 +26,7 @@ const run = Effect.gen(function* () {
 	const restart = () =>
 		Layer.build(
 			layer({ rpId: "comms.test", expectedOrigin: "https://comms.test" }).pipe(
-				Layer.provide(Layer.mergeAll(eventsLayer, editLockLayer)),
+				Layer.provide(Layer.mergeAll(eventsLayer(Effect.void), editLockLayer)),
 			),
 		).pipe(
 			Effect.map((context) => Context.get(context, Auth)),

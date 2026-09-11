@@ -7,13 +7,7 @@ export interface RecoveryHooks<E, R> {
 	readonly beforeAppend: (batch: Batch) => Effect.Effect<void, E, R>;
 	readonly afterResolve: Effect.Effect<void, E, R>;
 }
-const noMoves: RecoveryHooks<EventError, never> = {
-	beforeAppend: (batch) =>
-		batch.events.some((event) => event.type === "topic.moved")
-			? Effect.fail(new EventError({ code: "topic_move_recovery_required" }))
-			: Effect.void,
-	afterResolve: Effect.void,
-};
+const noMoves: RecoveryHooks<EventError, never> = { beforeAppend: () => Effect.void, afterResolve: Effect.void };
 
 /** Narrow shared SQL contract. Domain schema remains owned by editable server code. */
 const make = (filename: string, hooks: RecoveryHooks<EventError, never>) =>

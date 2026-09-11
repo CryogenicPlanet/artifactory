@@ -19,7 +19,7 @@ Lifecycle changes passed combined acceptance (393/393 tests across 103 files, pl
 
 The API, shared mutation protocol, typed HTTP validation, extension-owned core, public-page projection/CSP, event indexes, signal-driven waits, 30-day receipts and UI simplification are integrated. The final exact-checkout suite passes **454/454 tests across 121 files**, with locked install, check and build passing. Live browser acceptance passes the core board flows. Graceful shutdown now drains admitted work and records positive child closure before listener teardown; the built launcher exits promptly rather than waiting for an internal long-poll timeout.
 
-The next isolated integration combines app-owned topic moves, guarded local SQL writes, app-owned backup scheduling and storage safeguards. SSE relocation and preparation-cache simplification are separate later slices so they do not delay that combined wave. The scratchpad records exact handoffs, failure evidence and remaining guarantees.
+The next 115-path integration is accepted locally: app-owned topic moves, guarded local SQL writes, app-owned backup scheduling and storage safeguards. Exact before/after hashes matched; check/build and fresh static seam review pass. The full run produced 498 passes and 17 failures. Reviewed fixture corrections resolve all 16 retained failing cases; one test of the deleted boot move coordinator was removed. Root verification then passed 27 tests across nine affected files, plus the generation-restore case separately. This establishes passing evidence for all 514 retained tests across runs, not one 514-test run. SSE relocation, preparation simplification and metrics remain in a separate isolated integration.
 
 ## Parallel groups and dependencies
 
@@ -50,6 +50,8 @@ The numbered checklist in the scratchpad is authoritative. In addition to comple
 - Complete combined acceptance and Linux/container ownership, descendant closure and actual reboot verification. Database portability is a separate later design/PR.
 
 The owner accepts that shell edits no longer auto-deploy or create watcher history, topic-page moves become re-runnable rather than atomic, a broken app scheduler can miss hourly backups, and app-owned SSE disconnects on replacement. Do not retain obsolete machinery to preserve those superseded guarantees.
+
+The owner clarified reset semantics: **reset only editable source to seed; preserve messages, pages and identities**. Do not implement a database or identity wipe. Signed restart and the remaining core-domain ownership split are being implemented in isolated copies; combined source/database restore and source reset have separate bounded design work.
 
 ## Safety contracts
 

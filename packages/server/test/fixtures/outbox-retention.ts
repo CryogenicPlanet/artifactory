@@ -24,6 +24,7 @@ const program = Effect.gen(function* () {
 			let blocked = false;
 			const error = () => new KernelError({ code: "boot_unavailable" });
 			const boot: BootChannel["Service"] = {
+				backup: Effect.void,
 				changed: (after) => events.changed(after).pipe(Effect.mapError(error)),
 				epoch: "writer",
 				filename: `${root}/app.db`,
@@ -186,7 +187,7 @@ const program = Effect.gen(function* () {
 				}
 				yield* Console.log(`RETENTION_${mode}_OK`);
 			}).pipe(Effect.provide(SqliteClient.layer({ filename: boot.filename, disableWAL: true })), Effect.scoped);
-		}).pipe(Effect.provide(eventsLayer));
+		}).pipe(Effect.provide(eventsLayer(Effect.void)));
 	}).pipe(
 		Effect.provide(SqliteClient.layer({ filename: `${root}/boot.db`, disableWAL: true })),
 		Effect.scoped,
