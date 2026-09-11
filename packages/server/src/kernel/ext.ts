@@ -162,9 +162,11 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 							query: yield* HttpServerRequest.ParsedSearchParams,
 						};
 					}),
-				migrate: (migration, statement) =>
+				migrate: (migration, statement, options) =>
 					Effect.suspend(() =>
-						registering ? migrate(migration, statement) : Effect.fail(new KernelError({ code: "input_invalid" })),
+						registering
+							? migrate(migration, statement, options)
+							: Effect.fail(new KernelError({ code: "input_invalid" })),
 					),
 				mount: (definition, handlers) => {
 					if (!registering) throw new Error("Mount APIs only in the extension factory.");

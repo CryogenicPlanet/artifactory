@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { BootChannel, KernelError } from "../../kernel/boot-channel.ts";
 import { writerGate } from "../../kernel/database.ts";
+import { registerProtectedSqlTable } from "../../kernel/protected-sql-tables.ts";
 import { initializeMentions, reindexMentions } from "./message-mentions.ts";
 import { migrateIdempotency } from "./legacy-idempotency.ts";
 export const initialize = Effect.gen(function* () {
@@ -84,6 +85,7 @@ export const initialize = Effect.gen(function* () {
 				if (version >= 7) yield* reindexMentions(sql);
 				yield* sql`PRAGMA user_version = 9`;
 			}
+			yield* registerProtectedSqlTable(sql, "topic_page_continuations");
 			yield* sql`SELECT deleted_at FROM topics LIMIT 1`;
 			yield* sql`SELECT ns,key,value,updated_seq,previous FROM kv LIMIT 1`;
 			yield* sql`SELECT updated_seq,previous FROM topics LIMIT 1`;

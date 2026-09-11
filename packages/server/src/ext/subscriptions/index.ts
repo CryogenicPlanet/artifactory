@@ -62,6 +62,7 @@ export default (api: Api) =>
  cursor INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
  next_attempt INTEGER NOT NULL DEFAULT 0, last_error TEXT,
  UNIQUE(instance,idempotency_key))`,
+			{ protect: true },
 		);
 		const client = yield* HttpClient.HttpClient.pipe(Effect.provide(FetchHttpClient.layer));
 		const gate = yield* Semaphore.make(1);

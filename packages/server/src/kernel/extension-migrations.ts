@@ -1,13 +1,14 @@
 import { Crypto, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
+import { registerProtectedSqlTable } from "./protected-sql-tables.ts";
 import { writerGate } from "./database.ts";
 
 /** Loader-only migrations share the startup writer fence; they never publish candidate events. */
 export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, extension: string) =>
 	Effect.gen(function* () {
 		const crypto = yield* Crypto.Crypto;
-		return (name: string, statement: string) =>
+		return (name: string, statement: string, options?: { readonly protect?: boolean }) =>
 			Effect.gen(function* () {
 				if (
 					!name ||
@@ -23,6 +24,11 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 					!/^\s*(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|WITH)\b/i.test(statement)
 				)
 					return yield* new KernelError({ code: "extension_migration_invalid" });
+				const table = options?.protect
+					? /^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z_][a-zA-Z0-9_]{0,127})\s*\(/i.exec(statement)?.[1]
+					: undefined;
+				if (options?.protect && table === undefined)
+					return yield* new KernelError({ code: "extension_migration_invalid" });
 				const checksum = Buffer.from(yield* crypto.digest("SHA-256", new TextEncoder().encode(statement))).toString(
 					"hex",
 				);
@@ -37,9 +43,11 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 						if (previous.length > 0) {
 							if (previous[0]?.checksum !== checksum)
 								return yield* new KernelError({ code: "extension_migration_conflict" });
+							if (table !== undefined) yield* registerProtectedSqlTable(sql, table);
 							return;
 						}
 						yield* sql.unsafe(statement);
+						if (table !== undefined) yield* registerProtectedSqlTable(sql, table);
 						yield* sql`INSERT INTO extension_migrations(extension,name,checksum) VALUES(${extension},${name},${checksum})`;
 					}),
 				);

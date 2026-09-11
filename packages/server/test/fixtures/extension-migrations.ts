@@ -16,7 +16,8 @@ const run = Effect.gen(function* () {
 		const migrate = yield* makeExtensionMigrate(sql, "current", "example");
 		const create = "CREATE TABLE example_data(value TEXT)";
 		yield* migrate("001-create", create);
-		yield* migrate("001-create", create);
+		yield* migrate("001-create", create, { protect: true });
+		assert.deepEqual(yield* sql`SELECT name FROM protected_sql_tables`, [{ name: "example_data" }]);
 		assert.deepEqual(yield* sql`SELECT extension,name,length(checksum) AS size FROM extension_migrations`, [
 			{ extension: "example", name: "001-create", size: 64 },
 		]);
@@ -35,10 +36,11 @@ const run = Effect.gen(function* () {
 		// A failed receipt insert must roll back even DDL that has already executed.
 		yield* sql`CREATE TRIGGER reject_migration BEFORE INSERT ON extension_migrations WHEN NEW.name='003-atomic' BEGIN SELECT RAISE(ABORT,'test receipt failure'); END`;
 		assert.equal(
-			(yield* migrate("003-atomic", "CREATE TABLE rolled_back(value TEXT)").pipe(Effect.exit))._tag,
+			(yield* migrate("003-atomic", "CREATE TABLE rolled_back(value TEXT)", { protect: true }).pipe(Effect.exit))._tag,
 			"Failure",
 		);
 		assert.deepEqual(yield* sql`SELECT name FROM sqlite_master WHERE name='rolled_back'`, []);
+		assert.deepEqual(yield* sql`SELECT name FROM protected_sql_tables WHERE name='rolled_back'`, []);
 		assert.deepEqual(yield* sql`SELECT name FROM extension_migrations WHERE name='003-atomic'`, []);
 		yield* sql`DROP TRIGGER reject_migration`;
 		yield* migrate("003-atomic", "CREATE TABLE rolled_back(value TEXT)");
@@ -59,8 +61,18 @@ const run = Effect.gen(function* () {
 			assert.equal(errorCode(yield* migrate("rejected", statement).pipe(Effect.flip)), "extension_migration_invalid");
 		}
 		assert.equal(errorCode(yield* migrate("", create).pipe(Effect.flip)), "extension_migration_invalid");
+		for (const statement of [
+			'CREATE TABLE "quoted"(value TEXT)',
+			"CREATE TABLE main.qualified(value TEXT)",
+			"ALTER TABLE example_data ADD COLUMN other TEXT",
+		]) {
+			assert.equal(
+				errorCode(yield* migrate("protected-invalid", statement, { protect: true }).pipe(Effect.flip)),
+				"extension_migration_invalid",
+			);
+		}
 		yield* sql`UPDATE kernel_writer SET epoch='replacement'`;
-		assert.equal(errorCode(yield* migrate("001-create", create).pipe(Effect.flip)), "stale_writer");
+		assert.equal(errorCode(yield* migrate("001-create", create, { protect: true }).pipe(Effect.flip)), "stale_writer");
 		assert.equal(
 			errorCode(yield* migrate("005-stale", "CREATE TABLE forbidden(value TEXT)").pipe(Effect.flip)),
 			"stale_writer",
