@@ -5,6 +5,7 @@ export class SourceRejected extends Schema.TaggedError<SourceRejected>()("Source
 	code: Schema.Literals([
 		"invalid_path",
 		"topic_deleted",
+		"topic_archived",
 		"path_conflict",
 		"publication_pending",
 		"external_conflict",

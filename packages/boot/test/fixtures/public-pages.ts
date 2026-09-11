@@ -15,9 +15,9 @@ const main = Effect.gen(function* () {
 	const create = (isPublic: boolean) => {
 		const database = new Database(`${root}/comms.db`);
 		try {
-			database.exec("CREATE TABLE topics(path TEXT,parent TEXT,meta TEXT,deleted_at INTEGER)");
+			database.exec("CREATE TABLE topics(path TEXT,parent TEXT,meta TEXT,deleted_at INTEGER,archived_at INTEGER)");
 			database
-				.query("INSERT INTO topics VALUES('guide','','{\"public\":' || ? || '}',NULL)")
+				.query("INSERT INTO topics VALUES('guide','','{\"public\":' || ? || '}',NULL,NULL)")
 				.run(isPublic ? "true" : "false");
 		} finally {
 			database.close();

@@ -11,6 +11,7 @@ import { AuthError, type AuthConfig } from "./auth.ts";
 import { authenticate, authErrorResponse, authFailure, authRoute, sessionCookie, type AuthStore } from "./auth-http.ts";
 import { editRoute, type EditStore } from "./edit-http.ts";
 import { passkeyManagementRoute } from "./passkey-management-http.ts";
+import { backupRoute, type BackupStore } from "./backup-http.ts";
 import { accountRoute } from "./account-http.ts";
 import { tokenMintRoute } from "./token-mint-http.ts";
 import { tokenRoute } from "./token-http.ts";
@@ -25,6 +26,7 @@ const help = `comms local development bootloader
 GET /health        Bootloader liveness (independent of the child).
 GET /_boot/status  Child state and bounded stderr tail.
 GET /_boot/generations  Persistent generation history (also /api/generations).
+GET /_boot/db/backups  Human-only backup catalog; restore is not implemented.
 GET /api/events?since=0&wait=60  Read or wait for published events.
 GET /api/stream?since=0  SSE with cursor resume, independent of app swaps.
 
@@ -78,6 +80,7 @@ export const proxy = (
 	editing: EditStore,
 	publicPages: Ref.Ref<PublicPages["Service"] | null>,
 	requests: RequestEvents,
+	backups: BackupStore,
 ) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
@@ -111,6 +114,8 @@ export const proxy = (
 		if (passkeyResponse) return passkeyResponse;
 		const enrollmentResponse = yield* enrollmentRoute(authStore, authConfig);
 		if (enrollmentResponse) return enrollmentResponse;
+		const backupResponse = yield* backupRoute(authStore, backups);
+		if (backupResponse) return backupResponse;
 		const accountResponse = yield* accountRoute(authStore);
 		if (accountResponse) return accountResponse;
 		const mintResponse = yield* tokenMintRoute(authStore, authConfig);

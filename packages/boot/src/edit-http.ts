@@ -23,7 +23,10 @@ const errorResponse = (code: string, status: number, holder?: unknown) =>
 			error: {
 				code,
 				message: "Source edit refused.",
-				hint: "GET /_boot/status for diagnostics. POST /api/lock before app edits; repair staged source and POST /api/reload to retry.",
+				hint:
+					code === "topic_archived"
+						? "Unarchive the topic and its archived ancestors before changing its pages."
+						: "GET /_boot/status for diagnostics. POST /api/lock before app edits; repair staged source and POST /api/reload to retry.",
 				retriable: status === 503,
 			},
 			...(holder === undefined ? {} : { lock: holder }),
@@ -235,6 +238,7 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 											"anchor_not_found",
 											"idempotency_conflict",
 											"topic_deleted",
+											"topic_archived",
 									  ].includes(error.code)
 									? 409
 									: 400,

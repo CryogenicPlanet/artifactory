@@ -18,6 +18,7 @@ import type { Editing } from "./edit-http.ts";
 import { PublicPages, layer as publicPagesLayer } from "./public-pages.ts";
 import { layer as preparationLayer } from "./generation-preparation.ts";
 import { layer as preparationProcessLayer } from "./preparation-process.ts";
+import { makeBackupInventory, type BackupInventory } from "./backup-inventory.ts";
 import { requestEvents } from "./request-events.ts";
 import { proxy } from "./proxy.ts";
 import { layer as kernelBootLayer } from "./kernel-boot.ts";
@@ -33,6 +34,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const events = yield* Ref.make<Events["Service"] | null>(null);
 	const editing = yield* Ref.make<Editing | null>(null);
 	const publicPages = yield* Ref.make<PublicPages["Service"] | null>(null);
+	const backups = yield* Ref.make<BackupInventory | null>(null);
 	const requests = yield* requestEvents(events);
 	const supervisor = yield* supervise(options);
 	const { child, run, fail } = supervisor;
@@ -44,6 +46,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			yield* retainEvents.pipe(Effect.forkScoped);
 			return yield* Effect.gen(function* () {
 				yield* Ref.set(auth, yield* Auth);
+				yield* Ref.set(backups, yield* makeBackupInventory);
 				yield* Ref.set(events, yield* Events);
 				yield* (yield* Generations).recover;
 				const coordinator = yield* cutover(options, supervisor);
@@ -103,9 +106,10 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		),
 		Effect.forkScoped,
 	);
-	yield* HttpRouter.add("*", "/*", proxy(child, auth, options.auth, events, editing, publicPages, requests)).pipe(
-		(routes) => HttpRouter.serve(routes, { disableLogger: true }),
-		Layer.build,
-	);
+	yield* HttpRouter.add(
+		"*",
+		"/*",
+		proxy(child, auth, options.auth, events, editing, publicPages, requests, backups),
+	).pipe((routes) => HttpRouter.serve(routes, { disableLogger: true }), Layer.build);
 	return yield* Effect.never;
 });

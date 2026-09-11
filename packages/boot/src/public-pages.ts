@@ -77,6 +77,9 @@ const make = (directory: string, operationGate: Semaphore.Semaphore, channelGate
 											const deleted =
 												yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${relative} OR substr(${relative},1,length(path)+1)=path||'/') LIMIT 1`;
 											if (deleted.length) return yield* new SourceRejected({ code: "topic_deleted", path: name });
+											const archived =
+												yield* sql`SELECT path FROM topics WHERE archived_at IS NOT NULL AND (path=${relative} OR substr(${relative},1,length(path)+1)=path||'/') LIMIT 1`;
+											if (archived.length) return yield* new SourceRejected({ code: "topic_archived", path: name });
 										}
 									}),
 								).pipe(
