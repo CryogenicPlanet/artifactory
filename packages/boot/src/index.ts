@@ -22,6 +22,7 @@ import { makeBackupInventory, type BackupInventory } from "./backup-inventory.ts
 import { requestEvents } from "./request-events.ts";
 import { proxy } from "./proxy.ts";
 import { layer as kernelBootLayer } from "./kernel-boot.ts";
+import { storageUsage } from "./storage-usage.ts";
 import { storageMaintenance } from "./storage-maintenance.ts";
 import { supervise } from "./supervisor.ts";
 
@@ -36,11 +37,13 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const publicPages = yield* Ref.make<PublicPages["Service"] | null>(null);
 	const backups = yield* Ref.make<BackupInventory | null>(null);
 	const requests = yield* requestEvents(events);
+	const storage = yield* storageUsage(options.dataDirectory);
 	const supervisor = yield* supervise(options);
 	const { child, run, fail } = supervisor;
 	yield* Effect.gen(function* () {
 		yield* validateAuthConfig(options.auth);
 		yield* fs.makeDirectory(options.dataDirectory, { recursive: true, mode: 0o700 });
+		yield* storage.run.pipe(Effect.forkScoped);
 		return yield* Effect.gen(function* () {
 			yield* initializeBootSchema;
 			yield* retainEvents.pipe(Effect.forkScoped);
@@ -109,7 +112,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	yield* HttpRouter.add(
 		"*",
 		"/*",
-		proxy(child, auth, options.auth, events, editing, publicPages, requests, backups),
+		proxy(child, auth, options.auth, events, editing, publicPages, requests, backups, storage.current),
 	).pipe((routes) => HttpRouter.serve(routes, { disableLogger: true }), Layer.build);
 	return yield* Effect.never;
 });
