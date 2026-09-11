@@ -5,7 +5,8 @@ import { Cause, Console, Crypto, Effect, Exit, Layer, Schema, Semaphore } from "
 import { FetchHttpClient, HttpServerResponse } from "effect/unstable/http";
 import { SqlClient, Statement } from "effect/unstable/sql";
 import { Reactivity } from "effect/unstable/reactivity";
-import { BootChannel, type EventRecord, KernelError, layer as bootLayer } from "../../src/kernel/boot-channel.ts";
+import type { EventRecord } from "@comms/protocol/events";
+import { BootChannel, KernelError, layer as bootLayer } from "../../src/kernel/boot-channel.ts";
 import { probeHealth } from "../../src/kernel/health.ts";
 import { makeMutate } from "../../src/kernel/mutate.ts";
 
