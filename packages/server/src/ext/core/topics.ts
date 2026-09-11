@@ -14,7 +14,7 @@ export const makeTopics = (sql: SqlClient.SqlClient, read: Messages["Service"]["
 	const detail = (identity: Identity, path: string, depth = 1, archived = false) =>
 		read((ceiling) =>
 			Effect.gen(function* () {
-				if (path !== "" && !validTopic(path)) return yield* new KernelError({ code: "query_invalid" });
+				if (path !== "" && !validTopic(path)) return yield* new KernelError({ code: "input_invalid" });
 				const page = yield* pages.topic(path, depth);
 				return yield* sql.withTransaction(
 					Effect.gen(function* () {

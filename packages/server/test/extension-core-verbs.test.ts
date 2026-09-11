@@ -56,6 +56,8 @@ export default (api: Api) => Effect.gen(function* () {
  });
  api.route("POST", "/api/protocol", {description:"Publish extension SQL and event atomically", scope:"write", handler:(request,ctx) =>
   ctx.mutate(protocol(ctx, ctx.query.mode ?? "valid", request.headers["idempotency-key"])).pipe(Effect.map(Response.json))});
+ api.route("GET", "/api/protocol-topic", {description:"Read a topic through the public capability", scope:"read", handler:(_request,ctx) =>
+  ctx.topics.read(String(ctx.query.path ?? "")).pipe(Effect.result, Effect.map(result => Response.json(result._tag === "Failure" ? {code:result.failure.code} : {path:result.success.path})))});
  api.route("GET", "/api/protocol-read", {description:"Attempt mutation from a read capability", scope:"read", handler:(_request,ctx) =>
   ctx.mutate(ctx.query.mode === "effect"
    ? ctx.db\`INSERT INTO protocol_entries VALUES('read-effect',0)\`.pipe(Effect.asVoid)
@@ -91,6 +93,11 @@ export default (api: Api) => Effect.gen(function* () {
 	expect((await app.post("/api/messages", { topic: "verbs", body: "visible" }, cookie)).status).toBe(200);
 	expect((await get("/api/messages?topic=verbs")).status).toBe(200);
 	expect((await get("/api/topics/verbs")).status).toBe(200);
+	for (const path of ["Uppercase", "../verbs", "verbs//child"])
+		expect(await (await get(`/api/protocol-topic?path=${encodeURIComponent(path)}`)).json()).toEqual({
+			code: "input_invalid",
+		});
+	expect(await (await get("/api/protocol-topic?path=verbs")).json()).toEqual({ path: "verbs" });
 	const calls = await usage();
 	for (const name of ["create", "query", "read", "meta", "markRead"]) expect(calls[name]).toBeGreaterThan(0);
 
