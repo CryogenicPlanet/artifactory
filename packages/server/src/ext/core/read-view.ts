@@ -9,5 +9,10 @@ export const markView = (
 	items: ReadonlyArray<typeof Message.Type>,
 	topic: string,
 	enabled = true,
-) =>
-	enabled && items.length ? ctx.topics.markRead(topic, Math.max(...items.map((message) => message.seq))) : Effect.void;
+) => {
+	if (!enabled) return Effect.void;
+	const visible = items.filter(
+		(message) => topic === "" || message.topic === topic || message.topic.startsWith(`${topic}/`),
+	);
+	return visible.length ? ctx.topics.markRead(topic, Math.max(...visible.map((message) => message.seq))) : Effect.void;
+};

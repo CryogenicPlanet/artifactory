@@ -56,7 +56,12 @@ const handlers = (extension: ExtensionApi) =>
 							...(wait > 0 || query.exclude_self === "1" ? { exclude: ctx.instance } : {}),
 						};
 						const view = (result: typeof Envelope.Type) =>
-							markView(ctx, result.items, query.topic ?? "", query.mark !== "0").pipe(Effect.as(result));
+							markView(
+								ctx,
+								result.items,
+								query.topic ?? "",
+								query.mark !== "0" && (query.topic !== undefined || query.mentions === undefined),
+							).pipe(Effect.as(result));
 						const first = yield* ctx.messages.query(input);
 						if (first.items.length || wait === 0) return yield* view(first);
 						const deadline = (yield* DateTime.nowAsDate).getTime() + wait * 1000;

@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { BootChannel, KernelError } from "../../kernel/boot-channel.ts";
 import { writerGate } from "../../kernel/database.ts";
-import { initializeMentions } from "./message-mentions.ts";
+import { initializeMentions, reindexMentions } from "./message-mentions.ts";
 import { migrateIdempotency } from "./legacy-idempotency.ts";
 export const initialize = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -12,7 +12,7 @@ export const initialize = Effect.gen(function* () {
 		Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ user_version: Schema.Int })))),
 	);
 	const version = versions[0]?.user_version;
-	if (version === undefined || version > 8) return yield* new KernelError({ code: "app_schema_unsupported" });
+	if (version === undefined || version > 9) return yield* new KernelError({ code: "app_schema_unsupported" });
 	yield* sql`PRAGMA journal_mode = WAL`;
 	yield* sql`PRAGMA synchronous = FULL`;
 	yield* sql.withTransaction(
@@ -77,6 +77,10 @@ export const initialize = Effect.gen(function* () {
 				yield* sql`CREATE TABLE topic_page_continuations(seq INTEGER PRIMARY KEY,from_path TEXT NOT NULL,to_path TEXT NOT NULL,marker TEXT NOT NULL,completed INTEGER NOT NULL CHECK(completed IN (0,1)))`;
 				yield* sql`CREATE INDEX topic_page_continuations_pending ON topic_page_continuations(completed) WHERE completed=0`;
 				yield* sql`PRAGMA user_version = 8`;
+			}
+			if (version < 9) {
+				if (version >= 7) yield* reindexMentions(sql);
+				yield* sql`PRAGMA user_version = 9`;
 			}
 			yield* sql`SELECT deleted_at FROM topics LIMIT 1`;
 			yield* sql`SELECT name,emoji,color,status FROM agents LIMIT 1`;
