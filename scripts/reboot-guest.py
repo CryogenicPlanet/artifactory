@@ -47,6 +47,17 @@ def http(path, body=None, key=None):
         return json.load(response)
 
 
+def messages(topic=None):
+    statement = 'SELECT * FROM messages'
+    params = []
+    if topic is not None:
+        statement += ' WHERE topic=?'
+        params.append(topic)
+    result = http('/api/sql', {'sql': statement + ' ORDER BY seq', 'params': params})
+    require(not result['truncated'], 'Message proof query was truncated')
+    return result['rows']
+
+
 def wait_for(check, label, seconds=180):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -101,7 +112,9 @@ def before():
     identity = boot_id()
     require(all(owner['boot_id'] == identity for owner in owners), 'Attempt lacks actual current kernel identity')
     require(Path('/proc/' + str(child['pid'])).exists(), 'Child disappeared before reset')
-    proof = {'boot_id': identity, 'owners': owners, 'response': response}
+    proof = {'boot_id': identity, 'owners': owners, 'response': response, 'messages': messages()}
+    require([row['body'] for row in proof['messages'] if row['topic'] == 'reboot-proof'] == [BODY],
+            'Expected exactly one acknowledged user message before reset')
     verify_unreceipted(proof)
     PROOF.write_text(json.dumps(proof))
     # Do not sync guest disks here: acknowledged production writes must already be durable.
@@ -126,10 +139,16 @@ def after():
         require(not Path(owner['receipt']).exists(), 'Recovery unexpectedly depended on keeper receipt')
     replay = http('/api/messages', {'topic': 'reboot-proof', 'body': BODY}, 'guest-reboot-write')
     require(replay == proof['response'], 'Acknowledged idempotency outcome changed across reboot')
-    result = http('/api/sql', {'sql': 'SELECT body FROM messages ORDER BY seq'})
-    require(result['rows'] == [{'body': BODY}], 'Acknowledged message missing or duplicated')
-    http('/api/messages', {'topic': 'reboot-proof', 'body': 'accepted after guest reboot'})
-    require(len(http('/api/sql', {'sql': 'SELECT body FROM messages ORDER BY seq'})['rows']) == 2,
+    recovered = {row['id']: row for row in messages()}
+    # System projection can append new messages after reboot. Every earlier row,
+    # including its full contents and sequence, must nevertheless survive intact.
+    for previous in proof['messages']:
+        require(recovered.get(previous['id']) == previous, 'Pre-reset message changed or disappeared')
+    require([row['body'] for row in messages('reboot-proof')] == [BODY],
+            'Acknowledged user message missing or duplicated')
+    created = http('/api/messages', {'topic': 'reboot-proof', 'body': 'accepted after guest reboot'})
+    require(created['seq'] > proof['response']['seq'], 'Sequence did not advance across recovery')
+    require([row['body'] for row in messages('reboot-proof')] == [BODY, 'accepted after guest reboot'],
             'New writes unavailable after recovery')
     print('PASS: kernel changed, unreceipted owner recovered, acknowledged write retained exactly once, new write accepted')
 
