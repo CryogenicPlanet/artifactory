@@ -137,6 +137,7 @@ export function Extensions() {
 					className="mt-5 flex flex-wrap gap-x-6 gap-y-3 [&>a]:text-xs [&>a]:underline [&>a]:underline-offset-[3px]"
 					aria-label="Extension tools"
 				>
+					<a href="/_boot/recovery">Immutable recovery ↗</a>
 					<a href="/_boot">Recovery instructions ↗</a>
 					<a href="/_boot/status">Boot diagnostics ↗</a>
 					<a href="/api/events?types=ext.*&since=0&limit=100">Extension events ↗</a>

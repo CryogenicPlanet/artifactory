@@ -21,6 +21,12 @@ const routes = [
 	["get", ["/_boot"], "public", "Plain-text boot recovery help."],
 	[
 		"get",
+		["/_boot/recovery"],
+		"human",
+		"Immutable source-undo confirmation page; remains available when the app and its board cannot run.",
+	],
+	[
+		"get",
 		["/_boot/status"],
 		"fs",
 		"Child state, recovery diagnostics and traffic state. Human session or fs-scoped bearer.",

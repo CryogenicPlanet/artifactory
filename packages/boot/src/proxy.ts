@@ -1,3 +1,4 @@
+import { recoveryRoute } from "./recovery-http.ts";
 import { settingsRoute } from "./settings-http.ts";
 import { discoveryResponse } from "./route-discovery.ts";
 import { restartRoute } from "./restart-http.ts";
@@ -30,6 +31,7 @@ const help = `comms local development bootloader
 GET /_boot/settings  Human-only revisioned retention, storage percentages and public paths.
 POST /_boot/settings  Change {revision,patch} with a fresh settings.change assertion; retain proof for exact retries.
 GET /health        Bootloader liveness (independent of the child).
+GET /_boot/recovery  Human source-recovery page, independent of the child.
 GET /_boot/status  Child state and bounded stderr tail.
 GET /_boot/metrics  Prometheus metrics; human session or fs-scoped bearer.
 GET /_boot/generations  Persistent generation history (also /api/generations).
@@ -132,6 +134,8 @@ export const proxy = Effect.gen(function* () {
 			if (internal) return internal;
 		}
 		if ((yield* Ref.get(phase))._tag === "Stopping") return authErrorResponse("boot_unavailable", 503);
+		const recoveryResponse = yield* recoveryRoute(auth);
+		if (recoveryResponse) return recoveryResponse;
 		const settingsResponse = yield* settingsRoute(auth, authConfig);
 		if (settingsResponse) return settingsResponse;
 		const restarted = yield* restartRoute(auth, authConfig, restart);
@@ -285,7 +289,7 @@ export const proxy = Effect.gen(function* () {
 							error: {
 								code: "app_unavailable",
 								message: "The server child is unavailable.",
-								hint: "GET /_boot/status and /_boot/generations for diagnostics. GET /_boot explains local recovery.",
+								hint: "GET /_boot/status and /_boot/generations for diagnostics. Open /_boot/recovery for human source undo. GET /_boot explains local recovery.",
 								retriable: true,
 							},
 							...(identity?.kind === "human" || identity?.scopes.includes("fs")

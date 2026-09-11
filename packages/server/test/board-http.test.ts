@@ -31,7 +31,7 @@ it("serves a private compiled board from its generation and confines SPA fallbac
 	const cookie = await app.login();
 	await app.ready(cookie);
 	const get = (path: string, method = "GET") => fetch(`${app.url}${path}`, { method, headers: { cookie } });
-	for (const path of ["/", "/t/project/thread", "/ext", "/@rahul", "/assets/board.js"])
+	for (const path of ["/", "/t/project/thread", "/ext", "/@rahul", "/assets/board.js", "/_boot/recovery"])
 		expect((await fetch(`${app.url}${path}`)).status).toBe(401);
 	for (const path of ["/", "/t/project/thread", "/ext", "/@rahul"]) {
 		const response = await get(path);
@@ -39,6 +39,12 @@ it("serves a private compiled board from its generation and confines SPA fallbac
 		expect(response.headers.get("content-type")).toContain("text/html");
 		expect(await response.text()).toBe(html);
 	}
+	const recovery = await get("/_boot/recovery");
+	expect(recovery.status).toBe(200);
+	expect(recovery.headers.get("cache-control")).toBe("no-store");
+	expect(await recovery.text()).toContain("Recover app source");
+	expect((await get("/_boot/recovery?x=1")).status).toBe(400);
+	expect((await get("/_boot/recovery", "POST")).status).toBe(405);
 	const javascript = await get("/assets/board.js");
 	expect(javascript.headers.get("content-type")).toContain("javascript");
 	expect(javascript.headers.get("x-content-type-options")).toBe("nosniff");
