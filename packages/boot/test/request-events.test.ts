@@ -175,7 +175,7 @@ it("logs completed streams after their last byte and disconnects once without re
 	await expect.poll(async () => (await query()).items.some((event) => event.payload.method === "HEAD")).toBe(true);
 }, 10000);
 
-it("keeps proxied events behind pending publication and hides other agents before pagination", async (test) => {
+it("fences stored request publication while direct boot diagnostics enforce actor visibility before pagination", async (test) => {
 	const app = await launch(test, "normal", true);
 	await expect.poll(async () => (await app.state()).state).toBe("live");
 	const codex = await seedAgent(app.data, "codex"),
@@ -195,18 +195,31 @@ it("keeps proxied events behind pending publication and hides other agents befor
 			inspect(app.data, "SELECT count(*) AS n FROM events WHERE json_extract(event,'$.type')='http.request'"),
 		)
 		.toEqual([{ n: 1 }]);
-	const path = `${app.url}/api/events?since=0&types=http.request&limit=1`;
-	expect(decode(await (await app.fetch(path)).json()).items).toHaveLength(0);
-	await operation("abort");
+	// App publication remains fenced; independent recovery diagnostics deliberately do not wait.
+	expect((await recordedRequests(app.data)).items).toHaveLength(0);
+	const rows = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ seq: Schema.Int })))(
+		await inspect(app.data, "SELECT seq FROM events WHERE type='http.request' ORDER BY seq"),
+	);
+	const first = rows[0];
+	if (!first) throw Error("Missing recorded request");
+	const path = `${app.url}/_boot/events?since=${first.seq - 1}&limit=1`;
 	expect(decode(await (await fetch(path, { headers: codex.headers })).json()).items).toMatchObject([
 		{ actor: "codex", instance: codex.id },
 	]);
 	expect(decode(await (await fetch(path, { headers: claude.headers })).json()).items).toHaveLength(0);
+	await operation("abort");
+	expect((await recordedRequests(app.data)).items).toMatchObject([{ actor: "codex", instance: codex.id }]);
+	expect(decode(await (await app.fetch(`${app.url}/api/events?since=0&types=http.request`)).json()).items).toHaveLength(
+		0,
+	);
 	await (await fetch(`${app.url}/api/me`, { headers: claude.headers })).text();
 	await expect
 		.poll(async () => decode(await (await fetch(path, { headers: claude.headers })).json()).items)
 		.toMatchObject([{ actor: "claude", instance: claude.id }]);
-	expect(decode(await (await app.fetch(`${app.url}/api/events?since=0&types=http.request`)).json()).items).toHaveLength(
+	expect(decode(await (await fetch(path, { headers: codex.headers })).json()).items).toMatchObject([
+		{ actor: "codex", instance: codex.id },
+	]);
+	expect(decode(await (await app.fetch(`${app.url}/_boot/events?since=${first.seq - 1}`)).json()).items).toHaveLength(
 		2,
 	);
 }, 10000);
