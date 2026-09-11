@@ -77,99 +77,111 @@ export const topicMove = Effect.fn("topicMove")(function* (supervisor: Superviso
 						closed = true;
 					}
 				});
-				yield* supervisor.child.traffic.requests.freeze;
 				const outcome = yield* Effect.gen(function* () {
-					// Draining terminates existing app long polls; frozen retains the narrow move-command permission.
-					yield* active.process.control("draining");
-					yield* supervisor.child.traffic.requests.drained.pipe(Effect.timeout("5 seconds"));
-					yield* active.process.control("frozen");
-					stable = true;
-					yield* recovery.prepare(active.attempt.epoch);
-					const current = yield* revalidate.pipe(
-						Effect.mapError(() => new TopicMoveError({ code: "credential_invalid" })),
-					);
-					if (current.id !== identity.id || !current.scopes.includes("write"))
-						return yield* new TopicMoveError({ code: "scope_required" });
-					if (
-						(yield* sql`SELECT seq FROM events WHERE (topic=${input.from} OR substr(topic,1,length(${input.from})+1)=${input.from}||'/')
-					AND length(topic)-length(${input.from})+length(${input.to})>200 LIMIT 1`).length
-					)
-						return yield* new TopicMoveError({ code: "input_invalid" });
-					yield* sql`INSERT INTO topic_moves(id,from_path,to_path,instance,request_key,request_hash,state)
-					VALUES(${transaction},${input.from},${input.to},${identity.id},${input.key ?? null},${hash},'prepared')`;
-					const prepared = yield* pages.prepare(transaction, input.from, input.to, identity.agent);
-					const authorized = yield* revalidate.pipe(
-						Effect.mapError(() => new TopicMoveError({ code: "credential_invalid" })),
-					);
-					if (
-						authorized.id !== identity.id ||
-						authorized.agent !== identity.agent ||
-						authorized.kind !== identity.kind ||
-						!authorized.scopes.includes("write")
-					)
-						return yield* new TopicMoveError({ code: "scope_required" });
-					yield* supervisor.child.channelGate.withPermit(events.reserve(transaction, 1, active.attempt.epoch));
-					stable = false;
-					const response = yield* client.execute(
-						HttpClientRequest.post(`http://127.0.0.1:${active.process.port}/_kernel/topic-move`).pipe(
-							HttpClientRequest.setHeader("x-boot-secret", active.attempt.secret),
-							HttpClientRequest.bodyJsonUnsafe({
-								transaction,
-								...(input.key === undefined ? {} : { key: input.key }),
-								from: input.from,
-								to: input.to,
-								page_source: prepared.page_source,
-								identity: {
-									agent: identity.agent,
-									instance: identity.id,
-									request: transaction,
-									kind: identity.kind,
-									label: identity.label,
-								},
-							}),
-						),
-					);
-					const value = yield* response.json;
-					if (response.status !== 200) {
-						const rejection = yield* Schema.decodeUnknownEffect(Rejection)(value);
+					yield* supervisor.child.traffic.requests.freeze;
+					const outcome = yield* Effect.gen(function* () {
+						// Draining terminates existing app long polls; frozen retains the narrow move-command permission.
+						yield* active.process.control("draining");
+						yield* supervisor.child.traffic.requests.drained.pipe(Effect.timeout("5 seconds"));
+						yield* active.process.control("frozen");
 						stable = true;
-						return yield* new TopicMoveError({ code: rejection.error.code });
-					}
-					yield* Schema.decodeUnknownEffect(Outcome)(value);
-					stable = true;
-					// The app's committed outbox, not its HTTP response, authorizes page publication and success.
-					yield* recovery.prepare(active.attempt.epoch);
-					const rows = yield* sql`SELECT * FROM topic_moves WHERE id=${transaction}`.pipe(
-						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(TopicMoveRow))),
-					);
-					const row = rows[0];
-					if (row?.state !== "completed" || row.seq === null)
-						return yield* new TopicMoveError({ code: "topic_move_evidence_invalid" });
-					return { from: row.from_path, to: row.to_path, seq: row.seq };
-				}).pipe(Effect.timeout("20 seconds"), Effect.interruptible, Effect.exit);
-				// A canceled request/control is not closure evidence. Fence only after the keeper closes its owner.
-				if (!stable) yield* retire;
-				const resolved = yield* recovery.prepare(active.attempt.epoch).pipe(Effect.exit);
-				if (resolved._tag === "Failure") {
-					yield* Ref.set(
-						supervisor.child.sourceError,
-						Cause.pretty(resolved.cause).replace(/[a-f0-9]{64}/g, "[redacted]"),
-					);
-					yield* retire;
-					yield* supervisor.fail(resolved.cause);
-					return yield* Effect.failCause(resolved.cause);
-				}
-				yield* supervisor.assertClosure;
-				if (closed) yield* supervisor.start(active.generation).pipe(Effect.provideContext(context));
-				else
-					yield* active.process
-						.control("live")
-						.pipe(
-							Effect.catch(() =>
-								retire.pipe(Effect.andThen(supervisor.start(active.generation).pipe(Effect.provideContext(context)))),
+						yield* recovery.prepare(active.attempt.epoch);
+						const current = yield* revalidate.pipe(
+							Effect.mapError(() => new TopicMoveError({ code: "credential_invalid" })),
+						);
+						if (current.id !== identity.id || !current.scopes.includes("write"))
+							return yield* new TopicMoveError({ code: "scope_required" });
+						if (
+							(yield* sql`SELECT seq FROM events WHERE (topic=${input.from} OR substr(topic,1,length(${input.from})+1)=${input.from}||'/')
+						AND length(topic)-length(${input.from})+length(${input.to})>200 LIMIT 1`).length
+						)
+							return yield* new TopicMoveError({ code: "input_invalid" });
+						yield* sql`INSERT INTO topic_moves(id,from_path,to_path,instance,request_key,request_hash,state)
+						VALUES(${transaction},${input.from},${input.to},${identity.id},${input.key ?? null},${hash},'prepared')`;
+						const prepared = yield* pages.prepare(transaction, input.from, input.to, identity.agent);
+						const authorized = yield* revalidate.pipe(
+							Effect.mapError(() => new TopicMoveError({ code: "credential_invalid" })),
+						);
+						if (
+							authorized.id !== identity.id ||
+							authorized.agent !== identity.agent ||
+							authorized.kind !== identity.kind ||
+							!authorized.scopes.includes("write")
+						)
+							return yield* new TopicMoveError({ code: "scope_required" });
+						yield* supervisor.child.channelGate.withPermit(events.reserve(transaction, 1, active.attempt.epoch));
+						stable = false;
+						const response = yield* client.execute(
+							HttpClientRequest.post(`http://127.0.0.1:${active.process.port}/_kernel/topic-move`).pipe(
+								HttpClientRequest.setHeader("x-boot-secret", active.attempt.secret),
+								HttpClientRequest.bodyJsonUnsafe({
+									transaction,
+									...(input.key === undefined ? {} : { key: input.key }),
+									from: input.from,
+									to: input.to,
+									page_source: prepared.page_source,
+									identity: {
+										agent: identity.agent,
+										instance: identity.id,
+										request: transaction,
+										kind: identity.kind,
+										label: identity.label,
+									},
+								}),
 							),
 						);
-				yield* supervisor.child.traffic.requests.release;
+						const value = yield* response.json;
+						if (response.status !== 200) {
+							const rejection = yield* Schema.decodeUnknownEffect(Rejection)(value);
+							stable = true;
+							return yield* new TopicMoveError({ code: rejection.error.code });
+						}
+						yield* Schema.decodeUnknownEffect(Outcome)(value);
+						stable = true;
+						// The app's committed outbox, not its HTTP response, authorizes page publication and success.
+						yield* recovery.prepare(active.attempt.epoch);
+						const rows = yield* sql`SELECT * FROM topic_moves WHERE id=${transaction}`.pipe(
+							Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(TopicMoveRow))),
+						);
+						const row = rows[0];
+						if (row?.state !== "completed" || row.seq === null)
+							return yield* new TopicMoveError({ code: "topic_move_evidence_invalid" });
+						return { from: row.from_path, to: row.to_path, seq: row.seq };
+					}).pipe(Effect.timeout("20 seconds"), Effect.interruptible, Effect.exit);
+					// A canceled request/control is not closure evidence. Fence only after the keeper closes its owner.
+					if (!stable) yield* retire;
+					const resolved = yield* recovery.prepare(active.attempt.epoch).pipe(Effect.exit);
+					if (resolved._tag === "Failure") {
+						yield* Ref.set(
+							supervisor.child.sourceError,
+							Cause.pretty(resolved.cause).replace(/[a-f0-9]{64}/g, "[redacted]"),
+						);
+						yield* retire;
+						yield* supervisor.fail(resolved.cause);
+						return yield* Effect.failCause(resolved.cause);
+					}
+					yield* supervisor.assertClosure;
+					if (closed) yield* supervisor.start(active.generation).pipe(Effect.provideContext(context));
+					else
+						yield* active.process
+							.control("live")
+							.pipe(
+								Effect.catch(() =>
+									retire.pipe(Effect.andThen(supervisor.start(active.generation).pipe(Effect.provideContext(context)))),
+								),
+							);
+					return outcome;
+				}).pipe(
+					Effect.tapCause(() =>
+						Effect.gen(function* () {
+							const current = yield* Ref.get(supervisor.current);
+							yield* Ref.set(supervisor.current, null);
+							yield* Ref.set(supervisor.child.traffic.route, null);
+							if (current) yield* supervisor.retire(current).pipe(Effect.provideContext(context));
+						}),
+					),
+					Effect.ensuring(supervisor.child.traffic.requests.release),
+				);
 				if (outcome._tag === "Failure") return yield* Effect.failCause(outcome.cause);
 				return outcome.value;
 			}).pipe(Effect.uninterruptible),

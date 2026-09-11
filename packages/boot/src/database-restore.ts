@@ -276,22 +276,32 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					yield* supervisor.assertClosure;
 					yield* sql`UPDATE db_restore_requests SET phase='restoring' WHERE proof_id=${record.proof_id}`;
 				});
-				const prepared = yield* prepare.pipe(Effect.interruptible, Effect.exit);
-				if (prepared._tag === "Failure") {
-					yield* supervisor.assertClosure;
-					const latest = yield* read(record.proof_id);
-					if (latest.phase !== "authorized") return yield* Effect.failCause(prepared.cause);
-					// No replacement was selected. Resume the authoritative current store, never the requested backup.
-					if (latest.generation !== null) yield* close;
-					yield* sql`UPDATE db_restore_requests SET phase='failed',failure='restore_preparation_failed' WHERE proof_id=${record.proof_id}`;
-					yield* releaseLock(latest);
-					if (latest.generation !== null) yield* restart(latest);
-					yield* release;
+				return yield* Effect.gen(function* () {
+					const prepared = yield* prepare.pipe(Effect.interruptible, Effect.exit);
+					if (prepared._tag === "Failure") {
+						yield* supervisor.assertClosure;
+						const latest = yield* read(record.proof_id);
+						if (latest.phase !== "authorized") return yield* Effect.failCause(prepared.cause);
+						// No replacement was selected. Resume the authoritative current store, never the requested backup.
+						if (latest.generation !== null) yield* close;
+						yield* sql`UPDATE db_restore_requests SET phase='failed',failure='restore_preparation_failed' WHERE proof_id=${record.proof_id}`;
+						yield* releaseLock(latest);
+						if (latest.generation !== null) yield* restart(latest);
+						return receipt(yield* read(record.proof_id));
+					}
+					yield* resume(yield* read(record.proof_id));
 					return receipt(yield* read(record.proof_id));
-				}
-				yield* resume(yield* read(record.proof_id));
-				yield* release;
-				return receipt(yield* read(record.proof_id));
+				}).pipe(
+					// Reopening admission is safe only after failed coordinator work has lost its route.
+					Effect.tapCause(() =>
+						Effect.gen(function* () {
+							const active = yield* Ref.get(supervisor.current);
+							yield* unroute;
+							if (active) yield* stop(active);
+						}),
+					),
+					Effect.ensuring(release),
+				);
 			}).pipe(
 				Effect.uninterruptible,
 				Effect.tapCause((cause) =>
