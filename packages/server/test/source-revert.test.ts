@@ -154,7 +154,7 @@ it("reauthenticates a held revert body and fences a replaced lock before staging
 }, 15000);
 
 for (const input of [{}, { path: "app/note.txt" }])
-	it(`keeps a lost-response ${"path" in input ? "path" : "latest-batch"} undo selection across restart and rejects key reuse`, async (test) => {
+	it(`replays the exact ${"path" in input ? "path" : "latest-batch"} undo outcome across restart without replacing later edits`, async (test) => {
 		const fixture = await conversation(test),
 			app = await fixture.launch();
 		await app.setup();
@@ -170,20 +170,40 @@ for (const input of [{}, { path: "app/note.txt" }])
 				})
 			).json(),
 		).toMatchObject({ status: "live" });
-		// Drop the successful outcome instead of learning its resulting history/generation.
-		await (await app.post("/api/revert", input, cookie, "lost-revert-response")).body?.cancel();
+		const replies = await Promise.all([0, 1].map(() => app.post("/api/revert", input, cookie, "lost-revert-response")));
+		const first = await replies[0]?.json();
+		expect(await replies[1]?.json()).toEqual(first);
+		expect(first).toMatchObject({ status: "live" });
+		// A later edit and released lock must survive replay, including after reboot.
+		expect(
+			await (
+				await fetch(`${app.url}/api/fs/app/note.txt`, {
+					method: "PUT",
+					headers: { cookie, origin: "https://comms.test" },
+					body: "later edit",
+				})
+			).json(),
+		).toMatchObject({ status: "live" });
+		expect(
+			(await fetch(`${app.url}/api/lock`, { method: "DELETE", headers: { cookie, origin: "https://comms.test" } }))
+				.status,
+		).toBe(200);
+		const generations = await fixture.sql("SELECT n FROM generations", "boot.db");
 		await app.stop();
 		const resumed = await fixture.launch();
 		await resumed.ready(cookie);
-		expect((await fetch(`${resumed.url}/api/fs/app/note.txt`, { headers: { cookie } })).status).toBe(404);
-		expect(await (await resumed.post("/api/revert", input, cookie, "lost-revert-response")).json()).toMatchObject({
-			status: "live",
-		});
-		expect((await fetch(`${resumed.url}/api/fs/app/note.txt`, { headers: { cookie } })).status).toBe(404);
+		expect(await (await fetch(`${resumed.url}/api/fs/app/note.txt`, { headers: { cookie } })).text()).toBe(
+			"later edit",
+		);
+		expect(await (await resumed.post("/api/revert", input, cookie, "lost-revert-response")).json()).toEqual(first);
+		expect(await fixture.sql("SELECT n FROM generations", "boot.db")).toEqual(generations);
+		expect(await (await fetch(`${resumed.url}/api/fs/app/note.txt`, { headers: { cookie } })).text()).toBe(
+			"later edit",
+		);
 		expect(
 			await (await resumed.post("/api/revert", { version: 1 }, cookie, "lost-revert-response")).json(),
 		).toMatchObject({ error: { code: "idempotency_conflict" } });
-		expect(await fixture.sql("SELECT COUNT(*) AS n FROM settings WHERE key LIKE 'source-revert:%'", "boot.db")).toEqual(
-			[{ n: 1 }],
-		);
+		expect(
+			await fixture.sql("SELECT COUNT(*) AS n FROM settings WHERE key LIKE 'source-revert-result:%'", "boot.db"),
+		).toEqual([{ n: 1 }]);
 	}, 20000);

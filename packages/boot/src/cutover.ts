@@ -1,3 +1,4 @@
+import { acceptSourceRevert } from "./source-revert.ts";
 import { seedSource } from "./seed-source.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
 import { Cause, Clock, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
@@ -107,6 +108,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			readonly release?: boolean;
 			readonly check?: boolean;
 			readonly undo?: UndoSelection;
+			readonly revertRequest?: string;
 			readonly trustedSource?: { readonly directory: string; readonly agent: string };
 		} = {},
 	) =>
@@ -262,6 +264,9 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							if (!generation) return yield* Effect.die("Missing candidate");
 							yield* generations.healthy(generation.n);
 							yield* sql`UPDATE cutover SET phase='accepted' WHERE singleton=1`;
+							yield* acceptSourceRevert(options.revertRequest, generation.n).pipe(
+								Effect.provideService(SqlClient.SqlClient, sql),
+							);
 						}),
 					);
 

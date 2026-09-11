@@ -100,12 +100,24 @@ it("keeps a page undo target across restart and never confuses omitted history b
 	expect((await put(app.url, "before")).status).toBe(200);
 	expect((await put(app.url, "after")).status).toBe(200);
 	const selection = { path: "pages/undo/note.md" };
-	await (await app.post("/api/revert", selection, cookie, "page-lost-response")).body?.cancel();
+	let receiptKey = "";
+	for (let attempt = 0; attempt < 5; attempt++) {
+		receiptKey = `page-lost-response-${attempt}`;
+		const response = await app.post("/api/revert", selection, cookie, receiptKey);
+		if (response.status === 200) {
+			await response.body?.cancel();
+			break;
+		}
+		// Each prepublication refusal is now a terminal receipt; a fresh operation needs a fresh key.
+		expect(await response.json()).toMatchObject({ error: { code: "publication_pending" } });
+		expect(attempt).toBeLessThan(4);
+		await delay(20);
+	}
 	await app.stop();
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
 	expect(
-		await (await pagePublication(() => resumed.post("/api/revert", selection, cookie, "page-lost-response"))).json(),
+		await (await pagePublication(() => resumed.post("/api/revert", selection, cookie, receiptKey))).json(),
 	).toMatchObject({
 		published: true,
 	});
@@ -113,11 +125,11 @@ it("keeps a page undo target across restart and never confuses omitted history b
 		"before",
 	);
 	expect(
-		await (await resumed.post("/api/revert", { path: "pages/undo/other.md" }, cookie, "page-lost-response")).json(),
+		await (await resumed.post("/api/revert", { path: "pages/undo/other.md" }, cookie, receiptKey)).json(),
 	).toMatchObject({ error: { code: "idempotency_conflict" } });
 	expect((await put(resumed.url, "x".repeat(1024 * 1024 + 1))).status).toBe(200);
 	expect((await put(resumed.url, "keep")).status).toBe(200);
-	expect(await (await resumed.post("/api/revert", selection, cookie)).json()).toMatchObject({
+	expect(await (await pagePublication(() => resumed.post("/api/revert", selection, cookie))).json()).toMatchObject({
 		error: { code: "version_unavailable" },
 	});
 	expect(await (await fetch(`${resumed.url}/api/fs/pages/undo/note.md`, { headers: { cookie } })).text()).toBe("keep");

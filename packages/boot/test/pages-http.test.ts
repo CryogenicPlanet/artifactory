@@ -417,3 +417,91 @@ const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
 		expect(await env.sql("SELECT id FROM source_batches WHERE state='publishing'")).toEqual([]);
 	},
 );
+
+it("replays keyed page undo and failure outcomes without replacing newer pages, across restart", async (test) => {
+	const env = await fixture(test),
+		app = await env.start();
+	const call = (url: string, input: object, key: string) =>
+		app.call(`${url}/api/revert`, {
+			method: "POST",
+			headers: { "content-type": "application/json", "idempotency-key": key },
+			body: JSON.stringify(input),
+		});
+	const input = { path: "pages/receipt.md" };
+	for (const body of ["before", "after"])
+		expect((await app.call(`${app.url}/api/fs/pages/receipt.md`, { method: "PUT", body })).status).toBe(200);
+	const replies = await Promise.all([call(app.url, input, "page"), call(app.url, input, "page")]);
+	const first = await replies[0]?.json();
+	expect(first).toMatchObject({ published: true });
+	expect(await replies[1]?.json()).toEqual(first);
+	expect((await app.call(`${app.url}/api/fs/pages/receipt.md`, { method: "PUT", body: "later" })).status).toBe(200);
+	const history = await env.sql("SELECT id FROM versions");
+	const failure = await call(app.url, { path: "pages/absent.md" }, "failed");
+	const failed = await failure.json();
+	expect(failure.status).toBe(400);
+	expect((await app.call(`${app.url}/api/fs/pages/absent.md`, { method: "PUT", body: "created later" })).status).toBe(
+		200,
+	);
+	await app.stop();
+	const restarted = await env.start();
+	expect(await (await call(restarted.url, input, "page")).json()).toEqual(first);
+	expect(await readFile(join(env.root, "data/pages/receipt.md"), "utf8")).toBe("later");
+	const retry = await call(restarted.url, { path: "pages/absent.md" }, "failed");
+	expect(retry.status).toBe(failure.status);
+	expect(await retry.json()).toEqual(failed);
+	expect(await readFile(join(env.root, "data/pages/absent.md"), "utf8")).toBe("created later");
+	expect(await env.sql("SELECT id FROM versions WHERE path != 'pages/absent.md'")).toEqual(history);
+}, 15000);
+
+it("refuses a legacy selector-only undo key rather than replaying uncertain old effects", async (test) => {
+	const env = await fixture(test),
+		app = await env.start();
+	const sessions = await env.sql("SELECT id FROM sessions");
+	const rows = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ id: Schema.String })))(sessions);
+	const family = rows[0]?.id;
+	expect(family).toBeDefined();
+	const key = "legacy undo";
+	const digest = createHash("sha256").update(JSON.stringify({ family, key })).digest("hex");
+	await env.sql(`INSERT INTO settings(key,value) VALUES('source-revert:${digest}','{}')`);
+	const before = await env.sql("SELECT id FROM versions");
+	const response = await app.call(`${app.url}/api/revert`, {
+		method: "POST",
+		headers: { "content-type": "application/json", "idempotency-key": key },
+		body: "{}",
+	});
+	expect(response.status).toBe(409);
+	expect(await response.json()).toMatchObject({
+		error: { code: "source_revert_outcome_unavailable", retriable: false },
+	});
+	expect(await env.sql("SELECT id FROM versions")).toEqual(before);
+});
+
+it("rechecks credentials after a keyed revert waits behind another request", async (test) => {
+	const env = await fixture(test),
+		app = await env.start();
+	for (const body of ["before", "after"])
+		expect((await app.call(`${app.url}/api/fs/pages/held.md`, { method: "PUT", body })).status).toBe(200);
+	await writeFile(join(env.root, "pause-page"), "pause undo");
+	const send = () =>
+		app.call(`${app.url}/api/revert`, {
+			method: "POST",
+			headers: { "content-type": "application/json", "idempotency-key": "queued" },
+			body: JSON.stringify({ path: "pages/held.md" }),
+		});
+	const first = send();
+	await expect.poll(() => readFile(join(env.root, "page-captured"), "utf8").catch(() => "")).toBe("ready");
+	const queued = send();
+	expect(
+		(
+			await app.call(`${app.url}/_boot/auth/logout`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: "{}",
+			})
+		).status,
+	).toBe(204);
+	await rm(join(env.root, "pause-page"));
+	expect((await first).status).toBe(401);
+	expect((await queued).status).toBe(401);
+	expect(await readFile(join(env.root, "data/pages/held.md"), "utf8")).toBe("after");
+}, 15000);

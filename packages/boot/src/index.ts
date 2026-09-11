@@ -1,3 +1,4 @@
+import { sourceReverts } from "./source-revert.ts";
 import { SourceRejected } from "./source-schema.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
@@ -90,6 +91,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 
 	yield* Effect.gen(function* () {
 		const coordinator = yield* cutover(options, supervisor);
+		const reverts = yield* sourceReverts;
 		const restore = yield* databaseRestore(supervisor);
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* Events;
@@ -112,6 +114,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 				captures: yield* databaseBackup(supervisor),
 				restores: restore,
 				editing: {
+					reverts,
 					source: yield* SourceFiles,
 					lock: yield* EditLock,
 					cutover: coordinator,
@@ -150,6 +153,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 				? owners
 				: yield* coordinator.recover.pipe(
 						Effect.andThen(restore.recover),
+						Effect.andThen(reverts.recover),
 						Effect.andThen(source._tag === "Success" ? (yield* EditLock).recover : Effect.void),
 						Effect.exit,
 					);

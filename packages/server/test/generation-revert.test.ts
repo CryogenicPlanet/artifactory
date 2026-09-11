@@ -31,13 +31,18 @@ it("restores a retained generation's whole source and manifest through cutover w
 	expect((await request("app/package.json", "PUT", `${manifest}\n`)).status).toBe(200);
 	expect((await request("app/retained.sh", "DELETE")).status).toBe(200);
 	expect((await request("app/new-only.txt", "PUT", "must disappear")).status).toBe(200);
-	expect(await (await app.post("/api/reload", {}, cookie)).json()).toMatchObject({ status: "live" });
+	const reloaded = await (await app.post("/api/reload", {}, cookie)).json();
+	expect(reloaded, JSON.stringify(reloaded)).toMatchObject({ status: "live" });
 	expect(
 		(await app.post("/api/messages", { topic: "generation", body: "written after original snapshot" }, cookie)).status,
 	).toBe(200);
-	const restored = await app.post("/api/revert", { generation: 1 }, cookie);
+	const restored = await app.post("/api/revert", { generation: 1 }, cookie, "generation-receipt");
 	expect(restored.status).toBe(200);
-	expect(await restored.json()).toMatchObject({ status: "live" });
+	const outcome = await restored.json();
+	expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: "live" });
+	expect(await (await app.post("/api/revert", { generation: 1 }, cookie, "generation-receipt")).json()).toEqual(
+		outcome,
+	);
 	await app.ready(cookie);
 	expect(await readFile(join(fixture.root, "app/package.json"), "utf8")).toBe(manifest);
 	expect(await readFile(join(fixture.root, "app/bun.lock"), "utf8")).toBe(lockfile);
@@ -156,9 +161,9 @@ it("keeps the original generation selection after a lost response and restart an
 		expect(conflicting.status).toBe(409);
 		expect(await conflicting.json()).toMatchObject({ error: { code: "idempotency_conflict" } });
 	}
-	expect(await fixture.sql("SELECT COUNT(*) AS n FROM settings WHERE key LIKE 'source-revert:%'", "boot.db")).toEqual([
-		{ n: 1 },
-	]);
+	expect(
+		await fixture.sql("SELECT COUNT(*) AS n FROM settings WHERE key LIKE 'source-revert-result:%'", "boot.db"),
+	).toEqual([{ n: 1 }]);
 }, 30000);
 
 it("restores file-directory replacements and exact empty directories from a retained generation", async (test) => {
@@ -248,7 +253,7 @@ it("recreates a missing editable app tree while its saved generation continues s
 	expect(
 		(await app.post("/api/messages", { topic: "missing-source", body: "saved child still serves" }, cookie)).status,
 	).toBe(200);
-	const restored = await app.post("/api/revert", { generation: 1 }, cookie);
+	const restored = await app.post("/api/revert", { generation: 1 }, cookie, "generation-receipt");
 	expect(restored.status).toBe(200);
 	expect(await restored.json()).toMatchObject({ status: "live" });
 	expect(await readFile(join(fixture.root, "app/server.ts"), "utf8")).toBe(original);

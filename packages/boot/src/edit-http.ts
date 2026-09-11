@@ -1,26 +1,24 @@
+import { editFailure, errorResponse } from "./edit-failure.ts";
+import type { SourceReverts } from "./source-revert.ts";
 import { SourceResetParams } from "./source-reset-schema.ts";
-import { isSqlError } from "effect/unstable/sql/SqlError";
-import { isHttpClientError } from "effect/unstable/http/HttpClientError";
-import { ChildError } from "./child-process.ts";
-import { Cause, Effect, Schema, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth } from "./auth.ts";
 import { assertionProof, authenticate, body, humanSession } from "./auth-http.ts";
 import { databaseRestoreResponse } from "./database-restore-http.ts";
 import type { DatabaseRestore } from "./database-restore.ts";
-import { FreezeTimeout, type Cutover } from "./cutover.ts";
+import type { Cutover } from "./cutover.ts";
 import type { BootMetrics } from "./metrics.ts";
 import { EditAuthority, EditRejected, type EditLock, type Ownership } from "./edit-lock.ts";
 import type { VerifiedIdentity } from "./enrollment.ts";
 import { BreakLock } from "./lock-break-schema.ts";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { SourceFiles } from "./source-files.ts";
-import { ArtifactRetentionRejected } from "./artifact-retention.ts";
-import { StorageRejected } from "./storage-headroom.ts";
 import { SourceRejected } from "./source-schema.ts";
 
 export interface Editing {
 	readonly writable: boolean;
+	readonly reverts: SourceReverts;
 	readonly source: SourceFiles["Service"];
 	readonly lock: EditLock["Service"];
 	readonly cutover: Cutover;
@@ -28,24 +26,6 @@ export interface Editing {
 		effect: Effect.Effect<A, E, R>,
 	) => Effect.Effect<A, E | SourceRejected | SqlError | Schema.SchemaError, R>;
 }
-const errorResponse = (code: string, status: number, holder?: unknown) =>
-	HttpServerResponse.jsonUnsafe(
-		{
-			error: {
-				code,
-				message: "Source edit refused.",
-				hint:
-					code === "unsafe_artifact_path"
-						? "Inspect the boot-owned artifact paths before retrying; no unsafe path was deleted."
-						: status === 507
-							? "Free space in DATA_DIR or expand its volume, then retry. Protected recovery artifacts are retained."
-							: "GET /_boot/status for diagnostics. POST /api/lock before app edits; repair staged source and POST /api/reload to retry.",
-				retriable: status === 503,
-			},
-			...(holder === undefined ? {} : { lock: holder }),
-		},
-		{ status, headers: { "cache-control": "no-store" } },
-	);
 
 export const editRoute = (
 	editing: Editing,
@@ -159,32 +139,74 @@ export const editRoute = (
 				const key = request.headers["idempotency-key"];
 				if (key !== undefined && !/^[\x20-\x7e]{1,128}$/.test(key))
 					return errorResponse("idempotency_key_invalid", 400);
-				const undo = { ...input, ...(key === undefined ? {} : { retry: { family: identity.id, key } }) };
-				if (input.generation !== undefined) {
-					if (!known) return yield* new EditRejected({ code: "lock_required", holder: null, transitions: [] });
-					if (known.holder_family !== identity.id)
-						return yield* new EditRejected({ code: "locked", holder: known, transitions: [] });
-					return HttpServerResponse.jsonUnsafe(yield* authoritative(editing.cutover.reload(owner(), { undo })));
-				}
-				if (yield* editing.source.undoTargetsPages(undo))
-					return yield* authoritative(
-						editing.withPagePublication(
-							Effect.acquireUseRelease(
-								editing.source.preparePageUndo(identity.agent, undo),
-								(id) =>
-									Effect.gen(function* () {
-										if (id === null) return yield* new SourceRejected({ code: "batch_missing", path: "pages" });
-										yield* editing.source.publish(id);
-										return HttpServerResponse.jsonUnsafe({ published: true, batch: id });
-									}),
-								(id) => (id === null ? Effect.void : editing.source.discard(id).pipe(Effect.ignore)),
+				const undo = input;
+				const perform = (revertRequest?: string) =>
+					Effect.gen(function* () {
+						const currentLock = revertRequest === undefined ? known : (yield* editing.lock.inspect).value;
+						const owner = (): Ownership => ({ id: currentLock?.id ?? "", family: identity.id });
+						if (input.generation !== undefined) {
+							if (!currentLock)
+								return yield* new EditRejected({ code: "lock_required", holder: null, transitions: [] });
+							if (currentLock.holder_family !== identity.id)
+								return yield* new EditRejected({ code: "locked", holder: currentLock, transitions: [] });
+							return HttpServerResponse.jsonUnsafe(
+								yield* authoritative(
+									editing.cutover.reload(owner(), { undo, ...(revertRequest === undefined ? {} : { revertRequest }) }),
+								),
+							);
+						}
+						if (yield* editing.source.undoTargetsPages(undo))
+							return yield* authoritative(
+								editing.withPagePublication(
+									Effect.acquireUseRelease(
+										editing.source.preparePageUndo(identity.agent, undo),
+										(id) =>
+											Effect.gen(function* () {
+												if (id === null) return yield* new SourceRejected({ code: "batch_missing", path: "pages" });
+												yield* editing.source.publishWithAcceptance(
+													id,
+													revertRequest === undefined ? Effect.void : editing.reverts.bindPage(revertRequest, id),
+												);
+												return HttpServerResponse.jsonUnsafe({ published: true, batch: id });
+											}),
+										(id) => (id === null ? Effect.void : editing.source.discard(id).pipe(Effect.ignore)),
+									),
+								),
+							);
+						if (!currentLock) return yield* new EditRejected({ code: "lock_required", holder: null, transitions: [] });
+						if (currentLock.holder_family !== identity.id)
+							return yield* new EditRejected({ code: "locked", holder: currentLock, transitions: [] });
+						return HttpServerResponse.jsonUnsafe(
+							yield* authoritative(
+								editing.cutover.reload(owner(), { undo, ...(revertRequest === undefined ? {} : { revertRequest }) }),
 							),
-						),
-					);
-				if (!known) return yield* new EditRejected({ code: "lock_required", holder: null, transitions: [] });
-				if (known.holder_family !== identity.id)
-					return yield* new EditRejected({ code: "locked", holder: known, transitions: [] });
-				return HttpServerResponse.jsonUnsafe(yield* authoritative(editing.cutover.reload(owner(), { undo })));
+						);
+					});
+				if (key === undefined) return yield* perform();
+				const selector = yield* Schema.encodeEffect(
+					Schema.fromJsonString(
+						Schema.Struct({
+							path: Schema.NullOr(Schema.String),
+							batch: Schema.NullOr(Schema.String),
+							version: Schema.NullOr(Schema.Int),
+							generation: Schema.NullOr(Schema.Int),
+						}),
+					),
+				)({
+					path: input.path ?? null,
+					batch: input.batch ?? null,
+					version: input.version ?? null,
+					generation: input.generation ?? null,
+				});
+				return yield* editing.reverts.run(
+					{ family: identity.id, key },
+					selector,
+					Effect.gen(function* () {
+						const current = yield* authenticate(auth, request);
+						if (!current.scopes.includes("fs")) return yield* new AuthError({ code: "scope_required" });
+					}),
+					(id) => perform(id).pipe(Effect.catchCause(editFailure(metrics))),
+				);
 			}
 			if ([...url.searchParams.keys()].some((key) => !["reload", "check", "release", "history"].includes(key)))
 				return errorResponse("unsupported_query", 400);
@@ -280,53 +302,7 @@ export const editRoute = (
 					}),
 				),
 			);
-		}).pipe(
-			Effect.catchCause((cause) => {
-				if (Cause.hasInterruptsOnly(cause))
-					return Effect.failCause(Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason)));
-				const expected =
-					cause.reasons.length > 0 &&
-					cause.reasons.every(
-						(reason) =>
-							reason._tag === "Fail" &&
-							(Schema.is(StorageRejected)(reason.error) ||
-								Schema.is(ArtifactRetentionRejected)(reason.error) ||
-								Schema.is(FreezeTimeout)(reason.error) ||
-								Schema.is(EditRejected)(reason.error) ||
-								Schema.is(SourceRejected)(reason.error) ||
-								Schema.is(AuthError)(reason.error) ||
-								Schema.is(ChildError)(reason.error) ||
-								Cause.isTimeoutError(reason.error) ||
-								isHttpClientError(reason.error) ||
-								(isSqlError(reason.error) && reason.error.isRetryable)),
-					);
-				if (!expected) return Effect.succeed(errorResponse("handler_failed", 500));
-				const found = Cause.findError(cause);
-				const error = found._tag === "Success" ? found.success : undefined;
-				if (Schema.is(StorageRejected)(error) || Schema.is(ArtifactRetentionRejected)(error))
-					return Effect.succeed(errorResponse(error.code, error.code === "unsafe_artifact_path" ? 409 : 507));
-				if (Schema.is(FreezeTimeout)(error)) return Effect.succeed(errorResponse(error.code, 503));
-				if (Schema.is(EditRejected)(error))
-					return Effect.as(
-						error.code === "locked" || error.code === "cutover_in_flight" ? metrics.lockWait : Effect.void,
-						errorResponse(error.code, error.code === "authority_expired" ? 401 : 423, error.holder),
-					);
-				if (Schema.is(SourceRejected)(error))
-					return Effect.succeed(
-						errorResponse(
-							error.code,
-							error.code === "publication_pending"
-								? 503
-								: ["stale_base", "ambiguous_anchor", "anchor_not_found", "idempotency_conflict"].includes(error.code)
-									? 409
-									: 400,
-						),
-					);
-				if (Schema.is(AuthError)(error))
-					return Effect.succeed(errorResponse(error.code, error.code === "invalid_request" ? 400 : 401));
-				return Effect.succeed(errorResponse("edit_unavailable", 503));
-			}),
-		);
+		}).pipe(Effect.catchCause(editFailure(metrics)));
 	});
 
 const readBytes = (request: HttpServerRequest.HttpServerRequest, name: string) =>
