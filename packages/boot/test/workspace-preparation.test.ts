@@ -76,7 +76,7 @@ console.log(server.url.toString());`,
 	expect(await readFile(join(`${snapshot}.board/assets`, script ?? "missing"), "utf8")).toContain(
 		"build workspace mutation",
 	);
-	expect(await readdir(join(root, "cache"))).toEqual([]);
+	expect(await readdir(join(root, "cache"))).toEqual(["bun"]);
 	await rm(source, { recursive: true });
 	await rm(join(root, "cache"), { recursive: true });
 	const server = spawn("bun", [join(snapshot, "server.ts")], { stdio: ["ignore", "pipe", "pipe"] });

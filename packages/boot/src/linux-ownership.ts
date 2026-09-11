@@ -62,6 +62,14 @@ export const prepareWorkspace = Effect.fn("ownership.workspace")(function* (work
 	yield* ownTree(workspace, uid, uid, false);
 });
 
+/** Only the fixed installer may enter the persistent download cache; never traverse cached links. */
+export const prepareBunCache = Effect.fn("ownership.bunCache")(function* (uid: 1000 | 1002) {
+	const fs = yield* FileSystem.FileSystem;
+	if ((yield* regular("/data/cache/bun")).type !== "Directory") return yield* Effect.die("Invalid Bun cache");
+	yield* fs.chown("/data/cache/bun", uid, uid);
+	yield* fs.chmod("/data/cache/bun", 0o700);
+});
+
 const sharePages = Effect.fn("ownership.pages")(function* (
 	directory: string,
 ): Effect.fn.Return<void, PlatformError, FileSystem.FileSystem | Path.Path> {

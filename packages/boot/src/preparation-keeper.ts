@@ -1,7 +1,7 @@
-import { buildIdentity, prepareWorkspace } from "./linux-ownership.ts";
+import { buildIdentity, prepareWorkspace, prepareBunCache } from "./linux-ownership.ts";
 import { PreparationConfiguration } from "./keeper-configuration.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Cause, Config, Console, Effect, Path, Redacted, Schema, Stdio, Stream } from "effect";
+import { Cause, Config, Console, Effect, FileSystem, Path, Redacted, Schema, Stdio, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { ChildError } from "./child-process.ts";
@@ -14,9 +14,16 @@ const keeper = Effect.gen(function* () {
 	const path = yield* Path.Path;
 	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 	const stdio = yield* Stdio.Stdio;
+	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
+	const cache =
+		config.operation === "install"
+			? isolated
+				? "/data/cache/bun"
+				: path.join(path.dirname(path.dirname(config.workspace)), "bun")
+			: path.join(config.workspace, ".bun-cache");
 	const args =
 		config.operation === "install"
-			? ["install", "--frozen-lockfile", "--ignore-scripts"]
+			? ["install", "--frozen-lockfile", "--ignore-scripts", "--backend=copyfile", "--cache-dir", cache]
 			: [
 					path.join(config.workspace, "node_modules/vite/bin/vite.js"),
 					"build",
@@ -24,7 +31,7 @@ const keeper = Effect.gen(function* () {
 					config.output,
 					"--emptyOutDir",
 				];
-	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
+
 	let spawnAttempted = false;
 	let groupClosed = false;
 	if (isolated) {
@@ -34,7 +41,14 @@ const keeper = Effect.gen(function* () {
 			!spawnAttempted || groupClosed ? prepareWorkspace(config.workspace, 1000).pipe(Effect.orDie) : Effect.void,
 		);
 		yield* prepareWorkspace(config.workspace, 1002);
+		// Revoking just this directory also works after failed closure; no cached entries are followed.
+		if (config.operation === "install") {
+			yield* Effect.addFinalizer(() => prepareBunCache(1000).pipe(Effect.orDie));
+			yield* prepareBunCache(1002);
+		} else yield* prepareBunCache(1000);
 	}
+	if (!isolated && config.operation === "install")
+		yield* (yield* FileSystem.FileSystem).makeDirectory(cache, { recursive: true, mode: 0o700 });
 	spawnAttempted = true;
 	const child = yield* spawner.spawn(
 		ChildProcess.make(
@@ -45,7 +59,7 @@ const keeper = Effect.gen(function* () {
 				env: {
 					PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
 					HOME: config.workspace,
-					BUN_INSTALL_CACHE_DIR: path.join(config.workspace, ".bun-cache"),
+					BUN_INSTALL_CACHE_DIR: cache,
 				},
 				stdin: "ignore",
 				stdout: "ignore",

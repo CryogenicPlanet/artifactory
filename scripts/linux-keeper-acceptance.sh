@@ -156,6 +156,45 @@ for mode in killed-owner exited-leader; do
 	test "$(counter)" = "$before"
 	printf '%s\n' "Passed $mode: app UID/capabilities/access, closure receipt, stable SQLite counter."
 done
+# Two fixed installers reuse package bytes without sharing writable cached inodes.
+docker exec -i "$container" sh -c 'cat > /tmp/cache-install-owner.js' <<'JS'
+const workspace = process.argv[2];
+const helper = Bun.spawn(["/usr/bin/sudo", "-n", "/opt/comms/deployment/preparation-keeper"], {
+  env: { COMMS_PREPARATION_CONFIG: JSON.stringify({operation: "install", workspace, output: ""}) },
+  stdin: "pipe", stdout: "inherit", stderr: "inherit",
+});
+const timeout = setTimeout(() => { helper.kill(); process.exit(1); }, 65000);
+const code = await helper.exited;
+clearTimeout(timeout);
+process.exit(code);
+JS
+docker exec -i "$container" bun - <<'JS'
+import { mkdirSync, writeFileSync } from "node:fs";
+for (const name of ["first", "second"]) {
+  const workspace = `/data/cache/.prepare-${name}/workspace`;
+  mkdirSync(workspace, {recursive:true});
+  writeFileSync(`${workspace}/package.json`, JSON.stringify({name:"cache-fixture", dependencies:{"is-number":"7.0.0"}}));
+  writeFileSync(`${workspace}/bun.lock`, JSON.stringify({lockfileVersion:2,configVersion:1,workspaces:{"":{name:"cache-fixture",dependencies:{"is-number":"7.0.0"}}},packages:{"is-number":["is-number@7.0.0","",{},"sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng=="]}}));
+}
+JS
+docker exec "$container" setpriv --reuid=1000 --regid=1000 --groups=1003 bun /tmp/cache-install-owner.js /data/cache/.prepare-first/workspace
+docker exec -i "$container" bun - <<'JS'
+import {readdirSync,readFileSync,writeFileSync,statSync} from "node:fs";
+const cache="/data/cache/bun";
+if(statSync(cache).uid!==1000 || (statSync(cache).mode&511)!==448)throw new Error("cache not reclaimed");
+const cached=`${cache}/${readdirSync(cache).find(name=>name.startsWith("is-number@7.0.0"))}/index.js`;
+const installed="/data/cache/.prepare-first/workspace/node_modules/is-number/index.js";
+if(statSync(cached).ino===statSync(installed).ino)throw new Error("cache inode shared");
+const original=readFileSync(cached,"utf8");
+writeFileSync(installed,"module.exports=()=>false");
+if(readFileSync(cached,"utf8")!==original)throw new Error("workspace poisoned cache");
+JS
+docker exec "$container" setpriv --reuid=1000 --regid=1000 --groups=1003 bun /tmp/cache-install-owner.js /data/cache/.prepare-second/workspace
+docker exec --user 1000:1000 "$container" bun -e 'if(!require("/data/cache/.prepare-second/workspace/node_modules/is-number")("123"))throw new Error("cached package changed")'
+for uid in 1001:1003 1002:1002; do
+  docker exec --user "$uid" "$container" sh -ec 'test ! -r /data/cache/bun && test ! -x /data/cache/bun'
+done
+printf '%s\n' 'Passed persistent cache, isolated package inodes and cache permission revocation.'
 # Fake editable Vite entry runs through the real fixed preparation keeper.
 docker exec -i "$container" sh -c 'cat > /data/cache/.prepare-probe/workspace/node_modules/vite/bin/vite.js' <<'JS'
 import { accessSync, constants, readFileSync, writeFileSync } from "node:fs";
@@ -164,7 +203,7 @@ const status = readFileSync("/proc/self/status", "utf8");
 if (!/^NoNewPrivs:\s+1$/m.test(status)) throw new Error("build NoNewPrivs");
 for (const name of ["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"])
   if (!new RegExp(`^${name}:\\s+0+$`, "m").test(status)) throw new Error(`build ${name}`);
-for (const path of ["/data/boot.db", "/data/store/comms.db"])
+for (const path of ["/data/boot.db", "/data/store/comms.db", "/data/cache/bun"])
   for (const mode of [constants.R_OK, constants.W_OK]) {
     let denied = false;
     try { accessSync(path, mode); } catch { denied = true; }

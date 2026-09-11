@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -39,12 +39,24 @@ it("loads extension dependencies from its generation root and retains them after
 	expect((await execute("bun", [join(root, "good/ext/tool/index.ts")])).stdout.trim()).toBe("true");
 	expect(await realpath(join(root, "good/node_modules"))).toBe(join(root, "good/node_modules"));
 	await expect(realpath(join(root, "good/ext/tool/node_modules"))).rejects.toMatchObject({ code: "ENOENT" });
+	const cache = join(root, "cache/bun");
+	const cachedPackage = (await readdir(cache)).find((name) => name.startsWith("is-number@7.0.0"));
+	expect(cachedPackage).toBeDefined();
+	const cached = join(cache, cachedPackage ?? "missing", "index.js");
+	const original = await readFile(cached, "utf8");
+	expect((await stat(cached)).ino).not.toBe((await stat(join(root, "good/node_modules/is-number/index.js"))).ino);
+	await writeFile(join(root, "good/node_modules/is-number/index.js"), "module.exports = () => false");
+	expect(await readFile(cached, "utf8")).toBe(original);
+	expect((await call("again")).stdout).toContain('"prepared":true');
+	expect((await execute("bun", [join(root, "again/ext/tool/index.ts")])).stdout.trim()).toBe("true");
+	// Restore the original snapshot bytes for the independent restart assertions below.
+	await writeFile(join(root, "good/node_modules/is-number/index.js"), original);
 	await writeFile(join(source, "package.json"), manifest.replace("7.0.0", "6.0.0"));
 	expect((await call("bad")).stdout).toContain('"prepared":false');
 	await expect(realpath(join(root, "bad/node_modules"))).rejects.toMatchObject({ code: "ENOENT" });
 	expect(await readFile(join(source, "package.json"), "utf8")).toBe(manifest.replace("7.0.0", "6.0.0"));
 	expect(await readFile(join(source, "bun.lock"), "utf8")).toBe(lock);
-	expect(await readdir(join(root, "cache"))).toEqual([]);
+	expect(await readdir(join(root, "cache"))).toEqual(["bun"]);
 	await rm(source, { recursive: true });
 	await rm(join(root, "cache"), { recursive: true });
 	// A new process resolves the saved generation without source, install workspaces, or preparation.

@@ -8,6 +8,7 @@ Effect.gen(function* () {
 		["/data", 1000, 1000, 0o711],
 		["/data/store", 1001, 1003, 0o2770],
 		["/data/cache", 1000, 1000, 0o711],
+		["/data/cache/bun", 1000, 1000, 0o700],
 		["/data/rehearsals", 1000, 1000, 0o711],
 		["/data/runtime", 1001, 1003, 0o700],
 	] as const) {
