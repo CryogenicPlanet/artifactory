@@ -14,9 +14,9 @@ it("decodes bounded numeric queries while preserving omitted cursors and schema 
 	const omitted = await (await get("/api/messages?mark=0")).json();
 	expect(omitted).toMatchObject({ items: [], timed_out: false, drained: false });
 	expect(omitted.cursor).toBeGreaterThanOrEqual(message.seq);
-	const history = await (await get("/api/messages?since=0&limit=1&wait=0&mark=0")).json();
+	const history = await (await get("/api/messages?since=0&limit=1&wait=0&mark=0&topic=numbers/child")).json();
 	expect(history.items).toEqual([message]);
-	const newest = await (await get("/api/messages?newest=1&limit=200&mark=0")).json();
+	const newest = await (await get("/api/messages?newest=1&limit=200&mark=0&topic=numbers/child")).json();
 	expect(newest.items).toEqual([message]);
 	for (const depth of ["", "?depth=1", "?depth=200"])
 		expect((await get(`/api/topics/numbers${depth}`)).status).toBe(200);

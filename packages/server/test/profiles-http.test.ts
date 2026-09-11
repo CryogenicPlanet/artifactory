@@ -38,5 +38,5 @@ it("returns verified caller identity while removed product routes stay absent fr
 	expect(docs.paths["/api/me"].get).toBeDefined();
 	expect(docs.paths["/api/me"]).not.toHaveProperty("patch");
 	expect(docs.paths["/api/messages/{ref}"]).not.toHaveProperty("get");
-	expect((await (await get("/api/messages?since=0&mark=0")).json()).items).toEqual([message]);
+	expect((await (await get("/api/messages?since=0&mark=0&topic=kept")).json()).items).toEqual([message]);
 }, 30000);

@@ -43,8 +43,8 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 	const input = { topic: "@codex/task", body: "Original", tags: ["question"], meta: { pinned: true } };
 	const created = await (await call("POST", "/api/messages", owner, input, "create")).json();
 	const path = `/api/messages/${created.id}`;
-	const one = async (seq: number, access: string) =>
-		(await (await call("GET", `/api/messages?since=${seq - 1}&limit=1`, access)).json()).items[0];
+	const one = async (seq: number, access: string, topic = input.topic) =>
+		(await (await call("GET", `/api/messages?since=${seq - 1}&limit=1&topic=${topic}`, access)).json()).items[0];
 	expect(await one(created.seq, reader)).toEqual(created);
 	for (const access of [sibling, reader]) {
 		expect((await call("PATCH", path, access, { body: "Denied" })).status).toBe(403);
@@ -86,11 +86,11 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 	expect(await one(created.seq, reader)).toBeUndefined();
 	expect((await call("PATCH", path, owner, { body: "Resurrect" })).status).toBe(404);
 	expect(await (await call("POST", "/api/messages", owner, input, "create")).json()).toEqual(created);
-	for (const list of ["/api/messages?since=0"])
+	for (const list of ["/api/messages?since=0&topic=@codex/task"])
 		expect((await (await call("GET", list, sibling)).json()).items).toEqual([]);
 	const topic = await (await call("GET", "/api/topics/@codex/task", reader)).json();
 	expect(topic).toMatchObject({ path: "@codex/task", messages: [], unread: 0 });
-	const events = await (await call("GET", "/api/events?since=0&types=message.*", owner)).json();
+	const events = await (await call("GET", "/api/events?since=0&types=message.*&topic=@codex/task", owner)).json();
 	expect(events.items.map((event: { type: string }) => event.type)).toEqual([
 		"message.created",
 		"message.edited",
@@ -124,7 +124,7 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 	expect((await call("POST", "/api/messages", owner, { topic: "archived/child/deep", body: "Forbidden" })).status).toBe(
 		409,
 	);
-	expect(await one(retained.seq, reader)).toEqual(retained);
+	expect(await one(retained.seq, reader, retained.topic)).toEqual(retained);
 	await fixture.sql("UPDATE kernel_writer SET epoch='replaced'");
 	expect((await call("PATCH", `/api/messages/${retained.id}`, owner, { body: "Forbidden stale writer" })).status).toBe(
 		503,
