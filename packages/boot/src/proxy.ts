@@ -1,3 +1,4 @@
+import { redactHex } from "./auth-primitives.ts";
 import { recoveryRoute } from "./recovery-http.ts";
 import { settingsRoute } from "./settings-http.ts";
 import { discoveryResponse } from "./route-discovery.ts";
@@ -246,7 +247,7 @@ export const proxy = Effect.gen(function* () {
 				}
 				let destination = yield* Ref.get(child.traffic.route);
 				const state = yield* Ref.get(child.status);
-				const safeState = { ...state, stderr: state.stderr.replace(/[a-f0-9]{64}/g, "[redacted]") };
+				const safeState = { ...state, stderr: redactHex(state.stderr) };
 				const generations = yield* Ref.get(child.generations);
 				const lastGood = generations.find((generation) => generation.good === 1)?.n ?? null;
 				if (path === "/_boot/status" && request.method === "GET") {

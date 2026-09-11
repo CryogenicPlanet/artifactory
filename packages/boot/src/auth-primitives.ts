@@ -45,3 +45,6 @@ export const canonicalProof = (proof: AssertionProof) =>
 		proof.response.response.signature,
 		proof.response.response.userHandle ?? null,
 	]);
+
+/** Diagnostic compatibility filter for lowercase 64-hex values, not general credential redaction. */
+export const redactHex = (text: string) => text.replace(/[a-f0-9]{64}/g, "[redacted]");

@@ -1,3 +1,4 @@
+import { redactHex } from "./auth-primitives.ts";
 import { logEvents } from "./log-events.ts";
 import { migrateAppStore } from "./app-store-layout.ts";
 import { sourceReverts } from "./source-revert.ts";
@@ -158,8 +159,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			if (intents.move) yield* (yield* AppRecovery).prepare(yield* (yield* Crypto.Crypto).randomUUIDv4);
 		}).pipe(Effect.exit);
 		const source = owners._tag === "Failure" ? owners : yield* (yield* SourceFiles).recover.pipe(Effect.exit);
-		if (source._tag === "Failure")
-			yield* Ref.set(child.sourceError, Cause.pretty<unknown>(source.cause).replace(/[a-f0-9]{64}/g, "[redacted]"));
+		if (source._tag === "Failure") yield* Ref.set(child.sourceError, redactHex(Cause.pretty<unknown>(source.cause)));
 		const recovered =
 			owners._tag === "Failure"
 				? owners
@@ -173,7 +173,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			yield* Ref.update(phase, (current): RecoveryPhase =>
 				current._tag === "Stopping" ? current : { _tag: "Failed", cause: recovered.cause },
 			);
-			yield* Ref.set(child.sourceError, Cause.pretty<unknown>(recovered.cause).replace(/[a-f0-9]{64}/g, "[redacted]"));
+			yield* Ref.set(child.sourceError, redactHex(Cause.pretty<unknown>(recovered.cause)));
 			yield* fail(recovered.cause);
 		} else {
 			yield* Ref.update(phase, (current): RecoveryPhase => (current._tag === "Stopping" ? current : { _tag: "Ready" }));

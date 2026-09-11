@@ -1,3 +1,4 @@
+import { redactHex } from "./auth-primitives.ts";
 import { acceptSourceRevert } from "./source-revert.ts";
 import { seedSource } from "./seed-source.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
@@ -307,17 +308,17 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					Schema.is(ChildError)(failure.success) &&
 					failure.success.code === "incompatible_schema";
 				const error =
-					Cause.pretty(result.cause).replace(/[a-f0-9]{64}/g, "[redacted]") +
+					redactHex(Cause.pretty(result.cause)) +
 					(incompatibleSeed ? "; image seed is incompatible with current data; apply a forward source fix" : "");
 				const persisted = yield* read;
 				const { generation: failedGeneration, candidate: failedCandidate } = rollback;
-				const stderr = (
+				const stderr = redactHex(
 					failure._tag === "Success" && Schema.is(ChildError)(failure.success)
 						? (failure.success.stderr ?? "")
 						: failedCandidate
 							? yield* Ref.get(failedCandidate.process.stderr)
-							: ""
-				).replace(/[a-f0-9]{64}/g, "[redacted]");
+							: "",
+				);
 				const acceptedGeneration =
 					persisted?.phase === "accepted"
 						? persisted.candidate

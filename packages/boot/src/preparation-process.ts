@@ -1,3 +1,4 @@
+import { redactHex } from "./auth-primitives.ts";
 import { PreparationConfiguration } from "./keeper-configuration.ts";
 import { Config, Context, Effect, Layer, Path, type PlatformError, Ref, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -80,7 +81,7 @@ export const layer = Layer.effect(
 						return Effect.gen(function* () {
 							return yield* new ChildError({
 								code: error.code,
-								stderr: (yield* Ref.get(stderr)).replace(/[a-f0-9]{64}/g, "[redacted]"),
+								stderr: redactHex(yield* Ref.get(stderr)),
 							});
 						});
 					}),
