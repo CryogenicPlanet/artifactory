@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Console, Effect } from "effect";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
+import { preparationPhases } from "./fixtures/preparation-phases.ts";
 
 it("restores a retained generation's whole source and manifest through cutover without restoring messages", async (test) => {
 	const fixture = await conversation(test);
@@ -19,11 +20,17 @@ it("restores a retained generation's whole source and manifest through cutover w
 		await cp(join(import.meta.dirname, "../../protocol", file), join(seed, "protocol", file), { recursive: true });
 	await writeFile(join(seed, "retained.sh"), "#!/bin/sh\necho retained\n");
 	await chmod(join(seed, "retained.sh"), 0o750);
-	const app = await fixture.launch(join(seed, "server.ts"));
+	const diagnostics = await preparationPhases(fixture.root);
+	const app = await fixture.launch(join(seed, "server.ts"), diagnostics.launcher);
 	await app.setup();
 	const cookie = await app.login();
 	// Cold runtime dependency preparation installs, copies and fsyncs the complete tree.
-	await app.ready(cookie, 60000);
+	try {
+		await app.ready(cookie, 60000);
+	} catch (cause) {
+		// Snapshot phase evidence before process cleanup; retain the original readiness error.
+		throw new Error(`Initial preparation phases: ${JSON.stringify(diagnostics.read(app.output()))}`, { cause });
+	}
 	const request = (path: string, method: string, body?: string) =>
 		fetch(`${app.url}/api/fs/${path}?reload=0`, {
 			method,
