@@ -1,4 +1,4 @@
-import { Crypto, Effect, Schema, Semaphore } from "effect";
+import { Cause, Clock, Crypto, Effect, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { HttpServerResponse } from "effect/unstable/http";
 import { SourceRejected } from "./source-schema.ts";
@@ -8,6 +8,8 @@ const Receipt = Schema.Struct({
 	selector: Schema.String,
 	page_batch: Schema.NullOr(Schema.String),
 	outcome: Schema.NullOr(Outcome),
+	created_at: Schema.optionalKey(Schema.Int),
+	completed_at: Schema.optionalKey(Schema.NullOr(Schema.Int)),
 });
 const Stored = Schema.fromJsonString(Receipt);
 const Rows = Schema.Array(Schema.Struct({ value: Schema.String }));
@@ -28,7 +30,8 @@ const outcome = (id: string, value: typeof Outcome.Type) =>
 	Effect.gen(function* () {
 		const receipt = yield* read(id);
 		if (!receipt) return yield* Effect.die("Missing source revert receipt");
-		if (receipt.outcome === null) yield* save(id, { ...receipt, outcome: value });
+		if (receipt.outcome === null)
+			yield* save(id, { ...receipt, outcome: value, completed_at: yield* Clock.currentTimeMillis });
 	});
 
 /** Called inside cutover's acceptance transaction: a later crash must never execute this undo again. */
@@ -63,17 +66,89 @@ export const sourceReverts = Effect.gen(function* () {
 	const context = yield* Effect.context<SqlClient.SqlClient>();
 	const reconcilePage = (id: string, receipt: typeof Receipt.Type) =>
 		Effect.gen(function* () {
-			if (receipt.outcome !== null || receipt.page_batch === null) return receipt;
+			if (receipt.outcome !== null) {
+				if (receipt.completed_at !== undefined && receipt.completed_at !== null) return receipt;
+				// Historical terminal receipts have no trustworthy age. Start their full window when observed.
+				const stamped = { ...receipt, completed_at: yield* Clock.currentTimeMillis };
+				yield* save(id, stamped);
+				return stamped;
+			}
+			if (receipt.page_batch === null) return receipt;
 			const batches = yield* sql`SELECT state FROM source_batches WHERE id=${receipt.page_batch}`.pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ state: Schema.String })))),
 			);
 			if (!batches[0]) return yield* Effect.die("Missing source revert publication journal");
 			if (batches[0].state !== "published") return receipt;
-			const completed = { ...receipt, outcome: { status: 200, body: { published: true, batch: receipt.page_batch } } };
+			const completed = {
+				...receipt,
+				completed_at: yield* Clock.currentTimeMillis,
+				outcome: { status: 200, body: { published: true, batch: receipt.page_batch } },
+			};
 			yield* save(id, completed);
 			return completed;
 		});
+	const cursor = yield* Ref.make("source-revert-result:");
+	const prune = gate
+		.withPermit(
+			sql.withTransaction(
+				Effect.gen(function* () {
+					// A current durable publication/cutover owner may still need an otherwise terminal receipt.
+					if (
+						(yield* sql`SELECT singleton FROM cutover LIMIT 1`).length > 0 ||
+						(yield* sql`SELECT id FROM source_batches WHERE state='publishing' LIMIT 1`).length > 0
+					)
+						return 0;
+					const after = yield* Ref.get(cursor);
+					const rows =
+						yield* sql`SELECT key,value FROM settings WHERE key>${after} AND key<'source-revert-result:~' ORDER BY key LIMIT 256`.pipe(
+							Effect.flatMap(
+								Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String }))),
+							),
+						);
+					const now = yield* Clock.currentTimeMillis;
+					let deleted = 0;
+					for (const row of rows) {
+						const stored = yield* Schema.decodeEffect(Stored)(row.value);
+						// Never infer a terminal outcome from age or discard unresolved journal bindings.
+						if (stored.outcome === null) continue;
+						if (
+							stored.page_batch !== null &&
+							!(yield* sql`SELECT id FROM source_batches WHERE id=${stored.page_batch} AND state='published'`).length
+						)
+							continue;
+						const receipt = yield* reconcilePage(row.key, stored);
+						if (
+							receipt.completed_at !== undefined &&
+							receipt.completed_at !== null &&
+							receipt.completed_at < now - 30 * 86_400_000
+						) {
+							yield* sql`DELETE FROM settings WHERE key=${row.key}`;
+							deleted++;
+						}
+					}
+					yield* Ref.set(
+						cursor,
+						rows.length === 256 ? (rows.at(-1)?.key ?? "source-revert-result:") : "source-revert-result:",
+					);
+					return deleted;
+				}),
+			),
+		)
+		.pipe(Effect.provideContext(context));
 	return {
+		prune,
+		retain: Effect.sleep("1 hour").pipe(
+			Effect.andThen(
+				prune.pipe(
+					Effect.catchCause((cause) =>
+						Cause.hasInterruptsOnly(cause)
+							? Effect.interrupt
+							: Effect.logError("Source revert retention failed", cause),
+					),
+				),
+			),
+			Effect.forever,
+		),
 		// SQL only: SourceFiles already holds its gate and the journal admission transaction.
 		bindPage: (id: string, batch: string) =>
 			Effect.gen(function* () {
@@ -135,7 +210,7 @@ export const sourceReverts = Effect.gen(function* () {
 										"This key predates exact outcome receipts. Inspect source and history, then use a new key only for a new operation.",
 									),
 								);
-							yield* sql`INSERT INTO settings(key,value) VALUES(${id},${yield* Schema.encodeEffect(Stored)({ selector, page_batch: null, outcome: null })})`;
+							yield* sql`INSERT INTO settings(key,value) VALUES(${id},${yield* Schema.encodeEffect(Stored)({ selector, page_batch: null, outcome: null, created_at: yield* Clock.currentTimeMillis, completed_at: null })})`;
 							const result = yield* restore(operation(id)).pipe(Effect.exit);
 							// Publication/acceptance evidence wins over a lost completion or cleanup error.
 							const durable = yield* sql.withTransaction(
