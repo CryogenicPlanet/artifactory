@@ -28,6 +28,9 @@ it("releases unavailable admission after a backup restart misses health and prov
 				health,
 				`${health}
 		if (yield* fs.exists(options.env.APP_DATABASE + ".stall-health")) {
+			// Only the targeted restart needs the real timeout; later attempts test the bounded recovery cap.
+			if (yield* fs.exists(options.env.APP_DATABASE + ".health-waiting"))
+				return yield* new ChildError({ code: "health_failed" });
 			yield* fs.writeFileString(options.env.APP_DATABASE + ".health-waiting", "waiting");
 			return yield* Effect.never;
 		}`,
