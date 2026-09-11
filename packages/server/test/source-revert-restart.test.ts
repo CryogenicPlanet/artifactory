@@ -29,6 +29,25 @@ it.for(["app-accepted", "page-journal"] as const)(
 		}\n${needle}`,
 			),
 		);
+		// Exercise the admission race deterministically: this refusal precedes journal admission.
+		if (boundary === "page-journal") {
+			const indexPath = join(fixture.root, "packages/boot/src/index.ts");
+			const index = await readFile(indexPath, "utf8");
+			const admission = "if ((yield* recoveryIntents(sql)).count > 0 || (yield* events.state).pending_id !== null)";
+			expect(index.split(admission)).toHaveLength(2);
+			const refused = join(fixture.root, "undo-refused");
+			await writeFile(
+				indexPath,
+				index.replace(
+					admission,
+					`if ((yield* fs.exists(${JSON.stringify(armed)})) && !(yield* fs.exists(${JSON.stringify(refused)}))) {
+				yield* fs.writeFileString(${JSON.stringify(refused)}, "refused before publication");
+				return yield* new SourceRejected({ code: "publication_pending", path: "recovery" });
+			}
+${admission}`,
+				),
+			);
+		}
 		const app = await fixture.launch();
 		await app.setup();
 		const cookie = await app.login();
@@ -57,8 +76,31 @@ it.for(["app-accepted", "page-journal"] as const)(
 		expect((await put(app.url, "before")).status).toBe(200);
 		expect((await put(app.url, "after")).status).toBe(200);
 		await writeFile(armed, "armed");
-		const pending = app.post("/api/revert", { path }, cookie, "crash-undo").catch(() => null);
-		await expect.poll(() => readFile(reached, "utf8").catch(() => ""), { timeout: 15000 }).toBe("ready");
+		let undoKey = "crash-undo-0";
+		const pending = (async () => {
+			for (let attempt = 0; ; attempt++) {
+				undoKey = `crash-undo-${attempt}`;
+				const response = await app.post("/api/revert", { path }, cookie, undoKey);
+				const body: unknown = await response.json();
+				if (
+					boundary !== "page-journal" ||
+					attempt === 5 ||
+					response.status !== 503 ||
+					!Schema.is(Schema.Struct({ error: Schema.Struct({ code: Schema.Literal("publication_pending") }) }))(body)
+				)
+					return `Source undo completed before ${boundary}: ${response.status} ${JSON.stringify(body)}`;
+				// The refused key retains that first outcome. Only this explicit prepublication
+				// refusal permits a fresh operation; never retry a transport failure or uncertain write.
+				await new Promise((resolve) => setTimeout(resolve, 20));
+			}
+		})().catch((error: unknown) => `Source undo connection ended before ${boundary}: ${String(error)}`);
+		await Promise.race([
+			expect.poll(() => readFile(reached, "utf8").catch(() => ""), { timeout: 15000 }).toBe("ready"),
+			pending.then((diagnostic) => {
+				throw new Error(diagnostic);
+			}),
+		]);
+		if (boundary === "page-journal") expect(undoKey).not.toBe("crash-undo-0");
 		if (boundary === "app-accepted")
 			expect(await fixture.sql("SELECT phase FROM cutover", "boot.db")).toEqual([{ phase: "accepted" }]);
 		else
@@ -71,12 +113,12 @@ it.for(["app-accepted", "page-journal"] as const)(
 		const resumed = await fixture.launch();
 		await resumed.ready(cookie);
 		expect(await readFile(join(fixture.root, path), "utf8")).toBe("before");
-		const first = await (await resumed.post("/api/revert", { path }, cookie, "crash-undo")).json();
+		const first = await (await resumed.post("/api/revert", { path }, cookie, undoKey)).json();
 		expect(first).toMatchObject(boundary === "app-accepted" ? { status: "live" } : { published: true });
 		expect((await put(resumed.url, "later edit")).status).toBe(200);
 		const generations = await fixture.sql("SELECT n FROM generations", "boot.db");
 		const versions = await fixture.sql("SELECT id FROM versions", "boot.db");
-		expect(await (await resumed.post("/api/revert", { path }, cookie, "crash-undo")).json()).toEqual(first);
+		expect(await (await resumed.post("/api/revert", { path }, cookie, undoKey)).json()).toEqual(first);
 		expect(await readFile(join(fixture.root, path), "utf8")).toBe("later edit");
 		expect(await fixture.sql("SELECT n FROM generations", "boot.db")).toEqual(generations);
 		expect(await fixture.sql("SELECT id FROM versions", "boot.db")).toEqual(versions);
