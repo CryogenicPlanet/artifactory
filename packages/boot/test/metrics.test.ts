@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { request } from "node:http";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { Effect, Schema } from "effect";
+import { Console, Effect, Schema } from "effect";
 import { expect, it } from "vitest";
 import { metrics } from "../src/metrics.ts";
 import { launch } from "./fixtures/proxy-launch.ts";
@@ -103,14 +103,39 @@ it("reports real lock contention, queued mutations and a completed source swap",
 	upload.write("held");
 	try {
 		await expect.poll(async () => (await app.fetch(`${app.url}/received`)).text()).toBe("4");
-		const reloaded = post("/api/reload");
+		const started = performance.now();
+		let reloadStatus: number | null = null;
+		let lastTraffic: { readonly frozen: boolean; readonly admitted: number; readonly queued: number } | null = null;
+		test.onTestFailed(() =>
+			Effect.runSync(
+				Console.error("Metrics freeze phase", {
+					elapsed_ms: Math.round(performance.now() - started),
+					reload_status: reloadStatus,
+					traffic: lastTraffic,
+				}),
+			),
+		);
+		const reloaded = post("/api/reload").then((response) => {
+			reloadStatus = response.status;
+			return response;
+		});
+		// Source preparation and rehearsal happen before freeze; the default one-second poll is not their deadline.
+		// The admitted upload holds the drain open once frozen, so observing it does not race a completed swap.
 		await expect
-			.poll(async () => {
-				const value = Schema.decodeUnknownSync(Schema.Struct({ traffic: Schema.Struct({ frozen: Schema.Boolean }) }))(
-					await (await app.fetch(`${app.url}/_boot/status`)).json(),
-				);
-				return value.traffic.frozen;
-			})
+			.poll(
+				async () => {
+					const value = Schema.decodeUnknownSync(
+						Schema.Struct({
+							traffic: Schema.Struct({ frozen: Schema.Boolean, admitted: Schema.Int, queued: Schema.Int }),
+						}),
+					)(await (await app.fetch(`${app.url}/_boot/status`)).json());
+					lastTraffic = value.traffic;
+					if (reloadStatus !== null)
+						throw new Error(`Reload responded before the held upload drained: HTTP ${reloadStatus}`);
+					return value.traffic.frozen;
+				},
+				{ timeout: 5000 },
+			)
 			.toBe(true);
 		const queued = post("/echo");
 		await expect
