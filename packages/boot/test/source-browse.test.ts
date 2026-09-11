@@ -26,7 +26,7 @@ async function fixture(test: TestContext) {
 	return { root, call };
 }
 
-it("lists immediate sorted entries and isolates staged additions, deletions and virtual directories to the holder", async (test) => {
+it("lists sorted committed entries, empty directories and non-directory targets", async (test) => {
 	const { root, call } = await fixture(test);
 	await mkdir(join(root, "app/empty"));
 	await writeFile(join(root, "app/a b&.ts"), "code");
@@ -35,6 +35,16 @@ it("lists immediate sorted entries and isolates staged additions, deletions and 
 		{ name: "empty", type: "directory" },
 		{ name: "main.ts", type: "file" },
 	]);
+	expect(await call("app/empty")).toEqual([]);
+	expect(await call("pages")).toEqual([]);
+	expect(await call("app/main.ts")).toBeNull();
+});
+
+it("isolates staged additions, deletions and virtual directories to the holder", async (test) => {
+	const { root, call } = await fixture(test);
+	await mkdir(join(root, "app/empty"));
+	await writeFile(join(root, "app/a b&.ts"), "code");
+
 	expect(
 		await call("app", {
 			holder: true,
@@ -55,9 +65,6 @@ it("lists immediate sorted entries and isolates staged additions, deletions and 
 	expect(
 		await call("app/new", { holder: true, writes: [{ path: "app/new/deep/created.ts", content: null }] }),
 	).toBeNull();
-	expect(await call("app/empty")).toEqual([]);
-	expect(await call("pages")).toEqual([]);
-	expect(await call("app/main.ts")).toBeNull();
 });
 
 it("omits unsafe children and refuses traversal, root links, dangling links, generated trees and journal names", async (test) => {

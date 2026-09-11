@@ -140,20 +140,31 @@ describe("recoverable topic page directory move", () => {
 			expect((await stat(join(env.root, "pages/old"))).isDirectory()).toBe(true);
 		},
 	);
-	it("rejects containment, reserved names, existing destinations, dangling symlinks and filesystem aliases", async (test) => {
-		const env = await fixture(test);
-		await mkdir(join(env.root, "pages/existing"));
-		await symlink(join(env.root, "missing"), join(env.root, "pages/dangling"));
-		for (const to of ["old", "old/child", "../escape", ".comms-move", "existing", "dangling"])
+	it.for(["old", "old/child", "../escape", ".comms-move", "existing", "dangling"])(
+		"rejects destination %s without creating an intent",
+		async (to, test) => {
+			const env = await fixture(test);
+			await mkdir(join(env.root, "pages/existing"));
+			await symlink(join(env.root, "missing"), join(env.root, "pages/dangling"));
 			expect(await env.call({ op: "prepare", to })).toMatchObject({ error: expect.any(String) });
+			expect(await env.sql("SELECT * FROM topic_page_moves")).toEqual([]);
+		},
+	);
+	it("rejects ancestor destinations without creating an intent", async (test) => {
+		const env = await fixture(test);
 		await mkdir(join(env.root, "pages/old/child"));
 		expect(await env.call({ op: "prepare", from: "old/child", to: "old" })).toMatchObject({ error: "path_conflict" });
-		await symlink(join(env.root, "missing"), join(env.root, "pages/old/link"));
+		expect(await env.sql("SELECT * FROM topic_page_moves")).toEqual([]);
+	});
+	it.for(["link", ".comms-private"])("rejects unsafe source entry %s", async (name, test) => {
+		const env = await fixture(test);
+		if (name === "link") await symlink(join(env.root, "missing"), join(env.root, "pages/old/link"));
+		else await writeFile(join(env.root, "pages/old/.comms-private"), "private");
 		expect(await env.call({ op: "prepare" })).toMatchObject({ error: "invalid_path" });
-		await rm(join(env.root, "pages/old/link"));
-		await writeFile(join(env.root, "pages/old/.comms-private"), "private");
-		expect(await env.call({ op: "prepare" })).toMatchObject({ error: "invalid_path" });
-		await rm(join(env.root, "pages/old/.comms-private"));
+		expect(await env.sql("SELECT * FROM topic_page_moves")).toEqual([]);
+	});
+	it("rejects oversized descendant paths and filesystem aliases", async (test) => {
+		const env = await fixture(test);
 		await mkdir(join(env.root, "pages/old/deep"));
 		expect(await env.call({ op: "prepare", to: "x".repeat(198) })).toMatchObject({ error: "invalid_path" });
 		const aliases = await stat(join(env.root, "pages/OLD")).then(
@@ -163,6 +174,7 @@ describe("recoverable topic page directory move", () => {
 		if (aliases) expect(await env.call({ op: "prepare", to: "OLD/moved" })).toMatchObject({ error: "invalid_path" });
 		expect(await env.sql("SELECT * FROM topic_page_moves")).toEqual([]);
 	});
+
 	it("handles SQL-only topics without creating phantom page directories and binds preparation retries", async (test) => {
 		const env = await fixture(test);
 		expect(await env.call({ op: "prepare", from: "absent" })).toEqual({ page_source: false });

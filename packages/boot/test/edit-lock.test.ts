@@ -162,22 +162,20 @@ describe("durable edit ownership and staging", () => {
 		});
 	}, 15000);
 
-	it("defers targeted break and family revocation until cutover finalization", async (test) => {
+	it.for(["break", "revoke"])("defers %s until cutover finalization", async (op, test) => {
 		const env = await fixture(test);
-		for (const op of ["break", "revoke"]) {
-			const lock = await env.acquire();
-			await env.call({ op: "stage", ...owner(lock) });
-			await env.call({ op: "pin", ...owner(lock) });
-			expect(await env.call({ op, ...owner(lock) })).toMatchObject({
-				value: { cutover_in_flight: 1 },
-				transitions: [{ deferred: true }],
-			});
-			expect(await env.call({ op: "acquire", family: "other" })).toMatchObject({ error: "cutover_in_flight" });
-			expect(await env.call({ op: "finish", ...owner(lock), succeeded: false })).toMatchObject({
-				value: null,
-				transitions: [{ type: op === "break" ? "broken" : "revoked", staged: ["app/main.ts"] }],
-			});
-		}
+		const lock = await env.acquire();
+		await env.call({ op: "stage", ...owner(lock) });
+		await env.call({ op: "pin", ...owner(lock) });
+		expect(await env.call({ op, ...owner(lock) })).toMatchObject({
+			value: { cutover_in_flight: 1 },
+			transitions: [{ deferred: true }],
+		});
+		expect(await env.call({ op: "acquire", family: "other" })).toMatchObject({ error: "cutover_in_flight" });
+		expect(await env.call({ op: "finish", ...owner(lock), succeeded: false })).toMatchObject({
+			value: null,
+			transitions: [{ type: op === "break" ? "broken" : "revoked", staged: ["app/main.ts"] }],
+		});
 	});
 
 	it.for([true, false])("preserves borrowed staging after finalization with succeeded=%s", async (succeeded, test) => {
