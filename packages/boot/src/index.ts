@@ -139,6 +139,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 								yield* supervisor.withdraw;
 								if (active) yield* supervisor.retire(active);
 								yield* supervisor.recoverClosure;
+								// With no route and every prior owner closed, queued requests can safely receive unavailable.
+								yield* supervisor.release;
 								yield* (yield* Generations).recover;
 								if (isolated) yield* migrateAppStore({ dataDirectory: options.dataDirectory, filename: appFilename });
 								yield* retireLegacyTopicMoves(options.dataDirectory, appFilename);

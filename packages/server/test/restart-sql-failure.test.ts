@@ -151,3 +151,75 @@ it("stops at the existing retry cap when activation history consistently fails",
 		{ body: "acknowledged before recovery" },
 	]);
 }, 30000);
+
+it("releases unavailable queues after closure even when accepted authority recovery fails", async (test) => {
+	const { fixture, app, cookie } = await failingRestart(test, "accepted-lookup");
+	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
+	await fixture.sql(
+		"CREATE TRIGGER refuse_recovery_finish BEFORE UPDATE OF cutover_in_flight ON edit_lock WHEN NEW.cutover_in_flight=0 BEGIN SELECT RAISE(ABORT,'recovery finish unavailable'); END",
+		"boot.db",
+	);
+	const response = await fetch(`${app.url}/api/fs/app/accepted.txt`, {
+		method: "PUT",
+		headers: { cookie, origin: "https://comms.test" },
+		body: "accepted source must survive",
+	});
+	expect(response.status).toBe(500);
+	await expect
+		.poll(async () => (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json())
+		.toMatchObject({
+			child: { state: "failed" },
+			source_recovery_error: expect.stringContaining("recovery finish unavailable"),
+			traffic: { frozen: false },
+		});
+	expect(await fixture.sql("SELECT phase FROM cutover", "boot.db")).toEqual([{ phase: "accepted" }]);
+	expect(await fixture.sql("SELECT cutover_in_flight FROM edit_lock", "boot.db")).toEqual([{ cutover_in_flight: 1 }]);
+	expect(await fixture.sql("SELECT COUNT(*) AS n FROM child_attempts WHERE closed=0", "boot.db")).toEqual([{ n: 0 }]);
+	expect((await app.post("/api/messages", { topic: "retained", body: "must not publish" }, cookie)).status).toBe(503);
+	expect(await readFile(join(fixture.root, "app/accepted.txt"), "utf8")).toBe("accepted source must survive");
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic='retained' ORDER BY seq")).toEqual([
+		{ body: "acknowledged before recovery" },
+	]);
+}, 30000);
+
+it("keeps queued admission frozen while all-owner closure proof is missing", async (test) => {
+	const fixture = await resetFixture(test);
+	const filename = join(fixture.boot, "src/index.ts");
+	const source = await readFile(filename, "utf8");
+	const needle = "yield* supervisor.recoverClosure;";
+	expect(source.split(needle)).toHaveLength(2);
+	// Hold admission before the real root closure check; the negative proof must not release it.
+	await writeFile(filename, source.replace(needle, `yield* supervisor.freeze; ${needle}`));
+	const app = await fixture.launch();
+	await app.setup();
+	const cookie = await app.login();
+	await app.ready(cookie);
+	expect(
+		(await app.post("/api/messages", { topic: "retained", body: "acknowledged before missing proof" }, cookie)).status,
+	).toBe(200);
+	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
+	await fixture.sql("UPDATE edit_lock SET cutover_in_flight=1,reset_pin=1", "boot.db");
+	await app.stop();
+	const receipt = join(fixture.root, "attempts/missing-owner.closed");
+	await fixture.sql(
+		`INSERT INTO child_attempts(id,generation,receipt,opened,closed) VALUES('missing-owner',1,'${receipt}',1,0)`,
+		"boot.db",
+	);
+	const lock = await fixture.sql("SELECT * FROM edit_lock", "boot.db");
+	const resumed = await fixture.launch();
+	await expect
+		.poll(async () => (await fetch(`${resumed.url}/_boot/status`, { headers: { cookie } })).json(), { timeout: 10000 })
+		.toMatchObject({
+			child: { state: "failed" },
+			source_recovery_error: expect.stringContaining("child_closure_unproven"),
+			traffic: { frozen: true },
+		});
+	expect(await fixture.sql("SELECT * FROM edit_lock", "boot.db")).toEqual(lock);
+	expect(await fixture.sql("SELECT closed FROM child_attempts WHERE id='missing-owner'", "boot.db")).toEqual([
+		{ closed: 0 },
+	]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic='retained' ORDER BY seq")).toEqual([
+		{ body: "acknowledged before missing proof" },
+	]);
+	expect((await fetch(`${resumed.url}/api/fs/app/server.ts`, { headers: { cookie } })).status).toBe(200);
+}, 30000);
