@@ -153,7 +153,21 @@ it("keeps anonymous page policy closed when startup cutover recovery has not suc
 			{ timeout: 5000 },
 		)
 		.toContain("cutover_backup_invalid");
-	expect((await fetch(restarted.url + "/p/guide/file.md")).status).toBe(401);
+	const unavailable = await fetch(restarted.url + "/p/guide/file.md");
+	const body = await unavailable.text();
+	expect({ status: unavailable.status, body: JSON.parse(body) }).toEqual({
+		status: 503,
+		body: {
+			error: { code: "boot_unavailable", retriable: true, message: expect.any(String), hint: expect.any(String) },
+		},
+	});
+	expect(body).not.toContain("public after recovery only");
+	expect(body).not.toContain("cutover_backup_invalid");
+	const head = await fetch(restarted.url + "/p/guide/file.md", { method: "HEAD" });
+	expect(head.status).toBe(503);
+	expect(await head.text()).toBe("");
+	for (const headers of [{ authorization: "Bearer invalid" }, { cookie: "__Host-comms_session=invalid" }])
+		expect((await fetch(restarted.url + "/p/guide/file.md", { headers })).status).toBe(401);
 	expect((await fetch(restarted.url + "/_boot/status", { headers: { cookie } })).status).toBe(200);
 }, 20000);
 

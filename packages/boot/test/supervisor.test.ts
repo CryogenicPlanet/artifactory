@@ -25,7 +25,8 @@ function alive(pid: number) {
 
 it(
 	"blocks retry, source reload and restart when startup loses its keeper's closure proof",
-	{ timeout: 25000 },
+	// Two boot lifetimes plus four human repair calls each retain the six-second keeper-proof check.
+	{ timeout: 60000 },
 	async (test) => {
 		const root = await mkdtemp(join(tmpdir(), "comms-startup-closure-"));
 		const seed = join(root, "seed");
@@ -156,16 +157,28 @@ it(
 		expect(await inspected.text()).toBe(source);
 		for (const path of ["app/", "app/server.ts?history=1"])
 			expect((await authenticated(`${restarted.url}/api/fs/${path}`)).status).toBe(200);
-		for (const [path, method, body] of [
-			["fs/app/server.ts?reload=0", "PUT", "refused source mutation"],
-			["fs/pages/diagnostic.md", "PUT", "refused page mutation"],
-			["lock", "POST", "{}"],
-			["lock", "DELETE", null],
-			["lock?break=1", "DELETE", "{}"],
-			["reload", "POST", "{}"],
-			["revert", "POST", "{}"],
-		] as const)
-			expect((await authenticated(`${restarted.url}/api/${path}`, { method, body })).status).toBe(503);
+		const lockRead = await authenticated(`${restarted.url}/api/lock`);
+		expect({ status: lockRead.status, body: await lockRead.json() }).toMatchObject({
+			status: 200,
+			body: { lock: { expires: 0 } },
+		});
+		for (const [path, method, body, status, code, retriable] of [
+			["fs/app/server.ts?reload=0", "PUT", "refused source mutation", 503, "editing_unavailable", true],
+			["fs/pages/diagnostic.md", "PUT", "refused page mutation", 503, "editing_unavailable", true],
+			["lock", "POST", "{}", 409, "child_closure_unproven", false],
+			["lock", "DELETE", null, 409, "child_closure_unproven", false],
+			["lock?break=1", "DELETE", "{}", 409, "child_closure_unproven", false],
+			["reload", "POST", "{}", 503, "editing_unavailable", true],
+			["revert", "POST", "{}", 409, "child_closure_unproven", false],
+		] as const) {
+			const response = await authenticated(`${restarted.url}/api/${path}`, { method, body });
+			const actual: unknown = await response.json();
+			expect({ path, status: response.status, body: actual }).toMatchObject({
+				path,
+				status,
+				body: { error: { code, retriable, message: expect.any(String), hint: expect.any(String) } },
+			});
+		}
 		expect(await sql("boot.db", "SELECT * FROM edit_lock")).toEqual(lockBefore);
 		expect(await sql("boot.db", "SELECT lock_id,path,hex(content) AS content,sha,at,mode FROM staging")).toEqual(
 			stagedBefore,
