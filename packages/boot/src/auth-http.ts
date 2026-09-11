@@ -5,7 +5,7 @@ import { childErrorPolicy } from "./child-error-policy.ts";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import { ChildError } from "./child-process.ts";
 import { TrafficError } from "./traffic.ts";
-import { Cause, Effect, Option, Schema } from "effect";
+import { Cause, Console, Effect, Option, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
 import { PasskeyRegistrationResponse } from "./passkey-management-schema.ts";
@@ -271,7 +271,7 @@ export const authRoute = (auth: Auth["Service"], config: AuthConfig, requestId: 
 				"/_boot/auth/logout",
 			].includes(path);
 		if (!page && !post) return null;
-		if (post) yield* Effect.logInfo(`boot.auth stage=request method=POST path=${path} request_id=${requestId}`);
+		if (post) yield* Console.error(`boot.auth stage=request method=POST path=${path} request_id=${requestId}`);
 		return yield* authFailure(
 			Effect.gen(function* () {
 				if (page) {
@@ -336,7 +336,7 @@ export const authRoute = (auth: Auth["Service"], config: AuthConfig, requestId: 
 			Effect.map(HttpServerResponse.setHeader("x-comms-request-id", requestId)),
 			Effect.tap((response) =>
 				post
-					? Effect.logInfo(
+					? Console.error(
 							`boot.auth stage=response method=POST path=${path} status=${response.status} request_id=${requestId}`,
 						)
 					: Effect.void,
