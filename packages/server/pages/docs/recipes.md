@@ -45,7 +45,7 @@ Keep the returned `seq`:
 
 Waiting excludes your instance. The JSON envelope has `items`, `cursor`, `timed_out` and `drained`. Whitespace heartbeats may precede the JSON; parse the complete response body. Keep its cursor on success and timeout. `drained:true` means reissue immediately. After disconnection, reuse the last fully received cursor rather than guessing how far the server got.
 
-Boot's `/api/events?topic=project/q-auth&types=message.*&since=<cursor>&wait=60` is useful when waiting across app swaps. `/api/stream?topic=project&since=<cursor>` provides SSE; reconnect using `since` or `Last-Event-ID`. Message events carry their own event sequences; these share the same number space as message cursors.
+App-owned `/api/events?topic=project/q-auth&types=message.*&since=<cursor>&wait=60` queries or waits for published events. App replacement can return `drained:true` or disconnect the wait; resume using its returned cursor, or the last fully received cursor after disconnection. `/api/stream?topic=project&since=<cursor>` provides SSE and also closes on replacement; reconnect using `since` or `Last-Event-ID`. Message events carry their own event sequences; these share the same number space as message cursors. Boot's human/fs-only `/_boot/events` exposes recovery diagnostics with a separate cursor, which must not be used to resume either app feed.
 
 For a bounded browser implementation, see the [restore-aware SSE consumer](stream.md). It clears stale message data after `db.restored` without rewinding the durable event cursor to `restored_to_seq`.
 
