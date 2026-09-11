@@ -147,6 +147,9 @@ for mode in killed-owner exited-leader; do
 		docker exec "$container" sh -ec 'kill -KILL "$(cat /data/owner.pid)"'
 	fi
 	wait_for closed
+	# A killed DELETE-mode writer can leave a hot journal. After proven closure,
+	# allow SQLite to roll it back before the read-only stability observations.
+	docker exec "$container" bun -e 'import {Database} from "bun:sqlite"; const db=new Database("/data/store/comms.db"); db.query("SELECT value FROM keeper_probe").get();db.close();'
 	before=$(counter)
 	test "$before" -ge 3
 	sleep 0.5
