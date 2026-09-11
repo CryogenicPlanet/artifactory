@@ -1,3 +1,4 @@
+import { deleteTopic } from "./optional-topic-delete.ts";
 import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { strict as assert } from "node:assert";
 import { SqlClient } from "effect/unstable/sql";
@@ -210,7 +211,7 @@ const program = Effect.gen(function* () {
 						for (const status of ["archived", "deleted"] as const) {
 							yield* messages.topic(who, status, { meta: {} });
 							if (status === "archived") yield* messages.topic(who, status, { archived: true });
-							else yield* messages.deleteTopic(who, status);
+							else yield* deleteTopic(who, status);
 							yield* reject(move("project", `${status}/new`));
 							yield* reject(move(status, "unused"));
 						}
@@ -309,7 +310,7 @@ const program = Effect.gen(function* () {
 						return;
 					}
 					const deleted = yield* messages.create(who, { topic: "project/deleted", body: "preserve tombstone" });
-					yield* messages.deleteTopic(who, "project/deleted");
+					yield* deleteTopic(who, "project/deleted");
 					yield* sql`INSERT INTO reads VALUES('family','new/project/child',${sibling.seq})`;
 					const receipts = yield* sql`SELECT * FROM idempotency ORDER BY key`;
 					const reactions = yield* sql`SELECT * FROM reactions`;

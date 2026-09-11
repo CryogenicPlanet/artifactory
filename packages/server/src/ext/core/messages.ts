@@ -8,7 +8,6 @@ import { mutateTopic, type TopicMetaInput, type TopicArchiveInput } from "./topi
 import { mutateMessage, type MessagePatch } from "./message-operations.ts";
 import { publishedMessages } from "./published-messages.ts";
 import { markRead } from "./read-marks.ts";
-import { deleteTopic } from "./topic-delete.ts";
 import { moveTopic } from "./topic-move.ts";
 import { mentionsIn } from "./message-mentions.ts";
 
@@ -246,8 +245,6 @@ export const makeMessages = (
 			input: typeof TopicMetaInput.Type | typeof TopicArchiveInput.Type,
 			key?: string,
 		) => mutateTopic(sql, mutate, boot, identity, path, input, key),
-		deleteTopic: (identity: Identity, path: string, key?: string) =>
-			deleteTopic(sql, mutate, boot, identity, path, key),
 		get,
 		update: (identity: Identity, id: string, input: typeof MessagePatch.Type, key?: string) =>
 			mutateMessage(sql, mutate, boot, identity, id, input, key),

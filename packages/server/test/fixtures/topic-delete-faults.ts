@@ -1,3 +1,5 @@
+import { TopicDeleteError } from "../../../../examples/extensions/topic-delete.ts";
+import { deleteTopic } from "./optional-topic-delete.ts";
 import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { strict as assert } from "node:assert";
 import { SqlClient } from "effect/unstable/sql";
@@ -75,28 +77,32 @@ const program = Effect.gen(function* () {
 							Effect.map((result) => {
 								assert.equal(result._tag, "Failure");
 								if (result._tag === "Failure")
-									assert.equal(Schema.is(KernelError)(result.failure) && result.failure.code, code);
+									assert.equal(
+										(Schema.is(KernelError)(result.failure) || Schema.is(TopicDeleteError)(result.failure)) &&
+											result.failure.code,
+										code,
+									);
 							}),
 						);
 					if (mode === "authorization") {
 						const before = yield* events.state;
-						yield* reject(messages.deleteTopic({ ...who, instance: "sibling" }, "project"), "author_required");
+						yield* reject(deleteTopic({ ...who, instance: "sibling" }, "project"), "author_required");
 						assert.deepEqual(yield* events.state, before);
 						const foreign = yield* messages.create(
 							{ ...who, instance: "sibling" },
 							{ topic: "project/child", body: "foreign" },
 						);
 						yield* messages.remove({ ...who, instance: "sibling" }, foreign.id);
-						yield* reject(messages.deleteTopic(who, "project"), "author_required");
+						yield* reject(deleteTopic(who, "project"), "author_required");
 						yield* messages.topic(who, "empty", { meta: {} }, "meta-key");
-						yield* reject(messages.deleteTopic(who, "empty", "meta-key"), "idempotency_conflict");
-						yield* reject(messages.deleteTopic(who, "empty"), "author_required");
+						yield* reject(deleteTopic(who, "empty", "meta-key"), "idempotency_conflict");
+						yield* reject(deleteTopic(who, "empty"), "author_required");
 						const human = { ...who, instance: "human", kind: "human" as const };
-						yield* messages.deleteTopic(human, "empty");
-						const outcome = yield* messages.deleteTopic(human, "project", "human-delete");
-						assert.deepEqual(yield* messages.deleteTopic(human, "project", "human-delete"), outcome);
+						yield* deleteTopic(human, "empty");
+						const outcome = yield* deleteTopic(human, "project", "human-delete");
+						assert.deepEqual(yield* deleteTopic(human, "project", "human-delete"), outcome);
 						yield* reject(messages.topic(human, "project", { meta: {} }, "human-delete"), "idempotency_conflict");
-						yield* reject(messages.deleteTopic(human, "empty", "human-delete"), "idempotency_conflict");
+						yield* reject(deleteTopic(human, "empty", "human-delete"), "idempotency_conflict");
 						yield* reject(messages.topic(human, "project/new", { meta: {} }), "topic_not_found");
 						yield* reject(messages.topic(human, "project/child", { archived: false }), "topic_not_found");
 						return yield* Console.log("DELETE_RECOVERED");
@@ -104,7 +110,7 @@ const program = Effect.gen(function* () {
 					if (mode === "sql-failure")
 						yield* sql`CREATE TRIGGER reject_topic BEFORE INSERT ON outbox WHEN json_extract(NEW.event,'$.type')='topic.deleted' BEGIN SELECT RAISE(ABORT,'reject'); END`;
 					testing = true;
-					assert.equal((yield* messages.deleteTopic(who, "project", "delete").pipe(Effect.result))._tag, "Failure");
+					assert.equal((yield* deleteTopic(who, "project", "delete").pipe(Effect.result))._tag, "Failure");
 					const rows = yield* sql`SELECT deleted_at,previous,updated_seq FROM topics WHERE path='project'`.pipe(
 						Effect.flatMap(
 							Schema.decodeUnknownEffect(
@@ -131,14 +137,14 @@ const program = Effect.gen(function* () {
 						);
 					} else assert.equal(rows[0]?.deleted_at, null);
 					if (mode === "sql-failure") yield* sql`DROP TRIGGER reject_topic`;
-					const deleted = yield* messages.deleteTopic(who, "project", "delete");
-					assert.deepEqual(yield* messages.deleteTopic(who, "project", "delete"), deleted);
+					const deleted = yield* deleteTopic(who, "project", "delete");
+					assert.deepEqual(yield* deleteTopic(who, "project", "delete"), deleted);
 					assert.equal((yield* sql`SELECT id FROM messages WHERE id=${initial.id}`).length, 1);
 					assert.equal((yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL`).length, 1);
 					assert.equal((yield* events.query({ since: 0, limit: 100, types: ["topic.deleted"] })).items.length, 1);
 					assert.equal((yield* sql`SELECT seq FROM outbox`).length, 0);
 					yield* sql`UPDATE kernel_writer SET epoch='replacement'`;
-					yield* reject(messages.deleteTopic(who, "project", "delete"), "stale_writer");
+					yield* reject(deleteTopic(who, "project", "delete"), "stale_writer");
 					yield* Console.log("DELETE_RECOVERED");
 				}).pipe(
 					Effect.provide(

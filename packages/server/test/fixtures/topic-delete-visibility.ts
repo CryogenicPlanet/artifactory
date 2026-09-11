@@ -1,3 +1,4 @@
+import { deleteTopic } from "./optional-topic-delete.ts";
 import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { strict as assert } from "node:assert";
 import { SqlClient } from "effect/unstable/sql";
@@ -68,7 +69,7 @@ const program = Effect.gen(function* () {
 					const edit = yield* messages.update(who, message.id, { body: "edited needle @here" }, "edit");
 					holdAppend = true;
 					// Exercise a committed topic tombstone before boot publishes its event.
-					assert.equal((yield* messages.deleteTopic(who, "project", "delete").pipe(Effect.result))._tag, "Failure");
+					assert.equal((yield* deleteTopic(who, "project", "delete").pipe(Effect.result))._tag, "Failure");
 					assert.equal((yield* messages.get(message.id)).body, edit.body);
 					assert.equal((yield* messages.list({ since: 0, limit: 100, q: "needle" })).items.length, 2);
 					assert.equal(

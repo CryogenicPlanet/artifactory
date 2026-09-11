@@ -1,11 +1,11 @@
-import { DateTime, Effect, Option, Schema } from "effect";
-import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { type BootChannel, KernelError } from "../../kernel/boot-channel.ts";
-import type { Mutate } from "../../kernel/mutate.ts";
-import { validTopic } from "./messages.ts";
-import type { Identity } from "../../kernel/identity.ts";
-import { Pages } from "./pages.ts";
+import { DateTime, Effect, Schema } from "effect";
+import type { Api, RequestContext } from "../../packages/server/src/kernel/extension-api.ts";
 
+export class TopicDeleteError extends Schema.TaggedError<TopicDeleteError>()("TopicDeleteError", {
+	code: Schema.Literals(["input_invalid", "topic_not_found", "author_required"]),
+}) {}
+const validTopic = (path: string) =>
+	path.length <= 200 && /^@?[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(path);
 export const TopicDeletion = Schema.Struct({ path: Schema.String, deleted_at: Schema.Int, seq: Schema.Int });
 const StoredTopic = Schema.Struct({
 	meta: Schema.fromJsonString(Schema.JsonObject),
@@ -15,16 +15,20 @@ const StoredTopic = Schema.Struct({
 
 // Messages holds its mutation permit until the tombstone and its single subtree event publish.
 export const deleteTopic = (
-	sql: SqlClient,
-	mutate: Mutate,
-	boot: Pick<BootChannel["Service"], "generation">,
-	identity: Identity,
+	ctx: Pick<RequestContext, "db" | "mutate" | "generation" | "agent" | "instance" | "request" | "kind"> & {
+		readonly topics: Pick<RequestContext["topics"], "read">;
+	},
 	path: string,
 	key?: string,
 ) =>
 	Effect.gen(function* () {
 		if (!validTopic(path) || (key !== undefined && (key.length < 1 || key.length > 200)))
-			return yield* new KernelError({ code: "input_invalid" });
+			return yield* new TopicDeleteError({ code: "input_invalid" });
+		const { db: sql, mutate } = ctx;
+		const identity = ctx;
+		// A separate read cannot deadlock the mutation permit. Its result is needed only for a page-only topic;
+		// a retained idempotency receipt replays before entering the mutation body, even after deletion.
+		const pageTopic = yield* ctx.topics.read(path).pipe(Effect.result);
 		const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))({ path, delete: true });
 		const now = (yield* DateTime.nowAsDate).getTime();
 		return yield* mutate({
@@ -43,7 +47,7 @@ export const deleteTopic = (
 				Effect.gen(function* () {
 					const deleted =
 						yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${path} OR substr(${path},1,length(path)+1)=path||'/') LIMIT 1`;
-					if (deleted.length) return yield* new KernelError({ code: "topic_not_found" });
+					if (deleted.length) return yield* new TopicDeleteError({ code: "topic_not_found" });
 					const rows = yield* sql`SELECT meta,archived_at,deleted_at FROM topics WHERE path=${path}`.pipe(
 						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(StoredTopic))),
 					);
@@ -52,9 +56,7 @@ export const deleteTopic = (
 						const descendants =
 							yield* sql`SELECT path FROM topics WHERE substr(path,1,length(${path})+1)=${path + "/"} LIMIT 1`;
 						if (!descendants.length) {
-							const pages = Option.getOrNull(yield* Effect.serviceOption(Pages));
-							if (!pages || !(yield* pages.topic(path)).exists)
-								return yield* new KernelError({ code: "topic_not_found" });
+							if (pageTopic._tag === "Failure") return yield* pageTopic.failure;
 						}
 					}
 					if (identity.kind !== "human") {
@@ -66,7 +68,7 @@ export const deleteTopic = (
 								),
 							);
 						if (!authored[0] || authored[0].total === 0 || authored[0].others > 0)
-							return yield* new KernelError({ code: "author_required" });
+							return yield* new TopicDeleteError({ code: "author_required" });
 					}
 					const range = yield* reserve(1);
 					const outcome = { path, deleted_at: now, seq: range.to };
@@ -87,7 +89,7 @@ export const deleteTopic = (
 						level: "info" as const,
 						actor: identity.agent,
 						instance: identity.instance,
-						generation: boot.generation,
+						generation: ctx.generation,
 						request_id: identity.request,
 						topic: path,
 						message_id: null,
@@ -97,3 +99,33 @@ export const deleteTopic = (
 				}),
 		});
 	});
+
+export default function topicDelete(api: Api) {
+	api.route("DELETE", "/api/topics/*", {
+		description:
+			"Tombstone a topic subtree without deleting retained messages or pages. Requires write and sole authorship by this instance, or a human. Empty/page-only topics require a human. Optional Idempotency-Key.",
+		scope: "write",
+		handler: (request, ctx) =>
+			Effect.gen(function* () {
+				if (Object.keys(ctx.query).length) return yield* new TopicDeleteError({ code: "input_invalid" });
+				const result = yield* deleteTopic(ctx, ctx.params["*"] ?? "", request.headers["idempotency-key"]);
+				return Response.json(result, { headers: { "cache-control": "no-store" } });
+			}).pipe(
+				Effect.catchTag("TopicDeleteError", (error) =>
+					Effect.succeed(
+						Response.json(
+							{
+								error: {
+									code: error.code,
+									message: "Topic deletion refused.",
+									hint: "Use a valid existing topic, your sole-author instance or a human session; preserve the idempotency key on retry.",
+									retriable: false,
+								},
+							},
+							{ status: error.code === "author_required" ? 403 : error.code === "topic_not_found" ? 404 : 400 },
+						),
+					),
+				),
+			),
+	});
+}

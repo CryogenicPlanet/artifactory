@@ -20,11 +20,12 @@ function checkInvariants() {
 			if (specifier.startsWith(".")) {
 				const target = resolve(dirname(path), specifier);
 				const targetLabel = relative(root, target);
-				// Cross-store failure fixtures exercise the real boot/server boundary without shipping these imports.
+				// Failure fixtures exercise the real boot/server boundary and relocated optional policies without shipping imports.
 				const integrationFixture =
 					label.startsWith(`packages${sep}server${sep}test${sep}fixtures${sep}`) &&
 					(targetLabel.startsWith(`packages${sep}boot${sep}src${sep}`) ||
-						targetLabel.startsWith(`packages${sep}boot${sep}test${sep}`));
+						targetLabel.startsWith(`packages${sep}boot${sep}test${sep}`) ||
+						targetLabel.startsWith(`examples${sep}extensions${sep}`));
 				if (workspace(target) !== owner && !integrationFixture)
 					failures.push(`${label}: relative import leaves package: ${specifier}`);
 			}
