@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { readStoragePolicy } from "./settings-schema.ts";
 import { BackupRecord } from "./backup-metadata.ts";
 import type { StorageVolume } from "./storage-volume.ts";
 
@@ -75,6 +76,7 @@ export const artifactRetention = (directory: string) =>
 		return {
 			prune: (volume: StorageVolume, requiredBackupBytes: number, operationGenerations: readonly number[]) =>
 				Effect.gen(function* () {
+					const policy = yield* readStoragePolicy.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 					const root = yield* fs.realPath(directory);
 					if (
 						!Number.isSafeInteger(requiredBackupBytes) ||
@@ -152,7 +154,8 @@ export const artifactRetention = (directory: string) =>
 							return yield* new ArtifactRetentionRejected({ code: "invalid_storage_sample" });
 						backupBytes += backup.bytes;
 					}
-					const limit = volume.status === "available" ? Math.floor(volume.capacity_bytes / 5) : null;
+					const limit =
+						volume.status === "available" ? Math.floor(volume.capacity_bytes * (policy.backup_percent / 100)) : null;
 					let removedBackups = 0;
 					for (const backup of catalog.backups) {
 						if (limit === null || backupBytes + requiredBackupBytes <= limit) break;

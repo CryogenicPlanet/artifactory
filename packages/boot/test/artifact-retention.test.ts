@@ -281,3 +281,24 @@ it("retains combined restore source and fallback plus exact backup links from pr
 	expect(await app.prune({ capacity: 500 })).toMatchObject({ success: { removed_backups: 4 } });
 	expect(await app.exists("backups/newest-copy.db")).toBe(true);
 });
+
+it("reads changed backup percentages on every pass without evicting recovery evidence", async (test) => {
+	const app = await store(test);
+	await app.backup("one");
+	await app.backup("two");
+	await app.sql(
+		`INSERT INTO settings VALUES('storage_policy','{"backup_percent":30,"event_percent":10,"headroom_percent":5}')`,
+	);
+	expect(await app.prune({ capacity: 1000, required: 100 })).toMatchObject({
+		success: { backup_limit_bytes: 300, removed_backups: 0 },
+	});
+	await app.sql(
+		`UPDATE settings SET value='{"backup_percent":10,"event_percent":10,"headroom_percent":5}' WHERE key='storage_policy'`,
+	);
+	expect(await app.prune({ capacity: 1000 })).toMatchObject({
+		success: { backup_limit_bytes: 100, removed_backups: 1 },
+	});
+	await app.sql("INSERT INTO cutover VALUES(1,1,2,'two','lock','family','frozen',NULL)");
+	expect(await app.prune({ capacity: 500 })).toMatchObject({ failure: { code: "backup_budget" } });
+	expect(await app.exists("backups/two.db")).toBe(true);
+});

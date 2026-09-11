@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, FileSystem, Path, Schema } from "effect";
+import { Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { describe, expect, it, type TestContext } from "vitest";
 import { Snapshots, layer as snapshotsLayer } from "../src/snapshots.ts";
-import { requireHeadroom } from "../src/storage-headroom.ts";
+import { HeadroomPolicy, storageHeadroom, requireHeadroom } from "../src/storage-headroom.ts";
 
 const run = async (test: TestContext, operation: string) => {
 	const root = await mkdtemp(join(tmpdir(), "comms-headroom-"));
@@ -123,4 +123,23 @@ describe("storage headroom admission", () => {
 			pending: [],
 		});
 	});
+});
+
+it("captures a scoped policy effect and reads its latest percentage for each admission", async () => {
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const percent = yield* Ref.make(5);
+			const headroom = yield* storageHeadroom("/tmp").pipe(Effect.provideService(HeadroomPolicy, Ref.get(percent)));
+			const volume = { status: "available", capacity_bytes: 1000, available_bytes: 100 } as const;
+			expect((yield* headroom.reserve(volume).pipe(Effect.result))._tag).toBe("Success");
+			yield* Ref.set(percent, 15);
+			expect(yield* headroom.reserve(volume).pipe(Effect.result)).toMatchObject({
+				failure: { code: "storage_headroom" },
+			});
+			yield* Ref.set(percent, 4);
+			expect(yield* headroom.reserve(volume).pipe(Effect.result)).toMatchObject({
+				failure: { code: "storage_measurement_failed" },
+			});
+		}).pipe(Effect.provide(BunServices.layer)),
+	);
 });
