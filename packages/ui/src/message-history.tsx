@@ -4,17 +4,7 @@ import { getMessageHistory, type BoardMessage } from "./board-api.ts";
 import { Message } from "./message.tsx";
 import { ReferencedMessage } from "./referenced-message.tsx";
 
-export function MessageHistory({
-	path,
-	disabled,
-	currentInstance,
-	onClose,
-}: {
-	readonly path: string;
-	readonly disabled: boolean;
-	readonly currentInstance: string | null;
-	readonly onClose: () => void;
-}) {
+export function MessageHistory({ path, onClose }: { readonly path: string; readonly onClose: () => void }) {
 	const [position, setPosition] = useState<{ readonly since: number; readonly previous: readonly number[] }>({
 		since: 0,
 		previous: [],
@@ -39,7 +29,7 @@ export function MessageHistory({
 	}, [path, position.since, retry]);
 	return (
 		<>
-			{page && <ReferencedMessage visible={page.items} currentInstance={currentInstance} />}
+			{page && <ReferencedMessage visible={page.items} />}
 			<section className="conversation" aria-label="Message history">
 				<div className="section-heading">
 					<h2>Message history</h2>
@@ -62,7 +52,7 @@ export function MessageHistory({
 				) : (
 					<>
 						{page.items.map((message) => (
-							<Message key={message.id} message={message} disabled={disabled} currentInstance={currentInstance} />
+							<Message key={message.id} message={message} />
 						))}
 						{page.items.length < 100 && <p role="status">You have reached the end of this topic’s history.</p>}
 					</>

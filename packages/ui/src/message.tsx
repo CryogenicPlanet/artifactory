@@ -2,17 +2,8 @@ import { DateTime } from "effect";
 import { topicHref, type BoardMessage } from "./board-api.ts";
 import { profileHref } from "./profile-api.ts";
 import { Markdown, messageHref } from "./markdown.tsx";
-import { Reactions } from "./reactions.tsx";
 
-export function Message({
-	message,
-	disabled = false,
-	currentInstance,
-}: {
-	readonly message: BoardMessage;
-	readonly disabled?: boolean;
-	readonly currentInstance?: string | null;
-}) {
+export function Message({ message }: { readonly message: BoardMessage }) {
 	const at = DateTime.makeUnsafe(message.created_at);
 	return (
 		<article className="message" id={`message-${message.seq}`}>
@@ -49,12 +40,6 @@ export function Message({
 						))}
 					</div>
 				)}
-				<Reactions
-					key={message.id}
-					message={message.id}
-					disabled={disabled}
-					currentInstance={currentInstance ?? null}
-				/>
 			</div>
 		</article>
 	);

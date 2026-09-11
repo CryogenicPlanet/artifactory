@@ -5,15 +5,7 @@ import { Message } from "./message.tsx";
 import { searchMessages, type MessageFilters } from "./search-api.ts";
 import "./search.css";
 
-export function Search({
-	path,
-	onActive,
-	currentInstance,
-}: {
-	readonly path: string;
-	readonly onActive: (active: boolean) => void;
-	readonly currentInstance: string | null;
-}) {
+export function Search({ path, onActive }: { readonly path: string; readonly onActive: (active: boolean) => void }) {
 	const [q, setQ] = useState("");
 	const [topic, setTopic] = useState(path);
 	const [tag, setTag] = useState("");
@@ -141,7 +133,7 @@ export function Search({
 						{items.length} shown, oldest first. Search again to include new messages and edits.
 					</p>
 					{items.map((message) => (
-						<Message key={message.id} message={message} currentInstance={currentInstance} />
+						<Message key={message.id} message={message} />
 					))}
 					{!loading && !error && items.length === 0 && <p role="status">No messages match these filters.</p>}
 					{loading && <p role="status">Loading results…</p>}

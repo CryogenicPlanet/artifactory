@@ -16,7 +16,6 @@ import {
 } from "effect/unstable/httpapi";
 import { identity, failure, integer } from "./conversation-request.ts";
 import { topicManagementGroup, topicManagementHandlers } from "./topic-management-http.ts";
-import { reactionGroup, reactionHandlers } from "./reaction-http.ts";
 import { searchGroup, searchHandlers } from "./search-http.ts";
 import { messageGroup, messageHandlers } from "./message-http.ts";
 import { topicsGroup, topicHandlers } from "./topics-http.ts";
@@ -41,7 +40,6 @@ export const Api = HttpApi.make("comms")
 	.add(topicManagementGroup)
 	.add(messageGroup)
 	.add(searchGroup)
-	.add(reactionGroup)
 	.add(
 		HttpApiGroup.make("conversation").add(
 			HttpApiEndpoint.post("create", "/api/messages", { payload: MessageInput, success: Message }).annotate(
@@ -175,7 +173,6 @@ export const routes = (extensions: Extensions["Service"]) =>
 					topicHandlers(Api),
 					messageHandlers(Api),
 					searchHandlers(Api),
-					reactionHandlers(Api),
 					topicManagementHandlers(Api),
 				),
 			),

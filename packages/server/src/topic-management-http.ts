@@ -15,7 +15,7 @@ export const topicManagementGroup = HttpApiGroup.make("topicManagement").add(
 		success: TopicMove,
 	}).annotate(
 		OpenApi.Description,
-		"POST /api/topics/<path>/move with {to}. Requires write. Boot briefly pauses application traffic while coordinating the SQL prefix rewrite, page publication and topic.moved event. Destination subtrees must be absent. Explicit read cursor collisions retain MAX; reactions keep their message IDs and historical idempotency outcomes remain unchanged. Optional Idempotency-Key preserves the first outcome.",
+		"POST /api/topics/<path>/move with {to}. Requires write. Boot briefly pauses application traffic while coordinating the SQL prefix rewrite, page publication and topic.moved event. Destination subtrees must be absent. Explicit read cursor collisions retain MAX and historical idempotency outcomes remain unchanged. Optional Idempotency-Key preserves the first outcome.",
 	),
 	HttpApiEndpoint.delete("delete", "/api/topics/*", { success: TopicDeletion }).annotate(
 		OpenApi.Description,

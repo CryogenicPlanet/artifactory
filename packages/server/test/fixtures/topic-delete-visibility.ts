@@ -59,7 +59,6 @@ const program = Effect.gen(function* () {
 						"create",
 					);
 					const sibling = yield* messages.create(who, { topic: "project-other", body: "sibling needle @here" });
-					const reaction = yield* messages.toggleReaction(who, { message: message.id, emoji: "+1" }, "reaction");
 					const mark = yield* messages.mark(who, { topic: message.topic, seq: message.seq }, "mark");
 					const edit = yield* messages.update(who, message.id, { body: "edited needle @here" }, "edit");
 					holdAppend = true;
@@ -79,7 +78,6 @@ const program = Effect.gen(function* () {
 					assert.equal((yield* messages.get(message.id)).body, edit.body);
 					assert.equal((yield* messages.list({ since: 0, limit: 100, q: "needle" })).items.length, 2);
 					assert.equal((yield* topics.inbox(reader, 0, 100)).items.length, 2);
-					assert.equal((yield* messages.reactions(message.id)).items.length, 1);
 					assert.equal((yield* topics.detail(reader, "project", 2)).subtopics.length, 2);
 					assert.equal((yield* topics.detail(reader, "project/page-only")).index, "retained page");
 					holdAppend = false;
@@ -93,7 +91,6 @@ const program = Effect.gen(function* () {
 						(yield* topics.inbox(reader, 0, 100)).items.map((item) => item.id),
 						[sibling.id],
 					);
-					assert.equal((yield* messages.reactions(message.id).pipe(Effect.result))._tag, "Failure");
 					const board = yield* topics.detail(reader, "", 3, true);
 					assert.deepEqual(
 						board.subtopics.map((topic) => topic.path),
@@ -110,7 +107,6 @@ const program = Effect.gen(function* () {
 						messages.create(who, { topic: "project/new/deep", body: "forbidden" }).pipe(Effect.asVoid),
 						messages.update(who, message.id, { body: "forbidden" }).pipe(Effect.asVoid),
 						messages.remove(who, message.id).pipe(Effect.asVoid),
-						messages.toggleReaction(who, { message: message.id, emoji: "+1" }).pipe(Effect.asVoid),
 						messages.mark(who, { topic: "project/child", seq: message.seq }).pipe(Effect.asVoid),
 					]) {
 						const result = yield* action.pipe(Effect.result);
@@ -122,10 +118,6 @@ const program = Effect.gen(function* () {
 					assert.deepEqual(
 						yield* messages.create(who, { topic: message.topic, body: message.body }, "create"),
 						message,
-					);
-					assert.deepEqual(
-						yield* messages.toggleReaction(who, { message: message.id, emoji: "+1" }, "reaction"),
-						reaction,
 					);
 					assert.deepEqual(yield* messages.update(who, message.id, { body: "edited needle @here" }, "edit"), edit);
 					assert.deepEqual(yield* messages.mark(who, { topic: message.topic, seq: message.seq }, "mark"), mark);

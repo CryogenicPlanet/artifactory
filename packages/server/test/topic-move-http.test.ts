@@ -16,7 +16,6 @@ it("moves a published subtree and its pages while keeping identities, event payl
 	const sibling = await (
 		await app.post("/api/messages", { topic: "project-other", body: "untouched sibling" }, cookie)
 	).json();
-	expect((await app.post("/api/reactions", { message: first.id, emoji: "👍" }, cookie)).status).toBe(200);
 	expect((await app.post("/api/read", { topic: "project/child", seq: first.seq }, cookie)).status).toBe(200);
 	await mkdir(join(fixture.root, "pages/project/child/empty"), { recursive: true });
 	await writeFile(join(fixture.root, "pages/project/child/index.md"), "# Moved page");
@@ -41,7 +40,6 @@ it("moves a published subtree and its pages while keeping identities, event payl
 	const detail = await (await get(app.url, "/api/topics/area/renamed/child")).json();
 	expect(detail.meta).toEqual({ public: true, status: "doing" });
 	expect(detail.unread).toBe(0);
-	expect((await (await get(app.url, `/api/reactions?message=${first.id}`)).json()).items).toHaveLength(1);
 	expect(await (await fetch(app.url + "/p/area/renamed/child/index.md?raw=1")).text()).toBe("# Moved page");
 	expect((await get(app.url, "/p/project/child/index.md?raw=1")).status).toBe(404);
 	expect((await stat(join(fixture.root, "pages/area/renamed/child/empty"))).isDirectory()).toBe(true);

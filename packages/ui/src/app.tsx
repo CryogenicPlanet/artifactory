@@ -6,7 +6,7 @@ import { Markdown } from "./markdown.tsx";
 import { ReferencedMessage } from "./referenced-message.tsx";
 import { Extensions } from "./extensions.tsx";
 import { Profile, ProfileLink } from "./profile.tsx";
-import { getMe, profilePath } from "./profile-api.ts";
+import { profilePath } from "./profile-api.ts";
 import { Search } from "./search.tsx";
 import { TopicControls } from "./topic-controls.tsx";
 import { MessageHistory } from "./message-history.tsx";
@@ -37,7 +37,6 @@ function Board() {
 	const [showArchived, setShowArchived] = useState(false);
 	const [browsingHistory, setBrowsingHistory] = useState(false);
 	const [searching, setSearching] = useState(false);
-	const [currentInstance, setCurrentInstance] = useState<string | null>(null);
 	useEffect(() => {
 		if (path === null) {
 			setLoading(false);
@@ -47,14 +46,12 @@ function Board() {
 		const load = Effect.gen(function* () {
 			const result = yield* Effect.all(
 				{
-					me: getMe,
 					root: getTopic("", showArchived),
 					topic: path === "" ? Effect.succeed(null) : getTopic(path, showArchived),
 				},
 				{ concurrency: "unbounded" },
 			).pipe(Effect.result);
 			if (result._tag === "Success") {
-				setCurrentInstance(result.success.me.instance);
 				setRoot(result.success.root);
 				setTopic(result.success.topic ?? result.success.root);
 				setError(null);
@@ -282,18 +279,13 @@ function Board() {
 										</div>
 									</section>
 								)}
-								<Search path={path} onActive={setSearching} currentInstance={currentInstance} />
+								<Search path={path} onActive={setSearching} />
 								{!searching && browsingHistory && (
-									<MessageHistory
-										path={path}
-										disabled={topic.archived_by !== null}
-										currentInstance={currentInstance}
-										onClose={() => setBrowsingHistory(false)}
-									/>
+									<MessageHistory path={path} onClose={() => setBrowsingHistory(false)} />
 								)}
 								{!searching && !browsingHistory && (
 									<>
-										<ReferencedMessage visible={topic.messages} currentInstance={currentInstance} />
+										<ReferencedMessage visible={topic.messages} />
 										<section className="conversation" aria-label="Messages">
 											<div className="section-heading">
 												<h2>{path ? "Messages" : "Recent messages"}</h2>
@@ -307,14 +299,7 @@ function Board() {
 													</p>
 												</div>
 											) : (
-												topic.messages.map((message) => (
-													<Message
-														key={message.id}
-														message={message}
-														disabled={topic.archived_by !== null}
-														currentInstance={currentInstance}
-													/>
-												))
+												topic.messages.map((message) => <Message key={message.id} message={message} />)
 											)}
 											{topic.messages.length >= 100 && (
 												<div className="history-note">

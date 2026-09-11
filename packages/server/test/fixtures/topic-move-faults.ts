@@ -56,7 +56,8 @@ const program = Effect.gen(function* () {
 					const initial = yield* messages.create(who, { topic: "project/child", body: "retained" }, "create");
 					const sibling = yield* messages.create(who, { topic: "project-other", body: "outside" });
 					yield* messages.topic(who, "project", { meta: { public: true, status: "active" } }, "meta");
-					yield* messages.toggleReaction(who, { message: initial.id, emoji: "ok" }, "reaction");
+					// Retained rows from the retired feature must survive a topic move unchanged.
+					yield* sql`INSERT INTO reactions VALUES(${initial.id},${who.instance},'ok',1,0,${initial.seq})`;
 					yield* messages.mark(who, { topic: "project/child", seq: initial.seq }, "read");
 					const reject = <A, E, R>(effect: Effect.Effect<A, E, R>, code?: string) =>
 						effect.pipe(

@@ -3,7 +3,6 @@ import { SqlClient } from "effect/unstable/sql";
 import { BootChannel, type Batch, EventRecord, KernelError } from "./boot-channel.ts";
 import { mutateTopic, type TopicMetaInput, type TopicArchiveInput } from "./topic-operations.ts";
 import { mutateMessage, type MessagePatch } from "./message-operations.ts";
-import { toggleReaction, listReactions, type ReactionInput } from "./reaction-operations.ts";
 import { publishedMessages } from "./published-messages.ts";
 import { HealthProbe } from "./health-probe.ts";
 import { markRead } from "./read-marks.ts";
@@ -313,9 +312,6 @@ const make = Effect.gen(function* () {
 		) => mutex.withPermit(mutateTopic(sql, crypto, boot, relay, identity, path, input, key)),
 		deleteTopic: (identity: Identity, path: string, key?: string) =>
 			mutex.withPermit(deleteTopic(sql, crypto, boot, relay, identity, path, key)),
-		toggleReaction: (identity: Identity, input: typeof ReactionInput.Type, key?: string) =>
-			mutex.withPermit(toggleReaction(sql, crypto, boot, relay, identity, input, key)),
-		reactions: (message: string) => listReactions(sql, fence, message),
 		get,
 		update: (identity: Identity, id: string, input: typeof MessagePatch.Type, key?: string) =>
 			mutex.withPermit(mutateMessage(sql, crypto, boot, relay, identity, id, input, key)),

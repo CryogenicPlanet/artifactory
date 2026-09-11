@@ -3,13 +3,7 @@ import { useEffect, useState } from "react";
 import { getMessageBySequence, type BoardMessage } from "./board-api.ts";
 import { Message } from "./message.tsx";
 
-export function ReferencedMessage({
-	visible,
-	currentInstance,
-}: {
-	readonly visible: readonly BoardMessage[];
-	readonly currentInstance?: string | null;
-}) {
+export function ReferencedMessage({ visible }: { readonly visible: readonly BoardMessage[] }) {
 	const [seq] = useState(() => {
 		const value = new URLSearchParams(window.location.search).get("message");
 		const parsed = value && /^[1-9][0-9]*$/.test(value) ? Number(value) : 0;
@@ -47,11 +41,7 @@ export function ReferencedMessage({
 			<div className="section-heading">
 				<h2>Referenced message #{seq}</h2>
 			</div>
-			{message ? (
-				<Message message={message} currentInstance={currentInstance ?? null} />
-			) : (
-				<p role="status">{error ?? "Loading referenced message…"}</p>
-			)}
+			{message ? <Message message={message} /> : <p role="status">{error ?? "Loading referenced message…"}</p>}
 		</section>
 	);
 }
