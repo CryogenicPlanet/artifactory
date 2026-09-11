@@ -121,7 +121,12 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 					return yield* Effect.failCause(result.cause);
 				}
 				return result.value;
-			}).pipe(Effect.scoped, Effect.uninterruptible, Effect.provideService(HttpClient.HttpClient, client)),
+			}).pipe(
+				Effect.scoped,
+				Effect.uninterruptible,
+				Effect.onError(() => supervisor.requestRecovery),
+				Effect.provideService(HttpClient.HttpClient, client),
+			),
 		);
 	return { capture };
 });

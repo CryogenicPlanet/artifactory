@@ -115,12 +115,16 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		const lifetime = yield* Effect.scope;
 		const recoveryGate = yield* Semaphore.make(1);
 		const supervised = yield* Ref.make(false);
-		const recover = (authorize: Effect.Effect<void, unknown>) =>
+		const recover = (authorize: Effect.Effect<void, unknown>, force = false) =>
 			recoveryGate.withPermit(
 				Effect.gen(function* () {
 					yield* authorize;
 					const state = yield* Ref.get(phase);
-					if (state._tag === "Ready") return;
+					if (
+						state._tag === "Ready" &&
+						(!force || ((yield* Ref.get(supervisor.current)) && (yield* recoveryIntents(sql)).count === 0))
+					)
+						return;
 					if (state._tag === "Stopping") return yield* Effect.interrupt;
 					yield* Ref.set(phase, { _tag: "Recovering" });
 					const owners = yield* supervisor.operationGate
@@ -166,7 +170,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 					if ((yield* Ref.get(phase))._tag === "Stopping") return yield* Effect.interrupt;
 					yield* Ref.set(phase, { _tag: "Ready" });
 					if (!(yield* Ref.getAndSet(supervised, true)))
-						yield* run.pipe(
+						yield* run(retryRecovery(Effect.void, true)).pipe(
 							Effect.catchCause(fail),
 							Effect.provideService(Logger.CurrentLoggers, loggers),
 							Effect.forkIn(lifetime),
@@ -174,8 +178,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 				}).pipe(Effect.uninterruptible),
 			);
 		const recoveryContext = yield* Effect.context<Effect.Services<ReturnType<typeof recover>>>();
-		const retryRecovery = (authorize: Effect.Effect<void, unknown>) =>
-			recover(authorize).pipe(Effect.provideContext(recoveryContext));
+		const retryRecovery = (authorize: Effect.Effect<void, unknown>, force = false): Effect.Effect<void, unknown> =>
+			recover(authorize, force).pipe(Effect.provideContext(recoveryContext));
 		const context = Context.add(
 			Context.pick(
 				Auth,

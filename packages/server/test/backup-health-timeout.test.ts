@@ -67,10 +67,14 @@ it("releases unavailable admission after a backup restart misses health and prov
 			])
 		).status,
 	).toBe(503);
-	expect(await fixture.sql("SELECT closed FROM child_attempts ORDER BY rowid", "boot.db")).toEqual([
+	expect(await fixture.sql("SELECT closed FROM child_attempts WHERE rowid<=2 ORDER BY rowid", "boot.db")).toEqual([
 		{ closed: 1 },
 		{ closed: 1 },
 	]);
+	// The targeted failure gets one bounded ordinary recovery pass, not an idle retry loop.
+	await expect
+		.poll(() => fixture.sql("SELECT closed FROM child_attempts ORDER BY rowid", "boot.db"), { timeout: 20000 })
+		.toEqual([{ closed: 1 }, { closed: 1 }, { closed: 1 }, { closed: 1 }, { closed: 1 }]);
 	expect(await fixture.sql("SELECT body FROM messages WHERE topic='retained' ORDER BY seq")).toEqual([
 		{ body: "acknowledged before backup" },
 	]);

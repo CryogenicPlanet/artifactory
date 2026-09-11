@@ -368,7 +368,10 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					lock: (yield* lock.inspect).value,
 				};
 			}),
-		).pipe(Effect.uninterruptible);
+		).pipe(
+			Effect.uninterruptible,
+			Effect.onError(() => supervisor.requestRecovery),
+		);
 	// The durable reset_pin marker also protects a human undo borrowing an editor's overlay.
 	const withBorrowedLock = <A, E, R>(note: string, operation: (owner: Ownership) => Effect.Effect<A, E, R>) =>
 		Effect.gen(function* () {

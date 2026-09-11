@@ -87,6 +87,7 @@ const main = Effect.gen(function* () {
 		let closureFailed = false;
 		const supervisor: Supervisor = {
 			current,
+			requestRecovery: Effect.void,
 			withdraw: Ref.set(routing.route, null).pipe(Effect.andThen(Ref.set(current, null))),
 			freeze: routing.freeze,
 			release: routing.release,
@@ -103,7 +104,7 @@ const main = Effect.gen(function* () {
 				),
 			operationGate: yield* Semaphore.make(1),
 			callback: "http://localhost",
-			run: Effect.never,
+			run: () => Effect.never,
 			recoverClosure: Effect.die("Unused recovery"),
 			shutdown: Effect.void,
 			assertClosure: Effect.gen(function* () {

@@ -1,5 +1,7 @@
+import { recoveryIntents } from "./recovery-intents.ts";
+import { SqlClient } from "effect/unstable/sql";
 import { redactHex } from "./auth-primitives.ts";
-import { Cause, Config, Crypto, Effect, FileSystem, Path, Ref, Schema, Scope, Semaphore } from "effect";
+import { Cause, Config, Crypto, Effect, FileSystem, Path, Queue, Ref, Schema, Scope, Semaphore } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import { prepareGeneration, snapshotEntry, type ApplicationSource } from "./application.ts";
 import { AppRecovery } from "./app-recovery.ts";
@@ -50,6 +52,16 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 	const channelGate = yield* Semaphore.make(1);
 	const operationGate = yield* Semaphore.make(1);
 	const current = yield* Ref.make<ActiveChild | null>(null);
+	const changed = yield* Queue.make<void>({ capacity: 1, strategy: "sliding" });
+	const recoveryRequested = yield* Ref.make(false);
+	const requestRecovery = Effect.gen(function* () {
+		// Cleanup failure alone must not retire a healthy serving child.
+		if (yield* Ref.get(current)) return;
+		// A missing keeper receipt still needs explicit repair; never spin on unknown ownership.
+		if ((yield* assertClosure.pipe(Effect.result))._tag === "Failure") return;
+		yield* Ref.set(recoveryRequested, true);
+		yield* Queue.offer(changed, undefined);
+	});
 	// A failed retirement may leave a database owner alive. Only restart receipt recovery can clear this.
 	const closureUnproven = yield* Ref.make(false);
 	const closing = yield* Ref.make(false);
@@ -214,6 +226,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			}
 			yield* recordAttempt(value, state);
 			yield* value.process.control(state);
+			yield* (yield* Generations).list.pipe(Effect.flatMap((rows) => Ref.set(history, rows)));
 			const alreadyWatching = (yield* Ref.get(current))?.attempt.epoch === value.attempt.epoch;
 			yield* Ref.set(current, value);
 			yield* Ref.set(routing.route, {
@@ -237,10 +250,10 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			// operation gate, including the accepted-to-live cutover window.
 			if (!alreadyWatching) yield* watch(value).pipe(Effect.catchCause(fail), Effect.forkIn(processScope));
 			yield* Ref.update(tried, (values) => ({ ...values, [value.generation.n]: 0 }));
-			yield* (yield* Generations).list.pipe(Effect.flatMap((rows) => Ref.set(history, rows)));
 			yield* release;
+			yield* Queue.offer(changed, undefined);
 		});
-	const start = (generation: Generation) =>
+	const start = (generation: Generation, recoverAfterFailure = false) =>
 		Effect.gen(function* () {
 			const recovery = yield* AppRecovery;
 			const value = yield* launch(generation, recovery.filename, "candidate");
@@ -262,24 +275,16 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			}).pipe(Effect.exit);
 			if (started._tag === "Failure") {
 				yield* retire(value);
+				if (recoverAfterFailure) {
+					// Retirement proves this candidate closed; error tags are not closure evidence.
+					yield* withdraw;
+					yield* release;
+				}
 				return yield* Effect.failCause(started.cause);
 			}
 			return value;
 		});
-	const restart = (generation: Generation) =>
-		start(generation).pipe(
-			Effect.onError((cause) =>
-				Effect.gen(function* () {
-					const error = Cause.findError(cause);
-					if (cause.reasons.length !== 1 || error._tag !== "Success" || !Schema.is(ChildError)(error.success)) return;
-					if ((yield* assertClosure.pipe(Effect.result))._tag === "Failure") return;
-					// start positively retired its failed candidate. Queued requests may now
-					// receive unavailable, but never reach a partially activated child.
-					yield* withdraw;
-					yield* release;
-				}),
-			),
-		);
+	const restart = (generation: Generation) => start(generation, true).pipe(Effect.onError(() => requestRecovery));
 	const resume = (active: ActiveChild) =>
 		active.process.control("live").pipe(
 			Effect.catch(() => withdraw.pipe(Effect.andThen(retire(active)), Effect.andThen(restart(active.generation)))),
@@ -316,58 +321,72 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		yield* generations.list.pipe(Effect.flatMap((rows) => Ref.set(history, rows)));
 		yield* Ref.update(status, (value): ChildStatus => ({ ...value, state: "failed" }));
 	});
-	const run = Effect.gen(function* () {
-		const refresh = (yield* Generations).list.pipe(
-			Effect.flatMap((rows) => Ref.set(history, rows)),
-			Effect.orDie,
-		);
-		yield* operationGate
-			.withPermit(
+	const run = <E, R>(recoverAuthority: Effect.Effect<void, E, R>) =>
+		Effect.gen(function* () {
+			const refresh = (yield* Generations).list.pipe(
+				Effect.flatMap((rows) => Ref.set(history, rows)),
+				Effect.orDie,
+			);
+			const recoverAvailable = operationGate.withPermit(
 				Effect.gen(function* () {
+					if ((yield* recoveryIntents(yield* SqlClient.SqlClient)).count > 0)
+						return yield* new ChildError({ code: "cutover_recovery_required" });
 					if (!(yield* Ref.get(current))) yield* recover;
 				}),
-			)
-			.pipe(Effect.ensuring(refresh), Effect.catchCause(fail));
-		while (true) {
-			const active = yield* Ref.get(current);
-			if (!active) {
-				yield* Effect.sleep("100 millis");
-				continue;
+			);
+			yield* recoverAvailable.pipe(Effect.ensuring(refresh), Effect.catchCause(fail));
+			while (true) {
+				if (yield* Ref.getAndSet(recoveryRequested, false)) {
+					// Root resolves source/restore journals before ordinary generation recovery.
+					yield* recoverAuthority.pipe(Effect.andThen(recoverAvailable), Effect.catchCause(fail));
+				}
+				const active = yield* Ref.get(current);
+				if (!active) {
+					yield* Queue.take(changed);
+					continue;
+				}
+				const notification = yield* Effect.raceFirst(
+					active.process.exited.pipe(Effect.as("exited")),
+					Queue.take(changed).pipe(Effect.as("changed")),
+				);
+				if (notification === "changed") continue;
+				yield* operationGate
+					.withPermit(
+						Effect.gen(function* () {
+							if ((yield* Ref.get(current))?.attempt.epoch !== active.attempt.epoch) return;
+							yield* Ref.set(current, null);
+							yield* Ref.set(routing.route, null);
+							const stderr = redactHex(yield* Ref.get(active.process.stderr));
+							const unresponsive = (yield* Ref.get(status)).error === "child_unresponsive";
+							yield* Ref.update(status, (value): ChildStatus => ({
+								...value,
+								state: "failed",
+								error: unresponsive ? "child_unresponsive" : "Child exited",
+								stderr,
+							}));
+							yield* retire(active);
+							yield* (yield* Generations).failed(
+								active.generation.n,
+								unresponsive ? "child_unresponsive" : "Child exited",
+								redactHex(yield* Ref.get(active.process.stderr)),
+							);
+							yield* Effect.sleep((yield* Ref.get(tried))[active.generation.n] === 1 ? "250 millis" : "500 millis");
+							yield* requestRecovery;
+						}),
+					)
+					.pipe(
+						Effect.onError(() => requestRecovery),
+						Effect.catchCause(fail),
+					);
 			}
-			yield* active.process.exited;
-			yield* operationGate
-				.withPermit(
-					Effect.gen(function* () {
-						if ((yield* Ref.get(current))?.attempt.epoch !== active.attempt.epoch) return;
-						yield* Ref.set(current, null);
-						yield* Ref.set(routing.route, null);
-						const stderr = redactHex(yield* Ref.get(active.process.stderr));
-						const unresponsive = (yield* Ref.get(status)).error === "child_unresponsive";
-						yield* Ref.update(status, (value): ChildStatus => ({
-							...value,
-							state: "failed",
-							error: unresponsive ? "child_unresponsive" : "Child exited",
-							stderr,
-						}));
-						yield* retire(active);
-						yield* (yield* Generations).failed(
-							active.generation.n,
-							unresponsive ? "child_unresponsive" : "Child exited",
-							redactHex(yield* Ref.get(active.process.stderr)),
-						);
-						yield* Effect.sleep((yield* Ref.get(tried))[active.generation.n] === 1 ? "250 millis" : "500 millis");
-						yield* recover;
-					}),
-				)
-				.pipe(Effect.catchCause(fail));
-		}
-	});
+		});
 	return {
 		child,
 		run,
 		shutdown,
 		fail,
 		operationGate,
+		requestRecovery,
 		current,
 		withdraw,
 		freeze: routing.freeze,
