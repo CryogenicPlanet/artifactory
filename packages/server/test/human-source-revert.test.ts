@@ -118,7 +118,8 @@ it("queues a human undo behind cutover and rechecks logout before borrowing", as
 		release = join(fixture.root, "queue-release"),
 		queued = join(fixture.root, "undo-queued");
 	let source = await readFile(file, "utf8");
-	const needle = "yield* rehearsed.process.health.pipe(";
+	// Match the complete declaration so the injected statement cannot split its initializer.
+	const needle = "const report = yield* rehearsed.process.health.pipe(";
 	expect(source.split(needle)).toHaveLength(2);
 	source = source.replace(
 		needle,
