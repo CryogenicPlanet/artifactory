@@ -30,6 +30,16 @@ it.for([
 		await mkdir(join(fixture.root, "pages/old"), { recursive: true });
 		await writeFile(join(fixture.root, "pages/old/index.md"), "page before conflict");
 		await app.stop();
+		if (inserts.some((statement) => statement === insertMove)) {
+			await fixture.sql(
+				"CREATE TABLE topic_moves (id TEXT PRIMARY KEY,from_path TEXT NOT NULL,to_path TEXT NOT NULL,instance TEXT NOT NULL,request_key TEXT,request_hash TEXT NOT NULL,state TEXT NOT NULL,seq INTEGER)",
+				"boot.db",
+			);
+			await fixture.sql(
+				"CREATE TABLE topic_page_moves (id TEXT PRIMARY KEY,from_path TEXT NOT NULL,to_path TEXT NOT NULL,agent TEXT NOT NULL,tree TEXT,state TEXT NOT NULL)",
+				"boot.db",
+			);
+		}
 		for (const statement of inserts) await fixture.sql(statement, "boot.db");
 		const appBefore = await readFile(join(fixture.root, "comms.db"));
 		const sourceBefore = await readFile(join(fixture.root, "app/server.ts"));
@@ -42,7 +52,7 @@ it.for([
 					(await (await fetch(`${restarted.url}/_boot/status`, { headers: { cookie } })).json()).source_recovery_error,
 				{ timeout: 10000 },
 			)
-			.toContain("Conflicting recovery intents");
+			.toContain("recovery_intents_conflict");
 		expect((await fetch(`${restarted.url}/_boot/db/backups`, { headers: { cookie } })).status).toBe(200);
 		expect((await fetch(`${restarted.url}/api/messages?since=0`, { headers: { cookie } })).status).toBe(503);
 		expect(
@@ -62,7 +72,7 @@ it.for([
 	},
 );
 
-it.for([insertCutover, insertRestore, insertMove, insertSource] as const)(
+it.for([insertCutover, insertRestore, insertSource] as const)(
 	"refuses new recovery operations while a durable owner is pending",
 	{ timeout: 30000 },
 	async (pending, test) => {

@@ -1,5 +1,4 @@
 import { publicPathsSchema } from "./public-paths.ts";
-import { topicMoveSchema } from "./topic-move-schema.ts";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { enrollmentSchema } from "./enrollment-schema.ts";
@@ -99,8 +98,6 @@ export const initializeBootSchema = Effect.gen(function* () {
 				yield* sql`CREATE UNIQUE INDEX db_restore_active ON db_restore_requests ((1))
 		WHERE phase IN ('authorized','restoring','working','rollback')`;
 				yield* eventRoutingSchema;
-				yield* topicMoveSchema;
-				yield* topicPageMoveSchema;
 				yield* sourceTreeSchema;
 			}
 			if (version < 14) {
@@ -143,14 +140,4 @@ export const eventFilterSchema = Effect.gen(function* () {
 	yield* sql`CREATE INDEX events_instance_seq ON events(instance,seq)`;
 	yield* sql`CREATE INDEX events_level_seq ON events(level,seq)`;
 	yield* sql`CREATE INDEX events_topic_seq ON events(topic,seq)`;
-});
-
-/** Included in boot schema v13 by the topic-move coordinator. */
-export const topicPageMoveSchema = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	yield* sql`CREATE TABLE topic_page_moves (
-		id TEXT PRIMARY KEY, from_path TEXT NOT NULL, to_path TEXT NOT NULL, agent TEXT NOT NULL,
-		tree TEXT, state TEXT NOT NULL CHECK(state IN ('prepared','publishing','published','completed'))
-	)`;
-	yield* sql`CREATE UNIQUE INDEX topic_page_move_single_pending ON topic_page_moves ((1)) WHERE state != 'completed'`;
 });

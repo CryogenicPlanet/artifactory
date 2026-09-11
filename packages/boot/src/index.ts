@@ -5,20 +5,7 @@ import { sourceReverts } from "./source-revert.ts";
 import { SourceRejected } from "./source-schema.ts";
 import { RecoveryRejected, recoveryIntents } from "./recovery-intents.ts";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import {
-	Cause,
-	Config,
-	Context,
-	Crypto,
-	Deferred,
-	Effect,
-	FileSystem,
-	Layer,
-	Logger,
-	Path,
-	Ref,
-	Semaphore,
-} from "effect";
+import { Cause, Config, Context, Deferred, Effect, FileSystem, Layer, Logger, Path, Ref, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { HttpRouter } from "effect/unstable/http";
 import { Auth, layer as authLayer, type AuthConfig } from "./auth.ts";
@@ -30,7 +17,7 @@ import { Generations, layer as generationsLayer } from "./generations.ts";
 import { SourceFiles, layer as sourceLayer } from "./source-files.ts";
 import { Events, layer as eventsLayer } from "./events.ts";
 import { retainEvents } from "./event-retention.ts";
-import { AppRecovery, layer as recoveryLayer } from "./app-recovery.ts";
+import { layer as recoveryLayer } from "./app-recovery.ts";
 import { layer as attemptsLayer, ChildAttempts } from "./child-attempts.ts";
 import { cutover } from "./cutover.ts";
 import { layer as backupLayer } from "./app-backup.ts";
@@ -41,8 +28,7 @@ import { layer as preparationProcessLayer } from "./preparation-process.ts";
 import { makeBackupInventory } from "./backup-inventory.ts";
 import { requestEvents } from "./request-events.ts";
 import { proxy, publicRoute } from "./proxy.ts";
-import { moveRecovery } from "./topic-move-recovery.ts";
-import { layer as topicPageMoveLayer } from "./topic-page-move.ts";
+import { legacyMovePending, retireLegacyTopicMoves } from "./legacy-topic-moves.ts";
 import { layer as kernelBootLayer } from "./kernel-boot.ts";
 import { databaseBackup } from "./database-backup.ts";
 import { headroomPolicyLayer, storageHeadroom } from "./storage-headroom.ts";
@@ -115,9 +101,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		preparationLayer(options).pipe(Layer.provide(preparationProcessLayer)),
 		attemptsLayer(options.dataDirectory).pipe(Layer.provide(kernelBootLayer)),
 		backupLayer(appFilename),
-		recoveryLayer(appFilename, moveRecovery, options.dataDirectory).pipe(
-			Layer.provide(topicPageMoveLayer(options.dataDirectory).pipe(Layer.provide(sourceServices))),
-		),
+		recoveryLayer(appFilename, options.dataDirectory),
 	).pipe(Layer.provideMerge(sourceServices));
 
 	yield* Effect.gen(function* () {
@@ -143,7 +127,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 						.withPermit(
 							Effect.gen(function* () {
 								const intents = yield* recoveryIntents(sql);
-								if (intents.count > 1) return yield* new RecoveryRejected({ code: "recovery_intents_conflict" });
+								if (intents.count + Number(yield* legacyMovePending(sql)) > 1)
+									return yield* new RecoveryRejected({ code: "recovery_intents_conflict" });
 								// Restore may have activated a child before a later recovery step failed.
 								// Withdraw its route and prove closure before selecting any authoritative store again.
 								const active = yield* Ref.get(supervisor.current);
@@ -153,7 +138,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 								yield* supervisor.recoverClosure;
 								yield* (yield* Generations).recover;
 								if (isolated) yield* migrateAppStore({ dataDirectory: options.dataDirectory, filename: appFilename });
-								if (intents.move) yield* (yield* AppRecovery).prepare(yield* (yield* Crypto.Crypto).randomUUIDv4);
+								yield* retireLegacyTopicMoves(options.dataDirectory, appFilename);
 							}),
 						)
 						.pipe(Effect.exit);

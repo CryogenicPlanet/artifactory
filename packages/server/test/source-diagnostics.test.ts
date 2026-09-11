@@ -26,6 +26,14 @@ it(
 		await mkdir(join(fixture.root, "pages/new"), { recursive: true });
 		await writeFile(join(fixture.root, "pages/new/index.md"), "physical page");
 		await app.stop();
+		await fixture.sql(
+			"CREATE TABLE topic_moves (id TEXT PRIMARY KEY,from_path TEXT NOT NULL,to_path TEXT NOT NULL,instance TEXT NOT NULL,request_key TEXT,request_hash TEXT NOT NULL,state TEXT NOT NULL,seq INTEGER)",
+			"boot.db",
+		);
+		await fixture.sql(
+			"CREATE TABLE topic_page_moves (id TEXT PRIMARY KEY,from_path TEXT NOT NULL,to_path TEXT NOT NULL,agent TEXT NOT NULL,tree TEXT,state TEXT NOT NULL)",
+			"boot.db",
+		);
 		// Preserve uncertain publication evidence; this fixture does not infer it from a database restore.
 		await fixture.sql(
 			"INSERT INTO topic_moves VALUES('fixture','old','new','fixture',NULL,'{}','pages_published',1)",

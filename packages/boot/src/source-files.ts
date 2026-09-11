@@ -46,21 +46,8 @@ const make = (dataDirectory: string) =>
 				: Effect.void;
 		const semaphore = yield* Semaphore.make(1);
 		const prepared = yield* Ref.make<Proposal | null>(null);
-		const pageMoveReady = (id?: string) =>
-			sql`SELECT id FROM topic_page_moves WHERE state != 'completed'`.pipe(
-				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: Schema.String })))),
-				Effect.flatMap((rows) => {
-					const pending = rows[0];
-					return pending && pending.id !== id
-						? Effect.fail(new SourceRejected({ code: "publication_pending", path: pending.id }))
-						: Effect.void;
-				}),
-			);
-		// Physical source diagnostics remain readable while a page move awaits recovery.
-		const committedRead = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-			semaphore.withPermit(Effect.andThen(journal.ready, effect));
 		const guard = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-			semaphore.withPermit(Effect.andThen(journal.ready, Effect.andThen(pageMoveReady(), effect)));
+			semaphore.withPermit(Effect.andThen(journal.ready, effect));
 		const validate = (name: string) =>
 			validSourcePath(name) ? Effect.void : Effect.fail(new SourceRejected({ code: "invalid_path", path: name }));
 		const read = Effect.fn("SourceFiles.read")(function* (name: string, owner?: Ownership) {
@@ -233,14 +220,9 @@ const make = (dataDirectory: string) =>
 			);
 
 		return {
-			// The durable page intent keeps this admission closed between coordinator calls and after restart.
-			withPageMove: <A, E, R>(id: string, effect: Effect.Effect<A, E, R>) =>
-				semaphore.withPermit(
-					Effect.andThen(journal.ready, Effect.andThen(available, Effect.andThen(pageMoveReady(id), effect))),
-				),
-			read: (name: string, owner?: Ownership) => (owner ? guard : committedRead)(read(name, owner)),
+			read: (name: string, owner?: Ownership) => guard(read(name, owner)),
 			browse: (name: string, owner?: Ownership) =>
-				(owner ? guard : committedRead)(
+				guard(
 					Effect.gen(function* () {
 						const committed = yield* io.list(name);
 						const items = new Map((committed ?? []).map((item) => [item.name, item]));
@@ -260,7 +242,7 @@ const make = (dataDirectory: string) =>
 						return [...items.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 					}),
 				),
-			history: (name: string) => committedRead(Effect.andThen(validate(name), journal.history(name))),
+			history: (name: string) => guard(Effect.andThen(validate(name), journal.history(name))),
 			previous: (batch: string) => guard(journal.previous(batch)),
 			stage: (owner: Ownership, name: string, content: Uint8Array | null, baseVersion?: string | null) =>
 				guard(
@@ -422,7 +404,7 @@ const make = (dataDirectory: string) =>
 						if (batches[0].state === "publishing") yield* journal.recover;
 					}),
 				),
-			recover: semaphore.withPermit(Effect.andThen(pageMoveReady(), journal.recover)),
+			recover: semaphore.withPermit(journal.recover),
 			// All new source snapshots share this admission boundary; saved-good snapshots require no editable IO.
 			withCommitted: guard,
 			materialize: (id: string) =>

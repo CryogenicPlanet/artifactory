@@ -163,17 +163,9 @@ const make = Effect.fn("Events")(function* (
 							move.to.startsWith(`${move.from}/`)
 						)
 							return yield* new EventError({ code: "topic_move_invalid" });
-						const legacy = yield* sql`SELECT id FROM topic_moves WHERE id=${batch.transaction}`;
-						if (legacy.length) {
-							const prepared =
-								yield* sql`SELECT id FROM topic_moves WHERE id=${batch.transaction} AND from_path=${move.from} AND to_path=${move.to} AND state='pages_published' AND (seq IS NULL OR seq=${event.seq})`;
-							if (batch.events.length !== 1 || prepared.length !== 1)
-								return yield* new EventError({ code: "topic_move_unprepared" });
-						}
 						yield* sql`UPDATE events SET topic=${move.to} || substr(topic,length(${move.from})+1)
 							WHERE topic=${move.from} OR substr(topic,1,length(${move.from})+1)=${`${move.from}/`}`;
 						yield* movePublicPaths(sql, move.from, move.to);
-						yield* sql`UPDATE topic_moves SET state='completed',seq=${batch.to} WHERE id=${batch.transaction}`;
 					}
 					const projected = yield* projectPublicPath(sql, event).pipe(
 						Effect.catchTag("SchemaError", () => Effect.fail(new EventError({ code: "public_path_invalid" }))),

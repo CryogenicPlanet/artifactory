@@ -271,7 +271,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 		supervisor.operationGate.withPermit(
 			Effect.gen(function* () {
 				const pending = yield* recoveryIntents(sql);
-				if (!(yield* Ref.get(ready)) || pending.cutover || pending.move)
+				if (!(yield* Ref.get(ready)) || pending.cutover)
 					return yield* new ChildError({ code: "restore_recovery_required" });
 				if (
 					pending.source &&
