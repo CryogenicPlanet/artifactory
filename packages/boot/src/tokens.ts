@@ -7,20 +7,17 @@ import type { AssertionProof } from "./enrollment.ts";
 import { Scope } from "./enrollment-schema.ts";
 import { Events } from "./events.ts";
 import { openReceipt, ReceiptError, sealReceipt } from "./refresh-receipt.ts";
-import { expireRefreshReceipts, Receipt, type RevokeFamily, type TokenPair, validFamily } from "./refresh-schema.ts";
+import {
+	expireRefreshReceipts,
+	Receipt,
+	Token as TokenRow,
+	type RevokeFamily,
+	type TokenPair,
+	validFamily,
+} from "./refresh-schema.ts";
 
 const Token = Schema.Struct({
-	id: Schema.String,
-	pair_id: Schema.String,
-	family: Schema.String,
-	agent: Schema.String,
-	kind: Schema.String,
-	hash: Schema.String,
-	label: Schema.String,
-	scopes: Schema.fromJsonString(Schema.Array(Scope)),
-	expires_at: Schema.Int,
-	created_at: Schema.Int,
-	revoked_at: Schema.NullOr(Schema.Int),
+	...TokenRow.fields,
 	rotated_to: Schema.NullOr(Schema.String),
 	rotated_at: Schema.NullOr(Schema.Int),
 });

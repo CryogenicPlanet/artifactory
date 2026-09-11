@@ -1,10 +1,10 @@
 import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
-import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
+import { Clock, Crypto, Effect, Schema, Struct, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AuthError } from "./auth.ts";
 import { Events } from "./events.ts";
-import { expireRefreshReceipts } from "./refresh-schema.ts";
+import { expireRefreshReceipts, Token } from "./refresh-schema.ts";
 import { Scope, type EnrollmentDecision, validDecision } from "./enrollment-schema.ts";
 
 export interface AssertionProof {
@@ -35,15 +35,7 @@ const enrollmentRow = Schema.Struct({
 	access_seconds: Schema.NullOr(Schema.Int),
 	refresh_seconds: Schema.NullOr(Schema.Int),
 });
-const tokenRow = Schema.Struct({
-	id: Schema.String,
-	family: Schema.String,
-	agent: Schema.String,
-	label: Schema.String,
-	scopes: Schema.fromJsonString(Schema.Array(Scope)),
-	expires_at: Schema.Int,
-	revoked_at: Schema.NullOr(Schema.Int),
-});
+const tokenRow = Token.mapFields(Struct.pick(["id", "family", "agent", "label", "scopes", "expires_at", "revoked_at"]));
 
 /** Enrollment and collection share the passkey service's admission mutex and boot transaction. */
 export const makeEnrollment = <E, R>(

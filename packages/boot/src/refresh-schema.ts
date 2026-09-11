@@ -2,6 +2,21 @@ import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Scope } from "./enrollment-schema.ts";
 
+/** Canonical persisted credential row; callers select only fields their operation needs. */
+export const Token = Schema.Struct({
+	id: Schema.String,
+	pair_id: Schema.String,
+	family: Schema.String,
+	agent: Schema.String,
+	kind: Schema.String,
+	hash: Schema.String,
+	label: Schema.String,
+	scopes: Schema.fromJsonString(Schema.Array(Scope)),
+	expires_at: Schema.Int,
+	created_at: Schema.Int,
+	revoked_at: Schema.NullOr(Schema.Int),
+});
+
 export const RevokeFamily = Schema.Struct({ family: Schema.String });
 export type RevokeFamily = typeof RevokeFamily.Type;
 export const validFamily = (family: string) => /^f_[A-Za-z0-9_-]{43}$/.test(family);

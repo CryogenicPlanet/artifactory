@@ -5,23 +5,10 @@ import type { AssertionProof } from "./enrollment.ts";
 import { Scope } from "./enrollment-schema.ts";
 import { Events } from "./events.ts";
 import { openMintReceipt, ReceiptError, sealMintReceipt } from "./refresh-receipt.ts";
-import type { TokenPair } from "./refresh-schema.ts";
+import { Token, type TokenPair } from "./refresh-schema.ts";
 import { canonicalMint, MintReceipt, validMint, type MintBinding } from "./token-mint-schema.ts";
 
 const Session = Schema.Struct({ id: Schema.String, expires_at: Schema.Int });
-const Token = Schema.Struct({
-	id: Schema.String,
-	pair_id: Schema.String,
-	family: Schema.String,
-	agent: Schema.String,
-	kind: Schema.String,
-	label: Schema.String,
-	scopes: Schema.fromJsonString(Schema.Array(Scope)),
-	hash: Schema.String,
-	expires_at: Schema.Int,
-	created_at: Schema.Int,
-	revoked_at: Schema.NullOr(Schema.Int),
-});
 /** One signed transaction owns issuance and a session-encrypted exact response receipt. */
 export const makeTokenMint = <E, R>(
 	verify: (params: MintBinding, proof: AssertionProof) => Effect.Effect<void, E, R>,
