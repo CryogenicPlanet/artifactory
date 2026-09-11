@@ -113,7 +113,12 @@ it("denies unauthenticated and read-only moves without changing a topic named mo
 			})
 		).status,
 	).toBe(403);
-	expect(await fixture.sql("SELECT id FROM topic_moves", "boot.db")).toEqual([]);
+	expect(
+		await fixture.sql(
+			"SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('topic_moves','topic_page_moves')",
+			"boot.db",
+		),
+	).toEqual([]);
 	expect(
 		(await (await fetch(app.url + `/api/messages?since=${original.seq - 1}&limit=1`, { headers: { cookie } })).json())
 			.items,

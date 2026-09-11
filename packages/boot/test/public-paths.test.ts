@@ -95,7 +95,6 @@ it("moves and revokes public subtrees without matching similarly named directori
 		expect((await app.append(index + 1, "topic.meta", path, { path, meta: { public: true } })).result).toMatchObject({
 			_tag: "Success",
 		});
-	await app.sql("INSERT INTO topic_moves VALUES('tx-4','a_b','moved','human',NULL,'hash','pages_published',NULL)");
 	const move = await app.append(4, "topic.moved", "moved", { from: "a_b", to: "moved" });
 	expect(move.result).toMatchObject({ _tag: "Success" });
 	expect(await app.sql("SELECT path FROM public_paths ORDER BY path")).toEqual([

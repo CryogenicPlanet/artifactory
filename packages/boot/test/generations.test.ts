@@ -77,8 +77,6 @@ async function removeSourceSchema(data: string) {
 		"seq",
 		"events",
 		"event_batches",
-		"topic_moves",
-		"topic_page_moves",
 		"db_restore_requests",
 		"enrollments",
 		"tokens",

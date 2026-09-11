@@ -129,8 +129,8 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 	await app.sql("DROP TABLE seq");
 	await app.sql("DROP TABLE events");
 	await app.sql("DROP TABLE event_batches");
-	await app.sql("DROP TABLE topic_moves");
-	await app.sql("DROP TABLE topic_page_moves");
+	await app.sql("DROP TABLE IF EXISTS topic_moves");
+	await app.sql("DROP TABLE IF EXISTS topic_page_moves");
 	await app.sql("DROP TABLE db_restore_requests");
 	await app.sql("ALTER TABLE generations DROP COLUMN backup_id");
 	await app.sql("ALTER TABLE edit_lock DROP COLUMN reset_pin");
@@ -191,7 +191,6 @@ it("routes moved history without changing immutable replay identity or rerouting
 		events: [{ ...event(4), type: "topic.moved", topic: "b", payload: { from: "a", to: "b" } }],
 	};
 	await app.run({ op: "reserve", transaction: "move-one" });
-	await app.sql("INSERT INTO topic_moves VALUES('move-one','a','b','family',NULL,'hash','pages_published',NULL)");
 	expect(await app.run({ op: "append", batch: move })).toMatchObject({ _tag: "Success" });
 	expect(await app.sql("SELECT event FROM events WHERE seq<=2 ORDER BY seq")).toEqual(rawBefore);
 	expect(await app.run({ op: "query", topic: "b", since: 0, limit: 1 })).toMatchObject({
@@ -224,7 +223,6 @@ it("routes moved history without changing immutable replay identity or rerouting
 		events: [{ ...event(7), type: "topic.moved", topic: "c", payload: { from: "b", to: "c" } }],
 	};
 	await app.run({ op: "reserve", transaction: "move-two" });
-	await app.sql("INSERT INTO topic_moves VALUES('move-two','b','c','family',NULL,'hash','pages_published',NULL)");
 	await app.run({ op: "append", batch: next });
 	expect(await app.run({ op: "append", epoch: "restart", batch: move })).toMatchObject({ _tag: "Success" });
 	expect(await app.run({ op: "query", topic: "a", since: 0 })).toMatchObject({
@@ -250,13 +248,9 @@ it("routes moved history without changing immutable replay identity or rerouting
 		{ seq: 7, topic: "c" },
 		{ seq: 8, topic: null },
 	]);
-	expect(await app.sql("SELECT state,seq FROM topic_moves ORDER BY seq")).toEqual([
-		{ state: "completed", seq: 4 },
-		{ state: "completed", seq: 7 },
-	]);
 }, 15000);
 
-it("rejects unprepared and malformed moves and rolls routing back with publication failures", async (test) => {
+it("rejects malformed moves and rolls routing back with publication failures", async (test) => {
 	const app = await store(test);
 	await app.run({ op: "init" });
 	await app.run({ op: "boot", event: { ...event(1), topic: "a/child" } });
@@ -283,21 +277,19 @@ it("rejects unprepared and malformed moves and rolls routing back with publicati
 			failure: { code: "topic_move_invalid" },
 		});
 	}
-	await app.sql("INSERT INTO topic_moves VALUES('move','a','b','family',NULL,'hash','prepared',NULL)");
-	expect(await app.run({ op: "append", batch })).toMatchObject({
-		_tag: "Failure",
-		failure: { code: "topic_move_unprepared" },
-	});
-	await app.sql("UPDATE topic_moves SET state='pages_published'");
 	await app.sql(
 		"CREATE TRIGGER fail_move BEFORE INSERT ON events WHEN NEW.seq=2 BEGIN SELECT RAISE(ABORT,'injected'); END",
 	);
 	expect(await app.run({ op: "append", batch })).toMatchObject({ _tag: "Failure" });
 	expect(await app.sql("SELECT topic FROM events ORDER BY seq")).toEqual([{ topic: "a/child" }, { topic: null }]);
-	expect(await app.sql("SELECT state,seq FROM topic_moves")).toEqual([{ state: "pages_published", seq: null }]);
 	expect(await app.run({ op: "state" })).toMatchObject({ success: { published_through: 1, pending_id: "move" } });
 	await app.sql("DROP TRIGGER fail_move");
-	await app.run({ op: "append", batch });
+	expect(await app.run({ op: "append", batch })).toMatchObject({ _tag: "Success" });
+	expect(await app.sql("SELECT topic FROM events ORDER BY seq")).toEqual([
+		{ topic: "b/child" },
+		{ topic: "b" },
+		{ topic: null },
+	]);
 	expect(await app.run({ op: "boot", event: batch.events[0] })).toMatchObject({
 		_tag: "Failure",
 		failure: { code: "topic_move_unprepared" },
@@ -314,8 +306,8 @@ it("backfills legacy routing without altering pending state or original event by
 		await app.sql(`DROP INDEX events_${column}_seq`);
 		await app.sql(`ALTER TABLE events DROP COLUMN ${column}`);
 	}
-	await app.sql("DROP TABLE topic_moves");
-	await app.sql("DROP TABLE topic_page_moves");
+	await app.sql("DROP TABLE IF EXISTS topic_moves");
+	await app.sql("DROP TABLE IF EXISTS topic_page_moves");
 	await app.sql("DROP TABLE db_restore_requests");
 	await app.sql("ALTER TABLE generations DROP COLUMN backup_id");
 	await app.sql("ALTER TABLE edit_lock DROP COLUMN reset_pin");
@@ -383,5 +375,7 @@ it("publishes an app-owned move with long historical routing and recovers withou
 			cursor: 3,
 		},
 	});
-	expect(await app.sql("SELECT id FROM topic_moves")).toEqual([]);
+	expect(
+		await app.sql("SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('topic_moves','topic_page_moves')"),
+	).toEqual([]);
 }, 15000);

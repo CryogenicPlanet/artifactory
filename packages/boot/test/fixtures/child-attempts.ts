@@ -34,8 +34,8 @@ const program = Effect.gen(function* () {
 			yield* sql`ALTER TABLE events DROP COLUMN instance`;
 			yield* sql`ALTER TABLE events DROP COLUMN level`;
 			yield* sql`ALTER TABLE events DROP COLUMN topic`;
-			yield* sql`DROP TABLE topic_moves`;
-			yield* sql`DROP TABLE topic_page_moves`;
+			yield* sql`DROP TABLE IF EXISTS topic_moves`;
+			yield* sql`DROP TABLE IF EXISTS topic_page_moves`;
 			yield* sql`DROP TABLE db_restore_requests`;
 			yield* sql`ALTER TABLE generations DROP COLUMN backup_id`;
 			yield* sql`ALTER TABLE source_changes DROP COLUMN before_directory`;
