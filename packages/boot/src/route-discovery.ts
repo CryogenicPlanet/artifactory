@@ -26,6 +26,12 @@ const routes = [
 		"human",
 		"Restart boot with strict {}, exact Origin and a fresh boot.restart X-Comms-Assertion bound to params {}. Returns 202 {status:restarting}, then exits gracefully for the external supervisor to relaunch. A lost response is uncertain; no idempotency replay.",
 	],
+	[
+		"post",
+		["/_boot/reset"],
+		"human",
+		"Reset source to the captured image seed with strict {}, no query parameters, exact Origin and a fresh app.reset X-Comms-Assertion from params {} bound to that seed and session. Rehearses and cuts over; preserves messages, pages and identities. Returns {generation,status,lock,error?,stderr?}; a lost response is uncertain and the proof is single-use.",
+	],
 	["get", ["/_boot/db/backups"], "human", "List retained app database backups; optional limit and before cursor."],
 	[
 		"post",
@@ -150,7 +156,7 @@ const routes = [
 		"post",
 		["/_boot/auth/challenge"],
 		"action-dependent",
-		"Create {action,params} challenge for enrollment.decide, token.mint, token.revoke, lock.break, db.restore, generation.restore, boot.restart, passkey.add or passkey.delete. Exact Origin required; all except enrollment.decide require a human session. Complete using X-Comms-Assertion: base64url JSON {id,response}.",
+		"Create {action,params} challenge for enrollment.decide, token.mint, token.revoke, lock.break, db.restore, generation.restore, boot.restart, app.reset, passkey.add or passkey.delete. Exact Origin required; all except enrollment.decide require a human session. Complete using X-Comms-Assertion: base64url JSON {id,response}.",
 	],
 	[
 		"get",

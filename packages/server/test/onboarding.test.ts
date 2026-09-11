@@ -26,6 +26,7 @@ it("serves editable public orientation with negotiated HTML, a source version an
 		["/_boot/db/backups", "get", "human"],
 		["/_boot/metrics", "get", "fs"],
 		["/_boot/restart", "post", "human"],
+		["/_boot/reset", "post", "human"],
 	] as const) {
 		for (const paths of [manifest.endpoints, discovery.paths]) {
 			expect(paths[path][method]["x-comms-auth"]).toBe(access);
@@ -36,6 +37,8 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	expect(discovery.paths["/_boot/seq"]).toBeUndefined();
 	expect(discovery.paths["/_boot/revert"].post.description).toContain("generation.restore");
 	expect(discovery.paths["/_boot/auth/challenge"].post.description).toContain("boot.restart");
+	expect(discovery.paths["/_boot/auth/challenge"].post.description).toContain("app.reset");
+	expect(discovery.paths["/_boot/reset"].post.description).toContain("preserves messages, pages and identities");
 
 	const anonymous = await fetch(app.url + "/init", {
 		headers: {
