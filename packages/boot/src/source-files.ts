@@ -6,7 +6,7 @@ import { sourceIO, validSourcePath } from "./source-io.ts";
 import { sourceJournal, type UndoSelection } from "./source-journal.ts";
 import type { TreeEntry } from "./source-tree-publication.ts";
 import { SourceRejected, type Change, type Write } from "./source-schema.ts";
-import { storageHeadroom } from "./storage-headroom.ts";
+import { HeadroomPolicy, storageHeadroom } from "./storage-headroom.ts";
 import { copySource } from "./snapshots.ts";
 
 interface Proposal {
@@ -32,6 +32,7 @@ const make = (dataDirectory: string) =>
 		const sql = yield* SqlClient.SqlClient;
 		const io = yield* sourceIO(dataDirectory);
 		const journal = yield* sourceJournal(io);
+		const policy = yield* HeadroomPolicy;
 		const headroom = yield* storageHeadroom(dataDirectory);
 		const checkChanges = (changes: readonly Change[]) =>
 			changes.some((change) => change.desired.content !== null)
@@ -447,7 +448,7 @@ const make = (dataDirectory: string) =>
 						const source = path.join(yield* fs.realPath(dataDirectory), "app");
 						if ((yield* fs.realPath(source)) !== source)
 							return yield* new SourceRejected({ code: "invalid_path", path: "app" });
-						yield* copySource(source, path.join(directory, "app"));
+						yield* copySource(source, path.join(directory, "app")).pipe(Effect.provideService(HeadroomPolicy, policy));
 						yield* checkChanges(value.changes);
 						const target = yield* sourceIO(directory);
 						for (const [index, change] of value.changes.entries())

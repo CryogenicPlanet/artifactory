@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { seedSession, sessionFetch } from "./fixtures/session.ts";
 
-it.for([false, true])(
+it.for([false, true, "configured"] as const)(
 	"restarts below headroom with cleared grants=%s, serving saved data and refusing live writes",
 	{ timeout: 30000 },
 	async (clearGrants, test) => {
@@ -118,7 +118,7 @@ it.for([false, true])(
 		expect((await fetch(`${first.url}/p/saved/readme.md`)).status).toBe(200);
 
 		await stop(first.child);
-		if (clearGrants) {
+		if (clearGrants === true) {
 			// Database restore deliberately clears this projection before activation reconstructs it.
 			await promisify(execFile)("bun", [
 				join(import.meta.dirname, "fixtures/store.ts"),
@@ -127,7 +127,14 @@ it.for([false, true])(
 			]);
 		}
 
-		const restarted = await start("low");
+		if (clearGrants === "configured") {
+			await promisify(execFile)("bun", [
+				join(import.meta.dirname, "fixtures/store.ts"),
+				join(directory, "boot.db"),
+				`INSERT INTO settings VALUES('storage_policy','{"backup_percent":20,"event_percent":10,"headroom_percent":60}')`,
+			]);
+		}
+		const restarted = await start(clearGrants === "configured" ? "normal" : "low");
 		expect(restarted.generation).toBe(first.generation);
 		const publicRead = await fetch(`${restarted.url}/p/saved/readme.md`);
 		expect(publicRead.status).toBe(200);
@@ -143,5 +150,27 @@ it.for([false, true])(
 		});
 		expect(refused.status).toBe(507);
 		expect(await refused.json()).toMatchObject({ error: { code: "storage_headroom" } });
+		if (clearGrants === "configured") {
+			const page = `${restarted.url}/api/fs/pages/saved/readme.md`;
+			const deniedPage = await restarted.request(page, { method: "PUT", body: "must preserve page" });
+			expect(deniedPage.status).toBe(507);
+			expect(await deniedPage.json()).toMatchObject({ error: { code: "storage_headroom" } });
+			expect(await (await restarted.request(page)).text()).toContain("Saved public page");
+			expect(
+				(await restarted.request(`${restarted.url}/api/fs/pages/private/readme.md`, { method: "DELETE" })).status,
+			).toBe(200);
+			await promisify(execFile)("bun", [
+				join(import.meta.dirname, "fixtures/store.ts"),
+				join(directory, "boot.db"),
+				`UPDATE settings SET value='{"backup_percent":20,"event_percent":10,"headroom_percent":5}' WHERE key='storage_policy'`,
+			]);
+			const admitted = await restarted.request(`${restarted.url}/api/messages`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: '{"topic":"saved","body":"after policy change without restart"}',
+			});
+			expect(admitted.status).toBe(200);
+			expect((await restarted.request(page, { method: "PUT", body: "after policy change" })).status).toBe(200);
+		}
 	},
 );

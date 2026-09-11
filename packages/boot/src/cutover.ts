@@ -1,11 +1,11 @@
 import { acceptSourceRevert } from "./source-revert.ts";
 import { seedSource } from "./seed-source.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
-import { Cause, Clock, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
+import { Layer, Cause, Clock, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { GenerationPreparation } from "./generation-preparation.ts";
 import { artifactRetention, ArtifactRetentionRejected } from "./artifact-retention.ts";
-import { storageHeadroom, StorageRejected } from "./storage-headroom.ts";
+import { HeadroomPolicy, storageHeadroom, StorageRejected } from "./storage-headroom.ts";
 import { AppBackup } from "./app-backup.ts";
 import { AppRecovery } from "./app-recovery.ts";
 import type { ApplicationSource } from "./application.ts";
@@ -48,6 +48,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 	const path = yield* Path.Path;
 	const crypto = yield* Crypto.Crypto;
 	const retention = yield* artifactRetention(options.dataDirectory);
+	const policy = yield* HeadroomPolicy;
 	const headroom = yield* storageHeadroom(options.dataDirectory);
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const freshEpoch = crypto.randomBytes(32).pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
@@ -155,7 +156,9 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					yield* fs.makeDirectory(directory, { recursive: true });
 					const snapshots = yield* Snapshots.pipe(
 						Effect.provide(
-							snapshotsLayer({ sourceDirectory: path.join(materialized, "app"), generationsDirectory: directory }),
+							snapshotsLayer({ sourceDirectory: path.join(materialized, "app"), generationsDirectory: directory }).pipe(
+								Layer.provide(Layer.succeed(HeadroomPolicy, policy)),
+							),
 						),
 					);
 					const snapshot = yield* snapshots.create(generation.n);
@@ -412,7 +415,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					if (!(yield* Ref.get(ready)) || (yield* recoveryIntents(sql)).count > 0)
 						return yield* new ChildError({ code: "cutover_recovery_required" });
 					yield* supervisor.assertClosure;
-					const seed = yield* seedSource(optionsSource);
+					const seed = yield* seedSource(optionsSource).pipe(Effect.provideService(HeadroomPolicy, policy));
 					yield* authorize(seed.digest);
 					return yield* withBorrowedLock("Reset source to seed", (owner) =>
 						performReload(owner, { trustedSource: { directory: seed.directory, agent } }),
@@ -451,7 +454,11 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			supervisor.operationGate.withPermit(performReload(owner, reloadOptions)),
 		reset,
 		revertHuman,
-		seedDigest: Effect.scoped(seedSource(optionsSource).pipe(Effect.map((seed) => seed.digest))),
+		seedDigest: Effect.scoped(
+			seedSource(optionsSource)
+				.pipe(Effect.provideService(HeadroomPolicy, policy))
+				.pipe(Effect.map((seed) => seed.digest)),
+		),
 		recover,
 	};
 });

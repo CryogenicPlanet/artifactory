@@ -29,7 +29,7 @@ import { moveRecovery } from "./topic-move-recovery.ts";
 import { layer as topicPageMoveLayer } from "./topic-page-move.ts";
 import { layer as kernelBootLayer } from "./kernel-boot.ts";
 import { databaseBackup } from "./database-backup.ts";
-import { storageHeadroom } from "./storage-headroom.ts";
+import { headroomPolicyLayer, storageHeadroom } from "./storage-headroom.ts";
 import { makeEventStorage } from "./event-storage.ts";
 import { databaseRestore } from "./database-restore.ts";
 import { supervise } from "./supervisor.ts";
@@ -52,7 +52,6 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	});
 	const supervisor = yield* supervise(options);
 	const { child, run, fail } = supervisor;
-	const headroom = yield* storageHeadroom(options.dataDirectory);
 	const initialized = Layer.effectDiscard(initializeBootSchema).pipe(
 		Layer.provideMerge(
 			SqliteClient.layer({ filename: path.join(options.dataDirectory, "boot.db"), disableWAL: true }).pipe(
@@ -66,14 +65,16 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			),
 		),
 	);
+	const storageServices = headroomPolicyLayer.pipe(Layer.provideMerge(initialized));
 	const eventServices = Layer.unwrap(
 		Effect.gen(function* () {
+			const headroom = yield* storageHeadroom(options.dataDirectory);
 			const storage = yield* makeEventStorage(headroom.sample);
 			yield* storage.run.pipe(Effect.forkScoped);
 			yield* retainEvents.pipe(Effect.forkScoped);
 			return eventsLayer(headroom.check().pipe(Effect.andThen(storage.admit)));
 		}),
-	).pipe(Layer.provideMerge(initialized));
+	).pipe(Layer.provideMerge(storageServices));
 	const sourceServices = sourceLayer(options.dataDirectory).pipe(
 		Layer.provideMerge(editLockLayer.pipe(Layer.provideMerge(eventServices))),
 	);

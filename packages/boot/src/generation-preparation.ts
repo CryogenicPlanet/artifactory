@@ -1,6 +1,6 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema, Semaphore } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { storageHeadroom, type StorageRejected } from "./storage-headroom.ts";
+import { HeadroomPolicy, storageHeadroom, type StorageRejected } from "./storage-headroom.ts";
 import type { PlatformError } from "effect/PlatformError";
 import type { ChildError } from "./child-process.ts";
 import { PreparationProcess } from "./preparation-process.ts";
@@ -27,6 +27,7 @@ export const layer = (options: { readonly dataDirectory: string; readonly depend
 			const path = yield* Path.Path;
 			const commands = yield* PreparationProcess;
 			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+			const policy = yield* HeadroomPolicy;
 			const headroom = yield* storageHeadroom(options.dataDirectory);
 			const gate = yield* Semaphore.make(1);
 			return GenerationPreparation.of({
@@ -121,6 +122,7 @@ export const layer = (options: { readonly dataDirectory: string; readonly depend
 									ancestor = path.dirname(ancestor);
 								}
 							}).pipe(
+								Effect.provideService(HeadroomPolicy, policy),
 								Effect.provideService(FileSystem.FileSystem, fs),
 								Effect.provideService(Path.Path, path),
 								Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
