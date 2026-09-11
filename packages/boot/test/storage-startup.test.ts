@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { Schema } from "effect";
 import { expect, it } from "vitest";
+import { launcherOutput } from "./fixtures/launcher-diagnostics.ts";
 import { seedSession, sessionFetch } from "./fixtures/session.ts";
 
 it.for([false, true, "configured"] as const)(
@@ -79,7 +80,16 @@ it.for([false, true, "configured"] as const)(
 				return body.child;
 			};
 			await expect.poll(async () => (await status()).state, { timeout: 10000 }).toBe("live");
-			return { child, request, url, generation: (await status()).generation };
+			return {
+				child,
+				request,
+				url,
+				generation: (await status()).generation,
+				diagnostic: () => ({
+					...launcherOutput(output),
+					event_maintenance_failed: output.includes("Event page-budget maintenance failed; retrying next minute"),
+				}),
+			};
 		};
 		const first = await start("normal");
 		await expect
@@ -170,7 +180,12 @@ it.for([false, true, "configured"] as const)(
 				headers: { "content-type": "application/json" },
 				body: '{"topic":"saved","body":"after policy change without restart"}',
 			});
-			expect(admitted.status).toBe(200);
+			expect(
+				admitted.status,
+				admitted.status === 200
+					? undefined
+					: JSON.stringify({ response: (await admitted.clone().text()).slice(0, 4096), boot: restarted.diagnostic() }),
+			).toBe(200);
 			const send = () => restarted.request(page, { method: "PUT", body: "after policy change" });
 			const pending = Schema.Struct({
 				error: Schema.Struct({ code: Schema.Literals(["publication_pending"]), retriable: Schema.Literals([true]) }),
