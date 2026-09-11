@@ -133,21 +133,27 @@ it("records child requests and authentication refusals without query, body, cred
 }, 10000);
 
 it("logs completed streams after their last byte and disconnects once without retaining admission", async (test) => {
-	const app = await launch(test);
+	const app = await launch(test, "controlled-stream");
 	await expect.poll(async () => (await app.state()).state).toBe("live");
 	const query = () => recordedRequests(app.data);
 	const stream = await app.fetch(`${app.url}/stream`);
 	const reader = stream.body?.getReader();
 	if (!reader) throw new Error("Missing stream");
 	expect(new TextDecoder().decode((await reader.read()).value)).toBe("first\n");
+	// Hold the child open across the store-query subprocess. Reading the first
+	// client chunk alone does not prevent the proxy from draining a timed stream.
+	await delay(350); // Also verify that request duration includes the held body.
 	expect((await query()).items).toHaveLength(0);
+	expect((await app.fetch(`${app.url}/release-stream`, { method: "POST" })).status).toBe(204);
 	expect(new TextDecoder().decode((await reader.read()).value)).toBe("second\n");
 	expect((await reader.read()).done).toBe(true);
-	await expect.poll(async () => (await query()).items.length).toBe(1);
-	expect((await query()).items[0]).toMatchObject({
+	await expect
+		.poll(async () => (await query()).items.map((event) => event.payload.path).sort())
+		.toEqual(["/release-stream", "/stream"]);
+	expect((await query()).items.find((event) => event.payload.path === "/stream")).toMatchObject({
 		payload: { path: "/stream", status: 200, outcome: "completed", duration_ms: expect.any(Number) },
 	});
-	const body = (await query()).items[0]?.payload;
+	const body = (await query()).items.find((event) => event.payload.path === "/stream")?.payload;
 	if (!body) throw new Error("Missing duration");
 	expect(body.duration_ms).toBeGreaterThan(300);
 	const control = new AbortController();

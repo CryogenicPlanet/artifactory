@@ -8,6 +8,7 @@ export function serve(mode: string) {
 	const secret = process.env.BOOT_SECRET;
 	let received = 0;
 	let cancelled = 0;
+	let releaseStream: (() => void) | null = null;
 	if (mode === "stderr") process.stderr.write("x".repeat(100_000) + "stderr-tail\n");
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
@@ -77,15 +78,24 @@ export function serve(mode: string) {
 						},
 					},
 				);
+			if (url.pathname === "/release-stream" && request.method === "POST") {
+				const complete = releaseStream;
+				if (!complete) return new Response(null, { status: 409 });
+				releaseStream = null;
+				complete();
+				return new Response(null, { status: 204 });
+			}
 			if (url.pathname === "/stream")
 				return new Response(
 					new ReadableStream({
 						start(controller) {
 							controller.enqueue(new TextEncoder().encode("first\n"));
-							setTimeout(() => {
+							const finish = () => {
 								controller.enqueue(new TextEncoder().encode("second\n"));
 								controller.close();
-							}, 400);
+							};
+							if (mode === "controlled-stream") releaseStream = finish;
+							else setTimeout(finish, 400);
 						},
 					}),
 					{ headers: { "content-type": "text/event-stream" } },
