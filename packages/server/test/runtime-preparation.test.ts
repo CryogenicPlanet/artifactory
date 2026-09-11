@@ -13,11 +13,7 @@ it("keeps writes live through failed preparation and serves an edited UI from a 
 	const app = await fixture.launch(join(seed, "server.ts"));
 	await app.setup();
 	const cookie = await app.login();
-	await expect
-		.poll(async () => (await (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json()).child.state, {
-			timeout: 90000,
-		})
-		.toBe("live");
+	await app.ready(cookie, 90000);
 	const headers = { cookie, origin: "https://comms.test" };
 	const put = (path: string, content: string) =>
 		fetch(`${app.url}/api/fs/app/${path}?reload=0`, {
