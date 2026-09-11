@@ -139,7 +139,7 @@ export const proxy = Effect.gen(function* () {
 		if (settingsResponse) return settingsResponse;
 		const restarted = yield* restartRoute(auth, authConfig, restart);
 		if (restarted) return restarted;
-		const authResponse = yield* authRoute(auth, authConfig);
+		const authResponse = yield* authRoute(auth, authConfig, requestId);
 		if (authResponse) return authResponse;
 		const passkeyResponse = yield* passkeyManagementRoute(auth, authConfig);
 		if (passkeyResponse) return passkeyResponse;

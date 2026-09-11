@@ -17,12 +17,28 @@ export const authClient = `(() => {
  const button = form.querySelector("button");
  const decode = value => Uint8Array.from(atob(value.replace(/-/g,"+").replace(/_/g,"/")), c => c.charCodeAt(0));
  const encode = value => btoa(String.fromCharCode(...new Uint8Array(value))).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");
- const post = async (path, body) => {
-  const response = await fetch(path, {method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(body)});
-  const result = await response.json();
+ let stage = "browser", requestId = "", errorCode = "";
+ const progress = (value, message) => { stage = value; status.textContent = message; };
+ const post = async (path, body, step) => {
+  requestId = ""; errorCode = "";
+  progress(step + " request", step === "options" ? "Requesting passkey options…" : "Verifying your passkey…");
+  let response;
+  try { response = await fetch(path, {method:"POST", redirect:"manual", headers:{"content-type":"application/json"}, body:JSON.stringify(body)}); }
+  catch { throw new Error("The authentication request could not reach the board. Check your connection and sharing-service sign-in."); }
+  const id = response.headers.get("x-comms-request-id");
+  requestId = /^[a-f0-9]{32}$/.test(id || "") ? id : "";
+  progress(step + " response", "Reading the authentication response…");
+  if (response.type === "opaqueredirect" || response.redirected || (response.status >= 300 && response.status < 400))
+   throw new Error("Authentication was redirected. Open this board directly and complete any sharing-service sign-in.");
+  let result;
+  try { result = await response.json(); }
+  catch { throw new Error("The board or sharing proxy returned an unreadable response (HTTP " + response.status + "). Check the connection and sign-in page."); }
+  if (!result || typeof result !== "object") throw new Error("The board returned an invalid authentication response.");
   if (!response.ok) {
    const messages = {setup_code_invalid:"That setup code is incorrect. Check the latest code in the bootloader logs.", setup_closed:"Setup is complete. Open /auth/login to sign in.", setup_required:"Create your first passkey at /setup.", challenge_invalid:"This passkey request expired or was already used. Try again.", origin_invalid:"This address does not match the configured public origin.", authentication_invalid:"The passkey could not be verified. Try again.", registration_invalid:"The passkey could not be registered. Try again.", boot_unavailable:"The boot authentication store is unavailable. Check the bootloader logs."};
-   throw new Error(messages[result.error?.code] || "Request failed. Try again.");
+   const code = result.error?.code;
+   errorCode = typeof code === "string" && /^[a-z_]{1,64}$/.test(code) ? code : "";
+   throw new Error((Object.hasOwn(messages, errorCode) ? messages[errorCode] : null) || "Authentication was refused (HTTP " + response.status + "). Check the board configuration or sign in again.");
   }
   return result;
  };
@@ -41,24 +57,39 @@ export const authClient = `(() => {
   return value;
  };
  form.addEventListener("submit", async event => {
-  event.preventDefault(); button.disabled = true; status.textContent = "Waiting for your passkey…";
+  event.preventDefault(); button.disabled = true;
+  requestId = ""; errorCode = "";
+  progress("browser", "Checking passkey support…");
   try {
    if (!window.isSecureContext || !navigator.credentials) throw new Error("Passkeys require HTTPS or http://localhost.");
    const setup = form.dataset.mode === "setup";
    const path = "/_boot/auth/" + (setup ? "setup" : "login");
    const input = setup ? {code:document.getElementById("code").value.trim()} : {};
-   const started = await post(path + "/options", input);
+   const started = await post(path + "/options", input, "options");
+   progress("options decode", "Preparing the passkey request…");
    const options = started.options;
    options.challenge = decode(options.challenge);
    if (setup) {
     options.user.id = decode(options.user.id);
     options.excludeCredentials = (options.excludeCredentials || []).map(item => ({...item,id:decode(item.id)}));
    } else options.allowCredentials = (options.allowCredentials || []).map(item => ({...item,id:decode(item.id)}));
+   progress(setup ? "credential create" : "credential get", setup ? "Waiting for your browser to create a passkey…" : "Waiting for your browser to unlock your passkey…");
    const credential = await navigator.credentials[setup ? "create" : "get"]({publicKey:options});
    if (!credential) throw new Error("No passkey was returned. Try again.");
-   await post(path + "/verify", {id:started.id, response:serialize(credential)});
+   progress("credential encode", "Preparing passkey verification…");
+   await post(path + "/verify", {id:started.id, response:serialize(credential)}, "verify");
    window.location.assign(setup ? "/auth/login" : "/");
-  } catch (error) { status.textContent = error instanceof Error ? error.message : "Sign in failed. Try again."; }
+  } catch (error) {
+   const names = ["NotAllowedError", "SecurityError", "InvalidStateError", "NotSupportedError", "AbortError", "TypeError", "UnknownError", "Error", "InvalidCharacterError"];
+   const name = names.includes(error?.name) ? error.name : "Error";
+   const native = stage === "credential create" || stage === "credential get";
+   const message = native
+    ? "Your browser could not complete the passkey request. Check your password manager and this site's passkey permissions. This browser failure is not visible to the server."
+    : stage === "options decode" || stage === "credential encode"
+     ? "The passkey data could not be prepared. Reload the page and try again."
+     : error instanceof Error ? error.message : "Authentication failed. Reload the page and try again.";
+   status.textContent = message + " Stage: " + stage + "; " + name + (errorCode ? "; code: " + errorCode : "") + (requestId ? "; request: " + requestId : "; no board request ID received") + ".";
+  }
   finally { button.disabled = false; }
  });
 })();`;

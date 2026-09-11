@@ -251,7 +251,7 @@ export const assertionProof = (request: HttpServerRequest.HttpServerRequest) =>
 	});
 
 /** Exact boot-owned entry points; other /auth and /_boot paths remain private. */
-export const authRoute = (auth: Auth["Service"], config: AuthConfig) =>
+export const authRoute = (auth: Auth["Service"], config: AuthConfig, requestId: string) =>
 	Effect.gen(function* () {
 		const { request, url } = yield* bootRoute;
 		const path = url.pathname;
@@ -271,6 +271,7 @@ export const authRoute = (auth: Auth["Service"], config: AuthConfig) =>
 				"/_boot/auth/logout",
 			].includes(path);
 		if (!page && !post) return null;
+		if (post) yield* Effect.logInfo(`boot.auth stage=request method=POST path=${path} request_id=${requestId}`);
 		return yield* authFailure(
 			Effect.gen(function* () {
 				if (page) {
@@ -331,5 +332,14 @@ export const authRoute = (auth: Auth["Service"], config: AuthConfig) =>
 					}),
 				);
 			}).pipe(Effect.map(HttpServerResponse.setHeader("cache-control", "no-store"))),
+		).pipe(
+			Effect.map(HttpServerResponse.setHeader("x-comms-request-id", requestId)),
+			Effect.tap((response) =>
+				post
+					? Effect.logInfo(
+							`boot.auth stage=response method=POST path=${path} status=${response.status} request_id=${requestId}`,
+						)
+					: Effect.void,
+			),
 		);
 	});

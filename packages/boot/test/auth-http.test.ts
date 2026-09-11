@@ -104,7 +104,7 @@ async function launch(test: TestContext, mode = "normal", blockedAttempts = fals
 		if (!header || !cookie) throw new Error("Missing session cookie");
 		return { response, cookie, header, payload };
 	};
-	return { url, code, post, setup, login, device, root };
+	return { url, code, post, setup, login, device, root, output: () => output };
 }
 
 it("creates a passkey and a protected session, forwards verified identity, and logs out", async (test) => {
@@ -304,4 +304,42 @@ it("keeps real authentication available when the attempt receipt directory canno
 	await app.post("/_boot/auth/logout", {}, session.cookie);
 	const relogged = await app.login(2);
 	expect((await fetch(`${app.url}/_boot/status`, { headers: { cookie: relogged.cookie } })).status).toBe(200);
+});
+
+it("correlates auth request and response diagnostics without recording submitted secrets", async (test) => {
+	const app = await launch(test);
+	const secret = "private-auth-diagnostic-sentinel";
+	const response = await fetch(`${app.url}/_boot/auth/setup/options?private=${secret}`, {
+		method: "POST",
+		headers: {
+			origin: "https://comms.test",
+			"content-type": "application/json",
+			"x-comms-request-id": secret,
+			cookie: secret,
+		},
+		body: JSON.stringify({ code: secret }),
+	});
+	expect(response.status).toBe(401);
+	const requestId = response.headers.get("x-comms-request-id");
+	expect(requestId).toMatch(/^[a-f0-9]{32}$/);
+	expect(await response.json()).toMatchObject({ error: { code: "setup_code_invalid" } });
+	const diagnostics = () =>
+		app
+			.output()
+			.split("\n")
+			.filter((line) => line.includes("boot.auth"));
+	await expect
+		.poll(() =>
+			diagnostics().some((line) =>
+				line.includes(`stage=response method=POST path=/_boot/auth/setup/options status=401 request_id=${requestId}`),
+			),
+		)
+		.toBe(true);
+	expect(
+		diagnostics().some((line) =>
+			line.includes(`stage=request method=POST path=/_boot/auth/setup/options request_id=${requestId}`),
+		),
+	).toBe(true);
+	expect(diagnostics().join("\n")).not.toContain(secret);
+	expect(diagnostics().join("\n")).not.toContain(app.code());
 });
