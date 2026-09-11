@@ -1,7 +1,8 @@
+import { requestBytes } from "./request-bytes.ts";
 import { editFailure, errorResponse } from "./edit-failure.ts";
 import type { SourceReverts } from "./source-revert.ts";
 import { SourceResetParams } from "./source-reset-schema.ts";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth } from "./auth.ts";
 import { assertionProof, authenticate, body, humanSession } from "./auth-http.ts";
@@ -318,17 +319,6 @@ export const editRoute = (
 	});
 
 const readBytes = (request: HttpServerRequest.HttpServerRequest, name: string) =>
-	Effect.gen(function* () {
-		let bytes = 0;
-		const chunks = yield* request.stream.pipe(
-			Stream.tap((chunk) =>
-				Effect.gen(function* () {
-					bytes += chunk.byteLength;
-					if (bytes > 8_388_608) return yield* new SourceRejected({ code: "invalid_text", path: name });
-				}),
-			),
-			Stream.runCollect,
-			Effect.timeout("5 seconds"),
-		);
-		return Buffer.concat(chunks);
-	});
+	requestBytes(request, 8_388_608, new SourceRejected({ code: "invalid_text", path: name })).pipe(
+		Effect.timeout("5 seconds"),
+	);

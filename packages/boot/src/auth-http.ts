@@ -1,8 +1,9 @@
+import { requestBytes } from "./request-bytes.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import { ChildError } from "./child-process.ts";
 import { TrafficError } from "./traffic.ts";
-import { Cause, Effect, Option, Schema, Stream } from "effect";
+import { Cause, Effect, Option, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
 import { PasskeyRegistrationResponse } from "./passkey-management-schema.ts";
@@ -195,16 +196,8 @@ export const validateAuthConfig = (config: AuthConfig) =>
 export const body = <A>(schema: Schema.ConstraintDecoder<A>) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
-		let size = 0;
-		const chunks: Uint8Array[] = [];
-		yield* Stream.runForEach(request.stream, (chunk) =>
-			Effect.gen(function* () {
-				size += chunk.byteLength;
-				if (size > 64 * 1024) return yield* new AuthError({ code: "invalid_request" });
-				chunks.push(chunk);
-			}),
-		);
-		return yield* Schema.decodeEffect(Schema.fromJsonString(schema))(Buffer.concat(chunks).toString("utf8"), {
+		const bytes = yield* requestBytes(request, 64 * 1024, new AuthError({ code: "invalid_request" }));
+		return yield* Schema.decodeEffect(Schema.fromJsonString(schema))(bytes.toString("utf8"), {
 			onExcessProperty: "error",
 		});
 	}).pipe(

@@ -1,3 +1,4 @@
+import { requestBytes } from "./request-bytes.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import { ChildError } from "./child-process.ts";
@@ -6,7 +7,7 @@ import { EventStorageRejected } from "./event-storage.ts";
 import { ArtifactRetentionRejected } from "./artifact-retention.ts";
 // oxlint-disable-next-line effecttsgo/node-builtin-import -- Constant-time comparison is not exposed by Effect Crypto.
 import { timingSafeEqual } from "node:crypto";
-import { Cause, DateTime, Effect, Option, Ref, Schema, type Semaphore, Stream } from "effect";
+import { Cause, DateTime, Effect, Option, Ref, Schema, type Semaphore } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { DatabaseBackup } from "./database-backup.ts";
 import type { Destination } from "./traffic.ts";
@@ -169,18 +170,10 @@ const eventFailure = <A, E, R>(
 	);
 const readBody = <S extends Schema.Constraint>(request: HttpServerRequest.HttpServerRequest, schema: S) =>
 	Effect.gen(function* () {
-		let bytes = 0;
-		const chunks = yield* request.stream.pipe(
-			Stream.tap((chunk) =>
-				Effect.gen(function* () {
-					bytes += chunk.byteLength;
-					if (bytes > 1_048_576) return yield* new EventError({ code: "body_too_large" });
-				}),
-			),
-			Stream.runCollect,
+		const bytes = yield* requestBytes(request, 1_048_576, new EventError({ code: "body_too_large" })).pipe(
 			Effect.timeout("2 seconds"),
 		);
-		return yield* Schema.decodeEffect(Schema.fromJsonString(schema))(Buffer.concat(chunks).toString("utf8"));
+		return yield* Schema.decodeEffect(Schema.fromJsonString(schema))(bytes.toString("utf8"));
 	});
 export const eventRoute = (
 	service: Events["Service"],
