@@ -221,7 +221,7 @@ it("retires a completed move only with its published single-event receipt", asyn
 	expect(await app.sql("SELECT name FROM sqlite_master WHERE name IN ('topic_moves','topic_page_moves')")).toEqual([]);
 });
 
-it.for(["missing", "aborted", "range", "attempt"] as const)(
+it.for(["missing", "aborted", "range", "attempt", "move-seq"] as const)(
 	"retains pages and evidence with a malformed boot reservation (%s)",
 	async (kind, test) => {
 		const app = await fixture(test);
@@ -230,6 +230,7 @@ it.for(["missing", "aborted", "range", "attempt"] as const)(
 		if (kind === "aborted") await app.sql("UPDATE event_batches SET state='aborted'");
 		if (kind === "range") await app.sql("UPDATE event_batches SET to_seq=to_seq+1");
 		if (kind === "attempt") await app.sql("UPDATE seq SET pending_attempt=NULL");
+		if (kind === "move-seq") await app.sql("UPDATE topic_moves SET seq=99");
 		const before = await Promise.all([
 			app.sql("SELECT * FROM topic_moves"),
 			app.sql("SELECT * FROM topic_page_moves"),
