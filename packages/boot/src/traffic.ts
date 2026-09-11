@@ -28,6 +28,7 @@ const admission = (route: Ref.Ref<Destination | null>) =>
 			state: Ref.get(gate).pipe(
 				Effect.map((state) => ({ frozen: state.frozen, admitted: state.admitted, queued: state.waiting })),
 			),
+			// One total wait budget covers the 10s drain + 30s backup + 5s health cutover.
 			awaitDestination: Effect.uninterruptibleMask((restore) =>
 				Effect.gen(function* () {
 					let waited = false;
@@ -40,7 +41,7 @@ const admission = (route: Ref.Ref<Destination | null>) =>
 						if (wait === "full") return yield* new TrafficError({ code: "freeze_queue_full" });
 						if (wait) {
 							waited = true;
-							yield* restore(Deferred.await(wait).pipe(Effect.timeout("10 seconds"))).pipe(
+							yield* restore(Deferred.await(wait)).pipe(
 								Effect.ensuring(Ref.update(gate, (state) => ({ ...state, waiting: state.waiting - 1 }))),
 							);
 							continue;
@@ -49,7 +50,7 @@ const admission = (route: Ref.Ref<Destination | null>) =>
 						return { destination: yield* Ref.get(route), waited, revision: (yield* Ref.get(gate)).revision };
 					}
 				}),
-			),
+			).pipe(Effect.timeout("60 seconds")),
 			freeze: Effect.gen(function* () {
 				if ((yield* Ref.get(gate)).frozen) return;
 				const released = yield* Deferred.make<void>();

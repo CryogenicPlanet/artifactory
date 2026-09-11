@@ -76,7 +76,7 @@ const main = Effect.gen(function* () {
 						calls.push(action);
 						if (action === "frozen") {
 							yield* Deferred.succeed(frozen, undefined);
-							if (mode === "freeze-failure" || mode === "closure-failure")
+							if (mode === "freeze-failure" || mode === "closure-failure" || mode === "restart-failure")
 								return yield* new ChildError({ code: "child_control_failed" });
 						}
 					}),
@@ -132,6 +132,7 @@ const main = Effect.gen(function* () {
 					const started = { ...active, attempt: { ...attempt, epoch: "restarted" } };
 					yield* Ref.set(current, started);
 					yield* Ref.set(routing.route, { ...destination, epoch: "restarted" });
+					if (mode === "restart-failure") return yield* new ChildError({ code: "health_failed" });
 					return started;
 				}),
 		};
@@ -274,6 +275,7 @@ const main = Effect.gen(function* () {
 			events: recordedEvents,
 			saved,
 			traffic: yield* routing.state,
+			route: yield* Ref.get(routing.route),
 			epoch: db.query("SELECT epoch FROM kernel_writer").get(),
 			current: (yield* Ref.get(current))?.attempt.epoch ?? null,
 		};

@@ -70,6 +70,15 @@ describe("on-demand quiesced backups", () => {
 			traffic: { frozen: false },
 		});
 	});
+	it("releases unavailable traffic after a proven closed failed restart and removes its stale route", async (test) => {
+		expect(await run(test, "restart-failure")).toMatchObject({
+			outcome: "Failure",
+			calls: ["frozen", "retire", "restart"],
+			current: null,
+			route: null,
+			traffic: { frozen: false },
+		});
+	});
 	it("leaves traffic frozen and never restarts after missing closure proof", async (test) => {
 		expect(await run(test, "closure-failure")).toMatchObject({
 			outcome: "Failure",

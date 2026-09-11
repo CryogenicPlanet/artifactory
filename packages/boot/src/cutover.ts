@@ -138,6 +138,37 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						),
 					);
 				}
+				let ownsFreeze = false;
+				let releaseSafe = false;
+				const restartGeneration = (generation: Generation) =>
+					start(generation).pipe(
+						Effect.onError((cause) =>
+							Effect.gen(function* () {
+								const error = Cause.findError(cause);
+								if (cause.reasons.length !== 1 || error._tag !== "Success" || !Schema.is(ChildError)(error.success))
+									return;
+								// start retires failed candidates, but partial activation may leave stale routing.
+								const closure = yield* supervisor.assertClosure.pipe(Effect.result);
+								if (closure._tag === "Failure") return;
+								yield* Ref.set(supervisor.current, null);
+								yield* Ref.set(supervisor.child.traffic.route, null);
+								releaseSafe = true;
+							}),
+						),
+					);
+				const freeze = Effect.gen(function* () {
+					releaseSafe = false;
+					ownsFreeze = true;
+					yield* supervisor.child.traffic.freeze;
+				});
+				yield* Effect.addFinalizer(() =>
+					Effect.gen(function* () {
+						// Failed restoration or unproven closure deliberately retains admission.
+						if (!ownsFreeze || !releaseSafe) return;
+						const closure = yield* supervisor.assertClosure.pipe(Effect.result);
+						if (closure._tag === "Success") yield* supervisor.child.traffic.release;
+					}),
+				);
 				// Partial progress is retained for failure recovery; perform uses non-null local values.
 				const rollback: { generation: Generation | null; candidate: ActiveChild | null; priorClosed: boolean } = {
 					generation: null,
@@ -212,7 +243,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						.launch(generation, recovery.filename, "candidate")
 						.pipe(Effect.provideContext(context));
 					rollback.candidate = candidate;
-					yield* supervisor.child.traffic.freeze;
+					yield* freeze;
 					const frozenAt = (yield* DateTime.nowAsDate).getTime();
 					let priorFrozen = false;
 					yield* Effect.gen(function* () {
@@ -280,6 +311,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					);
 
 					yield* activate(candidate, "accepted");
+					releaseSafe = true;
 					yield* supervisor.child.traffic.release;
 					const freezeMs = (yield* DateTime.nowAsDate).getTime() - frozenAt;
 					if (prior && !rollback.priorClosed) {
@@ -325,14 +357,15 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						: (yield* generations.list).find((item) => item.n === failedGeneration?.n && item.good === 1)?.n;
 				if (acceptedGeneration !== undefined) {
 					// Accepted data is never restored: public acknowledged writes may already exist.
-					yield* supervisor.child.traffic.freeze;
+					yield* freeze;
 					yield* Ref.set(supervisor.current, null);
 					yield* Ref.set(supervisor.child.traffic.route, null);
 					if (failedCandidate) yield* stop(failedCandidate);
 					yield* closePrior;
 					const selected = (yield* generations.list).find((item) => item.n === acceptedGeneration);
 					if (!selected) return yield* new ChildError({ code: "accepted_snapshot_missing" });
-					yield* start(selected);
+					yield* restartGeneration(selected);
+					releaseSafe = true;
 					yield* finish(owner, true, request.release ?? false);
 					yield* sql`DELETE FROM cutover WHERE singleton=1`;
 					yield* supervisor.child.traffic.release;
@@ -346,17 +379,18 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					yield* restore(persisted);
 					// Restarted live jobs may publish immediately; recovery must never restore over them.
 					yield* sql`DELETE FROM cutover WHERE singleton=1`;
-					if (prior) yield* start(prior.generation);
+					if (prior) yield* restartGeneration(prior.generation);
 				} else if (prior) {
 					const restart = Effect.gen(function* () {
 						yield* Ref.set(supervisor.current, null);
 						yield* Ref.set(supervisor.child.traffic.route, null);
 						yield* closePrior;
 						// No backup checkpoint exists: reconcile the authoritative store.
-						yield* start(prior.generation);
+						yield* restartGeneration(prior.generation);
 					});
 					yield* rollback.priorClosed ? restart : prior.process.control("live").pipe(Effect.catch(() => restart));
 				}
+				releaseSafe = true;
 				// Source publication may have committed even when its completion response failed.
 				yield* sources.recover;
 				yield* sources.discard(proposal);

@@ -36,7 +36,7 @@ it.effect(
 		),
 );
 
-it.effect("bounds the restore queue and releases slots after interruption and the ten-second deadline", () =>
+it.effect("bounds the restore queue and releases slots after interruption and the sixty-second total deadline", () =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const gate = (yield* traffic).requests;
@@ -55,7 +55,7 @@ it.effect("bounds the restore queue and releases slots after interruption and th
 			yield* Fiber.interrupt(first);
 			expect((yield* gate.state).queued).toBe(127);
 			const replacement = yield* Effect.scoped(gate.awaitDestination).pipe(Effect.result, Effect.forkScoped);
-			yield* TestClock.adjust("9 seconds");
+			yield* TestClock.adjust("59 seconds");
 			expect((yield* gate.state).queued).toBe(128);
 			yield* TestClock.adjust("1 second");
 			for (const pending of [...waiting.slice(1), replacement]) {
@@ -65,6 +65,21 @@ it.effect("bounds the restore queue and releases slots after interruption and th
 			yield* gate.release;
 			expect(yield* Effect.scoped(gate.awaitDestination)).toMatchObject({ waited: false });
 			expect(yield* gate.state).toEqual({ frozen: false, admitted: 0, queued: 0 });
+		}),
+	),
+);
+
+it.effect("keeps queued mutations through the full cutover budget and releases them to the destination", () =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const gate = yield* traffic;
+			yield* gate.freeze;
+			const waiting = yield* Effect.scoped(gate.awaitDestination).pipe(Effect.result, Effect.forkScoped);
+			yield* TestClock.adjust("45 seconds");
+			expect((yield* gate.state).queued).toBe(1);
+			yield* gate.release;
+			expect(yield* Fiber.join(waiting)).toMatchObject({ _tag: "Success", success: { waited: true } });
+			expect((yield* gate.state).queued).toBe(0);
 		}),
 	),
 );
