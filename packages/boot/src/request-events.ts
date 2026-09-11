@@ -26,11 +26,13 @@ export const requestEvents = (events: Events["Service"]) =>
 			readonly requestId: string;
 		}) =>
 			Effect.gen(function* () {
+				const span = yield* Effect.makeSpan("http.request", { root: true });
 				let status = 503;
 				let identity = input.identity;
 				let generation = input.generation;
 				yield* Effect.addFinalizer((exit) =>
 					Effect.gen(function* () {
+						span.end(yield* Clock.monotonicTimeNanos, exit);
 						const interrupted = exit._tag === "Failure" && Cause.hasInterruptsOnly(exit.cause);
 						const queued = yield* Queue.offer(pending, {
 							at: yield* Clock.currentTimeMillis,
@@ -40,9 +42,21 @@ export const requestEvents = (events: Events["Service"]) =>
 							instance: identity?.id ?? null,
 							generation,
 							request_id: input.requestId,
-							topic: null,
-							message_id: null,
+							topic: typeof span.attributes.get("topic") === "string" ? String(span.attributes.get("topic")) : null,
+							message_id:
+								typeof span.attributes.get("message_id") === "string"
+									? String(span.attributes.get("message_id"))
+									: null,
 							payload: {
+								trace_id: span.traceId,
+								span_id: span.spanId,
+								annotations: Object.fromEntries(
+									Array.from(span.attributes).filter(
+										(entry): entry is [string, string] =>
+											typeof entry[1] === "string" &&
+											["topic", "message_id", "extension", "lock_state"].includes(entry[0]),
+									),
+								),
 								method: input.method,
 								path: input.path.slice(0, 2048),
 								status,
@@ -54,6 +68,26 @@ export const requestEvents = (events: Events["Service"]) =>
 					}),
 				);
 				return {
+					span,
+					trace: `00-${span.traceId}-${span.spanId}-01`,
+					child: (encoded: string | undefined) =>
+						Effect.sync(() => {
+							if (!encoded || encoded.length > 4096) return;
+							try {
+								const fields: unknown = JSON.parse(decodeURIComponent(encoded));
+								if (!fields || typeof fields !== "object" || Array.isArray(fields)) return;
+								for (const [key, value] of Object.entries(fields)) {
+									if (
+										["topic", "message_id", "extension", "lock_state"].includes(key) &&
+										typeof value === "string" &&
+										/^[a-zA-Z0-9@/_.:-]{1,200}$/.test(value)
+									)
+										span.attribute(key, value);
+								}
+							} catch {
+								/* Malformed child diagnostics must never fail the response. */
+							}
+						}),
 					attribute: (verified: VerifiedIdentity | null, selectedGeneration: number) =>
 						Effect.sync(() => {
 							identity = verified;

@@ -10,7 +10,7 @@ export interface OperationalEvent {
 	/** Stable diagnostic key; each database attempt gets a separate reservation ID. */
 	readonly transaction: string;
 	readonly type: string;
-	readonly level: "info" | "error";
+	readonly level: typeof EventRecord.Type.level;
 	readonly payload: Schema.JsonObject;
 	readonly actor?: string;
 	readonly instance?: string;

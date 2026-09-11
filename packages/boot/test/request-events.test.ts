@@ -51,11 +51,22 @@ it("records child requests and authentication refusals without query, body, cred
 			"x-comms-agent": "forged",
 			"x-comms-request-id": "forged",
 			"x-comms-assertion": "assertion-secret",
+			traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
+			tracestate: "credential=secret",
+			baggage: "credential=secret",
+			"x-comms-traceparent": "forged",
 		},
 		body: "body-secret",
 	});
 	const echo: unknown = await response.json();
 	if (typeof echo !== "object" || !echo || !("requestId" in echo)) throw new Error("Missing request id");
+	expect(echo).toMatchObject({
+		trace: expect.stringMatching(/^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/),
+		publicTrace: expect.stringMatching(/^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/),
+		traceState: null,
+		baggage: null,
+	});
+	expect(JSON.stringify(echo)).not.toContain("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 	const query = async () => decode(await (await app.fetch(`${app.url}/api/events?since=0&types=http.request`)).json());
 	await expect.poll(async () => (await query()).items.length).toBe(1);
 	const logged = (await query()).items[0];

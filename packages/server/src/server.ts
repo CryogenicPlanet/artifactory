@@ -1,3 +1,5 @@
+import { logEvents } from "./kernel/log-events.ts";
+import { requestSpan } from "./kernel/request-span.ts";
 import { Publication, layer as publicationLayer } from "./kernel/publication.ts";
 import { extensionCapabilities } from "./ext/core/capabilities.ts";
 // oxlint-disable-next-line effecttsgo/node-builtin-import -- Effect Crypto has no constant-time comparison.
@@ -93,6 +95,7 @@ const server = Effect.gen(function* () {
 				yield* migrate(`${import.meta.dirname}/migrations`, boot.epoch);
 				return yield* Effect.gen(function* () {
 					const publication = yield* Publication;
+					const loggers = yield* Logger.CurrentLoggers;
 					const publicPagesContext = yield* Effect.context<
 						SqlClient | BootChannel | Publication | Messages | Lifecycle
 					>();
@@ -118,7 +121,9 @@ const server = Effect.gen(function* () {
 						| FileSystem.FileSystem
 						| Path.Path
 					>();
-					const actual = failure(extensions.dispatch(dispatch)).pipe(Effect.provideContext(context));
+					const actual = failure(extensions.dispatch(dispatch)).pipe(
+						Effect.provideContext(Context.add(context, Logger.CurrentLoggers, loggers)),
+					);
 					const sqlContext = yield* Effect.context<
 						Messages | Topics | Lifecycle | BootChannel | SqlClient | Crypto.Crypto
 					>();
@@ -220,6 +225,7 @@ const server = Effect.gen(function* () {
 					yield* backupSchedule.pipe(Effect.forkScoped);
 					return yield* Effect.never;
 				}).pipe(
+					Effect.provide(Logger.layer([logEvents])),
 					Effect.provide(
 						topicsLayer.pipe(
 							Layer.provideMerge(messagesLayer.pipe(Layer.provideMerge(publicationLayer))),
@@ -306,7 +312,7 @@ const server = Effect.gen(function* () {
 					});
 				}
 				const handler = yield* Ref.get(installed);
-				return handler ? yield* handler : HttpServerResponse.empty({ status: 503 });
+				return handler ? yield* requestSpan(handler) : HttpServerResponse.empty({ status: 503 });
 			}),
 		);
 		yield* Console.log(`COMMS_CHILD_PORT=${http.address.port}`);

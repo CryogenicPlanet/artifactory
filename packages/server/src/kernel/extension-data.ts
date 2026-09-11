@@ -1,3 +1,4 @@
+import { RequestSpan } from "./request-span.ts";
 import { HealthProbe } from "./health-probe.ts";
 import { Crypto, Effect, Option, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -38,7 +39,18 @@ export const extensionData = Effect.gen(function* () {
 				);
 			}).pipe(Effect.provideService(Lifecycle, lifecycle), Effect.provideService(Crypto.Crypto, crypto));
 		return {
-			log: (type: string, payload: Schema.JsonObject) => record(type, payload).pipe(Effect.asVoid),
+			log: Object.assign((type: string, payload: Schema.JsonObject) => record(type, payload).pipe(Effect.asVoid), {
+				set: (fields: Readonly<Record<string, string>>) =>
+					Effect.gen(function* () {
+						const span = yield* RequestSpan;
+						if (!span) return;
+						for (const key of ["topic", "message_id", "lock_state"]) {
+							const value = fields[key];
+							if (value && /^[a-zA-Z0-9@/_.:-]{1,200}$/.test(value)) span.attribute(key, value);
+						}
+						span.attribute("extension", filename);
+					}),
+			}),
 			kv: (ns = namespace) => {
 				const valid = (key: string) =>
 					ns === namespace &&

@@ -164,7 +164,7 @@ const program = Effect.gen(function* () {
 						// Deliberately stale numeric ceiling: standup must capture its own fresh fence inside SQL.
 						const work = handler(request, {
 							...who,
-							log: () => Effect.die("Standup must remain read-only"),
+							log: Object.assign(() => Effect.die("Standup must remain read-only"), { set: () => Effect.void }),
 							kv: () => ({
 								get: () => Effect.die("Standup must use message reads"),
 								set: () => Effect.die("Standup must remain read-only"),

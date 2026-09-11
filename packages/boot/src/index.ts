@@ -1,9 +1,10 @@
+import { logEvents } from "./log-events.ts";
 import { migrateAppStore } from "./app-store-layout.ts";
 import { sourceReverts } from "./source-revert.ts";
 import { SourceRejected } from "./source-schema.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Cause, Config, Context, Crypto, Deferred, Effect, FileSystem, Layer, Path, Ref } from "effect";
+import { Cause, Config, Context, Crypto, Deferred, Effect, FileSystem, Layer, Logger, Path, Ref } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { HttpRouter } from "effect/unstable/http";
 import { Auth, layer as authLayer, type AuthConfig } from "./auth.ts";
@@ -104,6 +105,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		const restore = yield* databaseRestore(supervisor);
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* Events;
+		const loggers = yield* logEvents(events);
 		const context = Context.add(
 			Context.pick(
 				Auth,
@@ -143,7 +145,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		);
 		// Capture services only: each request keeps its own HTTP scope, including streamed response finalizers.
 		yield* Ref.set(installed, {
-			handle: proxy.pipe(Effect.provideContext(context)),
+			handle: proxy.pipe(Effect.provideContext(Context.add(context, Logger.CurrentLoggers, loggers))),
 			shutdown: supervisor.shutdown.pipe(Effect.provideContext(context), Effect.orDie),
 		});
 		const owners = yield* Effect.gen(function* () {
@@ -175,7 +177,11 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			yield* fail(recovered.cause);
 		} else {
 			yield* Ref.update(phase, (current): RecoveryPhase => (current._tag === "Stopping" ? current : { _tag: "Ready" }));
-			yield* run.pipe(Effect.catchCause(fail), Effect.forkScoped);
+			yield* run.pipe(
+				Effect.catchCause(fail),
+				Effect.provideService(Logger.CurrentLoggers, loggers),
+				Effect.forkScoped,
+			);
 		}
 		return yield* Effect.never;
 	}).pipe(

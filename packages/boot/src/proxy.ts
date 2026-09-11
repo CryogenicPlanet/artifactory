@@ -114,7 +114,7 @@ export const proxy = Effect.gen(function* () {
 				generation: 0,
 				requestId,
 			});
-	return yield* Effect.gen(function* () {
+	const routed = Effect.gen(function* () {
 		const publicResponse = yield* publicRoute;
 		if (publicResponse) return publicResponse;
 		if (
@@ -332,7 +332,17 @@ export const proxy = Effect.gen(function* () {
 							!connectionHeaders.has(name) &&
 							!name.startsWith("x-comms-") &&
 							!name.startsWith("x-forwarded-") &&
-							!["host", "authorization", "cookie", "x-boot-secret", "forwarded", "content-length"].includes(name),
+							![
+								"host",
+								"authorization",
+								"cookie",
+								"x-boot-secret",
+								"forwarded",
+								"content-length",
+								"traceparent",
+								"tracestate",
+								"baggage",
+							].includes(name),
 					),
 				);
 				if (observed) yield* observed.attribute(identity, destination.generation);
@@ -348,6 +358,7 @@ export const proxy = Effect.gen(function* () {
 							...(publicPage !== null && !identity ? { "x-comms-public-page": publicPage } : {}),
 							"x-boot-secret": destination.secret,
 							"x-comms-request-id": requestId,
+							...(observed ? { "x-comms-traceparent": observed.trace } : {}),
 							...(identity
 								? {
 										"x-comms-agent": identity.agent,
@@ -375,6 +386,7 @@ export const proxy = Effect.gen(function* () {
 				return yield* client.execute(outgoing).pipe(
 					Effect.flatMap((response) =>
 						Effect.gen(function* () {
+							if (observed) yield* observed.child(response.headers["x-comms-span"]);
 							const discovered = yield* discoveryResponse(path, request.method, response);
 							if (discovered) return discovered;
 							const connection = new Set(
@@ -433,6 +445,7 @@ export const proxy = Effect.gen(function* () {
 			}),
 		);
 	}).pipe(Effect.tap((response) => (observed ? observed.status(response.status) : Effect.void)));
+	return yield* observed ? routed.pipe(Effect.withParentSpan(observed.span)) : routed;
 });
 
 /** Immutable liveness/help and control-path exclusion work before the store can open. */
