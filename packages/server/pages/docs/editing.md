@@ -18,7 +18,7 @@ curl -X POST "$HOST/api/reload?check=1" \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
-`POST /api/fs/edit` accepts `{path,edits:[{old_string,new_string}],baseVersion?}`. Read the source response for its `baseVersion`; it is a content token, not a history id. An ambiguous or stale anchor is refused before staging. `DELETE /api/lock` discards uncommitted staging, as does expiry. Do not use release to preserve work you have not committed.
+`POST /api/fs/edit` accepts `{path,edits:[{old_string,new_string}],baseVersion?}`. Read the raw source response’s `X-Comms-Base-Version` header for `baseVersion`; it is a content token, not a history id. An ambiguous or stale anchor is refused before staging. `DELETE /api/lock` discards uncommitted staging, as does expiry. Do not use release to preserve work you have not committed.
 
 ## Undo source
 
@@ -26,14 +26,14 @@ With an empty staging overlay and your edit lock, `POST /api/revert {"path":"app
 
 `GET /api/generations` lists snapshots. `POST /api/revert {"generation":9}` restores retained whole-source content and dependencies through rehearsal/cutover while preserving the current database and pages. Old code can be incompatible with a newer schema; repair forward when rehearsal rejects it. Incomplete provenance or unretained history is refused rather than guessed.
 
-After a lost response, reuse the same Idempotency-Key and selector. Source-revert selection is stable, but the current implementation can create another generation on retry; it does not yet replay the exact original HTTP outcome.
+After a lost response, reuse the same Idempotency-Key and selector with the same live identity. A completed keyed source undo replays its exact terminal outcome without creating another generation, running hooks or overwriting later edits. Terminal receipts remain for at least 30 days; pending outcomes and historical selection-only keys have different recovery rules. Without a key, every call is a new undo. See the [boot recovery contract](../../../boot/docs/README.md) for retention and uncertain-outcome details.
 
 ## Pages
 
-`PUT /api/fs/pages/project/plan.md` publishes immediately without an app lock or reload. Its response includes `published:true` and a history `batch`. Read it at `/p/project/plan.md`, or add `?raw=1`. Page writes and page undo refuse archived ancestors. `/init` is `pages/init.md`; keep it short and link to detailed pages here.
+`PUT /api/fs/pages/project/plan.md` publishes immediately without an app lock or reload. Its response includes `published:true` and a history `batch`. Read it at `/p/project/plan.md`, or add `?raw=1`. These boot-owned repair routes bypass app archive/deletion policy while enforcing authentication, safe paths and durable publication. A pending app reservation makes publication wait outside the operation/channel gates; cancellation while waiting creates no page journal. Conflicting durable recovery intents remain fail-closed. `/init` is `pages/init.md`; keep it short and link to detailed pages here.
 
 ## When the app fails
 
 `GET /_boot` lists recovery routes. `GET /_boot/status` and `/api/generations` provide diagnostics with a human session or `fs` scope. Source edits use `/api/fs`, `/api/lock`, `/api/reload` and `/api/revert` even when the app cannot serve its own routes, subject to recovery guards that prevent mutation while database ownership is uncertain.
 
-Restoring database contents is a human decision: `GET /_boot/db/backups`, then passkey-bound `POST /_boot/db/restore {"backup":"<id>"}`. It restores data using the current retained source. Never treat a source revert as a database rollback. Combined source-plus-database restore and reverting through another editor's lock remain incomplete.
+Restoring database contents is a human decision: `GET /_boot/db/backups`, then passkey-bound `POST /_boot/db/restore {"backup":"<id>"}`. It restores data using the current retained source. Never treat a source revert as a database rollback. A human can use passkey-bound `POST /_boot/revert {"generation":9,"withDb":true}` for combined source/database restore; its `generation.restore` proof binds the retained generation and backup. Ordinary human source revert can borrow another editor’s lock without consuming staging. Agents cannot authorize database restore with `fs` scope. See the [boot recovery contract](../../../boot/docs/README.md) for the separate proof ceremonies.

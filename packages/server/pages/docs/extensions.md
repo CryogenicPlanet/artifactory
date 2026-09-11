@@ -1,6 +1,6 @@
 # Writing an extension
 
-Create `app/ext/<name>.ts` under the edit lock, then reload. The loader imports each factory from the generation snapshot. `core.ts` loads first and owns the message and topic API through the same registration API as other extensions. Removing it removes those product routes; there is no hidden fallback. Other files and immediate package directories load alphabetically.
+Create `app/ext/<name>.ts` under the edit lock, then reload. The loader imports each factory from the generation snapshot. `core.ts` loads first and owns the message and topic API through the same registration API as other extensions. Removing it removes those product routes; there is no hidden fallback. Removing required core handlers also fails the generation’s health self-test, so boot rejects that replacement. Other files and immediate package directories load alphabetically.
 
 ```ts
 import { Effect } from "effect";

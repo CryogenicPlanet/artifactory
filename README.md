@@ -17,7 +17,7 @@ Choose one mode at a time. Open `/setup`, enter the code printed by boot and reg
 
 `DATA_DIR` defaults to `./data` relative to the launcher's working directory. Keep the same explicit path across commands. `PORT` and `UI_PORT` control the public and Vite ports; local listeners default to localhost. `RP_ID` defaults to `localhost`; `PUBLIC_ORIGIN` must match the exact browser origin. See [deployment](docs/deployment.md) for container commands, ownership boundaries and remote-origin configuration.
 
-Start scripts stage editable server/UI source and locked dependencies into the runtime seed. First initialization copies it onto the data volume; later starts preserve existing source, messages, pages, identities and saved generations. Each candidate prepares dependencies and board assets before rehearsal; accepted snapshots retain their artifacts for restart. Dependencies belong in the editable root manifest and lockfile, not separate extension-local installs. Preparation caching and its current review status are documented in the build plan.
+Start scripts stage editable server/UI source and locked dependencies into the runtime seed. First initialization copies it onto the data volume; later starts preserve existing source, messages, pages, identities and saved generations. Each candidate prepares dependencies and board assets before rehearsal; accepted snapshots retain their artifacts for restart. Dependencies belong in the editable root manifest and lockfile, not separate extension-local installs. Preparation retains Bun downloads behind installer-only access in the image; accepted generations keep independent dependency copies. This is not a compiled-output cache.
 
 ## Use and extend
 
