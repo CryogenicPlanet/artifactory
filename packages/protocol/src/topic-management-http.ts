@@ -9,6 +9,8 @@ export const TopicPayload = Schema.Union([
 	TopicMetaInput.annotate({ parseOptions: { onExcessProperty: "error" } }),
 	TopicArchiveInput.annotate({ parseOptions: { onExcessProperty: "error" } }),
 ]);
+// Typed aliases serve generated clients internally. Keep outer extension ownership and discovery
+// on the original wildcard so a later wildcard override also owns encoded and single-segment paths.
 export const topicManagementGroup = HttpApiGroup.make("topicManagement")
 	.add(
 		HttpApiEndpoint.post("move", "/api/topics/:path/move", {
@@ -18,10 +20,12 @@ export const topicManagementGroup = HttpApiGroup.make("topicManagement")
 			query,
 			payload: Schema.Struct({ to: Schema.String }),
 			success: TopicMove,
-		}).annotate(
-			OpenApi.Description,
-			"POST /api/topics/<path>/move with {to}. Requires write. Move a topic subtree to an absent destination; Idempotency-Key preserves the first outcome.",
-		),
+		})
+			.annotate(
+				OpenApi.Description,
+				"POST /api/topics/<path>/move with {to}. Requires write. Move a topic subtree to an absent destination; Idempotency-Key preserves the first outcome.",
+			)
+			.annotate(OpenApi.Exclude, true),
 		HttpApiEndpoint.put("meta", "/api/topics/:path", {
 			params: { path: Schema.String },
 			headers: { "idempotency-key": Schema.optionalKey(Schema.String) },
@@ -29,29 +33,35 @@ export const topicManagementGroup = HttpApiGroup.make("topicManagement")
 			query,
 			payload: TopicPayload,
 			success: TopicMutation,
-		}).annotate(
-			OpenApi.Description,
-			"Replace metadata with {meta}, creating missing ancestors, or set {archived:true|false}. Requires write. Archived subtrees remain readable. Success follows durable topic publication; Idempotency-Key preserves the first outcome.",
-		),
+		})
+			.annotate(
+				OpenApi.Description,
+				"Replace metadata with {meta}, creating missing ancestors, or set {archived:true|false}. Requires write. Archived subtrees remain readable. Success follows durable topic publication; Idempotency-Key preserves the first outcome.",
+			)
+			.annotate(OpenApi.Exclude, true),
 		HttpApiEndpoint.post("legacyMove", "/api/topics/*", {
 			headers: { "idempotency-key": Schema.optionalKey(Schema.String) },
 			error: errorSchemas,
 			query,
 			payload: Schema.Struct({ to: Schema.String }),
 			success: TopicMove,
-		}).annotate(
-			OpenApi.Description,
-			"POST /api/topics/<path>/move with {to}. Requires write. Move a topic subtree to an absent destination; Idempotency-Key preserves the first outcome.",
-		),
+		})
+			.annotate(
+				OpenApi.Description,
+				"POST /api/topics/<path>/move with {to}. Requires write. Move a topic subtree to an absent destination; Idempotency-Key preserves the first outcome.",
+			)
+			.annotate(OpenApi.Identifier, "topicManagement.move"),
 		HttpApiEndpoint.put("legacyMeta", "/api/topics/*", {
 			headers: { "idempotency-key": Schema.optionalKey(Schema.String) },
 			error: errorSchemas,
 			query,
 			payload: TopicPayload,
 			success: TopicMutation,
-		}).annotate(
-			OpenApi.Description,
-			"Replace metadata with {meta}, creating missing ancestors, or set {archived:true|false}. Requires write. Archived subtrees remain readable. Success follows durable topic publication; Idempotency-Key preserves the first outcome.",
-		),
+		})
+			.annotate(
+				OpenApi.Description,
+				"Replace metadata with {meta}, creating missing ancestors, or set {archived:true|false}. Requires write. Archived subtrees remain readable. Success follows durable topic publication; Idempotency-Key preserves the first outcome.",
+			)
+			.annotate(OpenApi.Identifier, "topicManagement.meta"),
 	)
 	.middleware(RequestValidation);

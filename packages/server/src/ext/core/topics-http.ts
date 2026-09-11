@@ -38,6 +38,6 @@ export const topicHandlers = (api: typeof Api, extension: ExtensionApi) => {
 			}),
 		);
 	return HttpApiBuilder.group(api, "topics", (handlers) =>
-		handlers.handle("detail", detail).handle("root", detail).handle("legacyDetail", detail),
+		handlers.handle("detail", detail).handle("legacyDetail", detail),
 	).pipe(Layer.provide(bodyLayer(131072)));
 };

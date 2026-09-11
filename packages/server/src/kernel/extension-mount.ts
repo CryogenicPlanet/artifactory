@@ -71,9 +71,7 @@ export const mountApi = <Id extends string, Groups extends HttpApiGroup.Constrai
 					.replace(/\{([^}]+)\}/g, ":$1")}`;
 				// HttpRouter registers a terminal wildcard at its base path as well.
 				// The extension ownership matcher and discovery must expose both routes.
-				const base = `/${route.slice(1, -2)}` as const;
-				const paths: ReadonlyArray<`/${string}`> =
-					route.endsWith("/*") && !operation(document.paths[base] ?? {}, method) ? [route, base] : [route];
+				const paths: ReadonlyArray<`/${string}`> = route.endsWith("/*") ? [route, `/${route.slice(1, -2)}`] : [route];
 				return paths.map((path) => ({
 					method,
 					path,
