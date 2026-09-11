@@ -4,7 +4,9 @@ import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { Console, Effect } from "effect";
 import { expect, type TestContext } from "vitest";
+import { childDiagnostic, launcherOutput } from "./launcher-diagnostics.ts";
 import { seedSession, sessionFetch } from "./session.ts";
 
 export async function launch(test: TestContext, mode = "normal", actualServer = false) {
@@ -25,6 +27,19 @@ export async function launch(test: TestContext, mode = "normal", actualServer = 
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 	let output = "";
+	let lastState: unknown = null;
+	const started = performance.now();
+	let beforeCleanup: { exit_code: number | null; signal: NodeJS.Signals | null } | null = null;
+	test.onTestFailed(() => {
+		Effect.runSync(
+			Console.error("Boot proxy fixture diagnostic", {
+				elapsed_ms: Math.round(performance.now() - started),
+				before_cleanup: beforeCleanup,
+				output: launcherOutput(output),
+				child: childDiagnostic(lastState),
+			}),
+		);
+	});
 	processHandle.stdout.on("data", (chunk: Buffer) => {
 		output = (output + chunk.toString()).slice(-16384);
 	});
@@ -32,6 +47,7 @@ export async function launch(test: TestContext, mode = "normal", actualServer = 
 		output = (output + chunk.toString()).slice(-16384);
 	});
 	test.onTestFinished(async () => {
+		beforeCleanup = { exit_code: processHandle.exitCode, signal: processHandle.signalCode };
 		if (processHandle.exitCode !== null || processHandle.signalCode !== null) return;
 		const exited = once(processHandle, "exit");
 		processHandle.kill("SIGTERM");
@@ -48,7 +64,7 @@ export async function launch(test: TestContext, mode = "normal", actualServer = 
 		.poll(
 			() => {
 				url = /Listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(output)?.[1] ?? "";
-				if (processHandle.exitCode !== null) throw new Error(output);
+				if (processHandle.exitCode !== null) throw new Error(JSON.stringify(launcherOutput(output)));
 				return url;
 			},
 			{ timeout: 5000 },
@@ -60,6 +76,7 @@ export async function launch(test: TestContext, mode = "normal", actualServer = 
 		const value: unknown = await (await authenticatedFetch(`${url}/_boot/status`)).json();
 		if (typeof value !== "object" || value === null || !("child" in value)) throw new Error("Missing child state");
 		const child = value.child;
+		lastState = child;
 		if (
 			typeof child !== "object" ||
 			child === null ||

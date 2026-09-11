@@ -4,8 +4,9 @@ import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { Schema } from "effect";
+import { Console, Effect, Schema } from "effect";
 import { expect, it, type TestContext } from "vitest";
+import { launcherOutput } from "./fixtures/launcher-diagnostics.ts";
 import { authenticator } from "./fixtures/authenticator.ts";
 
 const ceremony = Schema.Struct({ id: Schema.String, options: Schema.Struct({ challenge: Schema.String }) });
@@ -23,12 +24,26 @@ async function launch(test: TestContext, mode = "normal") {
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 	let output = "";
+	let phase = "listener";
+	const started = performance.now();
+	let beforeCleanup: { exit_code: number | null; signal: NodeJS.Signals | null } | null = null;
+	test.onTestFailed(() => {
+		Effect.runSync(
+			Console.error("Boot auth fixture diagnostic", {
+				phase,
+				elapsed_ms: Math.round(performance.now() - started),
+				before_cleanup: beforeCleanup,
+				output: launcherOutput(output),
+			}),
+		);
+	});
 	const capture = (chunk: Buffer) => {
 		output = (output + chunk.toString()).slice(-16384);
 	};
 	processHandle.stdout.on("data", capture);
 	processHandle.stderr.on("data", capture);
 	test.onTestFinished(async () => {
+		beforeCleanup = { exit_code: processHandle.exitCode, signal: processHandle.signalCode };
 		if (processHandle.exitCode !== null || processHandle.signalCode !== null) return;
 		const exited = once(processHandle, "exit");
 		processHandle.kill("SIGTERM");
@@ -39,12 +54,14 @@ async function launch(test: TestContext, mode = "normal") {
 	let url = "";
 	await expect
 		.poll(() => {
-			if (processHandle.exitCode !== null) throw new Error(output);
+			if (processHandle.exitCode !== null) throw new Error(JSON.stringify(launcherOutput(output)));
 			url = /Listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(output)?.[1] ?? "";
 			return url;
 		})
 		.not.toBe("");
+	phase = "setup";
 	await expect.poll(async () => (await fetch(`${url}/setup`)).status).toBe(200);
+	phase = "ready";
 	const code = () => {
 		const value = [...output.matchAll(/\/setup is open, code ([A-F0-9]+)/g)].at(-1)?.[1];
 		if (!value) throw new Error("Missing setup code");

@@ -45,5 +45,14 @@ jobs:
         run: bun run check
       - name: Build
         run: bun run build
+      - name: Serial Linux startup diagnostics
+        continue-on-error: true
+        run: >-
+          bun run test
+          packages/boot/test/proxy.test.ts
+          packages/boot/test/auth-http.test.ts
+          packages/boot/test/source-files.test.ts
+          --maxWorkers=1 --reporter=verbose
+          -t 'forwards upload chunks before the request finishes|creates a passkey and a protected session, forwards verified identity, and logs out|recovers process death at replacement boundary 0 idempotently from its own journal'
       - name: Boot and server recovery tests
         run: bun run test packages/boot/test packages/server/test --maxWorkers=4

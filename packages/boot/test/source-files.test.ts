@@ -4,7 +4,7 @@ import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { Schema } from "effect";
+import { Console, Effect, Schema } from "effect";
 import { describe, expect, it, type TestContext } from "vitest";
 
 const execute = promisify(execFile);
@@ -18,20 +18,47 @@ async function fixture(test: TestContext) {
 	await mkdir(join(root, "app"));
 	await writeFile(join(root, "app/main.ts"), "one");
 	await chmod(join(root, "app/main.ts"), 0o644);
-	const call = async (input: object) =>
-		decode((await execute("bun", [script, root, encode(input)], { maxBuffer: 8 * 1024 * 1024 })).stdout.trim());
-	const sql = async (statement: string) =>
-		decode(
-			(
-				await execute("bun", [join(import.meta.dirname, "fixtures/store.ts"), join(root, "boot.db"), statement])
-			).stdout.trim(),
-		);
+	const started = performance.now();
+	const operations: { operation: string; at_ms: number; event: string }[] = [];
+	const record = (operation: string, event: string) => {
+		operations.push({ operation, at_ms: Math.round(performance.now() - started), event });
+	};
+	test.onTestFailed(() => Effect.runSync(Console.error("Source fixture diagnostic", operations)));
+	const call = async (input: object) => {
+		const operation = "op" in input && typeof input.op === "string" ? input.op : "unknown";
+		record(operation, "start");
+		try {
+			const result = await execute("bun", [script, root, encode(input)], { maxBuffer: 8 * 1024 * 1024 });
+			record(operation, "exit");
+			return decode(result.stdout.trim());
+		} catch (error) {
+			record(operation, "failed");
+			throw error;
+		}
+	};
+	const sql = async (statement: string) => {
+		record("sql", "start");
+		try {
+			const result = await execute("bun", [
+				join(import.meta.dirname, "fixtures/store.ts"),
+				join(root, "boot.db"),
+				statement,
+			]);
+			record("sql", "exit");
+			return decode(result.stdout.trim());
+		} catch (error) {
+			record("sql", "failed");
+			throw error;
+		}
+	};
 	const crash = async (at: number, writes: readonly object[], batch?: string) => {
+		record(`crash-${at}`, "start");
 		const child = spawn("bun", [
 			script,
 			root,
 			encode({ op: batch === undefined ? "publish" : "page_undo", crash: at, writes, batch }),
 		]);
+		child.once("exit", () => record(`crash-${at}`, "exit"));
 		test.onTestFinished(() => {
 			child.kill("SIGKILL");
 		});
@@ -48,6 +75,7 @@ async function fixture(test: TestContext) {
 				if (output.includes("JOURNALED")) resolve();
 			});
 		});
+		record(`crash-${at}`, "journaled");
 		const exited = once(child, "exit");
 		child.kill("SIGKILL");
 		await exited;
