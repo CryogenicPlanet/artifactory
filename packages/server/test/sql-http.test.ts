@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, type TestContext } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
 it("inspects physical committed rows with scoped read authority and documents the bounded SQL subset", async (test) => {
@@ -75,16 +75,48 @@ it("inspects physical committed rows with scoped read authority and documents th
 	expect(discovery.paths["/api/sql"].post.description).toContain("physical committed");
 }, 30000);
 
-it("refuses wrapper escapes, unsupported values and oversized output without modifying the app store", async (test) => {
-	const fixture = await conversation(test),
-		app = await fixture.launch();
+async function safetyFixture(test: TestContext) {
+	const started = performance.now();
+	const phase: { stage: string; sent: number; completed: number; status: number | null } = {
+		stage: "fixture",
+		sent: 0,
+		completed: 0,
+		status: null,
+	};
+	const evidence = () => JSON.stringify({ ...phase, elapsed_ms: Math.round(performance.now() - started) });
+	let beforeCleanup: string | undefined;
+	test.onTestFailed(() => console.error(`SQL HTTP failure: ${beforeCleanup ?? evidence()}`));
+	const fixture = await conversation(test);
+	phase.stage = "launch";
+	const app = await fixture.launch();
+	// Preserve the operation observed before fixture shutdown can settle a pending request.
+	test.onTestFinished(() => {
+		beforeCleanup = evidence();
+	});
+	phase.stage = "setup";
 	await app.setup();
+	phase.stage = "login";
 	const cookie = await app.login();
+	phase.stage = "ready";
 	await app.ready(cookie);
-	const query = (sql: string, params?: unknown[]) =>
-		app.post("/api/sql", { sql, ...(params ? { params } : {}) }, cookie);
+	const queryInput = async (input: unknown) => {
+		phase.sent++;
+		phase.status = null;
+		const response = await app.post("/api/sql", input, cookie);
+		phase.completed++;
+		phase.status = response.status;
+		return response;
+	};
+	const query = (sql: string, params?: unknown[]) => queryInput({ sql, ...(params ? { params } : {}) });
+	return { fixture, app, cookie, phase, query, queryInput };
+}
+
+it("refuses wrapper escapes, unsupported values and oversized output without modifying the app store", async (test) => {
+	const { fixture, app, cookie, phase, query, queryInput } = await safetyFixture(test);
+	phase.stage = "seed safety table";
 	await fixture.sql("CREATE TABLE sql_safety(value INTEGER)");
 	await fixture.sql("INSERT INTO sql_safety VALUES(1)");
+	phase.stage = "unsupported grammar";
 	for (const sql of [
 		"PRAGMA writable_schema=1",
 		"ATTACH '/tmp/comms-sql-escape.db' AS escaped",
@@ -103,6 +135,7 @@ it("refuses wrapper escapes, unsupported values and oversized output without mod
 		expect(result.status, sql).toBe(501);
 		expect((await result.json()).error).toMatchObject({ code: "sql_unsupported", retriable: false });
 	}
+	phase.stage = "invalid execution and values";
 	for (const sql of [
 		"WITH x AS (DELETE FROM sql_safety RETURNING *) SELECT * FROM x",
 		"SELECT load_extension('/tmp/nope')",
@@ -116,6 +149,7 @@ it("refuses wrapper escapes, unsupported values and oversized output without mod
 		"SELECT printf('%140000s','a') AS value",
 	])
 		expect((await query(sql)).status, sql).toBe(400);
+	phase.stage = "bounded values and output";
 	expect(await (await query("SELECT CAST(9223372036854775807 AS TEXT) AS n")).json()).toEqual({
 		rows: [{ n: "9223372036854775807" }],
 		truncated: false,
@@ -134,6 +168,7 @@ it("refuses wrapper escapes, unsupported values and oversized output without mod
 	).json();
 	expect(escaped.rows).toHaveLength(200);
 	expect(escaped.truncated).toBe(true);
+	phase.stage = "invalid inputs";
 	for (const input of [
 		{ sql: "" },
 		{ sql: `SELECT '${"a".repeat(16384)}'` },
@@ -142,8 +177,22 @@ it("refuses wrapper escapes, unsupported values and oversized output without mod
 		{ sql: "SELECT ?", params: [true] },
 		{ sql: "SELECT ?", params: ["a".repeat(65536)] },
 	])
-		expect((await app.post("/api/sql", input, cookie)).status).toBe(400);
-	// Repeated failures leave ordinary writes usable.
-	for (let i = 0; i < 30; i++) expect((await query("SELECT missing_column FROM sql_safety")).status).toBe(400);
+		expect((await queryInput(input)).status).toBe(400);
+	phase.stage = "write after validation failures";
 	expect((await app.post("/api/messages", { topic: "sql", body: "still writing" }, cookie)).status).toBe(200);
+	phase.stage = "complete";
+}, 30000);
+
+it("keeps ordinary writes usable after thirty failed readonly executions", async (test) => {
+	const { fixture, app, cookie, phase, query } = await safetyFixture(test);
+	phase.stage = "seed safety table";
+	await fixture.sql("CREATE TABLE sql_safety(value INTEGER)");
+	await fixture.sql("INSERT INTO sql_safety VALUES(1)");
+	phase.stage = "repeated execution failures";
+	for (let i = 0; i < 30; i++) expect((await query("SELECT missing_column FROM sql_safety")).status).toBe(400);
+	phase.stage = "verify unchanged rows";
+	expect(await fixture.sql("SELECT * FROM sql_safety")).toEqual([{ value: 1 }]);
+	phase.stage = "write after repeated failures";
+	expect((await app.post("/api/messages", { topic: "sql", body: "still writing" }, cookie)).status).toBe(200);
+	phase.stage = "complete";
 }, 30000);
