@@ -4,6 +4,7 @@ import { useState } from "react";
 import { type BoardError } from "./board-api.ts";
 import { getPasskeys } from "./account-api.ts";
 import { addPasskey, deletePasskey } from "./account-passkeys.ts";
+import { AccountSettings } from "./account-settings.tsx";
 import { AccountTokens } from "./account-tokens.tsx";
 
 export function AccountControls() {
@@ -100,6 +101,7 @@ export function AccountControls() {
 				)}
 			</section>
 			<AccountTokens />
+			<AccountSettings />
 		</div>
 	);
 }
