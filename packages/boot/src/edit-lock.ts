@@ -63,6 +63,13 @@ export class EditAuthority extends Context.Service<
 >()("comms/boot/EditAuthority") {}
 export const authorityLayer = (authority: EditAuthority["Service"]) => Layer.succeed(EditAuthority, authority);
 
+/** Run inside the caller's admission transaction; the caller owns refusal and transition handling. */
+export const editAuthorityActive = (sql: SqlClient.SqlClient, authority: EditAuthority["Service"], now: number) =>
+	(authority.kind === "human"
+		? sql`SELECT id FROM sessions WHERE id=${authority.id} AND expires_at>${now}`
+		: sql`SELECT id FROM tokens WHERE family=${authority.id} AND kind='access' AND revoked_at IS NULL LIMIT 1`
+	).pipe(Effect.map((active) => !(authority.expiresAt <= now || active.length === 0)));
+
 interface Actor {
 	readonly agent: string;
 	readonly instance: string;
@@ -171,14 +178,8 @@ const make = Effect.gen(function* () {
 					const now = (yield* DateTime.nowAsDate).getTime();
 					const transitions: Transition[] = [];
 					const authority = checkAuthority ? Option.getOrNull(yield* Effect.serviceOption(EditAuthority)) : null;
-					if (authority) {
-						const active =
-							authority.kind === "human"
-								? yield* sql`SELECT id FROM sessions WHERE id=${authority.id} AND expires_at>${now}`
-								: yield* sql`SELECT id FROM tokens WHERE family=${authority.id} AND kind='access' AND revoked_at IS NULL LIMIT 1`;
-						if (authority.expiresAt <= now || active.length === 0)
-							return reject("authority_expired", lock, transitions);
-					}
+					if (authority && !(yield* editAuthorityActive(sql, authority, now)))
+						return reject("authority_expired", lock, transitions);
 					if (lock && !lock.cutover_in_flight && lock.expires <= now) {
 						transitions.push(yield* drop(lock, "expired"));
 						lock = null;

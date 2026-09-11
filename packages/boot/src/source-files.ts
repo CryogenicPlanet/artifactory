@@ -1,6 +1,6 @@
 import { Context, Crypto, DateTime, Effect, FileSystem, Layer, Option, Path, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { EditAuthority, EditLock, EditRejected, type Ownership } from "./edit-lock.ts";
+import { EditAuthority, editAuthorityActive, EditLock, EditRejected, type Ownership } from "./edit-lock.ts";
 import { generationSource } from "./generation-source.ts";
 import { sourceIO, validSourcePath } from "./source-io.ts";
 import { sourceJournal, type UndoSelection } from "./source-journal.ts";
@@ -209,11 +209,7 @@ const make = (dataDirectory: string) =>
 									const authority = Option.getOrNull(yield* Effect.serviceOption(EditAuthority));
 									if (authority) {
 										const now = (yield* DateTime.nowAsDate).getTime();
-										const active =
-											authority.kind === "human"
-												? yield* sql`SELECT id FROM sessions WHERE id=${authority.id} AND expires_at>${now}`
-												: yield* sql`SELECT id FROM tokens WHERE family=${authority.id} AND kind='access' AND revoked_at IS NULL LIMIT 1`;
-										if (authority.expiresAt <= now || active.length === 0)
+										if (!(yield* editAuthorityActive(sql, authority, now)))
 											return yield* new EditRejected({ code: "authority_expired", holder: null, transitions: [] });
 									}
 									yield* journal.begin(
