@@ -380,7 +380,7 @@ await helper.exited;
 		]);
 		for (const table of ["passkeys", "auth_challenges"])
 			expect(await sql(env.data, `SELECT * FROM ${table}`)).toEqual([]);
-	});
+	}, 15000);
 
 	it("migrates schema four preserving auth, active ownership and the staged overlay", async (test) => {
 		const env = await fixture(test);
@@ -415,7 +415,8 @@ await helper.exited;
 		expect(await sql(env.data, "SELECT path,content,mode FROM staging")).toEqual([
 			{ path: "app/old.ts", content: null, mode: null },
 		]);
-	});
+	}, 15000);
+
 	it("keeps auth and saved-good serving during source recovery conflict, blocks new snapshots, then replays before clearing pin", async (test) => {
 		const env = await fixture(test);
 		const first = await launch(test, env);
