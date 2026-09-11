@@ -1,87 +1,87 @@
 # Build plan
 
-The lead owns integration and acceptance. Workers make bounded changes in isolated copies; one writer owns the shared checkout. The owner-approved PR review supersedes the earlier feature-completion plan wherever they differ. [codex-scratchpad.md](codex-scratchpad.md) is the detailed requirement and validation ledger.
+The lead owns integration and acceptance. Writers use isolated checkouts; only the lead integrates into `codex/build-comms-core`. The owner-approved review and later decisions in SPEC §12 supersede older descriptive sections. Preserve the uncommitted owner files: `SPEC.md`, `docs/tech.md`, `docs/database.md`, and `docs/pr-1/`.
 
-## Current state
+## Goal and verified baseline
 
-**Active takeover from `51eef7a`:** all four hash-verified handoffs are composed, preserving owner files. Additional reviewed work provides exact keyed source-undo receipts, ordinary app-descendant closure, scoped Effect UI reads and complete onboarding discovery. Tested code `fb72973` passes **643/643 tests across 159 files** both locally (actual Node22.22.3, two workers, 441.28s) and in [Linux CI](https://github.com/CryogenicPlanet/artifactory/actions/runs/34591769316), with check/build passing. Integration defaults bound concurrency to two workers and allow real-process startup; explicit protocol deadlines remain enforced. The leading scratchpad section records remaining gaps, including the unmet boot-size target, physical event quota and Linux UID/reboot acceptance. The final follow-up commit records evidence only; older paragraphs below are historical.
+The active owner request is to finish the PR #1 review changes, then complete the build plan against the spec. Passing tests alone do not establish either milestone.
 
-The pushed head is `2979676`. Current uncommitted SSE/preparation/metrics and Linux fixture corrections pass check/build and **519/519 tests across 136 files** locally. The owner's direction check identifies unresolved architectural intent despite these passing tests: core must actually consume the public extension API, boot must lose the app-policy callback for page writes, and restore requests must queue with post-wait authentication. These corrections precede landing any further routes. File relocation alone does not complete extension ownership.
+Baseline code `fb72973`, followed by documentation checkpoint `f61b04a`, passes **643/643 tests in 159 files** locally under actual Node22.22.3 with two workers and in [Linux run 34591769316](https://github.com/CryogenicPlanet/artifactory/actions/runs/34591769316). Check, build and Linux serial startup diagnostics pass. All four frozen takeover handoffs were hash-verified and composed against newer code. Earlier acceptance history is recorded in [codex-scratchpad.md](codex-scratchpad.md).
 
-The subsequent corrected core, numeric schemas, actual HttpApi error encoding, terminal health and combined-restore integration is now in the checkout. Root check/build and 17 focused tests pass; fresh root review verifies actual public-capability consumption. Its full root suite remains pending. Page-policy removal, queuing and boot/auth corrections are being composed separately before the next acceptance run.
+The baseline provides passkeys, enrollment/refresh, conversations, topics, pages, extension routes and lifecycle, editable generations, journaled source history, rehearsed cutover/rollback, backups, signed database and combined restore, signed restart, source-only seed reset, metrics and onboarding discovery. Reset preserves messages, pages and identities. Keyed source undo retains the exact accepted outcome and cannot replay over newer edits. These capabilities do not imply that all review comments are resolved.
 
-The branch provides passkey sign-in, agent enrollment/refresh, conversations, topics, pages, editable runtime generations, journaled source history, rehearsed reload/rollback, backup inventory and signed database restore. Extensions provide routes, lifecycle hooks, cron, data and webhook subscriptions. These existing capabilities do not establish completion of the review.
+## Review completion wave
 
-Review changes committed through `6c21a88`:
-
-- Correct legacy migration, event-routing and source-history fixtures.
-- Remove reactions from core services/routes/UI while preserving historical data and receipts.
-- Remove source watching/automatic adoption, weekly backup drills and the storage dashboard/cache. This first cut removes 609 boot production lines. Source history/undo and hourly backups remain.
-- Preserve authenticated committed-source diagnostics after unproven keeper closure and unresolved page publication; do not mutate locks, staging or recovery evidence during diagnostic GETs.
-- Release failed restore/move request gates after removing unsafe routes and closing owners. A recoverable failure must not permanently leak admission gates.
-- Add redacted startup diagnostics and a serial diagnostic step to Linux CI. Subsequent measured fixture-budget corrections use two Linux workers and leave production deadlines unchanged.
-
-Lifecycle changes passed combined acceptance (393/393 tests across 103 files, plus check/build): reset consecutive startup failures after healthy activation, emit demotion events, and apply separate drain/backup/candidate-health deadlines. The drain timeout preserves admitted writes and returns typed retriable `freeze_timeout` after safe cleanup.
-
-The earlier API, shared mutation protocol, typed HTTP validation, public-page projection/CSP, event indexes, signal-driven waits, 30-day receipts and UI simplification wave passed **454/454 tests across 121 files**, with locked install, check and build passing. Live browser acceptance passed the core board flows. The core mount in that wave did not establish public-API ownership of domain behavior. Subsequent signed-restart work also found additional shutdown edges involving stalled writes, hooks and unread responses; its reviewed isolated correction is not yet integrated.
-
-The 115-path SQL/move/storage/backup integration is pushed in `2979676`. Its historical full run produced 498 passes and 17 failures, subsequently resolved with reviewed fixture corrections. The newer exact-root 519-test pass includes that wave and the uncommitted SSE/preparation/metrics integration. See the scratchpad for logs and remaining limits.
-
-## Parallel groups and dependencies
-
-| Group | Owned work | Integration dependency |
+| Group | Work and acceptance | Dependencies |
 | --- | --- | --- |
-| API | Minimal retained endpoints, SQL message search/mentions, automatic marks, considered-through cursors, onboarding/manifest/docs | Shares app schema v7 and zero-event marks with mutations; consumes typed validation |
-| Mutation protocol | One writer protocol, compatible unified receipts, safe rollback/abort and durable publication | Complete v7 includes mentions migration; remove obsolete writers before dropping old receipt tables |
-| HTTP contracts | Executed wire schemas, literal errors, exhaustive response policy, bounded request parsing | Retained handlers use these contracts; arbitrary defects remain non-retriable 500s |
-| Extensions | Actual core route ownership, public operations/read/migration helpers, subscriptions using that API | Shared mutations and publication signals; domain layout cleanup follows integration |
-| Publication | Cached/pinned fence, append acknowledgements, signal-driven waits, stream failure envelopes, indexed event filters | One signal/cache instance; boot schema v14 coordinated with public paths |
-| Boot hardening | Maintenance finalization, diagnostic access, retry/demotion, drain deadlines and positive closure | Preserve restore/reload acceptance boundaries through all merges |
-| Public pages | Exact-directory grants, atomic event projection, restoration rebuild, app-owned topic policy, CSP/assets | Boot v14; app activation and shared mutations; safe file-journal policy seam |
-| UI | Component-scoped state, shared request lifecycle, actual Tailwind, minimal API clients | Consume reaction-free API afterimages; no UI test suite |
-| Linux | Compare serial and parallel failures using redacted process evidence, then fix demonstrated causes | Exact pushed commit and pinned runtimes; do not infer Linux behavior from macOS |
+| Boot errors | Exhaustive literal-code status/hint policy; route-named non-retriable defects and conservative mixed failures | Preserve shared handler interfaces; coordinate backup route with deployment |
+| Human source undo | Undo through another editor's lock after active cutover finishes; revalidate session and preserve the other overlay | Reuse borrowed pin and exact durable acceptance; prove pre/post-acceptance restart and queued logout |
+| Optional policies | Runnable deletion and profile/roster examples using public extension capabilities | No new core product routes; preserve tombstones, sole-author rules, publication and replay |
+| UI contracts/SSE | Pure shared HttpApi, generated AtomHttpApi and scoped cursor/reconnect invalidation | Contract remains editable in standalone runtime; preserve nested-topic URLs, drafts and mark=0 |
+| Rehearsal effects | Scoped outbound/timer helpers and actual bounded health suppression report | Coordinate extension API and cutover report propagation; no claim arbitrary native network is intercepted |
+| Physical event quota | Event pages plus conservative shared freelist/WAL accounting; bounded checkpoint/reclaim | Coordinate fresh schema and settings; preserve recovery evidence and required terminal publication |
+| Signed settings | Typed retention, budgets and exact public paths; proof binds patch/revision/session, replay returns first result | Fresh configured quota values; immutable recovery/auth floor and privileged-path exclusions |
+| Deployment | Boot/app/build ownership, immutable keeper entry points, resumable layout conversion | Actual Linux permission/WAL/process tests; independently controlled real-reboot acceptance |
+| Boot simplification | Remove concrete duplication and unnecessary ownership without weakening recovery | Reassess after correctness lanes; count real production changes, not relocation or formatting |
+| Receipt retention | Bound terminal undo receipts without losing pending evidence or misrepresenting retained outcomes | Follow human-undo integration; explicit timestamps, legacy compatibility and replay window |
 
-Every handoff supplies exact before/after hashes and focused validation. The lead resolves shared schema changes as one migration, preserves unrelated files and obtains a fresh review before committing meaningful changes. Do not reset, clean, stash or discard another writer's changes.
+Before this completion wave, boot was 10,719 production lines in 87 files; the new required mechanisms add code, the final implementation is 12,234 production lines across 99 TypeScript files. The review's approximate 7,250-line target is unmet. Most requested policy removals are implemented; the latest scout identified roughly 75–130 lines of further safe consolidation. Additional reduction requires a concrete ownership or coordination simplification, not deletion of safety checks to meet a number.
 
-## Remaining review work
+An optional request-event roster must label activity as last observed, because diagnostic event loss prevents exact presence reporting. Boot token use continues to update at authentication. Preserve this distinction in example documentation and acceptance claims.
 
-The numbered checklist in the scratchpad is authoritative. In addition to completing the active groups above:
+## Integration and acceptance sequence
 
-- Move the topic-move coordinator and re-runnable page moves into the app/extension; remove boot's ordinary-product request freeze. Boot retains event routing rewrites.
-- Reduce boot's remaining product policies: agent roster, QR dependency, SSE, hourly scheduling and preparation-cache complexity. Preserve the edit loop, editable dependencies/UI builds, auth and recovery mechanisms.
-- Add the retained missing capabilities: boot backup mechanism, signed restart, metrics and combined generation/database restore. Reconcile any remaining signed settings/reset or human-lock recovery requirements against the review before expanding scope.
-- Enforce the reviewed storage limits: 5% headroom, 20% backup cap, protected five-generation pruning, physical event retention, and safe outbox/receipt retention. Do not prune live or recovery-referenced evidence to satisfy a quota.
-- Finish durable operational events, bounded SQL execution, hung-child retirement and the concrete auth/startup/error simplifications. No generic helper or backend framework.
-- Remove boot reads of app domain tables and enforce that boundary with a source check once the policy move is complete.
-- Complete combined acceptance and Linux/container ownership, descendant closure and actual reboot verification. Database portability is a separate later design/PR.
+1. Integrate independently reviewed boot errors and human undo against the current checkout, preserving newer changes.
+2. Compose optional extensions and shared UI contracts; validate frozen standalone packaging and a small manual browser smoke.
+3. Compose rehearsal reporting, settings and physical quota with shared interfaces explicitly reviewed.
+4. Integrate deployment ownership and legacy migration, then verify actual container permissions, process closure, WAL and interrupted recovery in Linux CI. A container restart is not a kernel reboot.
+5. Complete bounded boot consolidation and receipt retention, then freshly review every numbered PR comment and remaining spec requirement.
+6. Run check/build and the full retained suite under actual Node22.22.3 with two workers. Push coherent verified commits to the existing PR and inspect Linux for the exact code; record remaining gaps honestly.
 
-The owner accepts that shell edits no longer auto-deploy or create watcher history, topic-page moves become re-runnable rather than atomic, a broken app scheduler can miss hourly backups, and app-owned SSE disconnects on replacement. Do not retain obsolete machinery to preserve those superseded guarantees.
+Each writer supplies a commit or exact hashes, owned files, focused evidence and a fresh review. Worker evidence is not combined-checkout acceptance. Stage explicit paths; never reset, clean, stash or discard unrelated work.
 
-The owner clarified reset semantics: **reset only editable source to seed; preserve messages, pages and identities**. Do not implement a database or identity wipe. Signed restart and the remaining core-domain ownership split are being implemented in isolated copies; combined source/database restore and source reset have separate bounded design work.
+## Final spec-conformance additions
+
+The final source audit found these explicit requirements beyond the initial review handoffs. They are being completed before the separate database track:
+
+| Addition | Current integration and acceptance |
+| --- | --- |
+| System topic view | Shipped metadata-only extension mirrors selected events with durable cursor and existing idempotency; private request diagnostics excluded. Focused restart/privacy tests pass. Combined durability assertions preserve original rows while accounting for derived system messages; the full suite passes. |
+| PWA | Authenticated manifest/icons and runtime/Docker staging integrated. Chrome persistent-profile installability checks pass; no service worker or offline cache. Native installation and iOS have not been exercised. |
+| Recovery UI | Signed lock breaking and source undo integrated. Immutable human-only recovery page remains usable with every retained child broken; compiled browser smoke restored the board. |
+| Development page reload | Launcher-only authorized page revision polling integrated; real dev smoke covers edits, CSP, auth expiry and simulated BFCache lifecycle. Asset-only changes do not trigger document reload. |
+| Reservation events | New reservations atomically emit one trailing diagnostic; app ranges and publication fences remain intact. Focused allocator/replay/overflow/retention tests pass. |
+| SSE reference | Bounded browser example refreshes snapshots on restore and never rewinds the durable event cursor to restored message data. Executable mock validation passes. |
+| Request tracing and Logger export | Scoped cross-process request spans, bounded annotations, Logger export and optional drain example are integrated. The optional drain uses the public event capability; its privacy/fixed-window tests pass. Final combined local acceptance passes; Linux acceptance remains pending. |
+
+Full combined code `5b36d55` passes check/build and **711/711 tests across 177 files**,487.37s, actual Node22.22.3/two workers. The subsequent `640d9f6` is a reviewed QEMU probe-only correction preserving every prior message row while isolating user-topic counts. Actual Linux image/QEMU results remain required before deployment acceptance. Earlier failed runs and focused corrections are recorded in the scratchpad.
+
+## Build completion after the base review
+
+Database portability is explicitly a separate PR after base review work (item 23 and SPEC §12). It remains part of the broader goal.
+
+| Order | Deliverable | Acceptance |
+| --- | --- | --- |
+| 1 | Audit remaining phases 0a, 1, 0b, 2, 3 and 4 against the revised spec | Real onboarding/conversation/edit loop, real-kernel cutover measurement, lifecycle/subscriptions/pages and mobile smoke; do not restore superseded watcher, boot SSE, atomic page moves or drills |
+| 2 | Store descriptor, engine-neutral copy/restore/capacity, dialect SQL and both migration ladders | SQLite stays green; boot knows no app domain table; restore preserves closure and authoritative-store selection |
+| 3 | PostgreSQL for both stores with separate roles | Pglite CI plus real-server concurrency/recovery, copied-data rehearsal, fresh-target restore and role isolation |
+| 4 | MySQL for both stores with compensation | Container tests for nontransactional DDL, absent RETURNING/partial indexes, migration/restart/restore and publication |
+| 5 | Board transfer between engines | Row-by-row transfer preserves identities/content/history and sequence rules; completion marker and source stamp enforce startup safety |
+
+Read the owner's detailed `docs/database.md` and its reviews before that track. Never mix engines between stores, hand boot credentials to a child, or claim backend acceptance from SQL compilation alone.
 
 ## Safety contracts
 
-Boot owns sequence allocation, one outstanding app reservation and the publication fence. App domain changes, outbox evidence and retry outcome commit together. Publish the complete reserved batch before mutation success or successful retry replay. Reads establish an SQL snapshot before capturing their fence and must not expose unpublished updates.
+Boot owns sequence allocation, the one outstanding app reservation and the publication fence. Domain changes, outbox evidence and retry outcome commit together. Publish the complete reserved batch before mutation success or successful replay. Reads establish a snapshot before capturing the fence and cannot expose unpublished updates.
 
-All retained writers use the shared epoch-fenced transaction protocol. Abort only after confirmed rollback or confirmed absence; a timeout, a defect or a mixed failure cause is not rollback evidence. Recovery must preserve full failure causes. Missing/conflicting evidence refuses mutation while boot authentication, status and safe source diagnostics remain available.
+Writers use the shared epoch-fenced transaction protocol. Abort only on confirmed rollback or absence; timeout, defects and mixed failure causes are not evidence. Uncertainty refuses mutation while authentication, status and safe source diagnostics remain available.
 
-Source staging and publication history remain durable. A source journal records before/desired bytes and modes; replay preserves conflicting external edits. Source diagnostics may inspect physical page files during unresolved page moves without claiming a consistent product transaction.
+Source journals retain before/desired bytes and modes independently of staging. Recovery preserves external conflicts. Keeper receipts prove owned process-group closure; PIDs, disconnected sockets and timeouts do not. Previous-kernel identity is proof only under the validated boot-identity contract. Pre-acceptance failure may restore its safety copy; post-acceptance recovery preserves newer acknowledged writes.
 
-A keeper's durable attempt-bound receipt proves owner exit. PIDs, disconnected sockets and timeouts do not. Linux boot identity can prove a prior-kernel owner is gone only under the validated kernel-identity contract. Close owners before replacing the database. Pre-acceptance failure may restore its safety copy; post-acceptance recovery must preserve newer acknowledged writes.
+Boot strips credentials and supplied identity headers and guards child control. Sensitive human actions bind fresh proof to canonical parameters. Invalid bearer credentials never fall back to cookies. Public grants cover exact containing directories, become visible with publication, and rebuild from the authoritative restored store before anonymous admission.
 
-Boot strips credentials and supplied identity headers, forwards only verified identity, and guards child control. Sensitive human actions bind fresh passkey proof to canonical parameters. Explicit invalid bearer credentials never fall back to cookies. Recovery fixes must not weaken these boundaries.
+## Testing and reporting
 
-Public grants are exact containing-directory grants; parents do not implicitly expose child topics/assets. Grant/revoke must become visible with publication. Database replacement clears stale grants and rebuilds from the authoritative restored app before public admission. Ordinary unrelated publication must not make an already-public page return 503.
+Boot/auth/durability tests cover failures, concurrency, restart, real processes, ownership, lost writes and restore. Server tests focus on durable transactions, receipt migration/replay, snapshot visibility, schemas, authorization and cursors. UI acceptance is check/build and a few manual critical-flow and visual smokes; no blanket UI suite.
 
-## Testing and evidence
-
-| Area | Required effort |
-| --- | --- |
-| Boot/auth/recovery | Strong failure, concurrency, restart and real-process tests for ownership, lost writes, source recovery, restore and credentials |
-| Server protocol/API | Focused durable mutation, receipt migration/replay, snapshot visibility, schema validation, authorization and cursor/wait behavior |
-| UI | Check/build and a few manual critical-flow/visual smokes; no new UI test suite or styling snapshots |
-| Packaging | Real Linux permission, process-tree, WAL, restart and restore evidence before claiming isolation |
-
-Run `bun run check` after code changes and relevant tests for behavior. Close a combined wave with builds and a full retained suite; avoid broad reruns without a changed or unresolved concern.
-
-Earlier recovery-wave browser/compiled acceptance tested stronger watcher/topic-page/SSE behavior that is now being removed. It is historical evidence, not acceptance for the final review changes. Latest exact test counts, failures and CI links belong in the scratchpad and PR body. No deployment, merge or full completion is claimed.
+Run `bun run check` after code changes and relevant behavior tests. Close each combined wave with build and full retained tests. Repeat or broaden testing when changes, failures or unresolved concerns justify it. Report exact code, runtimes, worker count, totals and CI links; distinguish isolated evidence from integrated acceptance. Do not claim deployment, merge or full review resolution without evidence.
