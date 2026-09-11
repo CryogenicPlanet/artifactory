@@ -11,10 +11,11 @@ for (const expires of [false, true])
 		const seed = join(fixture.root, "seed");
 		await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
 		// Give this test's admitted upload a longer body deadline than boot's drain.
-		const conversationSource = await readFile(join(seed, "conversation.ts"), "utf8");
+		const bodySource = await readFile(join(seed, "request-schema.ts"), "utf8");
+		expect(bodySource).toContain('Effect.timeout("5 seconds")');
 		await writeFile(
-			join(seed, "conversation.ts"),
-			conversationSource.replace('Effect.timeout("5 seconds")', 'Effect.timeout("30 seconds")'),
+			join(seed, "request-schema.ts"),
+			bodySource.replace('Effect.timeout("5 seconds")', 'Effect.timeout("30 seconds")'),
 		);
 		const app = await fixture.launch(join(seed, "server.ts"));
 		await app.setup();
@@ -25,8 +26,8 @@ for (const expires of [false, true])
 		const changed = expires
 			? source
 			: source.replace(
-					"yield* initialize;",
-					'yield* initialize; if (lifecycle.initial === "candidate") yield* Effect.sleep("4 seconds");',
+					"yield* initialize;\n\t\t\t\tyield* migrate",
+					'yield* initialize; if (lifecycle.initial === "candidate") yield* Effect.sleep("4 seconds");\n\t\t\t\tyield* migrate',
 				);
 		if (!expires) expect(changed).not.toBe(source);
 		expect(

@@ -25,10 +25,11 @@ const program = Effect.gen(function* () {
 			let failed = false;
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
 			const channel: BootChannel["Service"] = {
-				agents: Effect.succeed({ items: [] }),
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 1,
+				changed: (after) =>
+					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
 					Effect.map((state) => ({ published_through: state.published_through })),
 					Effect.mapError(unavailable),
@@ -132,11 +133,8 @@ const program = Effect.gen(function* () {
 					assert.deepEqual(yield* messages.deleteTopic(who, "project", "delete"), deleted);
 					assert.equal((yield* sql`SELECT id FROM messages WHERE id=${initial.id}`).length, 1);
 					assert.equal((yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL`).length, 1);
-					assert.equal(
-						(yield* sql`SELECT seq FROM outbox WHERE json_extract(event,'$.type')='topic.deleted'`).length,
-						1,
-					);
-					assert.equal((yield* sql`SELECT seq FROM outbox WHERE shipped_at IS NULL`).length, 0);
+					assert.equal((yield* events.query({ since: 0, limit: 100, types: ["topic.deleted"] })).items.length, 1);
+					assert.equal((yield* sql`SELECT seq FROM outbox`).length, 0);
 					yield* sql`UPDATE kernel_writer SET epoch='replacement'`;
 					yield* reject(messages.deleteTopic(who, "project", "delete"), "stale_writer");
 					yield* Console.log("DELETE_RECOVERED");

@@ -1,5 +1,6 @@
 import { Schema } from "effect";
-import { validTopic } from "../../kernel/messages.ts";
+const validTopic = (topic: string) =>
+	topic.length <= 200 && /^@?[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(topic);
 
 export class SubscriptionError extends Schema.TaggedError<SubscriptionError>()("SubscriptionError", {
 	code: Schema.String,

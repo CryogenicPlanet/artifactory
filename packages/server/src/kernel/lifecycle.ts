@@ -1,4 +1,4 @@
-import { Config, Context, Effect, Layer, Ref, Semaphore } from "effect";
+import { Config, Context, Deferred, Effect, Layer, Ref, Semaphore } from "effect";
 
 export type State = "starting" | "rehearsal" | "candidate" | "accepted" | "live" | "frozen" | "draining";
 const make = Effect.gen(function* () {
@@ -8,6 +8,7 @@ const make = Effect.gen(function* () {
 	return {
 		initial,
 		state: yield* Ref.make<State>(initial),
+		drained: yield* Deferred.make<void>(),
 		mutations: yield* Ref.make(0),
 		requests: yield* Ref.make(0),
 		healthy: yield* Ref.make(false),

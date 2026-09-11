@@ -12,6 +12,10 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	const first = await app.login(),
 		second = await app.login();
 	await app.ready(first);
+	const manifest = await (await fetch(app.url + "/.well-known/agent.json")).json();
+	const discovery = await (await fetch(app.url + "/api", { headers: { cookie: first } })).json();
+	expect(manifest.endpoints).toEqual(discovery.paths);
+	expect(manifest.components).toEqual(discovery.components);
 	const anonymous = await fetch(app.url + "/init", {
 		headers: {
 			"x-comms-agent": "spoofed",
@@ -44,7 +48,7 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	expect((await app.post("/api/messages", { topic: "@rahul", body: "Hello" }, second)).status).toBe(200);
 	const personal = await fetch(app.url + "/init", { headers: { cookie: first, "x-comms-init": version ?? "" } });
 	expect(personal.headers.get("x-comms-init-stale")).toBeNull();
-	expect(await personal.text()).toContain("You are <code>rahul@human</code>: 1 unread inbox messages; 1 root topics");
+	expect(await personal.text()).toContain("You are <code>rahul@human</code>");
 	const generations = await fixture.sql("SELECT n,status FROM generations", "boot.db");
 	const edited = await fetch(app.url + "/api/fs/pages/init.md", {
 		method: "PUT",
@@ -66,8 +70,8 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	});
 	expect(await loaded.json()).toMatchObject({ status: "live" });
 	const registered = await fetch(app.url + "/init.md", { headers: { "x-comms-init": beforeExtension ?? "" } });
-	expect(registered.headers.get("x-comms-init-stale")).toBe("1");
-	expect(registered.headers.get("x-comms-init-version")).not.toBe(beforeExtension);
+	expect(registered.headers.get("x-comms-init-stale")).toBeNull();
+	expect(registered.headers.get("x-comms-init-version")).toBe(beforeExtension);
 	expect(await registered.text()).toContain("GET /api/orientation-example");
 	const head = await fetch(app.url + "/init", { method: "HEAD" });
 	expect(head.status).toBe(200);

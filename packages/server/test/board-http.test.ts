@@ -15,6 +15,13 @@ it("serves a private compiled board from its generation and confines SPA fallbac
 		"--packages=external",
 		`--outdir=${seed}`,
 	]);
+	await promisify(execFile)("bun", [
+		"build",
+		join(import.meta.dirname, "../src/ext/core.ts"),
+		"--target=bun",
+		"--packages=external",
+		`--outdir=${join(seed, "ext")}`,
+	]);
 	await mkdir(join(seed, "board/assets"), { recursive: true });
 	const html = '<!doctype html><title>Snapshot board</title><script src="/assets/board.js"></script>';
 	await writeFile(join(seed, "board/index.html"), html);

@@ -97,7 +97,7 @@ export async function conversation(test: TestContext) {
 				).status,
 			).toBe(200);
 		};
-		const ready = async (cookie: string) => {
+		const ready = async (cookie: string, timeout = 15000) => {
 			await expect
 				.poll(
 					async () => {
@@ -107,7 +107,7 @@ export async function conversation(test: TestContext) {
 						)(await response.json());
 						return value.child.state === "failed" ? value.child.error : value.child.state;
 					},
-					{ timeout: 15000 },
+					{ timeout },
 				)
 				.toBe("live");
 		};

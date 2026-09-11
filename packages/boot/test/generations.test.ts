@@ -30,7 +30,7 @@ const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) 
  if (request.headers.get("x-boot-secret") !== process.env.BOOT_SECRET) return new Response(null, { status: 403 });
  const path = new URL(request.url).pathname;
  if (path === "/_kernel/control") return new Response("ok");
- if (path === "/health") return new Response("ok",{headers:{"x-comms-writer-epoch":process.env.WRITER_EPOCH??"","x-comms-kernel-protocol":"2"}});
+ if (path === "/health" || path === "/_kernel/ping") return new Response("ok",{headers:{"x-comms-writer-epoch":process.env.WRITER_EPOCH??"","x-comms-kernel-protocol":"2"}});
  if (path === "/crash") { setTimeout(() => process.exit(7), 10); return new Response("exiting"); }
  return Response.json({ message, content: await Bun.file("content.txt").text(), generation: process.env.GENERATION });
 }});
@@ -305,13 +305,14 @@ await helper.exited;
 		await sql(env.data, "DROP TABLE staging");
 		await sql(env.data, "DROP TABLE edit_lock");
 		await removeSourceSchema(env.data);
+		await sql(env.data, "DROP TABLE public_paths");
 		await sql(env.data, "PRAGMA user_version = 1");
 		await rm(join(env.data, "app"), { recursive: true });
 		await rm(env.seed, { recursive: true });
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 13 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 14 }]);
 		expect(await sql(env.data, "SELECT value FROM settings WHERE key = 'app_seeded'")).toEqual([{ value: "1" }]);
 	}, 15000);
 
@@ -326,11 +327,12 @@ await helper.exited;
 		await sql(env.data, "DROP TABLE staging");
 		await sql(env.data, "DROP TABLE edit_lock");
 		await removeSourceSchema(env.data);
+		await sql(env.data, "DROP TABLE public_paths");
 		await sql(env.data, "PRAGMA user_version = 2");
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 13 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 14 }]);
 		expect(await sql(env.data, "SELECT value FROM settings WHERE key = 'app_seeded'")).toEqual([{ value: "1" }]);
 		expect(await sql(env.data, "SELECT * FROM edit_lock")).toEqual([]);
 	}, 15000);
@@ -345,6 +347,7 @@ await helper.exited;
 		await sql(env.data, "DROP TABLE sessions");
 		await removeSourceSchema(env.data);
 		await sql(env.data, "ALTER TABLE staging DROP COLUMN mode");
+		await sql(env.data, "DROP TABLE public_paths");
 		await sql(env.data, "PRAGMA user_version = 3");
 		await sql(
 			env.data,
@@ -356,7 +359,7 @@ await helper.exited;
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 13 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 14 }]);
 		expect(await sql(env.data, "SELECT id, holder_family FROM edit_lock")).toEqual([
 			{ id: "saved-lock", holder_family: "family-one" },
 		]);
@@ -382,10 +385,11 @@ await helper.exited;
 		await sql(env.data, "INSERT INTO staging VALUES ('saved-lock','app/old.ts',NULL,NULL,0)");
 		const sessions = await sql(env.data, "SELECT id,hash,expires_at FROM sessions");
 		await sql(env.data, "ALTER TABLE sessions DROP COLUMN last_seen_at");
+		await sql(env.data, "DROP TABLE public_paths");
 		await sql(env.data, "PRAGMA user_version = 4");
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child.state).toBe("live");
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 13 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 14 }]);
 		expect(await sql(env.data, "SELECT id,counter,label FROM passkeys")).toEqual([
 			{ id: "saved-key", counter: 4, label: "laptop" },
 		]);

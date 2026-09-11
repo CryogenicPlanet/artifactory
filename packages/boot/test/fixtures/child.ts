@@ -17,7 +17,7 @@ export function serve(mode: string) {
 			if (request.headers.get("x-boot-secret") !== secret) return new Response(null, { status: 403 });
 			const url = new URL(request.url);
 			if (url.pathname === "/_kernel/control") return new Response("ok");
-			if (url.pathname === "/health")
+			if (url.pathname === "/health" || url.pathname === "/_kernel/ping")
 				return new Response("ok", {
 					status: mode === "unhealthy" ? 500 : 200,
 					headers: { "x-comms-writer-epoch": process.env.WRITER_EPOCH ?? "", "x-comms-kernel-protocol": "2" },

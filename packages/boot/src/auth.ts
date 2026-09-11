@@ -12,7 +12,6 @@ import {
 import { Clock, Console, Context, Crypto, Effect, Layer, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { makeEnrollment, type AssertionProof } from "./enrollment.ts";
-import { roster } from "./agent-roster.ts";
 import { makeAccountQueries } from "./account-queries.ts";
 import { makePasskeyManagement } from "./passkey-management.ts";
 import {
@@ -348,7 +347,6 @@ const makeAuth = (config: AuthConfig) =>
 		const accounts = yield* makeAccountQueries;
 		return {
 			...accounts,
-			roster: roster(sql),
 			...enrollment,
 			...tokens,
 			...passkeys,

@@ -1,10 +1,12 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Database } from "bun:sqlite";
-import { Console, Deferred, Effect, FileSystem, Fiber, Layer, Semaphore } from "effect";
+import { Console, Deferred, Effect, FileSystem, Fiber, Layer, Ref, Schema, Semaphore } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
+import { SqlClient } from "effect/unstable/sql";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { Events, layer as eventsLayer } from "../../src/events.ts";
 import { PublicPages, layer } from "../../src/public-pages.ts";
+import type { Destination } from "../../src/traffic.ts";
 
 const main = Effect.gen(function* () {
 	const root = process.argv[2];
@@ -12,24 +14,47 @@ const main = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem;
 	yield* fs.makeDirectory(`${root}/pages/guide`, { recursive: true });
 	yield* fs.writeFileString(`${root}/pages/guide/file.md`, "# Guide");
-	const create = (isPublic: boolean) => {
-		const database = new Database(`${root}/comms.db`);
-		try {
-			database.exec("CREATE TABLE topics(path TEXT,parent TEXT,meta TEXT,deleted_at INTEGER,archived_at INTEGER)");
-			database
-				.query("INSERT INTO topics VALUES('guide','','{\"public\":' || ? || '}',NULL,NULL)")
-				.run(isPublic ? "true" : "false");
-		} finally {
-			database.close();
-		}
-	};
-	create(true);
+	let denied = false;
+	const app = yield* Effect.acquireRelease(
+		Effect.sync(() =>
+			Bun.serve({
+				hostname: "127.0.0.1",
+				port: 0,
+				async fetch(request) {
+					if (
+						request.headers.get("x-boot-secret") !== "fixture" ||
+						Array.from(request.headers.keys()).some((name) => name.startsWith("x-comms-"))
+					)
+						return new Response(null, { status: 403 });
+					const input = Schema.decodeUnknownSync(
+						Schema.Struct({ paths: Schema.Array(Schema.String), published_through: Schema.Int }),
+					)(await request.json());
+					return Response.json(
+						denied ? { allowed: false, code: "topic_deleted", path: input.paths[0] } : { allowed: true },
+					);
+				},
+			}),
+		),
+		(server) => Effect.promise(() => server.stop(true)),
+	);
+	const route = yield* Ref.make<Destination | null>({
+		secret: "fixture",
+		epoch: "fixture",
+		host: "127.0.0.1",
+		generation: 1,
+		state: "live",
+		port: app.port ?? 0,
+		pid: process.pid,
+		snapshot: root,
+	});
 	const operationGate = yield* Semaphore.make(1),
 		channelGate = yield* Semaphore.make(1);
 	return yield* Effect.gen(function* () {
 		yield* initializeBootSchema;
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql`INSERT INTO public_paths VALUES ('guide')`;
 		const policy = yield* PublicPages.pipe(
-			Effect.provide(layer(root, operationGate, channelGate).pipe(Layer.provide(eventsLayer))),
+			Effect.provide(layer(root, operationGate, channelGate, route).pipe(Layer.provide(eventsLayer))),
 		);
 		const events = yield* Events.pipe(Effect.provide(eventsLayer));
 		yield* events.reserve("pending-page-admission", 1, "fixture");
@@ -71,26 +96,11 @@ const main = Effect.gen(function* () {
 			.pipe(Effect.timeout("25 millis"), Effect.result);
 		yield* Deferred.succeed(writeRelease, undefined);
 		yield* Fiber.join(writing);
-		const update = (statement: string) => {
-			const database = new Database(`${root}/comms.db`);
-			try {
-				database.exec(statement);
-			} finally {
-				database.close();
-			}
-		};
-		update("UPDATE topics SET deleted_at=1 WHERE path='guide'");
+		denied = true;
+		yield* sql`DELETE FROM public_paths`;
 		const deleted = (yield* policy.check("/p/guide/file.md")) === null;
-		const refused = yield* policy.withWrite(["pages/guide/new.md"], Effect.succeed("must not run")).pipe(Effect.result);
-		update("UPDATE topics SET deleted_at=NULL WHERE path='guide'");
-		yield* operationGate.withPermit(
-			Effect.gen(function* () {
-				yield* fs.rename(`${root}/comms.db`, `${root}/old.db`);
-				create(false);
-			}),
-		);
+		const refused = yield* policy.withWrite(["pages/guide/new.md"], publish).pipe(Effect.result);
 		const replacement = (yield* policy.check("/p/guide/file.md")) !== null;
-		yield* fs.remove(`${root}/comms.db`);
 		const missing = yield* policy.check("/p/guide/file.md").pipe(Effect.result);
 		return {
 			beforeSettlement,
@@ -110,7 +120,9 @@ const main = Effect.gen(function* () {
 	}).pipe(Effect.provide(SqliteClient.layer({ filename: `${root}/boot.db`, disableWAL: true })));
 }).pipe(
 	Effect.scoped,
-	Effect.provide(BunServices.layer),
-	Effect.flatMap((value) => Console.log(JSON.stringify(value))),
+	Effect.provide(Layer.mergeAll(BunServices.layer, FetchHttpClient.layer)),
+	Effect.flatMap((value) =>
+		Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(Effect.flatMap(Console.log)),
+	),
 );
 main.pipe(BunRuntime.runMain);

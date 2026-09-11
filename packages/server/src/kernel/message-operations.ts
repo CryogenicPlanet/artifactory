@@ -1,7 +1,8 @@
-import { type Crypto, DateTime, Effect, Schema } from "effect";
+import { DateTime, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { type BootChannel, EventRecord, KernelError } from "./boot-channel.ts";
-import { writerGate } from "./database.ts";
+import { type BootChannel, KernelError } from "./boot-channel.ts";
+import { mentionsIn } from "./message-mentions.ts";
+import type { Mutate } from "./mutate.ts";
 import { type Identity, Message, MessageInput, StoredMessage } from "./messages.ts";
 
 export const MessagePatch = Schema.Struct({
@@ -11,11 +12,10 @@ export const MessagePatch = Schema.Struct({
 });
 
 // Called under Messages' permit through SQL commit and immediate outbox publication.
-export const mutateMessage = <E>(
+export const mutateMessage = (
 	sql: SqlClient,
-	crypto: Crypto.Crypto,
+	mutate: Mutate,
 	boot: BootChannel["Service"],
-	relay: Effect.Effect<void, E>,
 	identity: Identity,
 	id: string,
 	input: typeof MessagePatch.Type | null,
@@ -23,7 +23,8 @@ export const mutateMessage = <E>(
 ) =>
 	Effect.gen(function* () {
 		if (
-			!/^m_[a-z0-9]+$/.test(id) ||
+			!/^m_[a-z0-9]+$|^[1-9][0-9]*$/.test(id) ||
+			(/^[0-9]+$/.test(id) && !Number.isSafeInteger(Number(id))) ||
 			(key !== undefined && (key.length < 1 || key.length > 200)) ||
 			(input !== null &&
 				(Object.keys(input).length === 0 ||
@@ -33,50 +34,41 @@ export const mutateMessage = <E>(
 					input.tags?.some((tag) => tag.length > 100)))
 		)
 			return yield* new KernelError({ code: "input_invalid" });
-		yield* relay;
 		const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))({
 			method: input === null ? "DELETE" : "PATCH",
 			id,
 			input,
 		});
-		const transaction = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
 		const now = (yield* DateTime.nowAsDate).getTime();
-		let reserved = false;
-		const result = yield* sql
-			.withTransaction(
+		return yield* mutate({
+			...(key === undefined
+				? {}
+				: {
+						idempotency: {
+							instance: identity.instance,
+							key,
+							kind: input === null ? "message.deleted" : "message.edited",
+							input: encoded,
+							outcome: Schema.fromJsonString(Message),
+						},
+					}),
+			body: (reserve) =>
 				Effect.gen(function* () {
-					yield* writerGate(sql, boot.epoch);
-					const rows = yield* sql`SELECT * FROM messages WHERE id=${id}`.pipe(
-						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(StoredMessage))),
-					);
+					const rows =
+						yield* sql`SELECT * FROM messages WHERE id=${id} OR seq=${/^[0-9]+$/.test(id) ? Number(id) : -1}`.pipe(
+							Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(StoredMessage))),
+						);
 					const previous = rows[0];
 					if (!previous) return yield* new KernelError({ code: "message_not_found" });
 					if (identity.kind !== "human" && identity.instance !== previous.instance)
 						return yield* new KernelError({ code: "author_required" });
-					if (key !== undefined) {
-						const receipts =
-							yield* sql`SELECT input,outcome FROM idempotency WHERE instance=${identity.instance} AND key=${key}`.pipe(
-								Effect.flatMap(
-									Schema.decodeUnknownEffect(
-										Schema.Array(Schema.Struct({ input: Schema.String, outcome: Schema.fromJsonString(Message) })),
-									),
-								),
-							);
-						if (receipts[0]) {
-							if (receipts[0].input !== encoded) return yield* new KernelError({ code: "idempotency_conflict" });
-							return receipts[0].outcome;
-						}
-					}
+
 					const deleted =
 						yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${previous.topic} OR substr(${previous.topic},1,length(path)+1)=path||'/') LIMIT 1`;
 					if (deleted.length > 0) return yield* new KernelError({ code: "topic_not_found" });
 					if (previous.deleted_at !== null) {
 						if (input === null) {
-							if (key !== undefined) {
-								const outcome = yield* Schema.encodeEffect(Schema.fromJsonString(Message))(previous);
-								yield* sql`INSERT INTO idempotency VALUES(${identity.instance},${key},${encoded},${id},(SELECT transaction_id FROM outbox WHERE seq=(SELECT updated_seq FROM messages WHERE id=${id})),${outcome})`;
-							}
-							return previous;
+							return { outcome: previous, events: [] };
 						}
 						return yield* new KernelError({ code: "message_not_found" });
 					}
@@ -89,13 +81,11 @@ export const mutateMessage = <E>(
 						if (new TextEncoder().encode(content).byteLength > 131072)
 							return yield* new KernelError({ code: "input_invalid" });
 					}
-					reserved = true;
-					const range = yield* boot.reserve(transaction, 1);
-					const outcome = yield* Schema.encodeEffect(Schema.fromJsonString(Message))(message);
+					const range = yield* reserve(1);
 					const before = yield* Schema.encodeEffect(Schema.fromJsonString(Message))(previous);
 					const tags = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(message.tags);
 					const meta = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))(message.meta);
-					yield* sql`UPDATE messages SET body=${message.body},tags=${tags},meta=${meta},edited_at=${message.edited_at},deleted_at=${message.deleted_at},updated_seq=${range.from},previous=${before} WHERE id=${id}`;
+					yield* sql`UPDATE messages SET body=${message.body},tags=${tags},meta=${meta},edited_at=${message.edited_at},deleted_at=${message.deleted_at},updated_seq=${range.from},previous=${before},previous_mentions=mentions,mentions=${JSON.stringify(mentionsIn(message.body))} WHERE id=${previous.id}`;
 					const event = {
 						seq: range.from,
 						at: now,
@@ -106,26 +96,10 @@ export const mutateMessage = <E>(
 						generation: boot.generation,
 						request_id: identity.request,
 						topic: previous.topic,
-						message_id: id,
+						message_id: previous.id,
 						payload: message,
 					};
-					const eventJson = yield* Schema.encodeEffect(Schema.fromJsonString(EventRecord))(event);
-					yield* sql`INSERT INTO mutation_batches VALUES(${transaction},${range.from},${range.to},1)`;
-					yield* sql`INSERT INTO outbox VALUES(${range.from},${transaction},${eventJson},NULL)`;
-					if (key !== undefined)
-						yield* sql`INSERT INTO idempotency VALUES(${identity.instance},${key},${encoded},${id},${transaction},${outcome})`;
-					return message;
+					return { outcome: message, events: [event] };
 				}),
-			)
-			.pipe(Effect.result);
-		if (result._tag === "Failure") {
-			// Typed failures confirm rollback; uncertain commit/rollback defects remain for fenced recovery.
-			if (reserved) {
-				yield* boot.reserve(transaction, 1);
-				yield* boot.abort(transaction);
-			}
-			return yield* result.failure;
-		}
-		yield* relay;
-		return result.success;
-	}).pipe(Effect.uninterruptible);
+		});
+	});

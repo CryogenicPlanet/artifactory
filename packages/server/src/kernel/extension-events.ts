@@ -25,13 +25,14 @@ export const runEvents = <E>(
 				continue;
 			}
 			const page = result.success;
+			if (!Number.isSafeInteger(page.cursor) || page.cursor < since)
+				return yield* new KernelError({ code: "event_cursor_invalid" });
 			let previous = since;
 			for (const event of page.items) {
 				if (!Number.isSafeInteger(event.seq) || event.seq <= previous || event.seq > page.cursor)
 					return yield* new KernelError({ code: "event_cursor_invalid" });
 				previous = event.seq;
 			}
-			if (page.cursor !== previous) return yield* new KernelError({ code: "event_cursor_invalid" });
 			for (const event of page.items) {
 				for (const hook of hooks) {
 					if (
@@ -46,6 +47,8 @@ export const runEvents = <E>(
 				// Commit only after every callback succeeded. Interruption/failure may replay this event.
 				yield* Ref.set(cursor, event.seq);
 			}
+			// Exhausted filtered pages also acknowledge sequence values that did not match.
+			yield* Ref.set(cursor, page.cursor);
 			if (page.items.length === 0) yield* Effect.sleep("100 millis");
 		}
 	});

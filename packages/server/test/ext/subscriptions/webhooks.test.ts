@@ -164,31 +164,32 @@ it("requires read and write, isolates ownership, and never delivers another agen
 	);
 	expect(await (await call("/api/subscriptions", other.access)).json()).toEqual({ items: [] });
 	expect((await call(`/api/subscriptions/${subscription.id}`, other.access, "DELETE")).status).toBe(404);
-	for (const [seq, actor] of [
-		[1000, "claude"],
-		[1001, "codex"],
-		[1002, "claude"],
-	] as const) {
-		const event = {
-			seq,
-			at: 1,
-			type: "http.request",
-			level: "info",
-			actor,
-			instance: null,
-			generation: 1,
-			request_id: null,
-			topic: null,
-			message_id: null,
-			payload: { request: "private fixture" },
-		};
-		await fixture.sql(`INSERT INTO events(seq,event) VALUES(${seq},'${JSON.stringify(event)}')`, "boot.db");
-	}
-	await fixture.sql("UPDATE seq SET next=1003,published_through=1002", "boot.db");
-	await expect.poll(() => fixture.sql("SELECT cursor FROM webhook_subscriptions")).toEqual([{ cursor: 1002 }]);
+	// Real requests publish audit records and wake the shared publication signal.
+	for (const access of [other.access, owner.access, other.access])
+		expect((await call("/api/me", access)).status).toBe(200);
+	const auditRows = async () =>
+		Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ seq: Schema.Int, actor: Schema.String })))(
+			await fixture.sql(
+				`SELECT seq,json_extract(event,'$.actor') AS actor FROM events WHERE seq>${subscription.since} AND json_extract(event,'$.type')='http.request' AND json_extract(event,'$.payload.path')='/api/me' ORDER BY seq`,
+				"boot.db",
+			),
+		);
+	await expect.poll(async () => (await auditRows()).length).toBe(3);
+	const published = await auditRows();
+	const last = published.at(-1);
+	if (!last) throw Error("Missing published audit records");
+	await expect
+		.poll(
+			async () =>
+				Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ cursor: Schema.Int })))(
+					await fixture.sql("SELECT cursor FROM webhook_subscriptions"),
+				)[0]?.cursor ?? 0,
+		)
+		.toBeGreaterThanOrEqual(last.seq);
 	expect(target.received.length).toBeGreaterThan(0);
 	expect(target.received.every((item) => item.body.event.actor === "codex")).toBe(true);
-	expect(target.received.map((item) => item.body.event.seq)).toContain(1001);
+	for (const audit of published.filter((item) => item.actor === "codex"))
+		expect(target.received.map((item) => item.body.event.seq)).toContain(audit.seq);
 	expect(
 		(
 			await fetch(app.url + `/api/subscriptions/${subscription.id}`, {
@@ -215,22 +216,13 @@ it("does not send after a durable unpublished deletion or after the writer epoch
 			)
 		).json(),
 	);
-	await fixture.sql(`UPDATE webhook_subscriptions SET deleted_seq=1001 WHERE id='${subscription.id}'`);
-	const event = {
-		seq: 1000,
-		at: 1,
-		type: "message.created",
-		level: "info",
-		actor: "codex",
-		instance: null,
-		generation: 1,
-		request_id: null,
-		topic: "guard",
-		message_id: "m_fixture",
-		payload: { body: "published fixture" },
-	};
-	await fixture.sql(`INSERT INTO events(seq,event,topic) VALUES(1000,'${JSON.stringify(event)}','guard')`, "boot.db");
-	await fixture.sql("UPDATE seq SET next=1002,published_through=1000", "boot.db");
+	// Model a committed deletion whose public event is still beyond the fence.
+	await fixture.sql(`UPDATE webhook_subscriptions SET deleted_seq=1000000000 WHERE id='${subscription.id}'`);
+	const message = Schema.decodeUnknownSync(Schema.Struct({ seq: Schema.Int }))(
+		await (
+			await app.post("/api/messages", { topic: "guard", body: "published while delivery is suppressed" }, cookie)
+		).json(),
+	);
 	await delay(350);
 	expect(target.received).toEqual([]);
 	const original = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ epoch: Schema.String })))(
@@ -239,12 +231,14 @@ it("does not send after a durable unpublished deletion or after the writer epoch
 	if (!original) throw Error("Missing writer epoch");
 	await fixture.sql("UPDATE kernel_writer SET epoch='fenced-test'");
 	await fixture.sql(`UPDATE webhook_subscriptions SET deleted_seq=NULL WHERE id='${subscription.id}'`);
+	// The direct fault injection does not emit; a normal request wakes delivery while the epoch is revoked.
+	expect((await fetch(app.url + "/api/me", { headers: { cookie } })).status).toBe(200);
 	await delay(350);
 	expect(target.received).toEqual([]);
 	expect(await fixture.sql("SELECT cursor FROM webhook_subscriptions")).toEqual([{ cursor: subscription.since }]);
 	await fixture.sql(`UPDATE kernel_writer SET epoch='${original.epoch}'`);
-	await expect.poll(() => fixture.sql("SELECT cursor FROM webhook_subscriptions")).toEqual([{ cursor: 1000 }]);
-	expect(target.received.map((item) => item.body.event.seq)).toEqual([1000]);
+	await expect.poll(() => fixture.sql("SELECT cursor FROM webhook_subscriptions")).toEqual([{ cursor: message.seq }]);
+	expect(target.received.map((item) => item.body.event.seq)).toEqual([message.seq]);
 }, 15000);
 
 it("aborts live delivery during cutover, emits no rehearsal callbacks, and resumes the durable cursor afterward", async (test) => {

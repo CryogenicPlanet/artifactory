@@ -1,5 +1,6 @@
+import { publicPathsSchema } from "./public-paths.ts";
 import { databaseRestoreSchema } from "./database-restore-journal.ts";
-import { eventRoutingSchema } from "./event-routing-schema.ts";
+import { eventFilterSchema, eventRoutingSchema } from "./event-routing-schema.ts";
 import { topicMoveSchema } from "./topic-move-schema.ts";
 import { topicPageMoveSchema } from "./topic-page-move-schema.ts";
 import { Effect, Schema } from "effect";
@@ -30,10 +31,10 @@ export const initializeBootSchema = Effect.gen(function* () {
 	);
 	const version = versions[0]?.user_version;
 	if (version === undefined) return yield* Effect.die("Missing boot schema version");
-	if (version > 13) return yield* new BootSchemaTooNew({ found: version, supported: 13 });
+	if (version > 14) return yield* new BootSchemaTooNew({ found: version, supported: 14 });
 	yield* sql`PRAGMA journal_mode = WAL`;
 	yield* sql`PRAGMA synchronous = FULL`;
-	if (version === 13) return;
+	if (version === 14) return;
 	yield* sql.withTransaction(
 		Effect.gen(function* () {
 			if (version === 0)
@@ -80,7 +81,11 @@ export const initializeBootSchema = Effect.gen(function* () {
 				yield* topicPageMoveSchema;
 				yield* sourceTreeSchema;
 			}
-			yield* sql`PRAGMA user_version = 13`;
+			if (version < 14) {
+				yield* eventFilterSchema;
+				yield* publicPathsSchema(sql);
+			}
+			yield* sql`PRAGMA user_version = 14`;
 		}),
 	);
 });

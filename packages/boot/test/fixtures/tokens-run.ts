@@ -265,6 +265,16 @@ const run = Effect.gen(function* () {
 			yield* sql`DROP TABLE refresh_idempotency`;
 			for (const table of ["child_attempts", "backups", "cutover"]) yield* sql.unsafe(`DROP TABLE ${table}`);
 			yield* sql`ALTER TABLE sessions DROP COLUMN last_seen_at`;
+			yield* sql`DROP TABLE public_paths`;
+			yield* sql`DROP INDEX events_type_seq`;
+			yield* sql`DROP INDEX events_actor_seq`;
+			yield* sql`DROP INDEX events_instance_seq`;
+			yield* sql`DROP INDEX events_level_seq`;
+			yield* sql`DROP INDEX events_topic_seq`;
+			yield* sql`ALTER TABLE events DROP COLUMN type`;
+			yield* sql`ALTER TABLE events DROP COLUMN actor`;
+			yield* sql`ALTER TABLE events DROP COLUMN instance`;
+			yield* sql`ALTER TABLE events DROP COLUMN level`;
 			yield* sql`ALTER TABLE events DROP COLUMN topic`;
 			yield* sql`DROP TABLE topic_moves`;
 			yield* sql`DROP TABLE topic_page_moves`;
@@ -281,7 +291,7 @@ const run = Effect.gen(function* () {
 					yield* sql.unsafe(`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : "*"} FROM ${table}`),
 				);
 			assert.deepEqual(after, before);
-			assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 13 }]);
+			assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 14 }]);
 			yield* auth.refreshTokens(original.refresh);
 		}
 	});

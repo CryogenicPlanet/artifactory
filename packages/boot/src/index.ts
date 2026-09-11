@@ -43,6 +43,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const publicPages = yield* Ref.make<PublicPages["Service"] | null>(null);
 	const backups = yield* Ref.make<BackupInventory | null>(null);
 	const requests = yield* requestEvents(events);
+	const stopping = yield* Ref.make(false);
+	const shutdown = yield* Ref.make<Effect.Effect<void>>(Effect.void);
 	const moves = yield* Ref.make<TopicMove | null>(null);
 	const sourceServices = sourceLayer(options.dataDirectory).pipe(Layer.provideMerge(editLockLayer));
 	const movePagesServices = topicPageMoveLayer(options.dataDirectory).pipe(Layer.provideMerge(sourceServices));
@@ -58,6 +60,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 				yield* Ref.set(auth, yield* Auth);
 				yield* Ref.set(backups, yield* makeBackupInventory);
 				yield* Ref.set(events, yield* Events);
+				const context = yield* Effect.context<Events | ChildAttempts>();
+				yield* Ref.set(shutdown, supervisor.shutdown.pipe(Effect.provideContext(context), Effect.orDie));
 				const coordinator = yield* cutover(options, supervisor);
 				const restore = yield* databaseRestore(supervisor);
 				yield* Ref.set(restores, restore);
@@ -105,9 +109,12 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 					Layer.mergeAll(
 						generationsLayer,
 						preparationLayer(options).pipe(Layer.provide(preparationProcessLayer)),
-						publicPagesLayer(options.dataDirectory, supervisor.operationGate, child.channelGate).pipe(
-							Layer.provide(eventsLayer),
-						),
+						publicPagesLayer(
+							options.dataDirectory,
+							supervisor.operationGate,
+							child.channelGate,
+							child.traffic.route,
+						).pipe(Layer.provide(eventsLayer)),
 						attemptsLayer(options.dataDirectory).pipe(Layer.provide(kernelBootLayer)),
 						backupLayer(path.join(options.dataDirectory, "comms.db")),
 						recoveryLayer(path.join(options.dataDirectory, "comms.db"), moveRecovery).pipe(
@@ -137,7 +144,9 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	yield* HttpRouter.add(
 		"*",
 		"/*",
-		proxy(child, auth, options.auth, events, editing, publicPages, requests, backups, restores, moves),
+		proxy(child, auth, options.auth, events, editing, publicPages, requests, backups, restores, moves, stopping),
 	).pipe((routes) => HttpRouter.serve(routes, { disableLogger: true }), Layer.build);
+	// Close admission and retire owners while the listener can still serve their publication calls.
+	yield* Effect.addFinalizer(() => Ref.set(stopping, true).pipe(Effect.andThen(Ref.get(shutdown)), Effect.flatten));
 	return yield* Effect.never;
-});
+}, Effect.scoped);

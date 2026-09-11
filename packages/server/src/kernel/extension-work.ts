@@ -24,11 +24,12 @@ export const work = <A, R = never, E = never>(
 					)
 				: Effect.succeed(result).pipe(Effect.tap(onSuccess));
 	}).pipe(
-		Effect.catchCause((cause): Effect.Effect<never, ExtensionError | KernelError> => {
-			if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
-			const expected = cause.reasons.find((reason) => reason._tag === "Fail" && Schema.is(KernelError)(reason.error));
-			if (expected?._tag === "Fail" && Schema.is(KernelError)(expected.error)) return Effect.fail(expected.error);
-			return Effect.fail(new ExtensionError({ message: Cause.pretty(cause) }));
-		}),
+		Effect.catchCause((cause) =>
+			Effect.failCause(
+				Cause.map(cause, (error) =>
+					Schema.is(KernelError)(error) ? error : new ExtensionError({ message: Cause.pretty(Cause.fail(error)) }),
+				),
+			),
+		),
 	);
 /* oxlint-enable effecttsgo/any-unknown-in-error-context */

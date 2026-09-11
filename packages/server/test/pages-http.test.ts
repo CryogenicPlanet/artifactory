@@ -24,22 +24,46 @@ it("serves private Markdown with raw links, highlighting, conditional diagrams a
 	const get = (path: string, method = "GET") => fetch(app.url + path, { method, headers: { cookie } });
 	const response = await get("/p/guide/");
 	expect(response.status).toBe(200);
+	expect(response.headers.get("content-security-policy")).toBe(
+		"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+	);
+	expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+	expect(response.headers.get("x-content-type-options")).toBe("nosniff");
 	const body = await response.text();
 	expect(body).toContain("<h1>Guide</h1>");
 	expect(body).toContain("<table>");
 	expect(body).toContain("hljs-keyword");
 	expect(body).toContain("/p/guide/index.md?raw=1");
 	expect(body).toContain('href="asset.txt"');
-	expect(body).not.toContain("mermaid.esm");
-	expect(body).not.toContain("cdn.tailwindcss");
+	expect(body).not.toContain("/page-assets/mermaid");
+	expect(body).not.toContain("/page-assets/tailwind.js");
+	expect(body).not.toContain("https://cdn");
 	expect(await (await get("/p/guide/?raw=1")).text()).toBe(markdown);
-	expect(await (await get("/p/guide/diagram.md")).text()).toContain("mermaid@12.0.0");
-	expect(await (await get("/p/guide/styled.md")).text()).toContain("preflight:false");
+	expect(await (await get("/p/guide/diagram.md")).text()).toContain("/page-assets/mermaid-init.js");
+	expect(await (await get("/p/guide/styled.md")).text()).toContain('@import "tailwindcss/utilities"');
 	const frontmatter = await (await get("/p/guide/frontmatter.md")).text();
-	expect(frontmatter).toContain("preflight:false");
+	expect(frontmatter).toContain('@import "tailwindcss/utilities"');
 	expect(frontmatter).not.toContain("tailwind: true");
+	expect(frontmatter).not.toContain("tailwindcss/preflight");
+	for (const name of ["markdown.css", "highlight.css", "mermaid.js", "mermaid-init.js", "tailwind.js"]) {
+		const asset = await fetch(app.url + `/page-assets/${name}`);
+		expect(asset.status, name).toBe(200);
+		expect(asset.headers.get("content-type")).toContain(name.endsWith(".css") ? "text/css" : "text/javascript");
+		expect(asset.headers.get("x-content-type-options")).toBe("nosniff");
+		expect((await asset.text()).length).toBeGreaterThan(50);
+	}
+	expect((await get("/page-assets/package.json")).status).toBe(404);
+	expect((await fetch(app.url + "/page-assets/package.json")).status).toBe(401);
+	expect((await fetch(app.url + "/page-assets/mermaid.js", { method: "POST" })).status).toBe(401);
+	expect(
+		(await fetch(app.url + "/page-assets/mermaid.js", { headers: { authorization: "Bearer invalid" } })).status,
+	).toBe(401);
+	const assetHead = await fetch(app.url + "/page-assets/mermaid.js", { method: "HEAD" });
+	expect(assetHead.status).toBe(200);
+	expect(await assetHead.text()).toBe("");
 	const head = await get("/p/guide/", "HEAD");
 	expect(head.status).toBe(200);
+	expect(head.headers.get("content-security-policy")).toBe(response.headers.get("content-security-policy"));
 	expect(head.headers.get("content-type")).toContain("text/html");
 	expect(await head.text()).toBe("");
 }, 20000);
@@ -63,7 +87,13 @@ it("preserves HTML and binary bytes, redirects directory bases and lists escaped
 	const htmlResponse = await get("/p/tooling/");
 	expect(htmlResponse.headers.get("content-type")).toContain("text/html");
 	expect(await htmlResponse.text()).toBe(html);
-	const listing = await (await get("/p/plain/")).text();
+	expect(htmlResponse.headers.get("content-security-policy")).toContain("script-src 'self'");
+	expect(htmlResponse.headers.get("referrer-policy")).toBe("no-referrer");
+	const listingResponse = await get("/p/plain/");
+	expect(listingResponse.headers.get("content-security-policy")).toBe(
+		htmlResponse.headers.get("content-security-policy"),
+	);
+	const listing = await listingResponse.text();
 	expect(listing).toContain("a&quot;&lt;b&gt;.bin");
 	const asset = await get("/p/plain/" + encodeURIComponent('a"<b>.bin'));
 	expect(Buffer.from(await asset.arrayBuffer())).toEqual(binary);
@@ -117,7 +147,7 @@ it("merges page-only topic directories without manufacturing messages or changin
 	await app.ready(cookie);
 	expect((await app.post("/api/messages", { topic: "project/conversation", body: "hello" }, cookie)).status).toBe(200);
 	const get = async (path: string) => (await fetch(app.url + path, { headers: { cookie } })).json();
-	const root = await get("/api/topics");
+	const root = await get("/api/topics?mark=0");
 	expect(root.unread).toBe(1);
 	expect(root.messages).toHaveLength(1);
 	expect(root.subtopics.map((row: { path: string }) => row.path)).toEqual(["project", "only-pages"]);
@@ -128,7 +158,7 @@ it("merges page-only topic directories without manufacturing messages or changin
 		pages: [],
 		index: null,
 	});
-	const topic = await get("/api/topics/project");
+	const topic = await get("/api/topics/project?mark=0");
 	expect(topic).toMatchObject({ index: "# Project README", pages: ["index.md"], unread: 1 });
 	expect(topic.subtopics.map((row: { path: string }) => row.path)).toEqual([
 		"project/conversation",
@@ -159,7 +189,15 @@ it("hides deleted page ancestry at the published fence and rejects page mutation
 	await app.ready(cookie);
 	for (const topic of ["gone", "gone/deep", "gone-other"])
 		expect((await app.post("/api/messages", { topic, body: "retained" }, cookie)).status).toBe(200);
-	await fixture.sql(`UPDATE topics SET meta='{"public":true}'`);
+	expect(
+		(
+			await fetch(app.url + "/api/topics/gone-other", {
+				method: "PUT",
+				headers: { cookie, origin: "https://comms.test", "content-type": "application/json" },
+				body: JSON.stringify({ meta: { public: true } }),
+			})
+		).status,
+	).toBe(200);
 	const get = (path: string) => fetch(app.url + path, { headers: { cookie } });
 	const write = (path: string, method: string) =>
 		fetch(app.url + path, {

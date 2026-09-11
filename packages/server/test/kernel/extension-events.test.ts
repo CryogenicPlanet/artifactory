@@ -49,6 +49,28 @@ it("retries a failed read without advancing, keeps own-instance messages, and ad
 	);
 });
 
+it("advances exhausted filtered pages through unmatched events after completing callbacks", async () => {
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const cursor = yield* Ref.make(4);
+			const seen = yield* Ref.make<ReadonlyArray<number>>([]);
+			const queried = yield* Ref.make<ReadonlyArray<number>>([]);
+			yield* runEvents(
+				({ since }) =>
+					Ref.update(queried, (items) => [...items, since]).pipe(
+						Effect.as(since === 4 ? page([], 7) : since === 7 ? page([event(8)], 10) : page([], 9)),
+					),
+				cursor,
+				[{ type: "message.created", handle: (e) => Ref.update(seen, (items) => [...items, e.seq]) }],
+				Effect.void,
+			).pipe(Effect.result);
+			expect(yield* Ref.get(cursor)).toBe(10);
+			expect(yield* Ref.get(queried)).toEqual([4, 7, 10]);
+			expect(yield* Ref.get(seen)).toEqual([8]);
+		}),
+	);
+});
+
 it("rejects a malformed page before invoking callbacks and preserves the cursor on callback failure", async () => {
 	await Effect.runPromise(
 		Effect.gen(function* () {
@@ -63,7 +85,7 @@ it("rejects a malformed page before invoking callbacks and preserves the cursor 
 			).pipe(Effect.result);
 			expect(yield* Ref.get(seen)).toBe(0);
 			yield* runEvents(
-				() => Effect.succeed(page([event(5)], 5)),
+				() => Effect.succeed(page([event(5)], 9)),
 				cursor,
 				[
 					{ type: "*", handle },

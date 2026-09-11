@@ -40,7 +40,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 	const crypto = yield* Crypto.Crypto;
 	const path = yield* Path.Path;
 	const fs = yield* FileSystem.FileSystem;
-	const processScope = yield* Effect.scope;
+	const processScope = yield* Scope.fork(yield* Effect.scope);
 	const http = yield* HttpServer.HttpServer;
 	if (http.address._tag === "UnixPathAddress") return yield* Effect.die("Expected TCP boot listener");
 	const callback = `http://127.0.0.1:${http.address.port}`;
@@ -50,7 +50,9 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 	const current = yield* Ref.make<ActiveChild | null>(null);
 	// A failed retirement may leave a database owner alive. Only restart receipt recovery can clear this.
 	const closureUnproven = yield* Ref.make(false);
+	const closing = yield* Ref.make(false);
 	const assertClosure = Effect.gen(function* () {
+		if (yield* Ref.get(closing)) return yield* new ChildError({ code: "boot_shutting_down" });
 		if (yield* Ref.get(closureUnproven)) return yield* new ChildError({ code: "child_closure_unproven" });
 	});
 	const routing = yield* traffic;
@@ -141,10 +143,42 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			if (!(yield* (yield* ChildAttempts).closed(value.id, value.receipt)))
 				return yield* new ChildError({ code: "child_closure_unproven" });
 		}).pipe(Effect.onError(() => Ref.set(closureUnproven, true)));
+	const shutdown = operationGate.withPermit(
+		Effect.gen(function* () {
+			yield* Ref.set(closing, true);
+			yield* routing.requests.freeze;
+			// Keep the child and its publication channel live until forwarded mutations finish.
+			yield* routing.drained;
+			const active = yield* Ref.get(current);
+			if (active) yield* active.process.drain.pipe(Effect.ignore);
+			yield* routing.requests.drained;
+			yield* (yield* Events).stopWaiting;
+			yield* Ref.set(current, null);
+			yield* Ref.set(routing.route, null);
+			if (active) yield* retire(active);
+		}),
+	);
+	const watch = (active: ActiveChild) =>
+		Effect.gen(function* () {
+			while ((yield* Ref.get(current))?.attempt.epoch === active.attempt.epoch) {
+				yield* Effect.sleep("1 second");
+				const response = yield* active.process.ping.pipe(Effect.exit);
+				if (response._tag === "Success") continue;
+				if ((yield* Ref.get(current))?.attempt.epoch !== active.attempt.epoch) return;
+				yield* Ref.update(routing.route, (route) => (route?.epoch === active.attempt.epoch ? null : route));
+				yield* Ref.update(status, (value): ChildStatus =>
+					value.pid === active.process.pid ? { ...value, state: "failed", error: "child_unresponsive" } : value,
+				);
+				// Never race retirement against the exit it causes: closure proof must finish.
+				yield* retire(active);
+				return;
+			}
+		});
 	const activate = (value: ActiveChild, state: "accepted" | "live" = "live") =>
 		Effect.gen(function* () {
 			yield* admit(value, state);
 			yield* value.process.control(state);
+			const alreadyWatching = (yield* Ref.get(current))?.attempt.epoch === value.attempt.epoch;
 			yield* Ref.set(current, value);
 			yield* Ref.set(routing.route, {
 				...value.attempt,
@@ -163,6 +197,9 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 				error: null,
 				stderr: redact(yield* Ref.get(value.process.stderr)),
 			});
+			// Every newly activated lifetime is monitored independently of the recovery
+			// operation gate, including the accepted-to-live cutover window.
+			if (!alreadyWatching) yield* watch(value).pipe(Effect.catchCause(fail), Effect.forkIn(processScope));
 			yield* Ref.update(tried, (values) => ({ ...values, [value.generation.n]: 0 }));
 			yield* (yield* Generations).list.pipe(Effect.flatMap((rows) => Ref.set(history, rows)));
 		});
@@ -255,16 +292,17 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 						yield* Ref.set(current, null);
 						yield* Ref.set(routing.route, null);
 						const stderr = redact(yield* Ref.get(active.process.stderr));
+						const unresponsive = (yield* Ref.get(status)).error === "child_unresponsive";
 						yield* Ref.update(status, (value): ChildStatus => ({
 							...value,
 							state: "failed",
-							error: "Child exited",
+							error: unresponsive ? "child_unresponsive" : "Child exited",
 							stderr,
 						}));
 						yield* retire(active);
 						yield* (yield* Generations).failed(
 							active.generation.n,
-							"Child exited",
+							unresponsive ? "child_unresponsive" : "Child exited",
 							redact(yield* Ref.get(active.process.stderr)),
 						);
 						yield* Effect.sleep((yield* Ref.get(tried))[active.generation.n] === 1 ? "250 millis" : "500 millis");
@@ -274,6 +312,20 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 				.pipe(Effect.catchCause(fail));
 		}
 	});
-	return { child, run, fail, operationGate, current, assertClosure, launch, admit, retire, activate, start, callback };
+	return {
+		child,
+		run,
+		shutdown,
+		fail,
+		operationGate,
+		current,
+		assertClosure,
+		launch,
+		admit,
+		retire,
+		activate,
+		start,
+		callback,
+	};
 });
 export type Supervisor = Effect.Success<ReturnType<typeof supervise>>;

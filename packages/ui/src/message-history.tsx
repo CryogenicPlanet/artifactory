@@ -1,6 +1,6 @@
-import { Effect } from "effect";
-import { useEffect, useState } from "react";
-import { getMessageHistory, type BoardMessage } from "./board-api.ts";
+import { useMemo, useState } from "react";
+import { getMessageHistory } from "./board-api.ts";
+import { useLoad } from "./use-load.ts";
 import { Message } from "./message.tsx";
 import { ReferencedMessage } from "./referenced-message.tsx";
 
@@ -9,45 +9,30 @@ export function MessageHistory({ path, onClose }: { readonly path: string; reado
 		since: 0,
 		previous: [],
 	});
-	const [page, setPage] = useState<{ readonly items: readonly BoardMessage[]; readonly cursor: number } | null>(null);
-	const [error, setError] = useState("");
-	const [retry, setRetry] = useState(0);
-	useEffect(() => {
-		const controller = new AbortController();
-		setPage(null);
-		setError("");
-		void Effect.runPromise(
-			getMessageHistory(path, position.since).pipe(
-				Effect.match({
-					onSuccess: setPage,
-					onFailure: (failure) => setError(failure.message),
-				}),
-			),
-			{ signal: controller.signal },
-		).catch(() => {});
-		return () => controller.abort();
-	}, [path, position.since, retry]);
+	const request = useMemo(() => getMessageHistory(path, position.since), [path, position.since]);
+	const { value, error, loading, reload } = useLoad(request);
+	const page = loading || error ? undefined : value;
 	return (
 		<>
 			{page && <ReferencedMessage visible={page.items} />}
-			<section className="conversation" aria-label="Message history">
+			<section className="mb-8" aria-label="Message history">
 				<div className="section-heading">
 					<h2>Message history</h2>
 					<button type="button" onClick={onClose}>
 						Back to latest
 					</button>
 				</div>
-				<p className="history-note">
+				<p className="text-[11px] text-[#89917f]">
 					Page {position.previous.length + 1}, oldest first. Return to latest for live updates.
 				</p>
 				{error ? (
 					<div className="notice error" role="alert">
-						<p>{error}</p>
-						<button type="button" onClick={() => setRetry((value) => value + 1)}>
+						<p>{error.message}</p>
+						<button type="button" onClick={reload}>
 							Retry history
 						</button>
 					</div>
-				) : page === null ? (
+				) : page === undefined ? (
 					<p role="status">Loading history…</p>
 				) : (
 					<>
@@ -70,7 +55,7 @@ export function MessageHistory({ path, onClose }: { readonly path: string; reado
 					</button>
 					<button
 						type="button"
-						disabled={page === null || page.items.length < 100}
+						disabled={page === undefined || page.items.length < 100}
 						onClick={() => {
 							if (page) setPosition({ since: page.cursor, previous: [...position.previous, position.since] });
 						}}

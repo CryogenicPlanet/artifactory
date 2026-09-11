@@ -29,7 +29,8 @@ const program = Effect.gen(function* () {
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 2,
-				agents: Effect.succeed({ items: [] }),
+				changed: (after) =>
+					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
 					Effect.map((state) => ({ published_through: state.published_through })),
 					Effect.mapError(unavailable),

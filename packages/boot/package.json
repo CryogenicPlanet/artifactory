@@ -15,10 +15,6 @@
 		"@effect/platform-bun": "4.0.0-rc.113",
 		"@effect/sql-sqlite-bun": "4.0.0-rc.113",
 		"@simplewebauthn/server": "14.0.1",
-		"effect": "4.0.0-rc.113",
-		"qrcode": "1.5.4"
-	},
-	"devDependencies": {
-		"@types/qrcode": "1.5.6"
+		"effect": "4.0.0-rc.113"
 	}
 }

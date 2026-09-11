@@ -30,7 +30,7 @@ const Topic = Schema.Struct({
 	index: Schema.NullOr(Schema.String),
 	pages: Schema.Array(Schema.String),
 	messages: Schema.Array(Message),
-	cursor: Schema.Int,
+	fence: Schema.Int,
 	unread: Schema.Int,
 });
 const ErrorBody = Schema.Struct({
@@ -70,20 +70,20 @@ export const json = (request: HttpClientRequest.HttpClientRequest) =>
 		),
 	);
 
-export const getTopic = (path: string, archived = false) =>
-	json(
-		HttpClientRequest.get(
-			new URL(
-				`${path ? `/api/topics/${path.split("/").map(encodeURIComponent).join("/")}` : "/api/topics"}${archived ? "?archived=1" : ""}`,
-				window.location.origin,
-			).href,
-		),
-	).pipe(
+export const getTopic = (path: string, archived = false, mark = true) => {
+	const url = new URL(
+		path ? `/api/topics/${path.split("/").map(encodeURIComponent).join("/")}` : "/api/topics",
+		window.location.origin,
+	);
+	if (archived) url.searchParams.set("archived", "1");
+	if (!mark) url.searchParams.set("mark", "0");
+	return json(HttpClientRequest.get(url.href)).pipe(
 		Effect.flatMap(Schema.decodeUnknownEffect(Topic)),
 		Effect.catchTag("SchemaError", () =>
 			Effect.fail(new BoardError({ status: 0, message: "The board returned an unreadable topic. Try refreshing." })),
 		),
 	);
+};
 export type PendingMessage = { readonly topic: string; readonly body: string; readonly key: string };
 export const sendMessage = (message: PendingMessage) =>
 	json(
@@ -107,7 +107,9 @@ export const validTopic = (path: string) =>
 	path.length <= 200 && /^@?[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(path);
 
 export const getMessageBySequence = (seq: number) =>
-	json(HttpClientRequest.get(new URL(`/api/messages?since=${seq - 1}&limit=1`, window.location.origin).href)).pipe(
+	json(
+		HttpClientRequest.get(new URL(`/api/messages?since=${seq - 1}&limit=1&mark=0`, window.location.origin).href),
+	).pipe(
 		Effect.flatMap(Schema.decodeUnknownEffect(Schema.Struct({ items: Schema.Array(Message) }))),
 		Effect.flatMap((result) =>
 			result.items[0]?.seq === seq

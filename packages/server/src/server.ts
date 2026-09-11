@@ -17,15 +17,14 @@ import {
 	Ref,
 	Schema,
 	Semaphore,
+	Stream,
 	type Scope,
 } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { BootChannel, layer as channelLayer } from "./kernel/boot-channel.ts";
+import { BootChannel, type KernelError, layer as channelLayer } from "./kernel/boot-channel.ts";
 import { initialize } from "./kernel/database.ts";
 import { migrate } from "./kernel/migrations.ts";
 import { type Topics, layer as topicsLayer } from "./kernel/topics.ts";
-import { type Profiles, layer as profilesLayer } from "./kernel/profiles.ts";
-import { type Search, layer as searchLayer } from "./kernel/search.ts";
 import { Messages, layer as messagesLayer } from "./kernel/messages.ts";
 import { probeHealth } from "./kernel/health.ts";
 import { Lifecycle, layer as lifecycleLayer } from "./kernel/lifecycle.ts";
@@ -38,6 +37,8 @@ import type { HttpPlatform } from "effect/unstable/http/HttpPlatform";
 import { routes } from "./conversation.ts";
 import { Extensions, layer as extensionsLayer } from "./kernel/ext.ts";
 import { failure } from "./conversation-request.ts";
+import { checkPageWrites, PageWriteCheck, PageWriteUnavailable } from "./kernel/page-write-policy.ts";
+import { reconstructPublicPages } from "./kernel/public-page-policy.ts";
 import { TopicMoveCommand } from "./kernel/topic-move.ts";
 
 type Handler = Effect.Effect<
@@ -66,12 +67,21 @@ const server = Effect.gen(function* () {
 		const installed = yield* Ref.make<Handler | null>(null);
 		const extensionState = yield* Ref.make<Extensions["Service"]["changeState"] | null>(null);
 		const quiesce = yield* Ref.make<Effect.Effect<void> | null>(null);
+		const initializePublicPages = yield* Ref.make<Effect.Effect<void, KernelError> | null>(null);
 		const healthGate = yield* Semaphore.make(1);
 		const controlGate = yield* Semaphore.make(1);
 		const transitionTo = (state: Parameters<Extensions["Service"]["changeState"]>[0]) =>
 			controlGate.withPermit(
 				Effect.gen(function* () {
+					if (state === "accepted" || state === "live") {
+						const initialize = yield* Ref.get(initializePublicPages);
+						if (initialize) {
+							yield* initialize;
+							yield* Ref.set(initializePublicPages, null);
+						}
+					}
 					yield* lifecycle.gate.withPermit(Ref.set(lifecycle.state, state));
+					if (state === "draining") yield* Deferred.succeed(lifecycle.drained, undefined);
 					const transition = yield* Ref.get(extensionState);
 					if (transition) yield* transition(state);
 				}).pipe(Effect.uninterruptible),
@@ -83,6 +93,8 @@ const server = Effect.gen(function* () {
 				yield* migrate(`${import.meta.dirname}/migrations`, boot.epoch);
 				return yield* Effect.gen(function* () {
 					const messages = yield* Messages;
+					const publicPagesContext = yield* Effect.context<SqlClient | BootChannel | Messages | Lifecycle>();
+					yield* Ref.set(initializePublicPages, reconstructPublicPages.pipe(Effect.provideContext(publicPagesContext)));
 					const extensionContext = yield* Layer.build(extensionsLayer(`${import.meta.dirname}/ext`));
 					const extensions = Context.get(extensionContext, Extensions);
 					yield* Ref.set(extensionState, extensions.changeState);
@@ -92,8 +104,6 @@ const server = Effect.gen(function* () {
 					);
 					const context = yield* Effect.context<
 						| BootChannel
-						| Profiles
-						| Search
 						| Messages
 						| Topics
 						| Lifecycle
@@ -139,6 +149,27 @@ const server = Effect.gen(function* () {
 							const request = yield* HttpServerRequest.HttpServerRequest;
 							if (request.url === "/health" && request.method === "GET") return yield* health;
 							const state = yield* Ref.get(lifecycle.state);
+							if (request.url === "/_kernel/pages/check" && request.method === "POST") {
+								if (Object.keys(request.headers).some((name) => name.startsWith("x-comms-")))
+									return HttpServerResponse.empty({ status: 403 });
+								if (!["accepted", "live", "frozen"].includes(state)) return HttpServerResponse.empty({ status: 503 });
+								return yield* Effect.gen(function* () {
+									let bytes = 0;
+									const chunks: Uint8Array[] = [];
+									yield* Stream.runForEach(request.stream, (chunk) =>
+										Effect.gen(function* () {
+											bytes += chunk.byteLength;
+											if (bytes > 1048576) return yield* new PageWriteUnavailable({});
+											chunks.push(chunk);
+										}),
+									);
+									const body = Buffer.concat(chunks).toString("utf8");
+									const input = yield* Schema.decodeEffect(Schema.fromJsonString(PageWriteCheck), {
+										onExcessProperty: "error",
+									})(body);
+									return HttpServerResponse.jsonUnsafe(yield* checkPageWrites(boot.filename, boot.epoch, input));
+								}).pipe(Effect.catchCause(() => Effect.succeed(HttpServerResponse.empty({ status: 503 }))));
+							}
 							if (request.url === "/_kernel/topic-move" && request.method === "POST")
 								return yield* failure(
 									controlGate.withPermit(
@@ -204,10 +235,7 @@ const server = Effect.gen(function* () {
 					return yield* Effect.never;
 				}).pipe(
 					Effect.provide(
-						Layer.mergeAll(topicsLayer, searchLayer, profilesLayer).pipe(
-							Layer.provideMerge(messagesLayer),
-							Layer.provideMerge(pagesLayer(pagesDirectory)),
-						),
+						topicsLayer.pipe(Layer.provideMerge(messagesLayer), Layer.provideMerge(pagesLayer(pagesDirectory))),
 					),
 				);
 			}).pipe(Effect.provide(SqliteClient.layer({ filename: boot.filename, disableWAL: true })));
@@ -227,6 +255,17 @@ const server = Effect.gen(function* () {
 					Object.keys(request.headers).some((name) => name.startsWith("x-forwarded-") || name === "forwarded")
 				)
 					return HttpServerResponse.empty({ status: 403 });
+				if (request.url === "/_kernel/ping" && request.method === "GET") {
+					if (Object.keys(request.headers).some((name) => name.startsWith("x-comms-")))
+						return HttpServerResponse.empty({ status: 403 });
+					return HttpServerResponse.empty({
+						status: 200,
+						headers: {
+							"x-comms-writer-epoch": boot.epoch,
+							"x-comms-kernel-protocol": "2",
+						},
+					});
+				}
 				if (request.url === "/_kernel/control" && request.method === "POST") {
 					// Genuine boot control has the attempt secret only, never proxied caller metadata.
 					if (Object.keys(request.headers).some((name) => name.startsWith("x-comms-")))
@@ -241,9 +280,11 @@ const server = Effect.gen(function* () {
 					if (body.action === "go") yield* Deferred.succeed(go, undefined);
 					else if (body.action === "accepted" || body.action === "live") {
 						if (!(yield* Ref.get(lifecycle.healthy))) return HttpServerResponse.empty({ status: 409 });
-						yield* transitionTo(body.action);
+						const transitioned = yield* transitionTo(body.action).pipe(Effect.result);
+						if (transitioned._tag === "Failure") return HttpServerResponse.empty({ status: 503 });
 					} else {
-						yield* transitionTo(body.action);
+						const transitioned = yield* transitionTo(body.action).pipe(Effect.result);
+						if (transitioned._tag === "Failure") return HttpServerResponse.empty({ status: 503 });
 						while (
 							(yield* Ref.get(lifecycle.mutations)) !== 0 ||
 							(body.action === "draining" && (yield* Ref.get(lifecycle.requests)) !== 0)

@@ -1,5 +1,4 @@
 import { Effect, Random } from "effect";
-import "./composer.css";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { sendMessage, validTopic, type BoardMessage, type PendingMessage } from "./board-api.ts";
 
@@ -71,7 +70,7 @@ export function Composer({
 		Effect.runFork(send);
 	};
 	return (
-		<form className="composer" onSubmit={submit}>
+		<form className="rounded-[10px] border border-[#dfe5d8] bg-white p-[17px] min-[651px]:p-[22px]" onSubmit={submit}>
 			<div className="section-heading">
 				<h2>Write a message</h2>
 				<span>Markdown welcome</span>
@@ -125,7 +124,7 @@ export function Composer({
 						</a>
 					)}
 					{needsCheck && (
-						<div className="retry-decision">
+						<div className="mt-3 flex flex-wrap gap-2">
 							<button
 								type="button"
 								onClick={() => {
@@ -153,7 +152,7 @@ export function Composer({
 					)}
 				</div>
 			)}
-			<div className="composer-footer">
+			<div className="mt-[15px] flex items-end justify-between gap-[15px] min-[651px]:items-center [&>span]:max-w-40 [&>span]:text-[10px] [&>span]:text-[#8e9783] min-[651px]:[&>span]:max-w-none">
 				<span role="status">
 					{sent ? "Message posted." : sending ? "Sending…" : "Visible to everyone on this board."}
 				</span>

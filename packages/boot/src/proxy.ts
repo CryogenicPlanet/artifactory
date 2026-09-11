@@ -87,6 +87,7 @@ export const proxy = (
 	backups: BackupStore,
 	restores: DatabaseRestoreStore,
 	moves: TopicMoveStore,
+	stopping?: Ref.Ref<boolean>,
 ) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
@@ -109,20 +110,12 @@ export const proxy = (
 		if (
 			request.headers["x-boot-secret"] !== undefined ||
 			path.startsWith("/_boot/seq") ||
-			path === "/_boot/events/append" ||
-			path === "/_boot/agents"
+			path === "/_boot/events/append"
 		) {
-			const auth = yield* Ref.get(authStore);
-			const internal = yield* eventRoute(
-				events,
-				child.attempts,
-				null,
-				child.channelGate,
-				Effect.succeed(true),
-				auth?.roster ?? null,
-			);
+			const internal = yield* eventRoute(events, child.attempts, null, child.channelGate);
 			if (internal) return internal;
 		}
+		if (stopping && (yield* Ref.get(stopping))) return authErrorResponse("boot_unavailable", 503);
 		const authResponse = yield* authRoute(authStore, authConfig);
 		if (authResponse) return authResponse;
 		const passkeyResponse = yield* passkeyManagementRoute(authStore, authConfig);
@@ -145,7 +138,6 @@ export const proxy = (
 		const explicitCredential =
 			request.headers.authorization !== undefined ||
 			(request.headers.cookie ?? "").split(";").some((part) => part.trim().startsWith(`${sessionCookie}=`));
-		const policyRevision = yield* child.traffic.requests.revision;
 		let publicPage: string | null = null;
 		if ((request.method === "GET" || request.method === "HEAD") && path.startsWith("/p/") && !explicitCredential) {
 			const policy = yield* Ref.get(publicPages);
@@ -157,7 +149,17 @@ export const proxy = (
 		}
 		const isPublic =
 			(request.method === "GET" || request.method === "HEAD") &&
-			(["/init", "/init.md", "/.well-known/agent.json"].includes(path) || publicPage !== null);
+			([
+				"/init",
+				"/init.md",
+				"/.well-known/agent.json",
+				"/page-assets/markdown.css",
+				"/page-assets/highlight.css",
+				"/page-assets/mermaid.js",
+				"/page-assets/mermaid-init.js",
+				"/page-assets/tailwind.js",
+			].includes(path) ||
+				publicPage !== null);
 		if (!auth && (!isPublic || explicitCredential)) return authErrorResponse("boot_unavailable", 503);
 		return yield* authFailure(
 			Effect.gen(function* () {
@@ -255,8 +257,14 @@ export const proxy = (
 					);
 				const requestAdmission = yield* child.traffic.requests.admit.pipe(Effect.result);
 				if (requestAdmission._tag === "Failure") return expires(unavailable());
-				if (publicPage !== null && !identity && requestAdmission.success.revision !== policyRevision)
-					return expires(unavailable());
+				if (publicPage !== null && !identity) {
+					// Admission can wait across a database replacement. Recheck its current grants under the request lease.
+					const policy = yield* Ref.get(publicPages);
+					const checked = yield* (policy ? policy.check(path) : Effect.succeed(null)).pipe(Effect.result);
+					if (checked._tag === "Failure") return authErrorResponse("boot_unavailable", 503);
+					publicPage = checked.success;
+					if (publicPage === null) return authErrorResponse("credential_required", 401);
+				}
 				destination = requestAdmission.success.destination;
 				if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
 					const admitted = yield* child.traffic.admit;

@@ -25,10 +25,11 @@ const program = Effect.gen(function* () {
 			let holdAppend = false;
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
 			const channel: BootChannel["Service"] = {
-				agents: Effect.succeed({ items: [] }),
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 1,
+				changed: (after) =>
+					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
 					Effect.map((state) => ({ published_through: state.published_through })),
 					Effect.mapError(unavailable),
@@ -59,25 +60,18 @@ const program = Effect.gen(function* () {
 						"create",
 					);
 					const sibling = yield* messages.create(who, { topic: "project-other", body: "sibling needle @here" });
-					const mark = yield* messages.mark(who, { topic: message.topic, seq: message.seq }, "mark");
+					yield* messages.mark(who, { topic: message.topic, seq: message.seq });
 					const edit = yield* messages.update(who, message.id, { body: "edited needle @here" }, "edit");
 					holdAppend = true;
 					// Exercise a committed topic tombstone before boot publishes its event.
-					assert.equal(
-						(yield* messages
-							.recordEvent(
-								{ transaction: "a".repeat(32), type: "topic.deleted", level: "info", payload: { path: "project" } },
-								(seq) =>
-									sql`UPDATE topics SET previous=json_object('meta',json(meta),'archived_at',archived_at,'deleted_at',deleted_at),deleted_at=1,updated_seq=${seq} WHERE path='project'`.pipe(
-										Effect.asVoid,
-									),
-							)
-							.pipe(Effect.result))._tag,
-						"Failure",
-					);
+					assert.equal((yield* messages.deleteTopic(who, "project", "delete").pipe(Effect.result))._tag, "Failure");
 					assert.equal((yield* messages.get(message.id)).body, edit.body);
 					assert.equal((yield* messages.list({ since: 0, limit: 100, q: "needle" })).items.length, 2);
-					assert.equal((yield* topics.inbox(reader, 0, 100)).items.length, 2);
+					assert.equal(
+						(yield* messages.list({ since: 0, limit: 100, mentions: ["@here"], exclude: reader.instance })).items
+							.length,
+						2,
+					);
 					assert.equal((yield* topics.detail(reader, "project", 2)).subtopics.length, 2);
 					assert.equal((yield* topics.detail(reader, "project/page-only")).index, "retained page");
 					holdAppend = false;
@@ -88,7 +82,9 @@ const program = Effect.gen(function* () {
 						[sibling.id],
 					);
 					assert.deepEqual(
-						(yield* topics.inbox(reader, 0, 100)).items.map((item) => item.id),
+						(yield* messages.list({ since: 0, limit: 100, mentions: ["@here"], exclude: reader.instance })).items.map(
+							(item) => item.id,
+						),
 						[sibling.id],
 					);
 					const board = yield* topics.detail(reader, "", 3, true);
@@ -107,7 +103,6 @@ const program = Effect.gen(function* () {
 						messages.create(who, { topic: "project/new/deep", body: "forbidden" }).pipe(Effect.asVoid),
 						messages.update(who, message.id, { body: "forbidden" }).pipe(Effect.asVoid),
 						messages.remove(who, message.id).pipe(Effect.asVoid),
-						messages.mark(who, { topic: "project/child", seq: message.seq }).pipe(Effect.asVoid),
 					]) {
 						const result = yield* action.pipe(Effect.result);
 						assert.equal(result._tag, "Failure");
@@ -120,7 +115,6 @@ const program = Effect.gen(function* () {
 						message,
 					);
 					assert.deepEqual(yield* messages.update(who, message.id, { body: "edited needle @here" }, "edit"), edit);
-					assert.deepEqual(yield* messages.mark(who, { topic: message.topic, seq: message.seq }, "mark"), mark);
 					yield* messages.create(who, { topic: "project-other/child", body: "allowed" });
 					assert.equal((yield* sql`SELECT id FROM messages`).length, 3);
 					assert.equal(yield* fs.readFileString(`${root}/pages/project/page-only/index.md`), "retained page");

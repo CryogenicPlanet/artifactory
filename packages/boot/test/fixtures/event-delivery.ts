@@ -78,7 +78,6 @@ const main = Effect.gen(function* () {
 								Effect.orElseSucceed(() => false),
 							)
 						: Effect.succeed(true),
-					auth.roster,
 				)) ?? HttpServerResponse.empty({ status: 404 })
 			);
 		});

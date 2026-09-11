@@ -6,18 +6,20 @@ The lead owns integration and acceptance. Workers make bounded changes in isolat
 
 The branch provides passkey sign-in, agent enrollment/refresh, conversations, topics, pages, editable runtime generations, journaled source history, rehearsed reload/rollback, backup inventory and signed database restore. Extensions provide routes, lifecycle hooks, cron, data and webhook subscriptions. These existing capabilities do not establish completion of the review.
 
-Review changes committed through `0813fe6`:
+Review changes committed through `6c21a88`:
 
 - Correct legacy migration, event-routing and source-history fixtures.
 - Remove reactions from core services/routes/UI while preserving historical data and receipts.
 - Remove source watching/automatic adoption, weekly backup drills and the storage dashboard/cache. This first cut removes 609 boot production lines. Source history/undo and hourly backups remain.
 - Preserve authenticated committed-source diagnostics after unproven keeper closure and unresolved page publication; do not mutate locks, staging or recovery evidence during diagnostic GETs.
 - Release failed restore/move request gates after removing unsafe routes and closing owners. A recoverable failure must not permanently leak admission gates.
-- Add redacted startup diagnostics and a serial diagnostic step to Linux CI without relaxing deadlines or making the required full suite optional.
+- Add redacted startup diagnostics and a serial diagnostic step to Linux CI. Subsequent measured fixture-budget corrections use two Linux workers and leave production deadlines unchanged.
 
 Lifecycle changes passed combined acceptance (393/393 tests across 103 files, plus check/build): reset consecutive startup failures after healthy activation, emit demotion events, and apply separate drain/backup/candidate-health deadlines. The drain timeout preserves admitted writes and returns typed retriable `freeze_timeout` after safe cleanup.
 
-The API, shared mutation protocol, typed HTTP validation and actual extension-owned core are being integrated in a separate checkout. Public-page projection, event indexes, signal-driven waits and UI simplification have isolated implementations under validation. Do not infer their behavior from this plan before their combined changes land.
+The API, shared mutation protocol, typed HTTP validation, extension-owned core, public-page projection/CSP, event indexes, signal-driven waits, 30-day receipts and UI simplification are integrated. The final exact-checkout suite passes **454/454 tests across 121 files**, with locked install, check and build passing. Live browser acceptance passes the core board flows. Graceful shutdown now drains admitted work and records positive child closure before listener teardown; the built launcher exits promptly rather than waiting for an internal long-poll timeout.
+
+The next isolated integration combines app-owned topic moves, guarded local SQL writes, app-owned backup scheduling and storage safeguards. SSE relocation and preparation-cache simplification are separate later slices so they do not delay that combined wave. The scratchpad records exact handoffs, failure evidence and remaining guarantees.
 
 ## Parallel groups and dependencies
 

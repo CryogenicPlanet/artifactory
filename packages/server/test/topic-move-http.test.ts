@@ -10,13 +10,15 @@ it("moves a published subtree and its pages while keeping identities, event payl
 	const cookie = await app.login();
 	await app.ready(cookie);
 	const get = (url: string, path: string) => fetch(url + path, { headers: { cookie } });
+	const one = async (url: string, seq: number) =>
+		(await (await get(url, `/api/messages?since=${seq - 1}&limit=1`)).json()).items[0];
 	const first = await (
 		await app.post("/api/messages", { topic: "project/child", body: "moveable evidence" }, cookie, "first-message")
 	).json();
 	const sibling = await (
 		await app.post("/api/messages", { topic: "project-other", body: "untouched sibling" }, cookie)
 	).json();
-	expect((await app.post("/api/read", { topic: "project/child", seq: first.seq }, cookie)).status).toBe(200);
+	expect((await get(app.url, "/api/topics/project/child")).status).toBe(200);
 	await mkdir(join(fixture.root, "pages/project/child/empty"), { recursive: true });
 	await writeFile(join(fixture.root, "pages/project/child/index.md"), "# Moved page");
 	expect(
@@ -31,11 +33,11 @@ it("moves a published subtree and its pages while keeping identities, event payl
 	const response = await app.post("/api/topics/project/move", { to: "area/renamed" }, cookie, "move-one");
 	expect(response.status, await response.clone().text()).toBe(200);
 	const moved = await response.json();
-	expect(await (await get(app.url, `/api/messages/${first.id}`)).json()).toMatchObject({
+	expect(await one(app.url, first.seq)).toMatchObject({
 		...first,
 		topic: "area/renamed/child",
 	});
-	expect(await (await get(app.url, `/api/messages/${sibling.id}`)).json()).toEqual(sibling);
+	expect(await one(app.url, sibling.seq)).toEqual(sibling);
 	expect((await get(app.url, "/api/topics/project")).status).toBe(404);
 	const detail = await (await get(app.url, "/api/topics/area/renamed/child")).json();
 	expect(detail.meta).toEqual({ public: true, status: "doing" });
@@ -62,8 +64,8 @@ it("moves a published subtree and its pages while keeping identities, event payl
 	expect(
 		await (await restarted.post("/api/topics/project/move", { to: "area/renamed" }, cookie, "move-one")).json(),
 	).toEqual(moved);
-	expect(await (await get(restarted.url, `/api/messages/${recreated.id}`)).json()).toEqual(recreated);
-	expect(await (await get(restarted.url, `/api/messages/${first.id}`)).json()).toMatchObject({
+	expect(await one(restarted.url, recreated.seq)).toEqual(recreated);
+	expect(await one(restarted.url, first.seq)).toMatchObject({
 		id: first.id,
 		seq: first.seq,
 		topic: "final/child",
@@ -111,7 +113,8 @@ it("denies unauthenticated and read-only moves without changing a topic named mo
 		).status,
 	).toBe(403);
 	expect(await fixture.sql("SELECT id FROM topic_moves", "boot.db")).toEqual([]);
-	expect(await (await fetch(app.url + `/api/messages/${original.id}`, { headers: { cookie } })).json()).toEqual(
-		original,
-	);
+	expect(
+		(await (await fetch(app.url + `/api/messages?since=${original.seq - 1}&limit=1`, { headers: { cookie } })).json())
+			.items,
+	).toEqual([original]);
 }, 30000);

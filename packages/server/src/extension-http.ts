@@ -1,8 +1,16 @@
-import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
 import { Schema } from "effect";
-import type { Extensions } from "./kernel/ext.ts";
+import type { HttpMethod } from "effect/unstable/http/HttpMethod";
+interface RouteDescription {
+	readonly extension: string;
+	readonly method: HttpMethod;
+	readonly path: `/${string}`;
+	readonly description: string;
+	readonly scope: string;
+	readonly operation?: OpenApi.OpenAPISpecOperation;
+}
 
-export const description = (extensions: Extensions["Service"]) =>
+export const description = (extensions: { readonly registrations: ReadonlyArray<RouteDescription> }) =>
 	HttpApiGroup.make("extensions").add(
 		HttpApiEndpoint.get("extensions", "/api/ext", { success: Schema.Unknown }).annotate(
 			OpenApi.Description,
@@ -31,3 +39,39 @@ export const description = (extensions: Extensions["Service"]) =>
 			);
 		}),
 	);
+
+/** Selected runtime ownership chooses the operation schema too; an override cannot leave stale core docs. */
+export const document = (
+	registrations: ReadonlyArray<RouteDescription>,
+	documents: ReadonlyArray<OpenApi.OpenAPISpec>,
+) => {
+	const result = OpenApi.fromApi(HttpApi.make("extensions").add(description({ registrations })));
+	for (const item of documents) {
+		Object.assign(result.components.schemas, item.components.schemas);
+		Object.assign(result.components.securitySchemes, item.components.securitySchemes);
+	}
+	for (const route of registrations) {
+		if (!route.operation) continue;
+		const canonical =
+			registrations.find(
+				(other) =>
+					other.path.replace(/:[A-Za-z_]\w*/g, ":parameter") === route.path.replace(/:[A-Za-z_]\w*/g, ":parameter"),
+			)?.path ?? route.path;
+		const key = canonical.replace(/:([A-Za-z_]\w*)/g, "{$1}").replace(/\*$/, "{*}");
+		const item = result.paths[key];
+		if (item)
+			Object.assign(item, {
+				[route.method.toLowerCase()]: {
+					...route.operation,
+					parameters: route.operation.parameters.map((parameter) => {
+						if (parameter.in !== "path") return parameter;
+						const index = route.path.split("/").findIndex((segment) => segment === `:${parameter.name}`);
+						const segment = canonical.split("/")[index];
+						return segment?.startsWith(":") ? { ...parameter, name: segment.slice(1) } : parameter;
+					}),
+					description: `${route.description} Extension: ${route.extension}.`,
+				},
+			});
+	}
+	return result;
+};

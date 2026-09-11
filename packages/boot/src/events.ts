@@ -1,5 +1,6 @@
-import { Context, Effect, Layer, Schema } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { Context, Deferred, Effect, Layer, Ref, Schema } from "effect";
+import { SqlClient, type Statement } from "effect/unstable/sql";
+import { movePublicPaths, projectPublicPath } from "./public-paths.ts";
 
 export const EventRecord = Schema.Struct({
 	seq: Schema.Int,
@@ -56,6 +57,24 @@ const make = Effect.gen(function* () {
 			Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Sequence))),
 			Effect.flatMap((rows) => (rows[0] ? Effect.succeed(rows[0]) : Effect.die("Missing sequence row"))),
 		);
+	const stopped = yield* Ref.make(false);
+	const signal = yield* Ref.make(yield* Deferred.make<void>());
+	const notify = Effect.gen(function* () {
+		const next = yield* Deferred.make<void>();
+		const previous = yield* Ref.getAndSet(signal, next);
+		yield* Deferred.succeed(previous, undefined);
+	});
+	const changed = (after: number) =>
+		Effect.gen(function* () {
+			while (true) {
+				// Capture the signal before reading SQL so a commit between read and wait cannot be missed.
+				const pending = yield* Ref.get(signal);
+				if (yield* Ref.get(stopped)) return yield* new EventError({ code: "events_unavailable" });
+				const current = (yield* state).published_through;
+				if (current > after) return current;
+				yield* Deferred.await(pending);
+			}
+		}).pipe(Effect.mapError(() => new EventError({ code: "events_unavailable" })));
 	const finish = sql`UPDATE seq SET published_through=next-1,pending_id=NULL,pending_attempt=NULL,pending_from=NULL,pending_to=NULL WHERE singleton=1`;
 	const append = (batch: Batch, attempt: string) =>
 		sql.withTransaction(
@@ -127,8 +146,13 @@ const make = Effect.gen(function* () {
 						if (tooLong.length) return yield* new EventError({ code: "topic_move_invalid" });
 						yield* sql`UPDATE events SET topic=${move.to} || substr(topic,length(${move.from})+1)
 							WHERE topic=${move.from} OR substr(topic,1,length(${move.from})+1)=${`${move.from}/`}`;
+						yield* movePublicPaths(sql, move.from, move.to);
 						yield* sql`UPDATE topic_moves SET state='completed',seq=${batch.to} WHERE id=${batch.transaction}`;
 					}
+					const projected = yield* projectPublicPath(sql, event).pipe(
+						Effect.catchTag("SchemaError", () => Effect.fail(new EventError({ code: "public_path_invalid" }))),
+					);
+					if (!projected) return yield* new EventError({ code: "public_path_invalid" });
 					yield* sql`INSERT INTO events(seq,transaction_id,event,topic) VALUES(${event.seq},${batch.transaction},${encode(event)},${event.topic})`;
 				}
 				yield* sql`UPDATE event_batches SET state='published' WHERE id=${batch.transaction}`;
@@ -148,8 +172,10 @@ const make = Effect.gen(function* () {
 		);
 	return {
 		state,
-		append,
-		abort,
+		changed,
+		stopWaiting: Ref.set(stopped, true).pipe(Effect.andThen(notify)),
+		append: (batch: Batch, attempt: string) => append(batch, attempt).pipe(Effect.ensuring(notify)),
+		abort: (transaction: string, attempt: string) => abort(transaction, attempt).pipe(Effect.ensuring(notify)),
 		reserve: (transaction: string, count: number, attempt: string) =>
 			sql.withTransaction(
 				Effect.gen(function* () {
@@ -186,15 +212,19 @@ const make = Effect.gen(function* () {
 				}),
 			),
 		writeBoot: (event: Omit<typeof EventRecord.Type, "seq">) =>
-			sql.withTransaction(
-				Effect.gen(function* () {
-					if (event.type === "topic.moved") return yield* new EventError({ code: "topic_move_unprepared" });
-					const current = yield* state;
-					if (!Number.isSafeInteger(current.next + 1)) return yield* new EventError({ code: "sequence_exhausted" });
-					yield* sql`INSERT INTO events(seq,transaction_id,event,topic) VALUES(${current.next},NULL,${encode({ ...event, seq: current.next })},${event.topic})`;
-					yield* sql`UPDATE seq SET next=next+1,published_through=CASE WHEN pending_id IS NULL THEN next ELSE published_through END WHERE singleton=1`;
-				}),
-			),
+			sql
+				.withTransaction(
+					Effect.gen(function* () {
+						if (event.type === "topic.moved") return yield* new EventError({ code: "topic_move_unprepared" });
+						if (event.type === "topic.meta" || event.type === "topic.deleted" || event.type === "pages.public")
+							return yield* new EventError({ code: "public_path_invalid" });
+						const current = yield* state;
+						if (!Number.isSafeInteger(current.next + 1)) return yield* new EventError({ code: "sequence_exhausted" });
+						yield* sql`INSERT INTO events(seq,transaction_id,event,topic) VALUES(${current.next},NULL,${encode({ ...event, seq: current.next })},${event.topic})`;
+						yield* sql`UPDATE seq SET next=next+1,published_through=CASE WHEN pending_id IS NULL THEN next ELSE published_through END WHERE singleton=1`;
+					}),
+				)
+				.pipe(Effect.ensuring(notify)),
 		query: (input: {
 			readonly since?: number;
 			readonly limit: number;
@@ -210,44 +240,58 @@ const make = Effect.gen(function* () {
 				const fence = (yield* state).published_through;
 				const since = input.since ?? fence;
 				if (since > fence) return yield* new EventError({ code: "cursor_ahead" });
-				const types = input.types ?? [];
-				const typesJson = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(types);
-				const rows = yield* sql`SELECT event,topic FROM events WHERE seq>${since} AND seq<=${fence}
-    AND (${input.topic ?? null} IS NULL OR topic=${input.topic ?? null} OR substr(topic,1,length(${input.topic ?? ""})+1)=${(input.topic ?? "") + "/"})
-    AND (${input.requestActor ?? null} IS NULL OR json_extract(event,'$.type')<>'http.request' OR json_extract(event,'$.actor')=${input.requestActor ?? null})
-    AND (${input.excludeMessageInstance ?? null} IS NULL OR substr(json_extract(event,'$.type'),1,8)<>'message.' OR json_extract(event,'$.instance') IS NOT ${input.excludeMessageInstance ?? null})
-    AND (${input.agent ?? null} IS NULL OR json_extract(event,'$.actor')=${input.agent ?? null})
-    AND (${input.instance ?? null} IS NULL OR json_extract(event,'$.instance')=${input.instance ?? null})
-    AND (${input.level ?? null} IS NULL OR json_extract(event,'$.level')=${input.level ?? null})
-    AND (${types.length}=0 OR EXISTS(SELECT 1 FROM json_each(${typesJson}) WHERE value=json_extract(event,'$.type') OR substr(value,-1)='*' AND substr(json_extract(event,'$.type'),1,length(value)-1)=substr(value,1,length(value)-1)))
-    ORDER BY seq LIMIT ${input.limit}`.pipe(
-					Effect.flatMap(
-						Schema.decodeUnknownEffect(
-							Schema.Array(Schema.Struct({ event: Schema.String, topic: Schema.NullOr(Schema.String) })),
+				if (since === fence) return { items: [], cursor: fence, timed_out: false, drained: false };
+				const filters: Array<Statement.Fragment> = [sql`seq>${since}`, sql`seq<=${fence}`];
+				if (input.topic !== undefined) filters.push(sql`(topic=${input.topic} OR topic GLOB ${`${input.topic}/*`})`);
+				if (input.requestActor !== undefined) filters.push(sql`(type<>'http.request' OR actor=${input.requestActor})`);
+				if (input.excludeMessageInstance !== undefined)
+					filters.push(sql`(type NOT GLOB 'message.*' OR instance IS NOT ${input.excludeMessageInstance})`);
+				if (input.agent !== undefined) filters.push(sql`actor=${input.agent}`);
+				if (input.instance !== undefined) filters.push(sql`instance=${input.instance}`);
+				if (input.level !== undefined) filters.push(sql`level=${input.level}`);
+				if (input.types?.length)
+					filters.push(
+						sql.or(
+							input.types.map((type) =>
+								type.endsWith("*")
+									? sql`type GLOB ${`${type.slice(0, -1).replace(/[?*[]/g, (character) => `[${character}]`)}*`}`
+									: sql`type=${type}`,
+							),
 						),
-					),
+					);
+				// SQLite otherwise prefers sequence order over selective prefix indexes and scans unrelated history.
+				const index = (
+					[
+						["events_actor_seq", input.agent !== undefined],
+						["events_instance_seq", input.instance !== undefined],
+						["events_level_seq", input.level !== undefined],
+						["events_type_seq", Boolean(input.types?.length && !input.types.includes("*"))],
+						["events_topic_seq", input.topic !== undefined],
+					] as const
+				).find(([, present]) => present)?.[0];
+				// A nearly caught-up query can inspect at most one page of sequence values; prefix indexes
+				// would instead revisit older matching history because their second key cannot bound that range.
+				let indexed = sql``;
+				if (fence - since <= input.limit + 1) indexed = sql`NOT INDEXED`;
+				else if (index !== undefined) indexed = sql`INDEXED BY ${sql(index)}`;
+				// One lookahead distinguishes a full page from exhausted filtered history. Only decode returned rows.
+				const rows =
+					yield* sql`SELECT event,topic FROM events ${indexed} WHERE ${sql.and(filters)} ORDER BY seq LIMIT ${input.limit + 1}`.pipe(
+						Effect.flatMap(
+							Schema.decodeUnknownEffect(
+								Schema.Array(Schema.Struct({ event: Schema.String, topic: Schema.NullOr(Schema.String) })),
+							),
+						),
+					);
+				const items = yield* Effect.forEach(rows.slice(0, input.limit), (row) =>
+					decode(row.event).pipe(Effect.map((event) => ({ ...event, topic: row.topic }))),
 				);
-				const items: Array<typeof EventRecord.Type> = [];
-				for (const row of rows) {
-					const event = { ...(yield* decode(row.event)), topic: row.topic };
-					if (input.topic && event.topic !== input.topic && !event.topic?.startsWith(`${input.topic}/`)) continue;
-					if (
-						(input.agent && event.actor !== input.agent) ||
-						(input.instance && event.instance !== input.instance) ||
-						(input.level && event.level !== input.level)
-					)
-						continue;
-					if (
-						input.types?.length &&
-						!input.types.some((type) =>
-							type.endsWith("*") ? event.type.startsWith(type.slice(0, -1)) : event.type === type,
-						)
-					)
-						continue;
-					items.push(event);
-					if (items.length === input.limit) break;
-				}
-				return { items, cursor: items.at(-1)?.seq ?? since, timed_out: false, drained: false };
+				return {
+					items,
+					cursor: rows.length > input.limit ? (items.at(-1)?.seq ?? since) : fence,
+					timed_out: false,
+					drained: false,
+				};
 			}),
 	};
 });

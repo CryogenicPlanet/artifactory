@@ -58,7 +58,7 @@ export const pageMarkdown = () => {
 		const frontmatter = matched?.[1] ?? "";
 		const body = parser.parse(matched ? text.slice(matched[0].length) : text, { async: false });
 		const tailwind = /<!--\s*tailwind\s*-->/i.test(text) || /^tailwind:[ \t]*true[ \t]*$/m.test(frontmatter);
-		const assets = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.9.0/github-markdown-light.css">${body.includes('class="hljs') ? '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.12.0/styles/github.min.css">' : ""}${body.includes('class="mermaid"') ? `<script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12.0.0/dist/mermaid.esm.min.mjs';mermaid.initialize({startOnLoad:true,theme:'default',securityLevel:'loose'});</script>` : ""}${tailwind ? '<script src="https://cdn.tailwindcss.com/3.4.19"></script><script>tailwind.config={corePlugins:{preflight:false}};</script>' : ""}`;
+		const assets = `<link rel="stylesheet" href="/page-assets/markdown.css">${body.includes('class="hljs') ? '<link rel="stylesheet" href="/page-assets/highlight.css">' : ""}${body.includes('class="mermaid"') ? '<script defer src="/page-assets/mermaid.js"></script><script defer src="/page-assets/mermaid-init.js"></script>' : ""}${tailwind ? '<style type="text/tailwindcss">@layer theme, utilities; @import "tailwindcss/theme" layer(theme); @import "tailwindcss/utilities" layer(utilities);</style><script defer src="/page-assets/tailwind.js"></script>' : ""}`;
 		return pageDocument(name, body, { title: text.match(/^#\s+(.+)$/m)?.[1] ?? name, raw: name, ...options, assets });
 	};
 };

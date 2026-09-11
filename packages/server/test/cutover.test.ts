@@ -106,8 +106,8 @@ for (const accepted of [false, true])
 					'else if (body.action === "accepted" || body.action === "live") { if (body.action === "live" && lifecycle.initial === "candidate") yield* Effect.sleep("3 seconds");',
 				)
 			: source.replace(
-					"yield* initialize;",
-					'yield* initialize; if (lifecycle.initial === "candidate") yield* Effect.sleep("3 seconds");',
+					"yield* migrate(",
+					'if (lifecycle.initial === "candidate") yield* Effect.sleep("3 seconds"); yield* migrate(',
 				);
 		expect(changed).not.toBe(source);
 		expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);

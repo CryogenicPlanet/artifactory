@@ -1,13 +1,48 @@
-import { Cause, Effect, Schema, Semaphore, Stream } from "effect";
-import type { Api } from "../../kernel/extension-api.ts";
-import { FetchHttpClient, HttpClient, type HttpServerRequest } from "effect/unstable/http";
-import { BootChannel } from "../../kernel/boot-channel.ts";
-import { Lifecycle } from "../../kernel/lifecycle.ts";
+import { Cause, Effect, Schema, Semaphore } from "effect";
+import type { Api, BackgroundContext } from "../../kernel/extension-api.ts";
+import { FetchHttpClient, HttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
 import { Input, created, SubscriptionError, validate } from "./contract.ts";
 import { makeStore } from "./store.ts";
 import { runDelivery } from "./delivery.ts";
 
-const respond = <E, R>(effect: Effect.Effect<Response, E, R>) =>
+const Receipt = Schema.Struct({
+	id: Schema.String,
+	filter: Input.fields.filter,
+	deliver: Input.fields.deliver,
+	created_at: Schema.Int,
+	since: Schema.Int,
+});
+const definition = HttpApi.make("subscriptions").add(
+	HttpApiGroup.make("subscriptions").add(
+		HttpApiEndpoint.post("create", "/api/subscriptions", { payload: Input, success: Receipt }).annotate(
+			OpenApi.Description,
+			"Persist a webhook subscription from the current published cursor. Requires read and write. Supply Idempotency-Key for retries.",
+		),
+		HttpApiEndpoint.get("list", "/api/subscriptions", {
+			success: Schema.Struct({
+				items: Schema.Array(
+					Schema.Struct({
+						...Receipt.fields,
+						cursor: Schema.Int,
+						attempts: Schema.Int,
+						next_attempt: Schema.Int,
+						last_error: Schema.NullOr(Schema.String),
+					}),
+				),
+			}),
+		}).annotate(
+			OpenApi.Description,
+			"List this instance’s active webhook subscriptions and retry status. Humans can list all subscriptions.",
+		),
+		HttpApiEndpoint.delete("remove", "/api/subscriptions/:id", { params: { id: Schema.String } }).annotate(
+			OpenApi.Description,
+			"Stop a webhook subscription owned by this instance. Humans can stop any subscription; deletion is idempotent.",
+		),
+	),
+);
+const ScopeFailure = Schema.Struct({ code: Schema.Literal("scope_required") });
+const respond = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	effect.pipe(
 		Effect.catchCause((cause) => {
 			if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
@@ -15,10 +50,13 @@ const respond = <E, R>(effect: Effect.Effect<Response, E, R>) =>
 				(reason) => reason._tag === "Fail" && Schema.is(SubscriptionError)(reason.error),
 			);
 			const own = reason?._tag === "Fail" && Schema.is(SubscriptionError)(reason.error) ? reason.error : null;
-			const status = own?.status ?? 503,
-				code = own?.code ?? "subscription_unavailable";
+			const scopeRequired = cause.reasons.some(
+				(reason) => reason._tag === "Fail" && Schema.is(ScopeFailure)(reason.error),
+			);
+			const status = own?.status ?? (scopeRequired ? 403 : 503),
+				code = own?.code ?? (scopeRequired ? "scope_required" : "subscription_unavailable");
 			return Effect.succeed(
-				Response.json(
+				HttpServerResponse.jsonUnsafe(
 					{
 						error: {
 							code,
@@ -35,96 +73,81 @@ const respond = <E, R>(effect: Effect.Effect<Response, E, R>) =>
 			);
 		}),
 	);
-const body = (request: HttpServerRequest.HttpServerRequest) =>
-	Effect.gen(function* () {
-		let length = 0;
-		const chunks = yield* request.stream.pipe(
-			Stream.tap((chunk) => {
-				length += chunk.byteLength;
-				return length > 8192 ? Effect.fail(new SubscriptionError({ code: "input_invalid", status: 400 })) : Effect.void;
-			}),
-			Stream.runCollect,
-			Effect.timeout("2 seconds"),
-		);
-		return yield* Schema.decodeEffect(Schema.fromJsonString(Input))(Buffer.concat(chunks).toString("utf8"), {
-			onExcessProperty: "error",
-		});
-	}).pipe(
-		Effect.flatMap((input) => Effect.try(() => validate(input))),
-		Effect.mapError(() => new SubscriptionError({ code: "input_invalid", status: 400 })),
-	);
 
-/** Bundled reference: intentionally captures trusted kernel services, never credentials. */
 export default (api: Api) =>
 	Effect.gen(function* () {
-		const boot = yield* BootChannel,
-			lifecycle = yield* Lifecycle;
+		yield* api.migrate(
+			"webhook_subscriptions",
+			`CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+ id TEXT PRIMARY KEY, instance TEXT NOT NULL, agent TEXT NOT NULL, human INTEGER NOT NULL,
+ input TEXT NOT NULL, idempotency_key TEXT, created_at INTEGER NOT NULL,
+ start_seq INTEGER NOT NULL, created_seq INTEGER NOT NULL, deleted_seq INTEGER,
+ cursor INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+ next_attempt INTEGER NOT NULL DEFAULT 0, last_error TEXT,
+ UNIQUE(instance,idempotency_key))`,
+		);
 		const client = yield* HttpClient.HttpClient.pipe(Effect.provide(FetchHttpClient.layer));
-		const store = yield* makeStore,
-			gate = yield* Semaphore.make(1);
-		api.route("POST", "/api/subscriptions", {
-			description:
-				"Persist a webhook delivery subscription from the current published cursor. Requires read and write. Supply Idempotency-Key for retries.",
-			scope: "write",
-			handler: (request, ctx) =>
-				respond(
-					Effect.gen(function* () {
-						if (!(request.headers["x-comms-scopes"] ?? "").split(",").includes("read"))
-							return yield* new SubscriptionError({ code: "scope_required", status: 403 });
-						const input = yield* body(request),
-							key = request.headers["idempotency-key"] ?? null;
-						if (
-							key !== null &&
-							(key.length < 1 ||
-								key.length > 200 ||
-								key.split("").some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))
-						)
-							return yield* new SubscriptionError({ code: "input_invalid", status: 400 });
-						return yield* gate
-							.withPermit(store.create(ctx, input, key))
-							.pipe(Effect.map((result) => Response.json(result)));
-					}),
-				),
-		});
-		api.route("GET", "/api/subscriptions", {
-			description:
-				"List this instance’s active webhook subscriptions and delivery retry status. Humans can list all subscriptions.",
-			scope: "read",
-			handler: (_request, ctx) =>
-				respond(
-					gate.withPermit(store.visible).pipe(
-						Effect.map((rows) =>
-							Response.json({
-								items: rows
-									.filter((row) => ctx.kind === "human" || row.instance === ctx.instance)
-									.map((row) => ({
-										...created(row),
-										cursor: row.cursor,
-										attempts: row.attempts,
-										next_attempt: row.next_attempt,
-										last_error: row.last_error,
+		const gate = yield* Semaphore.make(1);
+		api.mount(
+			definition,
+			HttpApiBuilder.group(definition, "subscriptions", (handlers) =>
+				handlers
+					.handle("create", ({ payload }) =>
+						respond(
+							Effect.gen(function* () {
+								const ctx = yield* api.context("write");
+								yield* api.context("read");
+								const request = yield* HttpServerRequest.HttpServerRequest;
+								const input = yield* Effect.try({
+									try: () => validate(payload),
+									catch: () => new SubscriptionError({ code: "input_invalid", status: 400 }),
+								});
+								const key = request.headers["idempotency-key"] ?? null;
+								if (
+									key !== null &&
+									(key.length < 1 ||
+										key.length > 200 ||
+										Array.from(key).some(
+											(character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+										))
+								)
+									return yield* new SubscriptionError({ code: "input_invalid", status: 400 });
+								return yield* gate.withPermit(makeStore(ctx).create(ctx, input, key));
+							}),
+						),
+					)
+					.handle("list", () =>
+						respond(
+							Effect.gen(function* () {
+								const ctx = yield* api.context("read");
+								return yield* gate.withPermit(makeStore(ctx).visible).pipe(
+									Effect.map((rows) => ({
+										items: rows
+											.filter((row) => ctx.kind === "human" || row.instance === ctx.instance)
+											.map((row) => ({
+												...created(row),
+												cursor: row.cursor,
+												attempts: row.attempts,
+												next_attempt: row.next_attempt,
+												last_error: row.last_error,
+											})),
 									})),
+								);
+							}),
+						),
+					)
+					.handle("remove", ({ params }) =>
+						respond(
+							Effect.gen(function* () {
+								const ctx = yield* api.context("write");
+								yield* gate.withPermit(makeStore(ctx).remove(ctx, params.id));
+								return HttpServerResponse.empty({ status: 204 });
 							}),
 						),
 					),
-				),
-		});
-		api.route("DELETE", "/api/subscriptions/:id", {
-			description:
-				"Stop a webhook subscription owned by this instance. Humans can stop any subscription; deletion is idempotent.",
-			scope: "write",
-			handler: (_request, ctx) =>
-				respond(
-					gate.withPermit(store.remove(ctx, ctx.params.id ?? "")).pipe(Effect.as(new Response(null, { status: 204 }))),
-				),
-		});
-		api.on("start", () =>
-			runDelivery(store, gate).pipe(
-				Effect.provideService(BootChannel, boot),
-				Effect.provideService(Lifecycle, lifecycle),
-				Effect.provideService(HttpClient.HttpClient, client),
-				Effect.forkScoped,
-				Effect.asVoid,
 			),
+		);
+		api.on("start", (_event: { readonly reason: "live" }, ctx: BackgroundContext) =>
+			runDelivery(ctx, makeStore(ctx), gate, client).pipe(Effect.forkScoped, Effect.asVoid),
 		);
 	});

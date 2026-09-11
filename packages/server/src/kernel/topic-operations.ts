@@ -1,7 +1,7 @@
-import { type Crypto, DateTime, Effect, Schema } from "effect";
+import { DateTime, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { type BootChannel, EventRecord, KernelError } from "./boot-channel.ts";
-import { writerGate } from "./database.ts";
+import { type BootChannel, type EventRecord, KernelError } from "./boot-channel.ts";
+import type { Mutate } from "./mutate.ts";
 import { type Identity, validTopic } from "./messages.ts";
 
 export const TopicMetaInput = Schema.Struct({ meta: Schema.JsonObject });
@@ -21,11 +21,10 @@ const StoredTopic = Schema.Struct({
 });
 
 // The caller holds Messages' permit through commit and immediate publication.
-export const mutateTopic = <E>(
+export const mutateTopic = (
 	sql: SqlClient,
-	crypto: Crypto.Crypto,
+	mutate: Mutate,
 	boot: BootChannel["Service"],
-	relay: Effect.Effect<void, E>,
 	identity: Identity,
 	path: string,
 	input: typeof TopicMetaInput.Type | typeof TopicArchiveInput.Type,
@@ -37,28 +36,21 @@ export const mutateTopic = <E>(
 		const archive = "archived" in input;
 		const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))({ path, input });
 		if (Buffer.byteLength(encoded) > 131072) return yield* new KernelError({ code: "input_invalid" });
-		yield* relay;
-		const transaction = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
 		const now = (yield* DateTime.nowAsDate).getTime();
-		let reservedCount = 0;
-		const result = yield* sql
-			.withTransaction(
+		return yield* mutate({
+			...(key === undefined
+				? {}
+				: {
+						idempotency: {
+							instance: identity.instance,
+							key,
+							kind: archive ? "topic.archived" : "topic.meta",
+							input: encoded,
+							outcome: Schema.fromJsonString(TopicMutation),
+						},
+					}),
+			body: (reserve) =>
 				Effect.gen(function* () {
-					yield* writerGate(sql, boot.epoch);
-					if (key !== undefined) {
-						const receipts =
-							yield* sql`SELECT input,outcome FROM topic_idempotency WHERE instance=${identity.instance} AND key=${key}`.pipe(
-								Effect.flatMap(
-									Schema.decodeUnknownEffect(
-										Schema.Array(Schema.Struct({ input: Schema.String, outcome: Schema.String })),
-									),
-								),
-							);
-						if (receipts[0]) {
-							if (receipts[0].input !== encoded) return yield* new KernelError({ code: "idempotency_conflict" });
-							return yield* Schema.decodeEffect(Schema.fromJsonString(TopicMutation))(receipts[0].outcome);
-						}
-					}
 					const deleted =
 						yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${path} OR substr(${path},1,length(path)+1)=path||'/') LIMIT 1`;
 					if (deleted.length) return yield* new KernelError({ code: "topic_not_found" });
@@ -82,8 +74,7 @@ export const mutateTopic = <E>(
 								name: parts[i] ?? "",
 							});
 					}
-					reservedCount = missing.length + 1;
-					const range = yield* boot.reserve(transaction, reservedCount);
+					const range = yield* reserve(missing.length + 1);
 					const event = (seq: number, type: string, topic: string, payload: Schema.JsonObject) => ({
 						seq,
 						at: now,
@@ -124,27 +115,7 @@ export const mutateTopic = <E>(
 					const meta = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))(outcome.meta);
 					yield* sql`UPDATE topics SET meta=${meta},archived_at=${outcome.archived_at},updated_seq=${range.to},previous=${before} WHERE path=${path}`;
 					records.push(event(range.to, archive ? "topic.archived" : "topic.meta", path, outcome));
-					yield* sql`INSERT INTO mutation_batches VALUES(${transaction},${range.from},${range.to},${records.length})`;
-					for (const record of records) {
-						const json = yield* Schema.encodeEffect(Schema.fromJsonString(EventRecord))(record);
-						yield* sql`INSERT INTO outbox VALUES(${record.seq},${transaction},${json},NULL)`;
-					}
-					if (key !== undefined) {
-						const json = yield* Schema.encodeEffect(Schema.fromJsonString(TopicMutation))(outcome);
-						yield* sql`INSERT INTO topic_idempotency VALUES(${identity.instance},${key},${encoded},${json})`;
-					}
-					return outcome;
+					return { outcome, events: records };
 				}),
-			)
-			.pipe(Effect.result);
-		if (result._tag === "Failure") {
-			// Typed failure proves rollback; commit/rollback defects remain for fenced recovery.
-			if (reservedCount > 0) {
-				yield* boot.reserve(transaction, reservedCount);
-				yield* boot.abort(transaction);
-			}
-			return yield* result.failure;
-		}
-		yield* relay;
-		return result.success;
-	}).pipe(Effect.uninterruptible);
+		});
+	});

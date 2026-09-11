@@ -20,7 +20,10 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 			},
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),
 		});
-	const get = async (path: string) => (await call("GET", path)).json();
+	const get = async (path: string) =>
+		(
+			await call("GET", path.startsWith("/api/topics") ? path + (path.includes("?") ? "&" : "?") + "mark=0" : path)
+		).json();
 	const page = (method: string, path: string, body?: string) =>
 		fetch(`${app.url}/api/fs/pages/${path}`, {
 			method,
@@ -53,7 +56,7 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 	await app.post("/api/messages", { topic: "project-other", body: "unrelated" }, cookie);
 	const pageWrite = await (await page("PUT", "project/notes/note.md", "retained page")).json();
 	const pageHistory = await get("/api/fs/pages/project/notes/note.md?history");
-	const archived = await (await call("PATCH", "/api/topics/project", { archived: true }, "archive")).json();
+	const archived = await (await call("PUT", "/api/topics/project", { archived: true }, "archive")).json();
 	expect(archived.archived_at).toEqual(expect.any(Number));
 	expect((await get("/api/topics")).subtopics.map((row: { path: string }) => row.path)).toEqual(["project-other"]);
 	expect((await get("/api/topics")).unread).toBe(1);
@@ -67,7 +70,7 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 	for (const [method, target, body] of [
 		["PUT", path, { meta: {} }],
 		["PUT", "/api/topics/project/new", { meta: {} }],
-		["PATCH", path, { archived: false }],
+		["PUT", path, { archived: false }],
 	] satisfies Array<[string, string, unknown]>)
 		expect((await call(method, target, body)).status).toBe(409);
 	expect((await app.post("/api/messages", { topic: "project/notes/child", body: "denied" }, cookie)).status).toBe(409);
@@ -86,21 +89,21 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 	expect(await get("/api/fs/pages/project/notes/note.md?history")).toEqual(pageHistory);
 	expect(await fixture.sql("SELECT * FROM source_changes", "boot.db")).toEqual([]);
 	expect((await page("PUT", "project-other/note.md", "sibling")).status).toBe(200);
-	expect((await call("PATCH", "/api/topics/project", { archived: false })).status).toBe(200);
+	expect((await call("PUT", "/api/topics/project", { archived: false })).status).toBe(200);
 	expect((await page("PUT", "project/notes/note.md", "unarchived page")).status).toBe(200);
-	expect(await (await call("PATCH", "/api/topics/project", { archived: true }, "archive")).json()).toEqual(archived);
+	expect(await (await call("PUT", "/api/topics/project", { archived: true }, "archive")).json()).toEqual(archived);
 	expect((await get("/api/topics")).unread).toBe(2);
 	expect(await get("/api/topics/project/notes/child")).toMatchObject({ archived_at: null, archived_by: null });
 	for (const [method, target, body] of [
 		["PUT", path, {}],
 		["PUT", path, { meta: {}, ignored: 1 }],
-		["PATCH", path, { archived: "true" }],
-		["PATCH", path, { archived: false, meta: {} }],
+		["PUT", path, { archived: "true" }],
+		["PUT", path, { archived: false, meta: {} }],
 		["PUT", "/api/topics/bad%2F..%2Fpath", { meta: {} }],
 		["PUT", path + "?unknown=1", { meta: {} }],
 	] satisfies Array<[string, string, unknown]>)
-		expect((await call(method, target, body)).status).toBe(400);
-	expect((await call("PATCH", "/api/topics/missing", { archived: true })).status).toBe(404);
+		expect((await call(method, target, body)).status, JSON.stringify({ method, target, body })).toBe(400);
+	expect((await call("PUT", "/api/topics/missing", { archived: true })).status).toBe(404);
 	expect((await call("PUT", path, { meta: {} }, undefined, "")).status).toBe(401);
 	const enrollment = await (await app.post("/auth/enroll", { name: "reader", kind: "codex", host: "test" })).json();
 	const params = { id: enrollment.id, decision: "approve" as const, scopes: ["read"], long_lived: false };

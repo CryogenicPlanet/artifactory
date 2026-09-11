@@ -9,7 +9,9 @@ it("matches scoped parameter and wildcard routes with the same context and descr
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
 	await writeFile(
 		join(seed, "ext/core.ts"),
-		`export default api => {
+		`import {CoreApi,coreHandlers} from "../conversation.ts";
+export default api => {
+ api.mount(CoreApi,coreHandlers);
  api.route("GET", "/api/route-demo/:id", {description:"Old parameter route",scope:"read",handler:async()=>Response.json("old")});
  api.route("GET", "/api/route-demo/fixed", {description:"Fixed route",scope:"read",handler:async()=>Response.json("fixed")});
 };`,
@@ -117,7 +119,7 @@ export default api => {
 	).toBe(403);
 }, 25000);
 
-it("keeps reserved routes outside broad patterns and rejects a broken parameterized health override", async (test) => {
+it("keeps reserved and static core routes ahead of broad extension patterns", async (test) => {
 	const fixture = await conversation(test);
 	const seed = join(fixture.root, "guard-seed");
 	await mkdir(join(fixture.root, "pages"), { recursive: true });
@@ -150,9 +152,16 @@ it("keeps reserved routes outside broad patterns and rejects a broken parameteri
 	const edited = await fetch(`${app.url}/api/fs/app/ext/zz-health.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
-		body: `export default api => api.route("GET", "/api/:endpoint", {description:"Broken parameterized override",scope:"read",handler:async()=>Response.json({items:[]})});`,
+		body: `export default api => api.route("GET", "/api/:endpoint", {description:"Broad parameter route",scope:"read",handler:async()=>Response.json({items:[]})});`,
 	});
-	expect(await edited.json()).toMatchObject({ status: "failed" });
+	expect(await edited.json()).toMatchObject({ status: "live" });
+	expect(await (await fetch(`${app.url}/api/otherwise-unregistered`, { headers: { cookie } })).json()).toEqual({
+		items: [],
+	});
+	expect(await (await fetch(`${app.url}/init`)).text()).toContain("# comms");
+	expect(await (await fetch(`${app.url}/api/ext`, { headers: { cookie } })).json()).toEqual(
+		expect.arrayContaining([expect.objectContaining({ name: "zz-health.ts", status: "loaded" })]),
+	);
 	expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: "keep me" }]);
 	expect((await (await fetch(`${app.url}/api/messages?since=0`, { headers: { cookie } })).json()).items).toEqual([
 		expect.objectContaining({ body: "keep me" }),

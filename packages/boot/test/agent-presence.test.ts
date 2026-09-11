@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
 
-test("presence migrates, admits only valid credentials, aggregates rotations, and survives restart", async ({
+test("activity metadata migrates, updates only for valid credentials, and survives restart", async ({
 	onTestFinished,
 }) => {
 	const directory = await mkdtemp(join(tmpdir(), "comms-presence-"));

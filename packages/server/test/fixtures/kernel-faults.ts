@@ -20,10 +20,11 @@ const program = Effect.gen(function* () {
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
 			const pause = Console.log("PAUSED").pipe(Effect.andThen(Effect.never));
 			const channel: BootChannel["Service"] = {
-				agents: Effect.succeed({ items: [] }),
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 2,
+				changed: (after) =>
+					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
 					Effect.map((state) => ({ published_through: state.published_through })),
 					Effect.mapError(unavailable),

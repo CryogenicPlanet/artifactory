@@ -1,147 +1,126 @@
+import { RequestValidation, layer as bodyLayer } from "./request-schema.ts";
 import { sqlGroup, sqlHandlers } from "./sql-http.ts";
 import { profilesGroup, profilesHandlers } from "./profiles-http.ts";
-import { context } from "./context.ts";
 import type { Extensions } from "./kernel/ext.ts";
-import { description } from "./extension-http.ts";
 import { routes as onboardingRoutes } from "./onboarding.ts";
-import { DateTime, Effect, Layer, Ref, Schema, Stream } from "effect";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import {
-	HttpApi,
-	HttpApiBuilder,
-	HttpApiEndpoint,
-	HttpApiGroup,
-	HttpApiSchema,
-	OpenApi,
-} from "effect/unstable/httpapi";
+import { DateTime, Deferred, Effect, Layer, Schema, Stream } from "effect";
+import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
 import { identity, failure, integer } from "./conversation-request.ts";
 import { topicManagementGroup, topicManagementHandlers } from "./topic-management-http.ts";
-import { searchGroup, searchHandlers } from "./search-http.ts";
 import { messageGroup, messageHandlers } from "./message-http.ts";
 import { topicsGroup, topicHandlers } from "./topics-http.ts";
 import { Lifecycle } from "./kernel/lifecycle.ts";
 import { KernelError } from "./kernel/boot-channel.ts";
 import { Envelope, Message, MessageInput, Messages, validTopic } from "./kernel/messages.ts";
+import { waitForMessages } from "./kernel/message-wait.ts";
+import { markView } from "./read-view.ts";
 
-const query = Object.freeze({
+const flag = Schema.optionalKey(Schema.Literals(["0", "1"]));
+const query = Schema.Struct({
 	since: Schema.optionalKey(Schema.String),
 	topic: Schema.optionalKey(Schema.String),
-	recursive: Schema.optionalKey(Schema.String),
+	recursive: flag,
 	tag: Schema.optionalKey(Schema.String),
 	agent: Schema.optionalKey(Schema.String),
 	q: Schema.optionalKey(Schema.String),
+	mentions: Schema.optionalKey(Schema.String),
+	exclude_self: flag,
+	newest: flag,
+	mark: flag,
 	limit: Schema.optionalKey(Schema.String),
 	wait: Schema.optionalKey(Schema.String),
-});
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+const conversationGroup = HttpApiGroup.make("conversation").add(
+	HttpApiEndpoint.post("create", "/api/messages", {
+		payload: MessageInput.annotate({ parseOptions: { onExcessProperty: "error" } }),
+		success: Message,
+	}).annotate(
+		OpenApi.Description,
+		"Create a markdown message and missing topic ancestors. Requires write. Idempotency-Key is scoped to the authenticated instance. Success follows durable event publication.",
+	),
+	HttpApiEndpoint.get("messages", "/api/messages", { query, success: Envelope }).annotate(
+		OpenApi.Description,
+		"Read published messages. since is exclusive and defaults to now; since=0 reads history. newest=1 returns latest limit in ascending sequence order. topic/subtree OR comma-list mentions selects addressed messages; other filters combine with AND. exclude_self=1 and waits exclude this instance. cursor is considered-through, including empty results. Views mark highest returned seq at topic or root; mark=0 peeks. wait up to60 seconds sends whitespace heartbeats and drains on swap.",
+	),
+);
+const boundedConversationGroup = conversationGroup.middleware(RequestValidation);
 export const Api = HttpApi.make("comms")
-	.add(sqlGroup)
-	.add(profilesGroup)
 	.add(topicsGroup)
 	.add(topicManagementGroup)
 	.add(messageGroup)
-	.add(searchGroup)
-	.add(
-		HttpApiGroup.make("conversation").add(
-			HttpApiEndpoint.post("create", "/api/messages", { payload: MessageInput, success: Message }).annotate(
-				OpenApi.Description,
-				"Create a markdown message and missing topic ancestors. Requires write. Idempotency-Key is scoped to the authenticated instance. Success follows durable event publication.",
-			),
-			HttpApiEndpoint.get("messages", "/api/messages", { query, success: Envelope }).annotate(
-				OpenApi.Description,
-				"Read published messages in sequence order. Combine exact tag and agent filters with literal full-text q words/phrases. Requires read. Omitted since starts now; since=0 reads history. wait up to 60 seconds excludes this instance, with whitespace heartbeats and a preserved empty cursor.",
-			),
-			HttpApiEndpoint.get("context", "/api/ctx", {
-				query: {
-					topic: Schema.optionalKey(Schema.String),
-					since: Schema.optionalKey(Schema.String),
-					budget: Schema.optionalKey(Schema.String),
-				},
-				success: Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/markdown" })),
-			}).annotate(
-				OpenApi.Description,
-				"Read a bounded markdown digest: README, metadata, pinned/open messages, subtopic summaries, pages and caller unread/inbox. Requires read. Latest 200 message window; approximate four UTF-16 code units per token, with explicit truncation. since filters ordinary recent messages, not standing context.",
-			),
-		),
-	);
+	.add(boundedConversationGroup);
+export const CoreApi = Api;
+export const SystemApi = HttpApi.make("comms-system").add(sqlGroup).add(profilesGroup);
 const handlers = HttpApiBuilder.group(Api, "conversation", (handlers) =>
 	handlers
-		.handleRaw("create", () =>
+		.handle("create", ({ payload, request }) =>
 			failure(
 				Effect.gen(function* () {
 					const who = yield* identity("write");
-					const request = yield* HttpServerRequest.HttpServerRequest;
-					let bytes = 0;
-					const chunks = yield* request.stream.pipe(
-						Stream.tap((chunk) =>
-							Effect.gen(function* () {
-								bytes += chunk.byteLength;
-								if (bytes > 131072) return yield* new KernelError({ code: "input_invalid" });
-							}),
-						),
-						Stream.runCollect,
-						Effect.timeout("5 seconds"),
-					);
-					const text = Buffer.concat(chunks).toString("utf8");
-					const input = yield* Schema.decodeEffect(Schema.fromJsonString(MessageInput))(text).pipe(
-						Effect.mapError(() => new KernelError({ code: "input_invalid" })),
-					);
-					return HttpServerResponse.jsonUnsafe(
-						yield* (yield* Messages).create(who, input, request.headers["idempotency-key"]),
-					);
+					return yield* (yield* Messages).create(who, payload, request.headers["idempotency-key"]);
 				}),
 			),
 		)
-		.handleRaw("messages", () =>
+		.handle("messages", ({ query }) =>
 			failure(
 				Effect.gen(function* () {
 					const who = yield* identity("read");
-					const request = yield* HttpServerRequest.HttpServerRequest;
-					const params = new URL(request.url, "http://localhost").searchParams;
-					if ([...params.keys()].some((key) => !Object.keys(query).includes(key) || params.getAll(key).length !== 1))
-						return yield* new KernelError({ code: "query_invalid" });
-					const since = integer(params.get("since"), -1, Number.MAX_SAFE_INTEGER),
-						limit = integer(params.get("limit"), 100, 200),
-						wait = integer(params.get("wait"), 0, 60),
-						topic = params.get("topic"),
-						recursive = params.get("recursive");
+					const limit = integer(query.limit ?? null, 100, 200),
+						wait = integer(query.wait ?? null, 0, 60),
+						parsedSince = integer(query.since ?? null, 0, Number.MAX_SAFE_INTEGER);
 					if (
-						(since === null && params.has("since")) ||
 						limit === null ||
 						limit === 0 ||
 						wait === null ||
-						(topic !== null && !validTopic(topic)) ||
-						(recursive !== null && recursive !== "0" && recursive !== "1")
+						parsedSince === null ||
+						(query.topic !== undefined && !validTopic(query.topic)) ||
+						(query.newest === "1" && wait > 0)
 					)
 						return yield* new KernelError({ code: "query_invalid" });
 					const messages = yield* Messages;
-					const cursor = params.has("since") && since !== null ? since : (yield* messages.fence).published_through;
+					const cursor =
+						query.since !== undefined
+							? parsedSince
+							: query.newest === "1"
+								? 0
+								: (yield* messages.fence).published_through;
 					const input = {
 						since: cursor,
 						limit,
-						...(topic === null ? {} : { topic }),
-						recursive: recursive === "1",
-						...(params.has("tag") ? { tag: params.get("tag") ?? "" } : {}),
-						...(params.has("agent") ? { agent: params.get("agent") ?? "" } : {}),
-						...(params.has("q") ? { q: params.get("q") ?? "" } : {}),
-						...(wait > 0 ? { exclude: who.instance } : {}),
+						...(query.topic === undefined ? {} : { topic: query.topic }),
+						recursive: query.recursive === "1",
+						newest: query.newest === "1",
+						...(query.tag === undefined ? {} : { tag: query.tag }),
+						...(query.agent === undefined ? {} : { agent: query.agent }),
+						...(query.q === undefined ? {} : { q: query.q }),
+						...(query.mentions === undefined ? {} : { mentions: query.mentions.split(",") }),
+						...(wait > 0 || query.exclude_self === "1" ? { exclude: who.instance } : {}),
 					};
+					const view = (result: typeof Envelope.Type) =>
+						markView(who, result.items, query.topic ?? "", query.mark !== "0").pipe(Effect.as(result));
 					const first = yield* messages.list(input);
-					if (first.items.length || wait === 0) return HttpServerResponse.jsonUnsafe(first);
+					if (first.items.length || wait === 0) return yield* view(first);
 					const lifecycle = yield* Lifecycle;
 					const deadline = (yield* DateTime.nowAsDate).getTime() + wait * 1000;
-					const result = Effect.gen(function* () {
-						while ((yield* DateTime.nowAsDate).getTime() < deadline) {
-							if ((yield* Ref.get(lifecycle.state)) === "draining") return { ...first, drained: true };
-							yield* Effect.sleep("100 millis");
-							const next = yield* messages.list(input);
-							if (next.items.length) return next;
-						}
-						return { ...first, timed_out: true };
+					const result = waitForMessages({
+						first,
+						deadline,
+						changed: messages.changed,
+						query: (since) => messages.list({ ...input, since }),
+						view,
+						drained: Deferred.await(lifecycle.drained),
 					});
+					const environment = yield* Effect.context<Messages | Lifecycle>();
 					const encoder = new TextEncoder();
 					return HttpServerResponse.stream(
 						Stream.merge(
-							Stream.fromEffect(result.pipe(Effect.flatMap(Schema.encodeEffect(Schema.fromJsonString(Envelope))))),
+							Stream.fromEffect(
+								result.pipe(
+									Effect.provideContext(environment),
+									Effect.flatMap(Schema.encodeEffect(Schema.fromJsonString(Envelope))),
+								),
+							),
 							Stream.tick("10 seconds").pipe(Stream.map(() => "\n")),
 							{ haltStrategy: "left" },
 						).pipe(Stream.map((value) => encoder.encode(value))),
@@ -149,11 +128,30 @@ const handlers = HttpApiBuilder.group(Api, "conversation", (handlers) =>
 					);
 				}),
 			),
-		)
-		.handleRaw("context", () => failure(context)),
+		),
+).pipe(Layer.provide(bodyLayer(131072)));
+export const coreHandlers = Layer.mergeAll(
+	handlers,
+	topicHandlers(Api),
+	messageHandlers(Api),
+	topicManagementHandlers(Api),
 );
-export const routes = (extensions: Extensions["Service"]) =>
-	Layer.mergeAll(
+export const routes = (extensions: Extensions["Service"]) => {
+	const system = OpenApi.fromApi(SystemApi);
+	const specification = {
+		...system,
+		paths: Object.fromEntries(
+			[...new Set([...Object.keys(system.paths), ...Object.keys(extensions.openapi.paths)])].map((path) => [
+				path,
+				{ ...system.paths[path], ...extensions.openapi.paths[path] },
+			]),
+		),
+		components: {
+			schemas: { ...extensions.openapi.components.schemas, ...system.components.schemas },
+			securitySchemes: { ...extensions.openapi.components.securitySchemes, ...system.components.securitySchemes },
+		},
+	};
+	return Layer.mergeAll(
 		HttpRouter.add(
 			"GET",
 			"/api/ext",
@@ -164,26 +162,17 @@ export const routes = (extensions: Extensions["Service"]) =>
 				}),
 			),
 		),
-		HttpApiBuilder.layer(Api).pipe(
-			Layer.provide(
-				Layer.mergeAll(
-					handlers,
-					sqlHandlers(Api),
-					profilesHandlers(Api),
-					topicHandlers(Api),
-					messageHandlers(Api),
-					searchHandlers(Api),
-					topicManagementHandlers(Api),
-				),
-			),
+		HttpApiBuilder.layer(SystemApi).pipe(
+			Layer.provide(Layer.mergeAll(sqlHandlers(SystemApi), profilesHandlers(SystemApi))),
 		),
 		HttpRouter.add(
 			"GET",
 			"/api",
 			Effect.gen(function* () {
 				yield* identity("read");
-				return HttpServerResponse.jsonUnsafe(OpenApi.fromApi(Api.add(description(extensions))));
+				return HttpServerResponse.jsonUnsafe(specification);
 			}).pipe(failure),
 		),
-		onboardingRoutes(OpenApi.fromApi(Api.add(description(extensions))).paths),
+		onboardingRoutes(specification),
 	);
+};

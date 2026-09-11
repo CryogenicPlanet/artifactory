@@ -1,28 +1,17 @@
+import { useLoad } from "./use-load.ts";
 import { Effect } from "effect";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { type BoardError } from "./board-api.ts";
-import { getPasskeys, type PasskeyList } from "./account-api.ts";
+import { getPasskeys } from "./account-api.ts";
 import { addPasskey, deletePasskey } from "./account-passkeys.ts";
 import { AccountTokens } from "./account-tokens.tsx";
-import "./account-controls.css";
 
 export function AccountControls() {
-	const [passkeys, setPasskeys] = useState<PasskeyList | null>(null);
+	const { value: passkeys, error: loadError, reload } = useLoad(getPasskeys);
 	const [error, setError] = useState<BoardError | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [label, setLabel] = useState("");
-	const [refresh, setRefresh] = useState(0);
 	const [message, setMessage] = useState("");
-	useEffect(() => {
-		const controller = new AbortController();
-		void Effect.runPromise(getPasskeys.pipe(Effect.result), { signal: controller.signal })
-			.then((result) => {
-				if (result._tag === "Success") setPasskeys(result.success);
-				else setError(result.failure);
-			})
-			.catch(() => {});
-		return () => controller.abort();
-	}, [refresh]);
 	const run = (operation: Effect.Effect<void, BoardError>, success: string) => {
 		if (busy) return;
 		setBusy(true);
@@ -30,7 +19,7 @@ export function AccountControls() {
 		setMessage("Waiting for your passkey…");
 		void Effect.runPromise(operation.pipe(Effect.result)).then((result) => {
 			setBusy(false);
-			setRefresh((value) => value + 1);
+			reload();
 			if (result._tag === "Failure") {
 				setError(result.failure);
 				setMessage("");
@@ -41,8 +30,8 @@ export function AccountControls() {
 		});
 	};
 	return (
-		<div className="account-controls">
-			<section className="account-section" aria-labelledby="account-passkeys-heading">
+		<div className="mt-9">
+			<section className="mt-8 text-[13px]" aria-labelledby="account-passkeys-heading">
 				<div className="section-heading">
 					<h2 id="account-passkeys-heading">Your passkeys</h2>
 					<button
@@ -50,14 +39,17 @@ export function AccountControls() {
 						disabled={busy}
 						onClick={() => {
 							setError(null);
-							setRefresh((value) => value + 1);
+							reload();
 						}}
 					>
 						Refresh passkeys
 					</button>
 				</div>
 				{passkeys?.items.map((passkey) => (
-					<article className="account-row" key={passkey.id}>
+					<article
+						className="flex items-center justify-between gap-3 border-b border-[#e3e8df] py-4 [&>div]:min-w-0 [&>div]:wrap-anywhere [&_strong]:min-w-0 [&_strong]:wrap-anywhere [&_p]:my-[5px] [&_p]:text-[#737d6d] [&_small]:wrap-anywhere [&_small]:text-[#939b89] [&_button]:max-w-[48%] [&_button]:shrink-0 [&_button]:wrap-anywhere"
+						key={passkey.id}
+					>
 						<strong>{passkey.label}</strong>
 						<button
 							type="button"
@@ -72,7 +64,7 @@ export function AccountControls() {
 					<p className="field-hint">Keep at least one passkey so you can sign in.</p>
 				)}
 				<form
-					className="composer account-form"
+					className="rounded-[10px] border border-[#dfe5d8] bg-white p-[17px] min-[651px]:p-[22px] mt-[18px] [&_h3]:text-sm [&_fieldset]:mb-4 [&_fieldset]:min-w-0 [&_button]:mt-[14px]"
 					onSubmit={(event) => {
 						event.preventDefault();
 						run(addPasskey(label.trim()), "Passkey added.");
@@ -96,10 +88,10 @@ export function AccountControls() {
 					</button>
 				</form>
 				<p role="status">{message}</p>
-				{error && (
+				{(error ?? loadError) && (
 					<div className="notice" role="alert">
-						{error.message}
-						{error.status === 401 && (
+						{(error ?? loadError)?.message}
+						{(error ?? loadError)?.status === 401 && (
 							<p>
 								<a href="/auth/login">Sign in again</a>
 							</p>

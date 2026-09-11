@@ -77,10 +77,33 @@ const make = (directory: string) =>
 					),
 				),
 		);
-		const entries = Effect.fn("Pages.entries")(function* (name: string) {
+		const entries = Effect.fn("Pages.entries")(function* (name: string, publicOnly = false) {
 			const target = yield* resolve(name);
 			if (target.type !== "Directory") return yield* new PageRejected({ code: "page_not_found" });
 			const names = yield* fs.readDirectory(target.absolute);
+			const publicChildren = publicOnly
+				? yield* sql
+						.withTransaction(
+							Effect.gen(function* () {
+								yield* sql`SELECT epoch FROM kernel_writer`;
+								const ceiling = (yield* boot.fence).published_through;
+								return yield* sql`WITH visible_topics AS (${publishedTopics(sql, ceiling)})
+				 SELECT path,meta FROM visible_topics topic WHERE (parent=${name} OR (${name}='' AND parent IS NULL)) AND deleted_at IS NULL
+				 AND NOT EXISTS (SELECT 1 FROM visible_topics ancestor WHERE ancestor.deleted_at IS NOT NULL
+				 AND (ancestor.path=topic.path OR substr(topic.path,1,length(ancestor.path)+1)=ancestor.path||'/'))`.pipe(
+									Effect.flatMap(
+										Schema.decodeUnknownEffect(
+											Schema.Array(
+												Schema.Struct({ path: Schema.String, meta: Schema.fromJsonString(Schema.JsonObject) }),
+											),
+										),
+									),
+									Effect.map((rows) => rows.filter((row) => row.meta.public === true).map((row) => row.path)),
+								);
+							}),
+						)
+						.pipe(Effect.mapError(() => new PageRejected({ code: "pages_unavailable" })))
+				: null;
 			const result: Array<{ readonly name: string; readonly directory: boolean }> = [];
 			for (const child of names.sort()) {
 				const childName = name ? `${name}/${child}` : child;
@@ -89,7 +112,8 @@ const make = (directory: string) =>
 						error.code === "pages_unavailable" ? Effect.fail(error) : Effect.succeed(null),
 					),
 				);
-				if (entry) result.push({ name: child, directory: entry.type === "Directory" });
+				if (entry && (entry.type !== "Directory" || publicChildren === null || publicChildren.includes(childName)))
+					result.push({ name: child, directory: entry.type === "Directory" });
 			}
 			return result;
 		});

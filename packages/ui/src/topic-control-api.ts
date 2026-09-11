@@ -12,7 +12,7 @@ export type TopicMutation = typeof TopicMutation.Type;
 
 export const saveTopic = (path: string, input: { readonly meta: Schema.JsonObject } | { readonly archived: boolean }) =>
 	json(
-		HttpClientRequest.make("meta" in input ? "PUT" : "PATCH")(
+		HttpClientRequest.put(
 			new URL(`/api/topics/${path.split("/").map(encodeURIComponent).join("/")}`, window.location.origin).href,
 		).pipe(HttpClientRequest.bodyJsonUnsafe(input)),
 	).pipe(

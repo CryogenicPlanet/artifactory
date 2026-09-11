@@ -26,10 +26,11 @@ const program = Effect.gen(function* () {
 			let reserveFailed = false;
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
 			const channel: BootChannel["Service"] = {
-				agents: Effect.succeed({ items: [] }),
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 1,
+				changed: (after) =>
+					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
 					Effect.map((state) => ({ published_through: state.published_through })),
 					Effect.mapError(unavailable),
@@ -56,9 +57,11 @@ const program = Effect.gen(function* () {
 					const initial = yield* messages.create(who, { topic: "project/child", body: "retained" }, "create");
 					const sibling = yield* messages.create(who, { topic: "project-other", body: "outside" });
 					yield* messages.topic(who, "project", { meta: { public: true, status: "active" } }, "meta");
-					// Retained rows from the retired feature must survive a topic move unchanged.
+					// Preserve existing extension-era data without depending on removed core reaction writes.
 					yield* sql`INSERT INTO reactions VALUES(${initial.id},${who.instance},'ok',1,0,${initial.seq})`;
-					yield* messages.mark(who, { topic: "project/child", seq: initial.seq }, "read");
+					yield* messages.change(
+						sql`INSERT INTO reads VALUES(${who.instance},'project/child',${initial.seq})`.pipe(Effect.asVoid),
+					);
 					const reject = <A, E, R>(effect: Effect.Effect<A, E, R>, code?: string) =>
 						effect.pipe(
 							Effect.result,
@@ -190,9 +193,9 @@ const program = Effect.gen(function* () {
 					yield* messages.deleteTopic(who, "project/deleted");
 					// Read marks can exist without a topic row; merge a destination collision monotonically.
 					yield* sql`INSERT INTO reads VALUES('family','new/project/child',${sibling.seq})`;
-					const oldEvents = yield* sql`SELECT * FROM outbox ORDER BY seq`;
-					const receipts = yield* sql`SELECT * FROM idempotency ORDER BY key`;
-					const readReceipts = yield* sql`SELECT * FROM read_idempotency ORDER BY key`;
+					const oldEvents = (yield* events.query({ since: 0, limit: 100 })).items;
+					const receipts = yield* sql`SELECT * FROM idempotency WHERE kind<>'topic.moved' ORDER BY key`;
+					const readReceipts = yield* sql`SELECT * FROM idempotency WHERE kind='read.marked' ORDER BY key`;
 					const reactions = yield* sql`SELECT * FROM reactions`;
 					const state = yield* events.state;
 					const result = yield* messages.moveTopic(command);
@@ -202,9 +205,9 @@ const program = Effect.gen(function* () {
 					yield* reject(messages.moveTopic({ ...command, to: "elsewhere" }), "idempotency_conflict");
 					yield* reject(messages.moveTopic({ ...command, from: "../invalid" }), "input_invalid");
 					assert.equal((yield* events.state).published_through, state.published_through);
-					assert.deepEqual(yield* sql`SELECT * FROM outbox WHERE seq<${result.seq} ORDER BY seq`, oldEvents);
-					assert.deepEqual(yield* sql`SELECT * FROM idempotency ORDER BY key`, receipts);
-					assert.deepEqual(yield* sql`SELECT * FROM read_idempotency ORDER BY key`, readReceipts);
+					assert.deepEqual((yield* events.query({ since: 0, limit: 100 })).items, oldEvents);
+					assert.deepEqual(yield* sql`SELECT * FROM idempotency WHERE kind<>'topic.moved' ORDER BY key`, receipts);
+					assert.deepEqual(yield* sql`SELECT * FROM idempotency WHERE kind='read.marked' ORDER BY key`, readReceipts);
 					assert.deepEqual(yield* sql`SELECT * FROM reactions`, reactions);
 					assert.deepEqual(yield* sql`SELECT id,seq,topic FROM messages WHERE id=${initial.id}`, [
 						{ id: initial.id, seq: initial.seq, topic: "new/project/child" },
@@ -254,11 +257,11 @@ const program = Effect.gen(function* () {
 						epoch,
 					);
 					const reused = yield* messages.create(who, { topic: "project/child", body: "new content at original path" });
-					assert.equal(
-						(yield* sql`SELECT seq FROM outbox WHERE transaction_id=${command.transaction} AND shipped_at IS NOT NULL`)
-							.length,
-						1,
+					assert.deepEqual(
+						(yield* events.query({ since: 0, limit: 100, types: ["topic.moved"] })).items,
+						movedEvents.map((row) => row.event),
 					);
+					assert.equal((yield* sql`SELECT seq FROM outbox WHERE transaction_id=${command.transaction}`).length, 0);
 					assert.deepEqual(yield* messages.moveTopic({ ...command, transaction: "new-retry-id" }), result);
 					assert.deepEqual(yield* messages.get(reused.id), reused);
 					yield* sql`UPDATE kernel_writer SET epoch='replacement'`;

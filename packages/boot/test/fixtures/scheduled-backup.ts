@@ -64,6 +64,8 @@ const main = Effect.gen(function* () {
 				stderr: yield* Ref.make(""),
 				exited: Effect.never,
 				health: Effect.never,
+				ping: Effect.void,
+				drain: Effect.void,
 				stop: Effect.never,
 				control: (action) =>
 					Effect.gen(function* () {
@@ -85,6 +87,7 @@ const main = Effect.gen(function* () {
 			operationGate: yield* Semaphore.make(1),
 			callback: "http://localhost",
 			run: Effect.never,
+			shutdown: Effect.void,
 			assertClosure: Effect.gen(function* () {
 				if (closureFailed) return yield* new ChildError({ code: "child_closure_unproven" });
 			}),

@@ -1,6 +1,5 @@
 import { Clock, Effect, Ref, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import QRCode from "qrcode";
 import { AuthError, type AuthConfig } from "./auth.ts";
 import { assertionProof, humanSession, authFailure, authErrorResponse, body, type AuthStore } from "./auth-http.ts";
 import { AddPasskey, DeletePasskey } from "./passkey-management-schema.ts";
@@ -42,7 +41,7 @@ export const enrollmentRoute = (store: AuthStore, config: AuthConfig) =>
 			request.method === "POST" ? /^\/(?:auth|_boot)\/enroll\/(e_[A-Za-z0-9_-]{43})$/.exec(path)?.[1] : undefined;
 		const decide =
 			request.method === "POST" ? /^\/_boot\/enroll\/(e_[A-Za-z0-9_-]{43})\/approve$/.exec(path)?.[1] : undefined;
-		const page = request.method === "GET" ? /^\/(?:_boot\/)?approve\/(e_[A-Za-z0-9_-]{43})(\.svg)?$/.exec(path) : null;
+		const page = request.method === "GET" ? /^\/(?:_boot\/)?approve\/(e_[A-Za-z0-9_-]{43})$/.exec(path) : null;
 		const challenge = request.method === "POST" && path === "/_boot/auth/challenge";
 		if (request.method === "GET" && path === "/_boot/auth/approval.js")
 			return HttpServerResponse.text(approvalClient, { contentType: "text/javascript", headers: pageHeaders });
@@ -54,13 +53,6 @@ export const enrollmentRoute = (store: AuthStore, config: AuthConfig) =>
 				const approveUrl = (id: string) => `${config.expectedOrigin}/approve/${id}`;
 				if (page?.[1]) {
 					const info = yield* auth.enrollmentInfo(page[1]);
-					if (page[2]) {
-						const svg = yield* Effect.tryPromise({
-							try: () => QRCode.toString(approveUrl(info.id), { type: "svg" }),
-							catch: () => new AuthError({ code: "qr_unavailable" }),
-						});
-						return HttpServerResponse.text(svg, { contentType: "image/svg+xml", headers: pageHeaders });
-					}
 					return HttpServerResponse.text(approvalPage(info), { contentType: "text/html", headers: pageHeaders });
 				}
 				if (create) {
@@ -68,11 +60,7 @@ export const enrollmentRoute = (store: AuthStore, config: AuthConfig) =>
 					const input = yield* body(Schema.Struct({ name: Schema.String, kind: Schema.String, host: Schema.String }));
 					const result = yield* auth.createEnrollment(input);
 					const link = approveUrl(result.id);
-					const qr = yield* Effect.tryPromise({
-						try: () => QRCode.toString(link, { type: "utf8" }),
-						catch: () => new AuthError({ code: "qr_unavailable" }),
-					});
-					return HttpServerResponse.jsonUnsafe({ ...result, approve_url: link, qr_ascii: qr });
+					return HttpServerResponse.jsonUnsafe({ ...result, approve_url: link });
 				}
 				if (poll) {
 					if ([...url.searchParams.keys()].some((key) => key !== "wait") || url.searchParams.getAll("wait").length > 1)

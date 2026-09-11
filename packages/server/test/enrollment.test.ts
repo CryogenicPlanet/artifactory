@@ -15,15 +15,15 @@ it("enrolls two agents with signed approval, isolates scopes and attribution, fi
 		expect(created.status).toBe(200);
 		const enrollment = await created.json();
 		expect(enrollment.approve_url).toBe(`https://comms.test/approve/${enrollment.id}`);
-		expect(enrollment.qr_ascii).toContain("█");
+		expect(enrollment).not.toHaveProperty("qr_ascii");
 		const page = await fetch(`${app.url}/approve/${enrollment.id}`);
 		expect(page.status).toBe(200);
 		expect(page.headers.get("cache-control")).toBe("no-store");
 		const html = await page.text();
 		expect(html).toContain(enrollment.user_code);
 		expect(html).not.toContain(enrollment.device_secret);
-		const svg = await fetch(`${app.url}/_boot/approve/${enrollment.id}.svg`);
-		expect(svg.headers.get("content-type")).toContain("image/svg+xml");
+		const retiredQr = await fetch(`${app.url}/_boot/approve/${enrollment.id}.svg`, { headers: { cookie } });
+		expect(retiredQr.status).toBe(501);
 		expect((await app.post(`/auth/enroll/${enrollment.id}`, { device_secret: enrollment.device_secret })).status).toBe(
 			202,
 		);
@@ -118,10 +118,10 @@ it("enrolls two agents with signed approval, isolates scopes and attribution, fi
 	await fixture.sql("UPDATE seq SET next=1003,published_through=1002", "boot.db");
 	const filtered = await (await call("/api/events?since=999&limit=1", codex.pair.access)).json();
 	expect(filtered.items.map((event: { actor: string }) => event.actor)).toEqual(["codex"]);
-	expect(filtered.cursor).toBe(1001);
+	expect(filtered.cursor).toBe(1002);
 	expect(await (await call("/api/events?since=1001&limit=1", codex.pair.access)).json()).toMatchObject({
 		items: [],
-		cursor: 1001,
+		cursor: 1002,
 	});
 	const human = await fetch(`${app.url}/api/events?since=999`, { headers: { cookie } });
 	expect((await human.json()).items).toHaveLength(3);

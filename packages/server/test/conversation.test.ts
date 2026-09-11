@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
-it("persists two signed-in instances, implicit topics, published events, idempotency, waits and a markdown digest", async (test) => {
+it("persists two signed-in instances, implicit topics, published events, idempotency, waits", async (test) => {
 	const fixture = await conversation(test);
 	const app = await fixture.launch();
 	await app.setup();
@@ -23,7 +23,7 @@ it("persists two signed-in instances, implicit topics, published events, idempot
 	expect((await fetch(`${app.url}/api/messages`)).status).toBe(401);
 	expect(await (await read("/api/messages?since=0&topic=project&recursive=1")).json()).toMatchObject({
 		items: [message],
-		cursor: message.seq,
+		cursor: expect.any(Number),
 	});
 	const now = await (await read("/api/messages")).json();
 	expect(now).toEqual({ items: [], cursor: expect.any(Number), timed_out: false, drained: false });
@@ -44,13 +44,10 @@ it("persists two signed-in instances, implicit topics, published events, idempot
 	expect(answer.instance).not.toBe(message.instance);
 	const received = await (await wait).json();
 	expect(received.items).toEqual([answer]);
-	expect(received.cursor).toBe(answer.seq);
+	expect(received.cursor).toBeGreaterThanOrEqual(answer.seq);
 	expect(await (await read("/api/messages?since=0&topic=project/auth&t=bad")).json()).toMatchObject({
 		error: { code: "query_invalid" },
 	});
-	const digest = await read("/api/ctx?topic=project&budget=200");
-	expect(digest.headers.get("content-type")).toContain("text/markdown");
-	expect(await digest.text()).toContain("First question");
 	expect((await (await read("/api")).json()).paths["/api/messages"].post.description).toContain(
 		"durable event publication",
 	);
@@ -65,7 +62,7 @@ it("persists two signed-in instances, implicit topics, published events, idempot
 	expect(history.items[0]).toEqual(message);
 }, 30000);
 
-it("keeps subtree boundaries and limit cursors safe and empty waits preserve since", async (test) => {
+it("keeps subtree boundaries and limit cursors safe and empty waits advance through considered records", async (test) => {
 	const fixture = await conversation(test),
 		app = await fixture.launch();
 	await app.setup();
@@ -79,7 +76,12 @@ it("keeps subtree boundaries and limit cursors safe and empty waits preserve sin
 	expect(page.cursor).toBe(page.items[0].seq);
 	const next = await read(`/api/messages?topic=@pi&recursive=1&since=${page.cursor}&limit=1`);
 	expect(next.items[0].topic).toBe("@pi/child");
-	expect(await read("/api/messages?since=0&wait=1")).toEqual({ items: [], cursor: 0, timed_out: true, drained: false });
+	expect(await read("/api/messages?since=0&wait=1")).toEqual({
+		items: [],
+		cursor: expect.any(Number),
+		timed_out: true,
+		drained: false,
+	});
 	expect(await read("/api/events?topic=@pi&since=0&types=message.*")).toMatchObject({
 		items: [{ topic: "@pi" }, { topic: "@pi/child" }],
 	});

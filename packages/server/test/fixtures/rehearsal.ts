@@ -18,7 +18,18 @@ const run = Effect.gen(function* () {
 		yield* fs.makeDirectory(pages);
 		const backup = yield* AppBackup;
 		yield* backup.clone(clone);
-		const initial = yield* backup.prepareClone(clone, "rehearsal-test");
+		yield* backup.prepareClone(clone, "rehearsal-test");
+		const initial = yield* Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const rows = yield* sql`SELECT next FROM seq WHERE singleton=1`.pipe(
+				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ next: Schema.Int })))),
+			);
+			if (!rows[0]) return yield* Effect.die("Missing boot allocator");
+			return rows[0].next;
+		}).pipe(
+			Effect.provide(SqliteClient.layer({ filename: path.join(path.dirname(filename), "boot.db"), disableWAL: true })),
+			Effect.scoped,
+		);
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 		const child = yield* spawner.spawn(
 			ChildProcess.make(process.execPath, [entry], {

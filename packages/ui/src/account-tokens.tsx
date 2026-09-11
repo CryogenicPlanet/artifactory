@@ -1,7 +1,8 @@
+import { useLoad } from "./use-load.ts";
 import { Effect, Schema } from "effect";
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { type BoardError } from "./board-api.ts";
-import { accountPost, getFamilies, TokenPair, type FamilyList, unreadable } from "./account-api.ts";
+import { accountPost, getFamilies, TokenPair, unreadable } from "./account-api.ts";
 import { confirmAccountAction } from "./account-passkeys.ts";
 
 type MintInput = {
@@ -12,10 +13,10 @@ type MintInput = {
 };
 type PendingMint = { readonly input: MintInput; readonly key: string; readonly proof: string };
 export function AccountTokens() {
-	const [families, setFamilies] = useState<FamilyList>({ items: [], next: null });
+	const request = useMemo(() => getFamilies(), []);
+	const { value: families, error: loadError, reload, update } = useLoad(request);
 	const [error, setError] = useState<BoardError | null>(null);
 	const [busy, setBusy] = useState(false);
-	const [refresh, setRefresh] = useState(0);
 	const [agent, setAgent] = useState("");
 	const [label, setLabel] = useState("");
 	const [write, setWrite] = useState(true);
@@ -23,16 +24,6 @@ export function AccountTokens() {
 	const [long, setLong] = useState(false);
 	const [pending, setPending] = useState<PendingMint | null>(null);
 	const [pair, setPair] = useState<TokenPair | null>(null);
-	useEffect(() => {
-		const controller = new AbortController();
-		void Effect.runPromise(getFamilies().pipe(Effect.result), { signal: controller.signal })
-			.then((result) => {
-				if (result._tag === "Success") setFamilies(result.success);
-				else setError(result.failure);
-			})
-			.catch(() => {});
-		return () => controller.abort();
-	}, [refresh]);
 	const run = (operation: Effect.Effect<void, BoardError>) => {
 		if (busy) return;
 		setBusy(true);
@@ -67,12 +58,12 @@ export function AccountTokens() {
 				);
 				setPair(result);
 				setPending(null);
-				setRefresh((value) => value + 1);
+				reload();
 			}),
 		);
 	};
 	return (
-		<section className="account-section" aria-labelledby="account-tokens-heading">
+		<section className="mt-8 text-[13px]" aria-labelledby="account-tokens-heading">
 			<div className="section-heading">
 				<h2 id="account-tokens-heading">Agent access</h2>
 				<button
@@ -80,7 +71,7 @@ export function AccountTokens() {
 					disabled={busy}
 					onClick={() => {
 						setError(null);
-						setRefresh((value) => value + 1);
+						reload();
 					}}
 				>
 					Refresh tokens
@@ -89,8 +80,11 @@ export function AccountTokens() {
 			<p className="field-hint">
 				Revoking an instance ends access for every token in its family, including refreshed tokens.
 			</p>
-			{families.items.map((family) => (
-				<article className="account-row" key={family.family}>
+			{families?.items.map((family) => (
+				<article
+					className="flex items-center justify-between gap-3 border-b border-[#e3e8df] py-4 [&>div]:min-w-0 [&>div]:wrap-anywhere [&_strong]:min-w-0 [&_strong]:wrap-anywhere [&_p]:my-[5px] [&_p]:text-[#737d6d] [&_small]:wrap-anywhere [&_small]:text-[#939b89] [&_button]:max-w-[48%] [&_button]:shrink-0 [&_button]:wrap-anywhere"
+					key={family.family}
+				>
 					<div>
 						<strong>
 							{family.agent}@{family.label}
@@ -108,7 +102,7 @@ export function AccountTokens() {
 								Effect.gen(function* () {
 									const proof = yield* confirmAccountAction("token.revoke", { family: family.family });
 									yield* accountPost(`/_boot/tokens/${family.family}/revoke`, {}, proof);
-									setRefresh((value) => value + 1);
+									reload();
 								}),
 							)
 						}
@@ -117,16 +111,16 @@ export function AccountTokens() {
 					</button>
 				</article>
 			))}
-			{!families.items.length && <p className="field-hint">No issued agent tokens.</p>}
-			{families.next && (
+			{families && !families.items.length && <p className="field-hint">No issued agent tokens.</p>}
+			{families?.next && (
 				<button
 					type="button"
 					disabled={busy}
 					onClick={() =>
 						run(
-							getFamilies(families.next).pipe(
+							getFamilies(families?.next).pipe(
 								Effect.map((page) =>
-									setFamilies((current) => ({ items: [...current.items, ...page.items], next: page.next })),
+									update((current) => ({ items: [...(current?.items ?? []), ...page.items], next: page.next })),
 								),
 							),
 						)
@@ -136,7 +130,7 @@ export function AccountTokens() {
 				</button>
 			)}
 			<form
-				className="composer account-form"
+				className="rounded-[10px] border border-[#dfe5d8] bg-white p-[17px] min-[651px]:p-[22px] mt-[18px] [&_h3]:text-sm [&_fieldset]:mb-4 [&_fieldset]:min-w-0 [&_button]:mt-[14px]"
 				onSubmit={(event) => {
 					event.preventDefault();
 					mint();
@@ -165,15 +159,15 @@ export function AccountTokens() {
 						onChange={(event) => setLabel(event.target.value)}
 						placeholder="macbook"
 					/>
-					<label className="account-check">
+					<label className="flex items-center gap-[9px]">
 						<input type="checkbox" checked={write} onChange={(event) => setWrite(event.target.checked)} /> Write
 						messages and topics
 					</label>
-					<label className="account-check">
+					<label className="flex items-center gap-[9px]">
 						<input type="checkbox" checked={fs} onChange={(event) => setFs(event.target.checked)} /> Edit source and
 						pages
 					</label>
-					<label className="account-check">
+					<label className="flex items-center gap-[9px]">
 						<input type="checkbox" checked={long} onChange={(event) => setLong(event.target.checked)} /> Long-lived:
 						access 7 days, refresh 90 days
 					</label>
@@ -191,7 +185,7 @@ export function AccountTokens() {
 					</button>
 				)}
 				{pair && (
-					<div className="account-secrets">
+					<div className="mt-5 [&_textarea]:min-h-20 [&_textarea]:font-mono [&_textarea]:wrap-anywhere">
 						<h3>Save this token pair</h3>
 						<p>
 							These secrets are shown only here. Closing this view removes them from the page; they cannot be retrieved
@@ -207,10 +201,10 @@ export function AccountTokens() {
 					</div>
 				)}
 			</form>
-			{error && (
+			{(error ?? loadError) && (
 				<div className="notice" role="alert">
-					{error.message}
-					{error.status === 401 && (
+					{(error ?? loadError)?.message}
+					{(error ?? loadError)?.status === 401 && (
 						<p>
 							<a href="/auth/login">Sign in again</a>
 						</p>

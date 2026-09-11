@@ -78,11 +78,9 @@ export const authFailure = <E, R>(effect: Effect.Effect<HttpServerResponse.HttpS
 											? 409
 											: ["enrollment_invalid", "family_not_found", "passkey_not_found"].includes(error.code)
 												? 404
-												: error.code === "qr_unavailable"
-													? 503
-													: error.code === "invalid_request"
-														? 400
-														: 401,
+												: error.code === "invalid_request"
+													? 400
+													: 401,
 						)
 					: authErrorResponse("boot_unavailable", 503),
 			),

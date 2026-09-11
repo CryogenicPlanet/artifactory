@@ -31,7 +31,7 @@ it("combines published message filters before pagination and keeps them across l
 	expect(next.items).toEqual([two]);
 	expect(await (await read(`since=${next.cursor}&${filters}`)).json()).toEqual({
 		items: [],
-		cursor: two.seq,
+		cursor: expect.any(Number),
 		timed_out: false,
 		drained: false,
 	});

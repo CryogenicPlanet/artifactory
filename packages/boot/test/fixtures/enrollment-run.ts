@@ -26,6 +26,16 @@ const run = Effect.gen(function* () {
 		yield* sql`DROP TABLE enrollments`;
 		for (const table of ["child_attempts", "backups", "cutover"]) yield* sql.unsafe(`DROP TABLE ${table}`);
 		yield* sql`ALTER TABLE sessions DROP COLUMN last_seen_at`;
+		yield* sql`DROP TABLE public_paths`;
+		yield* sql`DROP INDEX events_type_seq`;
+		yield* sql`DROP INDEX events_actor_seq`;
+		yield* sql`DROP INDEX events_instance_seq`;
+		yield* sql`DROP INDEX events_level_seq`;
+		yield* sql`DROP INDEX events_topic_seq`;
+		yield* sql`ALTER TABLE events DROP COLUMN type`;
+		yield* sql`ALTER TABLE events DROP COLUMN actor`;
+		yield* sql`ALTER TABLE events DROP COLUMN instance`;
+		yield* sql`ALTER TABLE events DROP COLUMN level`;
 		yield* sql`ALTER TABLE events DROP COLUMN topic`;
 		yield* sql`DROP TABLE topic_moves`;
 		yield* sql`DROP TABLE topic_page_moves`;
@@ -75,7 +85,7 @@ const run = Effect.gen(function* () {
 		assert.deepEqual(yield* sql`SELECT before_directory,desired_directory FROM source_changes`, [
 			{ before_directory: 0, desired_directory: 0 },
 		]);
-		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 13 }]);
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 14 }]);
 		assert.equal((yield* sql`SELECT * FROM tokens`).length, 0);
 		assert.equal((yield* sql`SELECT * FROM enrollments`).length, 0);
 		return;

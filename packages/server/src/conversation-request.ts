@@ -1,33 +1,181 @@
+import { isSqlError } from "effect/unstable/sql/SqlError";
 import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError";
-import { Effect, Schema } from "effect";
-import { isHttpServerError, RouteNotFound } from "effect/unstable/http/HttpServerError";
+import { Effect, Option, Schema } from "effect";
+import { isHttpServerError, RequestParseError, RouteNotFound } from "effect/unstable/http/HttpServerError";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { KernelError } from "./kernel/boot-channel.ts";
 import type { Identity } from "./kernel/messages.ts";
-const requestHint = (code: string) => {
-	switch (code) {
-		case "scope_required":
-			return "Use credentials granted the required scope. Agents need a human-approved enrollment: read for reading/listening, write for conversation changes.";
-		case "author_required":
-			return "Use the original authoring instance's credentials or a human session. Another instance of the same agent is a different author.";
-		case "topic_not_found":
-			return "Check the topic path with GET /api/topics. Deleted topics remain unavailable.";
-		case "message_not_found":
-			return "Use the message id returned by a message read. Deleted messages remain unavailable.";
-		case "idempotency_conflict":
-			return "Retry the original unchanged request with its original Idempotency-Key. Use a new key only for an intentionally new operation.";
-		case "topic_exists":
-			return "Choose a destination whose topic subtree and page directory do not already exist.";
-		case "topic_archived":
-			return "Unarchive the topic and its archived ancestors before changing it.";
-		case "input_invalid":
-			return "Check the JSON fields and size limits at /api. Topic segments use lowercase letters, numbers, dot, underscore or hyphen, joined by /; only the first may start with @.";
-		case "query_invalid":
-			return "Check query parameters at /api. Use a nonnegative integer since from a returned cursor, and include each parameter only once.";
-		default:
-			return "Retry using the same Idempotency-Key; inspect authenticated boot status if failure persists.";
-	}
+/** Recognize only failures caused by incoming wire data; response encoding remains a defect. */
+export const requestErrorCode = (value: unknown): "input_invalid" | "query_invalid" | undefined => {
+	if (HttpApiSchemaError.is(value) && ["Params", "Headers", "Query", "Payload"].includes(value.kind))
+		return value.kind === "Query" ? "query_invalid" : "input_invalid";
+	if (isHttpServerError(value) && value.reason instanceof RequestParseError) return "input_invalid";
+	return undefined;
 };
+const policy = {
+	public_pages_limit: {
+		status: 500,
+		message: "The public page grant snapshot exceeds its activation limit.",
+		hint: "Reduce public topic grants to at most 4096 paths and 512 KiB of encoded paths, then reload. Inspect invalid public topic paths if the count remains over the limit.",
+	},
+	idempotency_migration_invalid: {
+		status: 500,
+		message: "Retained idempotency history cannot be migrated safely.",
+		hint: "Inspect the startup error and repair incompatible receipt data or its migration. Preserve original outcomes; do not retry or discard history blindly.",
+	},
+	unsupported_media_type: {
+		status: 415,
+		message: "The request content type is unsupported.",
+		hint: "Send Content-Type: application/json for this JSON endpoint.",
+	},
+	extension_migration_conflict: {
+		status: 409,
+		message: "The applied extension migration has different SQL.",
+		hint: "Keep the applied migration unchanged and use a new migration name for the next change.",
+	},
+	extension_migration_invalid: {
+		status: 400,
+		message: "The extension migration name or statement is invalid.",
+		hint: "Use a valid migration name and one supported, nonempty SQL statement.",
+	},
+	scope_required: {
+		status: 403,
+		message: "The required scope is missing.",
+		hint: "Use credentials granted the route's required scope. Request a human-approved enrollment to change scopes.",
+	},
+	author_required: {
+		status: 403,
+		message: "Only the authoring instance or a human may change this message.",
+		hint: "Use the original authoring instance's credentials or a human session. Another instance of the same agent is a different author.",
+	},
+	topic_not_found: {
+		status: 404,
+		message: "The topic does not exist.",
+		hint: "Check the topic path with GET /api/topics. Deleted topics remain unavailable.",
+	},
+	message_not_found: {
+		status: 404,
+		message: "The message does not exist.",
+		hint: "Use a message reference returned by a message read. Deleted messages remain unavailable.",
+	},
+	idempotency_conflict: {
+		status: 409,
+		message: "The idempotency key belongs to a different request.",
+		hint: "Retry the original unchanged request with its original Idempotency-Key. Use a new key only for an intentionally new operation.",
+	},
+	topic_exists: {
+		status: 409,
+		message: "The destination topic already exists.",
+		hint: "Choose a destination whose topic subtree and page directory do not already exist.",
+	},
+	topic_archived: {
+		status: 409,
+		message: "The topic is archived.",
+		hint: "Unarchive the topic and its archived ancestors before changing it.",
+	},
+	cursor_ahead: {
+		status: 400,
+		message: "The cursor is ahead of the publication fence.",
+		hint: "Use a cursor returned by this board, or omit since to begin at its current publication fence.",
+	},
+	input_invalid: {
+		status: 400,
+		message: "The request body or path is invalid.",
+		hint: "Check the declared JSON fields, path grammar and size limits at /api. Remove unknown fields and send a valid JSON body.",
+	},
+	query_invalid: {
+		status: 400,
+		message: "The query is invalid.",
+		hint: "Check query parameters at /api. Use a nonnegative integer since from a returned cursor, and include each parameter only once.",
+	},
+	sql_unsupported: {
+		status: 501,
+		message: "This SQL operation is not supported.",
+		hint: "Use one SELECT or WITH read query. Remove comments and semicolons; bind literal text as parameters. SQL writes are not implemented.",
+	},
+	boot_unavailable: {
+		status: 503,
+		message: "The boot channel is temporarily unavailable.",
+		hint: "Retry the unchanged request with the same Idempotency-Key. If it persists, inspect authenticated /_boot/status.",
+	},
+	generation_not_live: {
+		status: 503,
+		message: "This generation cannot currently accept the operation.",
+		hint: "Retry the unchanged request through the public board address after the generation transition.",
+	},
+	stale_writer: {
+		status: 503,
+		message: "This generation no longer owns the database writer epoch.",
+		hint: "Retry the unchanged request through the public board address so it reaches the current generation.",
+	},
+	app_schema_unsupported: {
+		status: 500,
+		message: "The app database schema is unsupported by this generation.",
+		hint: "Fix the app migration or restore compatible source through /api/revert. Inspect /_boot/status before changing data.",
+	},
+	batch_missing: {
+		status: 500,
+		message: "A committed mutation batch is missing.",
+		hint: "Inspect authenticated /_boot/status and repair the app's mutation evidence. Do not retry or remove recovery evidence blindly.",
+	},
+	event_cursor_invalid: {
+		status: 500,
+		message: "An event consumer produced an invalid cursor.",
+		hint: "Fix the event consumer to preserve the sequence and cursor contract before retrying.",
+	},
+	health_context_invalid: {
+		status: 500,
+		message: "The topic context health check failed.",
+		hint: "Fix the edited topic handler, then rehearse or reload again.",
+	},
+	health_create_invalid: {
+		status: 500,
+		message: "The message creation health check failed.",
+		hint: "Fix the edited message creation handler, then rehearse or reload again.",
+	},
+	health_read_invalid: {
+		status: 500,
+		message: "The message read health check failed.",
+		hint: "Fix the edited message reader, then rehearse or reload again.",
+	},
+	health_response_too_large: {
+		status: 500,
+		message: "A health response exceeded its size limit.",
+		hint: "Fix the edited health route to return a bounded response, then rehearse or reload again.",
+	},
+	health_route_failed: {
+		status: 500,
+		message: "A required route failed its health check.",
+		hint: "Inspect the generation failure and fix or revert the edited route before reloading.",
+	},
+	health_failed: {
+		status: 500,
+		message: "The generation health check failed.",
+		hint: "Inspect the generation failure and fix or revert the edited source before reloading.",
+	},
+	rehearsal_append_forbidden: {
+		status: 500,
+		message: "Rehearsal attempted to publish production events.",
+		hint: "Fix the edited handler to suppress event publication during rehearsal.",
+	},
+	rehearsal_events_forbidden: {
+		status: 500,
+		message: "Rehearsal attempted to read production events.",
+		hint: "Fix the edited handler to respect the rehearsal lifecycle boundary.",
+	},
+	rehearsal_reservation_conflict: {
+		status: 500,
+		message: "Rehearsal sequence reservations conflict.",
+		hint: "Fix the edited mutation to use one correctly sized reservation per transaction.",
+	},
+	webhook_response_too_large: {
+		status: 500,
+		message: "The webhook response exceeded its size limit.",
+		hint: "Change the webhook receiver to return a response under 64 KiB.",
+	},
+} as const satisfies Readonly<
+	Record<KernelError["code"], { readonly status: number; readonly message: string; readonly hint: string }>
+>;
 export const identity = (scope: string) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
@@ -48,51 +196,60 @@ export const identity = (scope: string) =>
 			kind: h["x-comms-auth-kind"],
 		} satisfies Identity;
 	});
-export const failure = <E, R>(effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>) =>
+/** Preserve declared success values so HttpApi can encode them; normalize errors before its error encoder. */
+export const failure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	effect.pipe(
-		Effect.catchCause((cause) => {
-			if (
-				cause.reasons.some(
-					(reason) =>
-						reason._tag === "Fail" && isHttpServerError(reason.error) && reason.error.reason instanceof RouteNotFound,
-				)
-			)
-				return Effect.succeed(HttpServerResponse.empty({ status: 404 }));
-			const error = cause.reasons.find((reason) => reason._tag === "Fail" && Schema.is(KernelError)(reason.error));
-			const invalidRequest = cause.reasons.some((reason) => {
-				const value = reason._tag === "Fail" ? reason.error : reason._tag === "Die" ? reason.defect : undefined;
-				return HttpApiSchemaError.is(value) && ["Params", "Headers", "Query", "Payload"].includes(value.kind);
-			});
-			const code = invalidRequest
-				? "input_invalid"
-				: error
-					? "error" in error && Schema.is(KernelError)(error.error)
-						? error.error.code
-						: "request_invalid"
-					: "store_unavailable";
-			const status = ["scope_required", "author_required"].includes(code)
-				? 403
-				: ["topic_not_found", "message_not_found"].includes(code)
-					? 404
-					: ["idempotency_conflict", "topic_archived", "topic_exists"].includes(code)
-						? 409
-						: ["input_invalid", "query_invalid"].includes(code)
-							? 400
-							: 503;
-			return Effect.succeed(
-				HttpServerResponse.jsonUnsafe(
-					{
-						error: {
-							code,
-							message: "Conversation request failed.",
-							hint: requestHint(code),
-							retriable: status === 503,
-						},
-					},
-					{ status },
-				),
-			);
-		}),
+		Effect.catchCause((cause) =>
+			Effect.gen(function* () {
+				const request = Option.getOrUndefined(yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest));
+				const route = request ? `${request.method} ${request.url.split("?")[0]}` : "the requested route";
+				let code: KernelError["code"] | "store_unavailable" | "handler_failed" = "handler_failed";
+				const unexpected = cause.reasons.some((reason) => {
+					if (reason._tag === "Interrupt") return false;
+					const value = reason._tag === "Fail" ? reason.error : reason.defect;
+					if (requestErrorCode(value) !== undefined) return false;
+					if (isHttpServerError(value) && value.reason instanceof RouteNotFound) return false;
+					return (
+						reason._tag !== "Fail" || (!Schema.is(KernelError)(value) && !(isSqlError(value) && value.isRetryable))
+					);
+				});
+				for (const reason of unexpected ? [] : cause.reasons) {
+					const value = reason._tag === "Fail" ? reason.error : reason._tag === "Die" ? reason.defect : undefined;
+					if (isHttpServerError(value) && value.reason instanceof RouteNotFound)
+						return HttpServerResponse.empty({ status: 404 });
+					const invalid = requestErrorCode(value);
+					if (invalid !== undefined) {
+						code = invalid;
+						break;
+					}
+					if (reason._tag === "Fail" && Schema.is(KernelError)(reason.error)) {
+						code = reason.error.code;
+						break;
+					}
+					if (reason._tag === "Fail" && isSqlError(reason.error) && reason.error.isRetryable)
+						code = "store_unavailable";
+				}
+				const detail =
+					code === "handler_failed"
+						? {
+								status: 500,
+								message: `Handler failed for ${route}.`,
+								hint: "Inspect the server error log and fix or revert the edited route. This failure is not an unchanged-retry condition.",
+							}
+						: code === "store_unavailable"
+							? {
+									status: 503,
+									message: "The app store is temporarily unavailable.",
+									hint: "Retry the unchanged request with the same Idempotency-Key. If it persists, inspect authenticated /_boot/status.",
+								}
+							: policy[code];
+				if (detail.status === 500) yield* Effect.logError(cause).pipe(Effect.annotateLogs("route", route));
+				return HttpServerResponse.jsonUnsafe(
+					{ error: { code, message: detail.message, hint: detail.hint, retriable: detail.status === 503 } },
+					{ status: detail.status, headers: { "cache-control": "no-store" } },
+				);
+			}),
+		),
 	);
 export const integer = (value: string | null, fallback: number, max: number) => {
 	const n = value === null ? fallback : Number(value);

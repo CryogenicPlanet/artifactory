@@ -17,7 +17,8 @@ it("restores a retained generation's whole source and manifest through cutover w
 	const app = await fixture.launch(join(seed, "server.ts"));
 	await app.setup();
 	const cookie = await app.login();
-	await app.ready(cookie);
+	// Cold runtime dependency preparation installs, copies and fsyncs the complete tree.
+	await app.ready(cookie, 60000);
 	const request = (path: string, method: string, body?: string) =>
 		fetch(`${app.url}/api/fs/${path}?reload=0`, {
 			method,
@@ -249,7 +250,8 @@ it("keeps source and live writes intact when generation dependency preparation f
 	const app = await fixture.launch(join(seed, "server.ts"));
 	await app.setup();
 	const cookie = await app.login();
-	await app.ready(cookie);
+	// Cold runtime dependency preparation installs, copies and fsyncs the complete tree.
+	await app.ready(cookie, 60000);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 	const original = await readFile(join(fixture.root, "app/server.ts"), "utf8");
 	const retained = join(fixture.root, "gen/1/source");

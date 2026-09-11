@@ -14,6 +14,12 @@ const Input = Schema.Struct({
 	since: Schema.optionalKey(Schema.Int),
 	limit: Schema.optionalKey(Schema.Int),
 	topic: Schema.optionalKey(Schema.String),
+	types: Schema.optionalKey(Schema.Array(Schema.String)),
+	agent: Schema.optionalKey(Schema.String),
+	instance: Schema.optionalKey(Schema.String),
+	level: Schema.optionalKey(Schema.String),
+	requestActor: Schema.optionalKey(Schema.String),
+	excludeMessageInstance: Schema.optionalKey(Schema.String),
 });
 const main = Effect.gen(function* () {
 	const root = process.argv[2];
@@ -42,9 +48,8 @@ const main = Effect.gen(function* () {
 					return "ok";
 				case "query":
 					return yield* events.query({
-						...(input.since === undefined ? {} : { since: input.since }),
+						...input,
 						limit: input.limit ?? 100,
-						...(input.topic === undefined ? {} : { topic: input.topic }),
 					});
 				case "recover":
 					yield* (yield* AppRecovery).prepare(input.epoch ?? "attempt");

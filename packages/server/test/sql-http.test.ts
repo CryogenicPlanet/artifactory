@@ -10,6 +10,22 @@ it("inspects physical committed rows with scoped read authority and documents th
 	const query = (sql: string, params?: unknown[]) =>
 		app.post("/api/sql", { sql, ...(params ? { params } : {}) }, cookie);
 	expect((await app.post("/api/sql", { sql: "SELECT 1" })).status).toBe(401);
+	for (const path of ["/api/sql?unknown=1", "/api/sql?sql=SELECT+1", "/api/sql?unknown=1&unknown=2"]) {
+		const invalid = await app.post(path, { sql: "SELECT 1" }, cookie);
+		expect(invalid.status).toBe(400);
+		expect(await invalid.json()).toMatchObject({ error: { code: "query_invalid", retriable: false } });
+	}
+	const extra = await app.post("/api/sql", { sql: "SELECT 1", unknown: true }, cookie);
+	expect(extra.status).toBe(400);
+	expect(await extra.json()).toMatchObject({ error: { code: "input_invalid" } });
+	const media = await fetch(`${app.url}/api/sql`, {
+		method: "POST",
+		headers: { cookie, origin: "https://comms.test", "content-type": "text/plain" },
+		body: '{"sql":"SELECT 1"}',
+	});
+	expect(media.status).toBe(415);
+	expect(await media.json()).toMatchObject({ error: { code: "unsupported_media_type", retriable: false } });
+
 	const created = await (await app.post("/api/messages", { topic: "sql", body: "original" }, cookie)).json();
 	// Raw inspection intentionally returns physical state, including unpublished prior-image metadata.
 	await fixture.sql(`UPDATE messages SET body='physical', previous='{}', updated_seq=9000000 WHERE id='${created.id}'`);

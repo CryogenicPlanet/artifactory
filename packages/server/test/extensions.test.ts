@@ -10,9 +10,10 @@ it("loads optional extensions independently with described overrides and verifie
 	const fixture = await conversation(test);
 	const seed = join(fixture.root, "seed");
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
-	const route = (body: string) =>
-		`export default api => api.route("GET", "/api/example", {description:"Example override",scope:"read",handler:async (req,ctx)=>Response.json(${body})});`;
-	await writeFile(join(seed, "ext/core.ts"), route('"core"'));
+	const route = (body: string, core = false) =>
+		`import {CoreApi,coreHandlers} from "../conversation.ts";
+export default api => {${core ? "api.mount(CoreApi,coreHandlers);" : ""}api.route("GET", "/api/example", {description:"Example override",scope:"read",handler:async (req,ctx)=>Response.json(${body})});};`;
+	await writeFile(join(seed, "ext/core.ts"), route('"core"', true));
 	await writeFile(
 		join(seed, "ext/zz-example.ts"),
 		route("{agent:ctx.agent,instance:ctx.instance,headers:Object.fromEntries(req.source.headers)}"),
@@ -45,7 +46,7 @@ it("loads optional extensions independently with described overrides and verifie
 	expect(identity).toMatchObject({ agent: "rahul" });
 	expect(identity.instance).not.toBe("spoof");
 	for (const secret of ["x-boot-secret", "authorization", "cookie"]) expect(identity.headers[secret]).toBeUndefined();
-	expect((await get("/api/partial")).status).toBe(503);
+	expect((await get("/api/partial")).status).toBe(404);
 	expect((await get("/api/throws")).status).toBe(503);
 	expect((await get("/api/standup")).status).toBe(200);
 	expect((await fetch(`${app.url}/api/head`, { method: "HEAD", headers: { cookie } })).headers.get("x-head")).toBe(
@@ -191,7 +192,7 @@ export default api => Effect.gen(function*(){
 	]);
 });
 
-it("loads the separately built standup extension from a bundled seed", async (test) => {
+it("loads separately built core and standup extensions from a bundled seed", async (test) => {
 	const fixture = await conversation(test),
 		seed = join(fixture.root, "built");
 	await execute("bun", [
@@ -203,6 +204,7 @@ it("loads the separately built standup extension from a bundled seed", async (te
 	]);
 	await execute("bun", [
 		"build",
+		join(import.meta.dirname, "../src/ext/core.ts"),
 		join(import.meta.dirname, "../src/ext/standup.ts"),
 		"--target=bun",
 		"--packages=external",
@@ -217,6 +219,7 @@ it("loads the separately built standup extension from a bundled seed", async (te
 		{ agent: "rahul", messages: 1 },
 	]);
 	expect(await (await fetch(`${app.url}/api/ext`, { headers: { cookie } })).json()).toEqual([
+		expect.objectContaining({ name: "core.js", status: "loaded" }),
 		expect.objectContaining({ name: "standup.js", status: "loaded" }),
 	]);
 }, 20000);

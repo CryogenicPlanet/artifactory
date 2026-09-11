@@ -1,97 +1,74 @@
-import { Crypto, DateTime, Effect, Ref, Schema } from "effect";
-import { SqlClient } from "effect/unstable/sql";
-import { BootChannel, KernelError } from "../../kernel/boot-channel.ts";
-import { Lifecycle } from "../../kernel/lifecycle.ts";
-import { Messages, type Identity } from "../../kernel/messages.ts";
-import { writerGate } from "../../kernel/database.ts";
+import { Crypto, DateTime, Effect, Schema } from "effect";
+import type { RequestContext, BackgroundContext } from "../../kernel/extension-api.ts";
 import { created, Input, Stored, SubscriptionError } from "./contract.ts";
 
-export const makeStore = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient,
-		boot = yield* BootChannel,
-		messages = yield* Messages,
-		crypto = yield* Crypto.Crypto,
-		lifecycle = yield* Lifecycle;
+type Context = Pick<BackgroundContext, "db" | "read" | "emit" | "mutate">;
+export const makeStore = (ctx: Context) => {
+	const sql = ctx.db;
 	const rows = Schema.decodeUnknownEffect(Schema.Array(Stored));
-	const live = Ref.get(lifecycle.state).pipe(
-		Effect.flatMap((state) =>
-			state === "live" ? Effect.void : Effect.fail(new KernelError({ code: "generation_not_live" })),
+	const visible = ctx.read((fence) =>
+		sql`SELECT * FROM webhook_subscriptions WHERE created_seq<=${fence} AND (deleted_seq IS NULL OR deleted_seq>${fence}) ORDER BY created_at,id`.pipe(
+			Effect.flatMap(rows),
 		),
 	);
-	const visible = sql.withTransaction(
-		Effect.gen(function* () {
-			yield* sql`SELECT epoch FROM kernel_writer`;
-			const fence = (yield* messages.fence).published_through;
-			return yield* sql`SELECT * FROM webhook_subscriptions WHERE created_seq<=${fence} AND (deleted_seq IS NULL OR deleted_seq>${fence}) ORDER BY created_at,id`.pipe(
-				Effect.flatMap(rows),
-			);
-		}),
-	);
-	const change = <E>(type: string, who: Identity | undefined, run: (seq: number) => Effect.Effect<void, E>) =>
-		Effect.gen(function* () {
-			yield* live;
-			const transaction = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
-			yield* messages.recordEvent(
-				{
-					transaction,
-					type,
-					level: "info",
-					payload: { extension: "subscriptions" },
-					...(who ? { actor: who.agent, instance: who.instance, request: who.request } : {}),
-				},
-				run,
-			);
-		}).pipe(Effect.provideService(Lifecycle, lifecycle), Effect.provideService(Crypto.Crypto, crypto));
 	return {
-		live,
 		visible,
-		admit: sql.withTransaction(writerGate(sql, boot.epoch)),
-		create: (who: Identity, input: Input, key: string | null) =>
+		admit: ctx.mutate(Effect.void),
+		create: (who: RequestContext, input: Input, key: string | null) =>
 			Effect.gen(function* () {
-				yield* live;
-				yield* messages.relay;
 				const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Input))(input);
 				if (key !== null) {
-					const prior =
-						yield* sql`SELECT * FROM webhook_subscriptions WHERE instance=${who.instance} AND idempotency_key=${key}`.pipe(
+					const prior = yield* ctx.read((fence) =>
+						sql`SELECT * FROM webhook_subscriptions WHERE instance=${who.instance} AND idempotency_key=${key}`.pipe(
 							Effect.flatMap(rows),
-						);
-					if (prior[0]) {
-						if ((yield* Schema.encodeEffect(Schema.fromJsonString(Input))(prior[0].input)) !== encoded)
+							Effect.flatMap((items) =>
+								items[0] && items[0].created_seq > fence
+									? Effect.fail(new SubscriptionError({ code: "subscription_unavailable", status: 503 }))
+									: Effect.succeed(items[0]),
+							),
+						),
+					);
+					if (prior) {
+						if ((yield* Schema.encodeEffect(Schema.fromJsonString(Input))(prior.input)) !== encoded)
 							return yield* new SubscriptionError({ code: "idempotency_conflict", status: 409 });
-						return created(prior[0]);
+						return created(prior);
 					}
 				}
 				if ((yield* visible).length >= 32)
 					return yield* new SubscriptionError({ code: "subscription_limit", status: 409 });
+				const crypto = yield* Crypto.Crypto;
 				const id = "sub_" + Buffer.from(yield* crypto.randomBytes(12)).toString("hex"),
 					at = (yield* DateTime.nowAsDate).getTime(),
-					since = (yield* messages.fence).published_through;
-				yield* change("subscription.created", who, (seq) =>
+					since = yield* ctx.read((fence) => Effect.succeed(fence));
+				yield* ctx.emit("subscription.created", {}, (seq) =>
 					sql`INSERT INTO webhook_subscriptions(id,instance,agent,human,input,idempotency_key,created_at,start_seq,created_seq,cursor) VALUES(${id},${who.instance},${who.agent},${who.kind === "human" ? 1 : 0},${encoded},${key},${at},${since},${seq},${since})`.pipe(
 						Effect.asVoid,
 					),
 				);
 				return { id, filter: input.filter, deliver: input.deliver, created_at: at, since };
 			}),
-		remove: (who: Identity, id: string) =>
+		remove: (who: RequestContext, id: string) =>
 			Effect.gen(function* () {
-				yield* live;
-				yield* messages.relay;
-				const found = (yield* sql`SELECT * FROM webhook_subscriptions WHERE id=${id}`.pipe(Effect.flatMap(rows)))[0];
+				const found = yield* ctx.read(() =>
+					sql`SELECT * FROM webhook_subscriptions WHERE id=${id}`.pipe(
+						Effect.flatMap(rows),
+						Effect.map((items) => items[0]),
+					),
+				);
 				if (!found || (who.kind !== "human" && found.instance !== who.instance))
 					return yield* new SubscriptionError({ code: "subscription_not_found", status: 404 });
 				if (found.deleted_seq === null)
-					yield* change("subscription.deleted", who, (seq) =>
+					yield* ctx.emit("subscription.deleted", {}, (seq) =>
 						sql`UPDATE webhook_subscriptions SET deleted_seq=${seq} WHERE id=${id} AND deleted_seq IS NULL`.pipe(
 							Effect.asVoid,
 						),
 					);
+				else if (found.deleted_seq > (yield* ctx.read((fence) => Effect.succeed(fence))))
+					return yield* new SubscriptionError({ code: "subscription_unavailable", status: 503 });
 			}),
 		checkpoint: (row: Stored, cursor: number, error: string | null) =>
-			sql.withTransaction(
+			ctx.mutate(
 				Effect.gen(function* () {
-					yield* writerGate(sql, boot.epoch);
 					const attempts = error === null ? 0 : Math.min(row.attempts + 1, 30);
 					const next =
 						error === null
@@ -101,4 +78,4 @@ export const makeStore = Effect.gen(function* () {
 				}),
 			),
 	};
-});
+};

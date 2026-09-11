@@ -72,7 +72,7 @@ it("keeps exact age boundaries and unpublished rows, preserving receipts and cur
 	expect(await app.run({ op: "query", since: 0, limit: 1 })).toMatchObject({
 		success: { items: [{ seq: 2 }], cursor: 2 },
 	});
-	expect(await app.run({ op: "query", since: 3 })).toMatchObject({ success: { items: [], cursor: 3 } });
+	expect(await app.run({ op: "query", since: 3 })).toMatchObject({ success: { items: [], cursor: 4 } });
 	await app.run({ op: "abort", transaction: "pending" });
 	expect(await app.prune()).toMatchObject({ deleted: 1 });
 	expect(await app.sql("SELECT seq FROM events ORDER BY seq")).toEqual([{ seq: 2 }, { seq: 3 }]);
@@ -94,7 +94,7 @@ it("commits bounded chunks, rolls back a failed chunk, and safely resumes after 
 	expect(await app.sql("SELECT count(*) AS count,min(seq) AS first FROM events")).toEqual([{ count: 344, first: 257 }]);
 	await app.sql("DROP TRIGGER fail_retention");
 	expect(await app.prune()).toMatchObject({ exit: "Success", deleted: 344 });
-	expect(await app.run({ op: "query", since: 256 })).toMatchObject({ success: { items: [], cursor: 256 } });
+	expect(await app.run({ op: "query", since: 256 })).toMatchObject({ success: { items: [], cursor: 600 } });
 	expect(await app.run({ op: "reserve", transaction: "next" })).toMatchObject({ success: { from: 601, to: 601 } });
 }, 15000);
 

@@ -1,5 +1,5 @@
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
+import { Context, Effect, FileSystem, Layer, Path } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
 /** SQLite online copies include committed WAL pages. Call restore only after proving all owners closed. */
@@ -30,20 +30,6 @@ const make = (filename: string) =>
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
 						yield* sql`UPDATE kernel_writer SET epoch=${epoch} WHERE singleton=1`;
-						const version = yield* sql`PRAGMA user_version`.pipe(
-							Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ user_version: Schema.Int })))),
-						);
-						if (version[0]?.user_version === 0) {
-							const rows = yield* sql`SELECT COALESCE(MAX(seq),0) ceiling FROM outbox`.pipe(
-								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ ceiling: Schema.Int })))),
-							);
-							return (rows[0]?.ceiling ?? 0) + 1;
-						}
-						const rows =
-							yield* sql`SELECT MAX(value) AS ceiling FROM (SELECT COALESCE(MAX(seq),0) value FROM messages UNION ALL SELECT COALESCE(MAX(seq),0) value FROM outbox)`.pipe(
-								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ ceiling: Schema.Int })))),
-							);
-						return (rows[0]?.ceiling ?? 0) + 1;
 					}).pipe(Effect.provide(SqliteClient.layer({ filename: clone, disableWAL: true }))),
 				),
 			restore: (backup: string) =>

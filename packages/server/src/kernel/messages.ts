@@ -1,6 +1,6 @@
 import { Context, Crypto, DateTime, Effect, Layer, Option, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { BootChannel, type Batch, EventRecord, KernelError } from "./boot-channel.ts";
+import { BootChannel, type EventRecord, KernelError } from "./boot-channel.ts";
 import { mutateTopic, type TopicMetaInput, type TopicArchiveInput } from "./topic-operations.ts";
 import { mutateMessage, type MessagePatch } from "./message-operations.ts";
 import { publishedMessages } from "./published-messages.ts";
@@ -9,7 +9,9 @@ import { markRead } from "./read-marks.ts";
 import { recordOperationalEvent, type OperationalEvent } from "./operational-events.ts";
 import { deleteTopic } from "./topic-delete.ts";
 import { moveTopic, type TopicMoveCommand } from "./topic-move.ts";
-import { writerGate } from "./database.ts";
+import { makeOutboxRelay } from "./outbox.ts";
+import { mentionsIn } from "./message-mentions.ts";
+import { makeMutate } from "./mutate.ts";
 
 export const Message = Schema.Struct({
 	id: Schema.String,
@@ -50,7 +52,6 @@ export const StoredMessage = Schema.Struct({
 });
 export const validTopic = (topic: string) =>
 	topic.length <= 200 && /^@?[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(topic);
-const eventJson = Schema.encodeSync(Schema.fromJsonString(EventRecord));
 const messageRows = Schema.decodeUnknownEffect(Schema.Array(StoredMessage));
 const jsonObject = Schema.encodeSync(Schema.fromJsonString(Schema.JsonObject));
 const make = Effect.gen(function* () {
@@ -58,174 +59,105 @@ const make = Effect.gen(function* () {
 	const boot = yield* BootChannel;
 	const crypto = yield* Crypto.Crypto;
 	const mutex = yield* Semaphore.make(1);
-	const batch = (id: string) =>
-		Effect.gen(function* () {
-			const rows = yield* sql`SELECT from_seq,to_seq FROM mutation_batches WHERE id=${id}`.pipe(
-				Effect.flatMap(
-					Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ from_seq: Schema.Int, to_seq: Schema.Int }))),
-				),
-			);
-			const record = rows[0];
-			if (!record) return yield* new KernelError({ code: "batch_missing" });
-			const outbox = yield* sql`SELECT event FROM outbox WHERE transaction_id=${id} ORDER BY seq`.pipe(
-				Effect.flatMap(
-					Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ event: Schema.fromJsonString(EventRecord) }))),
-				),
-			);
-			return {
-				transaction: id,
-				from: record.from_seq,
-				to: record.to_seq,
-				events: outbox.map((row) => row.event),
-			} satisfies Batch;
-		});
-	const relay = Effect.gen(function* () {
-		const pending = yield* sql`SELECT DISTINCT transaction_id FROM outbox WHERE shipped_at IS NULL ORDER BY seq`.pipe(
-			Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ transaction_id: Schema.String })))),
-		);
-		for (const row of pending) {
-			const item = yield* batch(row.transaction_id);
-			yield* boot.append(item);
-			const now = (yield* DateTime.nowAsDate).getTime();
-			yield* sql.withTransaction(
-				Effect.gen(function* () {
-					yield* writerGate(sql, boot.epoch);
-					yield* sql`UPDATE outbox SET shipped_at=${now} WHERE transaction_id=${row.transaction_id}`;
-				}),
-			);
-		}
-	});
+	const relay = makeOutboxRelay(sql, boot);
+	const mutate = makeMutate(sql, crypto, boot, relay, mutex);
 	const create = (identity: Identity, input: typeof MessageInput.Type, key?: string) =>
-		mutex.withPermit(
-			Effect.gen(function* () {
-				if (
-					!validTopic(input.topic) ||
-					input.body.length === 0 ||
-					input.body.length > 65536 ||
-					input.tags?.some((tag) => tag.length > 100) ||
-					(input.tags?.length ?? 0) > 100 ||
-					(key !== undefined && (key.length < 1 || key.length > 200))
-				)
-					return yield* new KernelError({ code: "input_invalid" });
-				const probe = Option.getOrNull(yield* Effect.serviceOption(HealthProbe));
-				if (!probe) yield* relay;
-				const transaction = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
-				const id = `m_${Buffer.from(yield* crypto.randomBytes(12)).toString("hex")}`;
-				const now = (yield* DateTime.nowAsDate).getTime();
-				const normalized = { topic: input.topic, body: input.body, tags: input.tags ?? [], meta: input.meta ?? {} };
-				const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(MessageInput))(normalized);
-				let reservedCount = 0;
-				const result = yield* sql
-					.withTransaction(
-						Effect.gen(function* () {
-							yield* writerGate(sql, boot.epoch);
-							if (key !== undefined) {
-								const previous =
-									yield* sql`SELECT input,outcome FROM idempotency WHERE instance=${identity.instance} AND key=${key}`.pipe(
-										Effect.flatMap(
-											Schema.decodeUnknownEffect(
-												Schema.Array(
-													Schema.Struct({
-														input: Schema.String,
-														outcome: Schema.fromJsonString(Message),
-													}),
-												),
-											),
-										),
-									);
-								if (previous[0]) {
-									if (previous[0].input !== encoded) return yield* new KernelError({ code: "idempotency_conflict" });
-									return previous[0].outcome;
-								}
-							}
-							if (new TextEncoder().encode(encoded).byteLength > 131072)
-								return yield* new KernelError({ code: "input_invalid" });
-							const deleted =
-								yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${input.topic} OR substr(${input.topic},1,length(path)+1)=path||'/') LIMIT 1`;
-							if (deleted.length > 0) return yield* new KernelError({ code: "topic_not_found" });
-							const archived =
-								yield* sql`SELECT path FROM topics WHERE archived_at IS NOT NULL AND (path=${input.topic} OR substr(${input.topic},1,length(path)+1)=path||'/') LIMIT 1`;
-							if (archived.length > 0) return yield* new KernelError({ code: "topic_archived" });
-							const parts = input.topic.split("/");
-							const missing: Array<{ path: string; parent: string | null; name: string }> = [];
-							for (let i = 0; i < parts.length; i++) {
-								const path = parts.slice(0, i + 1).join("/");
-								if ((yield* sql`SELECT path FROM topics WHERE path=${path}`).length === 0)
-									missing.push({ path, parent: i === 0 ? null : parts.slice(0, i).join("/"), name: parts[i] ?? "" });
-							}
-							reservedCount = missing.length + 1;
-							if (probe) yield* Ref.set(probe.reservation, { transaction, count: reservedCount });
-							const range = yield* boot.reserve(transaction, reservedCount);
-							if (probe) yield* Ref.set(probe.ceiling, range.to);
-							const records: Array<typeof EventRecord.Type> = [];
-							for (const [index, topic] of missing.entries()) {
-								const seq = range.from + index;
-								yield* sql`INSERT INTO topics(path,parent,name,meta,last_seq,created_at,updated_seq) VALUES(${topic.path},${topic.parent},${topic.name},'{}',${seq},${now},${seq})`;
-								records.push({
-									seq,
-									at: now,
-									type: "topic.created",
-									level: "info",
-									actor: identity.agent,
-									instance: identity.instance,
-									generation: boot.generation,
-									request_id: identity.request,
-									topic: topic.path,
-									message_id: null,
-									payload: topic,
-								});
-							}
-							const message = {
-								id,
-								seq: range.to,
-								...normalized,
-								agent: identity.agent,
+		Effect.gen(function* () {
+			if (
+				!validTopic(input.topic) ||
+				input.body.length === 0 ||
+				input.body.length > 65536 ||
+				input.tags?.some((tag) => tag.length > 100) ||
+				(input.tags?.length ?? 0) > 100 ||
+				(key !== undefined && (key.length < 1 || key.length > 200))
+			)
+				return yield* new KernelError({ code: "input_invalid" });
+			const id = `m_${Buffer.from(yield* crypto.randomBytes(12)).toString("hex")}`;
+			const now = (yield* DateTime.nowAsDate).getTime();
+			const normalized = { topic: input.topic, body: input.body, tags: input.tags ?? [], meta: input.meta ?? {} };
+			const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(MessageInput))(normalized);
+
+			return yield* mutate({
+				...(key === undefined
+					? {}
+					: {
+							idempotency: {
 								instance: identity.instance,
-								created_at: now,
-								edited_at: null,
-								deleted_at: null,
-							};
-							const tagsJson = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(
-								normalized.tags,
-							);
-							yield* sql`INSERT INTO messages(id,seq,topic,agent,instance,body,tags,meta,created_at) VALUES(${id},${range.to},${input.topic},${identity.agent},${identity.instance},${input.body},${tagsJson},${jsonObject(normalized.meta)},${now})`;
-							for (let i = 0; i < parts.length; i++)
-								yield* sql`UPDATE topics SET last_seq=${range.to} WHERE path=${parts.slice(0, i + 1).join("/")}`;
+								key,
+								kind: "message.created",
+								input: encoded,
+								outcome: Schema.fromJsonString(Message),
+							},
+						}),
+				body: (reserve) =>
+					Effect.gen(function* () {
+						if (new TextEncoder().encode(encoded).byteLength > 131072)
+							return yield* new KernelError({ code: "input_invalid" });
+						const deleted =
+							yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${input.topic} OR substr(${input.topic},1,length(path)+1)=path||'/') LIMIT 1`;
+						if (deleted.length > 0) return yield* new KernelError({ code: "topic_not_found" });
+						const archived =
+							yield* sql`SELECT path FROM topics WHERE archived_at IS NOT NULL AND (path=${input.topic} OR substr(${input.topic},1,length(path)+1)=path||'/') LIMIT 1`;
+						if (archived.length > 0) return yield* new KernelError({ code: "topic_archived" });
+						const parts = input.topic.split("/");
+						const missing: Array<{ path: string; parent: string | null; name: string }> = [];
+						for (let i = 0; i < parts.length; i++) {
+							const path = parts.slice(0, i + 1).join("/");
+							if ((yield* sql`SELECT path FROM topics WHERE path=${path}`).length === 0)
+								missing.push({ path, parent: i === 0 ? null : parts.slice(0, i).join("/"), name: parts[i] ?? "" });
+						}
+						const range = yield* reserve(missing.length + 1);
+						const records: Array<typeof EventRecord.Type> = [];
+						for (const [index, topic] of missing.entries()) {
+							const seq = range.from + index;
+							yield* sql`INSERT INTO topics(path,parent,name,meta,last_seq,created_at,updated_seq) VALUES(${topic.path},${topic.parent},${topic.name},'{}',${seq},${now},${seq})`;
 							records.push({
-								seq: range.to,
+								seq,
 								at: now,
-								type: "message.created",
+								type: "topic.created",
 								level: "info",
 								actor: identity.agent,
 								instance: identity.instance,
 								generation: boot.generation,
 								request_id: identity.request,
-								topic: input.topic,
-								message_id: id,
-								payload: message,
+								topic: topic.path,
+								message_id: null,
+								payload: topic,
 							});
-							yield* sql`INSERT INTO mutation_batches VALUES(${transaction},${range.from},${range.to},${records.length})`;
-							for (const event of records)
-								yield* sql`INSERT INTO outbox VALUES(${event.seq},${transaction},${eventJson(event)},NULL)`;
-							const outcome = yield* Schema.encodeEffect(Schema.fromJsonString(Message))(message);
-							if (key !== undefined)
-								yield* sql`INSERT INTO idempotency VALUES(${identity.instance},${key},${encoded},${id},${transaction},${outcome})`;
-							return message;
-						}),
-					)
-					.pipe(Effect.result);
-				if (result._tag === "Failure") {
-					// Typed failure only arrives after successful ROLLBACK; commit/rollback defects stay unresolved.
-					if (!probe && reservedCount > 0) {
-						yield* boot.reserve(transaction, reservedCount);
-						yield* boot.abort(transaction);
-					}
-					return yield* result.failure;
-				}
-				if (!probe) yield* relay;
-				return result.success;
-			}).pipe(Effect.uninterruptible),
-		);
+						}
+						const message = {
+							id,
+							seq: range.to,
+							...normalized,
+							agent: identity.agent,
+							instance: identity.instance,
+							created_at: now,
+							edited_at: null,
+							deleted_at: null,
+						};
+						const tagsJson = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(
+							normalized.tags,
+						);
+						yield* sql`INSERT INTO messages(id,seq,topic,agent,instance,body,tags,meta,created_at,mentions) VALUES(${id},${range.to},${input.topic},${identity.agent},${identity.instance},${input.body},${tagsJson},${jsonObject(normalized.meta)},${now},${JSON.stringify(mentionsIn(input.body))})`;
+						for (let i = 0; i < parts.length; i++)
+							yield* sql`UPDATE topics SET last_seq=${range.to} WHERE path=${parts.slice(0, i + 1).join("/")}`;
+						records.push({
+							seq: range.to,
+							at: now,
+							type: "message.created",
+							level: "info",
+							actor: identity.agent,
+							instance: identity.instance,
+							generation: boot.generation,
+							request_id: identity.request,
+							topic: input.topic,
+							message_id: id,
+							payload: message,
+						});
+						return { outcome: message, events: records };
+					}),
+			});
+		});
 	const fence = Effect.gen(function* () {
 		const probe = Option.getOrNull(yield* Effect.serviceOption(HealthProbe));
 		return probe ? { published_through: yield* Ref.get(probe.ceiling) } : yield* boot.fence;
@@ -240,18 +172,33 @@ const make = Effect.gen(function* () {
 		readonly tag?: string;
 		readonly agent?: string;
 		readonly q?: string;
+		readonly mentions?: ReadonlyArray<string>;
 	}) =>
 		sql.withTransaction(
 			Effect.gen(function* () {
 				yield* sql`SELECT epoch FROM kernel_writer`;
 				const ceiling = (yield* fence).published_through;
-				const since = input.since ?? ceiling;
-				if (since > ceiling) return yield* new KernelError({ code: "query_invalid" });
+				const since = input.since ?? (input.newest ? 0 : ceiling);
+				if (
+					!Number.isSafeInteger(since) ||
+					since < 0 ||
+					!Number.isSafeInteger(input.limit) ||
+					input.limit < 1 ||
+					input.limit > 200 ||
+					(input.topic !== undefined && !validTopic(input.topic))
+				)
+					return yield* new KernelError({ code: "query_invalid" });
+				if (since > ceiling) return yield* new KernelError({ code: "cursor_ahead" });
 				if (
 					(input.tag !== undefined && input.tag.length > 100) ||
 					(input.agent !== undefined && !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(input.agent))
 				)
 					return yield* new KernelError({ code: "query_invalid" });
+				const targets = input.mentions ?? [];
+				if (targets.length > 32 || targets.some((target) => !target.startsWith("@") || !validTopic(target)))
+					return yield* new KernelError({ code: "query_invalid" });
+				const topicMatch = sql`(topic=${input.topic ?? null} OR ${input.recursive ? 1 : 0}=1 AND substr(topic,1,length(${input.topic ?? ""})+1)=${(input.topic ?? "") + "/"})`;
+				const mentionMatch = sql`EXISTS (SELECT 1 FROM messages mention_source, json_each(CASE WHEN mention_source.updated_seq>${ceiling} THEN mention_source.previous_mentions ELSE mention_source.mentions END) mention WHERE mention_source.id=visible_messages.id AND mention.value IN (SELECT value FROM json_each(${JSON.stringify(targets)})))`;
 				let bodyMatch = sql`1`;
 				if (input.q !== undefined) {
 					// Quote every term: caller text must never become SQL or FTS syntax.
@@ -277,15 +224,17 @@ const make = Effect.gen(function* () {
 				}
 				const items =
 					yield* sql`WITH visible_messages AS (${publishedMessages(sql, ceiling)}) SELECT * FROM visible_messages WHERE deleted_at IS NULL AND seq>${since} AND seq<=${ceiling}
-   AND (${input.topic ?? null} IS NULL OR topic=${input.topic ?? null} OR ${input.recursive ? 1 : 0}=1 AND substr(topic,1,length(${input.topic ?? ""})+1)=${(input.topic ?? "") + "/"})
+   AND ((${input.topic === undefined && targets.length === 0 ? 1 : 0}=1) OR ${topicMatch} OR ${mentionMatch})
    AND (${input.exclude ?? null} IS NULL OR instance<>${input.exclude ?? null})
    AND (${input.agent ?? null} IS NULL OR agent=${input.agent ?? null})
    AND (${input.tag ?? null} IS NULL OR EXISTS (SELECT 1 FROM json_each(visible_messages.tags) WHERE value=${input.tag ?? null}))
    AND ${bodyMatch}
-   ORDER BY CASE WHEN ${input.newest ? 1 : 0}=1 THEN -seq ELSE seq END LIMIT ${input.limit}`.pipe(
+   ORDER BY CASE WHEN ${input.newest ? 1 : 0}=1 THEN -seq ELSE seq END LIMIT ${input.limit + 1}`.pipe(
 						Effect.flatMap(messageRows),
 					);
-				return { items, cursor: items.at(-1)?.seq ?? since, timed_out: false, drained: false };
+				const page = items.slice(0, input.limit);
+				const cursor = input.newest || items.length <= input.limit ? ceiling : (page.at(-1)?.seq ?? since);
+				return { items: input.newest ? page.reverse() : page, cursor, timed_out: false, drained: false };
 			}),
 		);
 	const get = (id: string) =>
@@ -303,27 +252,30 @@ const make = Effect.gen(function* () {
 		);
 	return {
 		create,
-		moveTopic: (input: typeof TopicMoveCommand.Type) => mutex.withPermit(moveTopic(sql, boot, input)),
+		mutate,
+		change: <A, E, R>(change: Effect.Effect<A, E, R>) =>
+			mutate({ body: () => change.pipe(Effect.map((outcome) => ({ outcome, events: [] }))) }),
+		moveTopic: (input: typeof TopicMoveCommand.Type) => mutex.withPermit(moveTopic(sql, crypto, boot, input)),
 		topic: (
 			identity: Identity,
 			path: string,
 			input: typeof TopicMetaInput.Type | typeof TopicArchiveInput.Type,
 			key?: string,
-		) => mutex.withPermit(mutateTopic(sql, crypto, boot, relay, identity, path, input, key)),
+		) => mutateTopic(sql, mutate, boot, identity, path, input, key),
 		deleteTopic: (identity: Identity, path: string, key?: string) =>
-			mutex.withPermit(deleteTopic(sql, crypto, boot, relay, identity, path, key)),
+			deleteTopic(sql, mutate, boot, identity, path, key),
 		get,
 		update: (identity: Identity, id: string, input: typeof MessagePatch.Type, key?: string) =>
-			mutex.withPermit(mutateMessage(sql, crypto, boot, relay, identity, id, input, key)),
-		remove: (identity: Identity, id: string, key?: string) =>
-			mutex.withPermit(mutateMessage(sql, crypto, boot, relay, identity, id, null, key)),
+			mutateMessage(sql, mutate, boot, identity, id, input, key),
+		remove: (identity: Identity, id: string, key?: string) => mutateMessage(sql, mutate, boot, identity, id, null, key),
 		list,
-		mark: (identity: Identity, input: { readonly topic: string; readonly seq: number }, key?: string) =>
-			mutex.withPermit(markRead(sql, crypto, boot, relay, identity, input, key)),
+		mark: (identity: Identity, input: { readonly topic: string; readonly seq: number }) =>
+			markRead(sql, mutate, identity, input),
 		recordEvent: <E = never>(input: OperationalEvent, change?: (seq: number) => Effect.Effect<void, E>) =>
-			mutex.withPermit(recordOperationalEvent(sql, boot, relay, input, change)),
+			recordOperationalEvent(mutate, boot, input, change),
 		relay: mutex.withPermit(relay),
 		quiesce: mutex.withPermit(Effect.void),
+		changed: boot.changed,
 		fence,
 	};
 });

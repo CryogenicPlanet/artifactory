@@ -61,6 +61,14 @@ export const run = () =>
 						headers: { "x-comms-writer-epoch": boot.epoch, "x-comms-kernel-protocol": "2" },
 					}),
 				),
+				HttpRouter.add(
+					"GET",
+					"/_kernel/ping",
+					HttpServerResponse.empty({
+						status: 200,
+						headers: { "x-comms-writer-epoch": boot.epoch, "x-comms-kernel-protocol": "2" },
+					}),
+				),
 				HttpRouter.add("POST", "/_kernel/control", initialize.pipe(Effect.as(HttpServerResponse.text("ok")))),
 				HttpRouter.add("GET", "/channel", HttpServerResponse.jsonUnsafe({ secret })),
 				HttpRouter.add("POST", "/admit", write(true)),

@@ -22,6 +22,16 @@ const program = Effect.gen(function* () {
 			yield* sql`ALTER TABLE child_attempts DROP COLUMN boot_id`;
 			yield* sql`ALTER TABLE backups DROP COLUMN published_through`;
 			yield* sql`ALTER TABLE backups DROP COLUMN generation`;
+			yield* sql`DROP TABLE public_paths`;
+			yield* sql`DROP INDEX events_type_seq`;
+			yield* sql`DROP INDEX events_actor_seq`;
+			yield* sql`DROP INDEX events_instance_seq`;
+			yield* sql`DROP INDEX events_level_seq`;
+			yield* sql`DROP INDEX events_topic_seq`;
+			yield* sql`ALTER TABLE events DROP COLUMN type`;
+			yield* sql`ALTER TABLE events DROP COLUMN actor`;
+			yield* sql`ALTER TABLE events DROP COLUMN instance`;
+			yield* sql`ALTER TABLE events DROP COLUMN level`;
 			yield* sql`ALTER TABLE events DROP COLUMN topic`;
 			yield* sql`DROP TABLE topic_moves`;
 			yield* sql`DROP TABLE topic_page_moves`;

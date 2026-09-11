@@ -28,10 +28,11 @@ const program = Effect.gen(function* () {
 			const release = yield* Deferred.make<void>();
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
 			const channel: BootChannel["Service"] = {
-				agents: Effect.succeed({ items: [] }),
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 1,
+				changed: (after) =>
+					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
 					Effect.tap(() =>
 						holdFence

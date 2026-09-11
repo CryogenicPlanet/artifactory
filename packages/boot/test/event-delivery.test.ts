@@ -77,12 +77,12 @@ it("withholds the publication gap, filters before pagination, resumes without sk
 	).toMatchObject({ items: [{ seq: 2 }] });
 }, 10000);
 
-it("wait excludes own messages, keeps empty cursor, and omitted since starts at the published fence", async (test) => {
+it("wait excludes own messages, advances empty cursor, and omitted since starts at the published fence", async (test) => {
 	const app = await launch(test);
 	await app.post("/emit", event({ instance: "caller-family", actor: "codex" }));
 	expect(await json(await app.get("/api/events?since=0&wait=1"))).toEqual({
 		items: [],
-		cursor: 0,
+		cursor: 1,
 		timed_out: true,
 		drained: false,
 	});
@@ -145,7 +145,7 @@ it("SSE resumes, survives child retirement, emits heartbeats, and disconnect sto
 	await delay(300);
 	const body = await longBody;
 	expect(body.startsWith("\n\n")).toBe(true);
-	expect(JSON.parse(body)).toEqual({ items: [], cursor: 2, timed_out: true, drained: false });
+	expect(JSON.parse(body)).toEqual({ items: [], cursor: 3, timed_out: true, drained: false });
 	const stopped = await json(await app.get("/stats"));
 	await delay(300);
 	expect(await json(await app.get("/stats"))).toEqual(stopped);
@@ -198,15 +198,15 @@ it("revoked credentials and captured expiry stop an open stream before new event
 	}
 }, 5000);
 
-it("roster requires the current child secret and exact host without forwarding headers", async (test) => {
+it("sequence fence requires the current child secret and exact host without forwarding headers", async (test) => {
 	const app = await launch(test);
-	expect((await app.get("/_boot/agents")).status).toBe(403);
-	expect((await app.get("/_boot/agents", { headers: { "x-boot-secret": "wrong" } })).status).toBe(403);
+	expect((await app.get("/_boot/seq")).status).toBe(403);
+	expect((await app.get("/_boot/seq", { headers: { "x-boot-secret": "wrong" } })).status).toBe(403);
 	const headers = { "x-boot-secret": "fixture-secret" };
 	for (const extra of [{ forwarded: "for=127.0.0.1" }, { "x-forwarded-host": "localhost" }])
-		expect((await app.get("/_boot/agents", { headers: { ...headers, ...extra } })).status).toBe(403);
+		expect((await app.get("/_boot/seq", { headers: { ...headers, ...extra } })).status).toBe(403);
 	const wrongHost = await new Promise<number | undefined>((resolve, reject) => {
-		const call = request(`${app.url}/_boot/agents`, { headers: { ...headers, host: "localhost:1" } }, (response) => {
+		const call = request(`${app.url}/_boot/seq`, { headers: { ...headers, host: "localhost:1" } }, (response) => {
 			response.resume();
 			response.on("end", () => resolve(response.statusCode));
 		});
@@ -214,11 +214,11 @@ it("roster requires the current child secret and exact host without forwarding h
 		call.end();
 	});
 	expect(wrongHost).toBe(403);
-	const roster = await app.get("/_boot/agents", { headers });
-	expect(roster.status).toBe(200);
-	expect(roster.headers.get("cache-control")).toBe("no-store");
-	expect(await json(roster)).toEqual({ items: [] });
-	expect((await app.post("/_boot/agents", {}, true)).status).toBe(405);
+	const fence = await app.get("/_boot/seq", { headers });
+	expect(fence.status).toBe(200);
+	expect(await json(fence)).toEqual({ published_through: 0 });
+	expect((await app.post("/_boot/seq", {}, true)).status).toBe(405);
+	expect((await app.get("/_boot/agents", { headers })).status).toBe(404);
 	await app.post("/retire", {});
-	expect((await app.get("/_boot/agents", { headers })).status).toBe(403);
+	expect((await app.get("/_boot/seq", { headers })).status).toBe(403);
 });

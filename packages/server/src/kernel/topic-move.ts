@@ -1,7 +1,8 @@
-import { DateTime, Effect, Schema } from "effect";
+import { type Crypto, DateTime, Effect, Option, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { type BootChannel, EventRecord, KernelError } from "./boot-channel.ts";
 import { writerGate } from "./database.ts";
+import { lookupIdempotency, storeIdempotency } from "./idempotency.ts";
 import { validTopic } from "./messages.ts";
 
 export const TopicMove = Schema.Struct({ from: Schema.String, to: Schema.String, seq: Schema.Int });
@@ -22,7 +23,12 @@ export const TopicMoveCommand = Schema.Struct({
 
 // Boot has paused all application traffic and verified the page tree. It owns reservation
 // resolution and pages-first publication, including after an uncertain child response.
-export const moveTopic = (sql: SqlClient, boot: BootChannel["Service"], input: typeof TopicMoveCommand.Type) =>
+export const moveTopic = (
+	sql: SqlClient,
+	crypto: Crypto.Crypto,
+	boot: BootChannel["Service"],
+	input: typeof TopicMoveCommand.Type,
+) =>
 	Effect.gen(function* () {
 		const { from, to, transaction, identity, key } = input;
 		if (
@@ -37,22 +43,22 @@ export const moveTopic = (sql: SqlClient, boot: BootChannel["Service"], input: t
 		)
 			return yield* new KernelError({ code: "input_invalid" });
 		const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))({ from, to, move: true });
+		const receipt =
+			key === undefined
+				? undefined
+				: {
+						instance: identity.instance,
+						key,
+						kind: "topic.moved",
+						input: encoded,
+						outcome: Schema.fromJsonString(TopicMove),
+					};
 		return yield* sql.withTransaction(
 			Effect.gen(function* () {
 				yield* writerGate(sql, boot.epoch);
-				if (key !== undefined) {
-					const receipts =
-						yield* sql`SELECT input,outcome FROM topic_idempotency WHERE instance=${identity.instance} AND key=${key}`.pipe(
-							Effect.flatMap(
-								Schema.decodeUnknownEffect(
-									Schema.Array(Schema.Struct({ input: Schema.String, outcome: Schema.String })),
-								),
-							),
-						);
-					if (receipts[0]) {
-						if (receipts[0].input !== encoded) return yield* new KernelError({ code: "idempotency_conflict" });
-						return yield* Schema.decodeEffect(Schema.fromJsonString(TopicMove))(receipts[0].outcome);
-					}
+				if (receipt) {
+					const previous = yield* lookupIdempotency(sql, crypto, receipt);
+					if (Option.isSome(previous)) return previous.value;
 				}
 				const previous = yield* sql`SELECT event FROM outbox WHERE transaction_id=${transaction}`.pipe(
 					Effect.flatMap(
@@ -135,10 +141,7 @@ export const moveTopic = (sql: SqlClient, boot: BootChannel["Service"], input: t
 				});
 				yield* sql`INSERT INTO mutation_batches VALUES(${transaction},${range.from},${range.to},1)`;
 				yield* sql`INSERT INTO outbox VALUES(${range.to},${transaction},${event},NULL)`;
-				if (key !== undefined) {
-					const json = yield* Schema.encodeEffect(Schema.fromJsonString(TopicMove))(outcome);
-					yield* sql`INSERT INTO topic_idempotency VALUES(${identity.instance},${key},${encoded},${json})`;
-				}
+				if (receipt) yield* storeIdempotency(sql, crypto, receipt, outcome);
 				return outcome;
 			}),
 		);

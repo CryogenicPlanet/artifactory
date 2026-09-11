@@ -22,7 +22,7 @@ describe("app database backup", () => {
 	it("restores the saved data after every old SQLite handle has closed", async (test) => {
 		expect(await run(test, "restore")).toEqual([{ value: "before backup" }]);
 	});
-	it("prepares an uninitialized clone but refuses missing initialized domain tables", async (test) => {
-		expect(await run(test, "bootstrap")).toEqual({ next: 26, epoch: { epoch: "rehearsal" }, corrupt: "Failure" });
+	it("installs the clone writer epoch without inspecting editable domain tables", async (test) => {
+		expect(await run(test, "bootstrap")).toEqual({ epoch: { epoch: "rehearsal" }, prepared: "Success" });
 	});
 });

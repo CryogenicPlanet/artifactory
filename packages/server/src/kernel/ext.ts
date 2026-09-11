@@ -1,8 +1,14 @@
+import { reserved, requestPath, pattern, validateRoute } from "./extension-routes.ts";
 import { Cause, Context, Crypto, DateTime, Effect, Exit, Layer, Path, Ref, Schema, Scope, Semaphore } from "effect";
 import { FindMyWay, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { HttpMethod } from "effect/unstable/http/HttpMethod";
 import { SqlClient } from "effect/unstable/sql";
-import { work, type Work } from "./extension-work.ts";
+import { document } from "../extension-http.ts";
+import type { OpenApi } from "effect/unstable/httpapi";
+import { mountApi } from "./extension-mount.ts";
+import { makeExtensionMigrate } from "./extension-migrations.ts";
+import { extensionCapabilities } from "./extension-capabilities.ts";
+import { ExtensionError, work, type Work } from "./extension-work.ts";
 import { parseCron, runCron } from "./extension-cron.ts";
 import { identity } from "../conversation-request.ts";
 import { Messages } from "./messages.ts";
@@ -12,7 +18,15 @@ import { pageHandler } from "./extension-page.ts";
 import { extensionData } from "./extension-data.ts";
 import { runEvents } from "./extension-events.ts";
 import { discoverExtensions } from "./extension-discovery.ts";
-import type { Api, CronContext, EventHandler, Hook, RequestContext, RequestServices } from "./extension-api.ts";
+import type {
+	Api,
+	CronContext,
+	EventHandler,
+	Hook,
+	RequestContext,
+	RequestServices,
+	ExtensionServices,
+} from "./extension-api.ts";
 
 interface CronJob {
 	readonly expression: string;
@@ -31,6 +45,7 @@ interface Registration {
 	readonly path: `/${string}`;
 	readonly description: string;
 	readonly scope: "read" | "write" | "fs";
+	readonly operation?: OpenApi.OpenAPISpecOperation;
 	readonly handler: (
 		request: HttpServerRequest.HttpServerRequest,
 		context: RequestContext,
@@ -48,57 +63,6 @@ const factory = Schema.Struct({
 	),
 });
 
-const reserved = (path: string) => {
-	const route = path.replace(/\/+/g, "/").replace(/\/$/, "").toLowerCase();
-	return (
-		[
-			"/_boot",
-			"/_kernel",
-			"/api/fs",
-			"/api/lock",
-			"/api/reload",
-			"/api/revert",
-			"/api/generations",
-			"/api/events",
-			"/api/stream",
-			"/api/tokens",
-			"/auth",
-			"/approve",
-			"/setup",
-		].some((prefix) => route === prefix || route.startsWith(prefix + "/")) ||
-		["/health", "/api", "/api/ext", "/init", "/init.md", "/.well-known/agent.json"].includes(route)
-	);
-};
-const requestPath = (url: string) => {
-	try {
-		const path = url.startsWith("/") ? url : new URL(url).pathname;
-		return decodeURI(path.split(/[?;#]/, 1)[0] ?? "/");
-	} catch {
-		return null;
-	}
-};
-const pattern = (route: string) => route.replace(/:[A-Za-z_]\w*/g, ":parameter");
-const validateRoute = (method: string, route: string, description: string, scope: string) => {
-	if (!route.startsWith("/") || !description.trim()) throw new Error("Extensions require described absolute paths.");
-	const segments = route.slice(1).split("/");
-	const names = segments.filter((segment) => segment.startsWith(":"));
-	if (
-		new Set(names).size !== names.length ||
-		segments.some((segment, index) =>
-			segment.startsWith(":")
-				? !/^:[A-Za-z_]\w*$/.test(segment)
-				: segment === "*"
-					? index !== segments.length - 1
-					: /[:*?;#%\\]/.test(segment),
-		)
-	)
-		throw new Error("Use static paths, named :parameters, and an optional terminal /* wildcard.");
-	if (!["read", "write", "fs"].includes(scope)) throw new Error("Invalid extension scope.");
-	if (!["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].includes(method))
-		throw new Error("Invalid extension method.");
-	if (reserved(route)) throw new Error("Reserved boot or kernel route.");
-};
-
 /** Owns one generation's optional extensions; resources exist only in a live scope. */
 export class Extensions extends Context.Service<Extensions, Effect.Success<ReturnType<typeof make>>>()(
 	"comms/server/Extensions",
@@ -112,6 +76,9 @@ const make = (directory: string) =>
 		const boot = yield* BootChannel;
 		const lifecycle = yield* Lifecycle;
 		const data = yield* extensionData;
+		const capabilities = yield* extensionCapabilities;
+		const services = yield* Effect.context<ExtensionServices>();
+		const documents: OpenApi.OpenAPISpec[] = [];
 		const parentScope = yield* Scope.Scope;
 		const transitions = yield* Semaphore.make(1);
 		const diagnostics = yield* Ref.make<ReadonlyArray<Diagnostic>>([]);
@@ -130,7 +97,11 @@ const make = (directory: string) =>
 			name: string,
 			type: Diagnostic["type"],
 			error: string | null,
-			details: { readonly expression?: string; readonly scheduled_at?: number } = {},
+			details: {
+				readonly expression?: string;
+				readonly scheduled_at?: number;
+				readonly overrides?: ReadonlyArray<string>;
+			} = {},
 		) =>
 			Effect.gen(function* () {
 				const transaction = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
@@ -154,6 +125,10 @@ const make = (directory: string) =>
 			});
 		for (const entry of yield* discoverExtensions(directory)) {
 			const { name } = entry;
+			const pending: Registration[] = [];
+			const pendingDocuments: OpenApi.OpenAPISpec[] = [];
+			const mounts: Array<ReturnType<typeof work<void>>> = [];
+			const migrate = yield* makeExtensionMigrate(sql, boot.epoch, name);
 			const jobs: CronJob[] = [];
 			const events: Array<{ readonly type: string; readonly handler: EventHandler }> = [];
 			const starts: Hook[] = [],
@@ -165,6 +140,44 @@ const make = (directory: string) =>
 				{ name, status: "loaded", load_ms: 0, error: null } satisfies Status,
 			]);
 			const api: Api = {
+				context: (scope) =>
+					Effect.gen(function* () {
+						const who = yield* identity(scope);
+						const request = yield* HttpServerRequest.HttpServerRequest;
+						const writable =
+							!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
+							(request.headers["x-comms-scopes"] ?? "").split(",").includes("write");
+						return {
+							...who,
+							...data(name, who, writable),
+							...capabilities(name, who, writable),
+							db: sql,
+							publicationFence: messages.fence,
+							params: (yield* HttpRouter.RouteContext).params,
+							query: yield* HttpServerRequest.ParsedSearchParams,
+						};
+					}),
+				migrate: (migration, statement) =>
+					Effect.suspend(() =>
+						registering ? migrate(migration, statement) : Effect.fail(new KernelError({ code: "input_invalid" })),
+					),
+				mount: (definition, handlers) => {
+					if (!registering) throw new Error("Mount APIs only in the extension factory.");
+					mounts.push(
+						work(() =>
+							mountApi(definition, handlers).pipe(
+								Effect.provideContext(services),
+								Effect.map((mounted) => {
+									pendingDocuments.push(mounted.document);
+									for (const route of mounted.routes) {
+										validateRoute(route.method, route.path, route.description, route.scope);
+										pending.push({ extension: name, ...route });
+									}
+								}),
+							),
+						),
+					);
+				},
 				page: (route, handler) =>
 					api.route("GET", route, { description: `Human page ${route}`, scope: "read", handler: pageHandler(handler) }),
 				cron: (expression, handler) => {
@@ -174,11 +187,17 @@ const make = (directory: string) =>
 				route: (method, route, options) => {
 					if (!registering) throw new Error("Register routes only in the extension factory.");
 					validateRoute(method, route, options.description, options.scope);
-					registrations.push({ extension: name, method, path: route, ...options });
+					pending.push({ extension: name, method, path: route, ...options });
 				},
 				on: (...args) => {
 					if (!registering) throw new Error("Register hooks only in the extension factory.");
-					if (args[0] === "start") starts.push(() => args[1]({ reason: "live" }));
+					if (args[0] === "start")
+						starts.push(() =>
+							args[1](
+								{ reason: "live" },
+								{ ...data(name), ...capabilities(name), db: sql, publicationFence: messages.fence },
+							),
+						);
 					else if (args[0] === "shutdown") stops.push(args[1]);
 					else {
 						const [type, handler] = args;
@@ -201,7 +220,42 @@ const make = (directory: string) =>
 				const imported: unknown = yield* Effect.tryPromise(() => import(url));
 				const loaded = yield* Schema.decodeUnknownEffect(factory)(imported);
 				yield* work(() => loaded.default(api));
-				yield* diagnostic(name, "ext.loaded", null);
+				yield* Effect.all(mounts, { discard: true });
+				const overrides: string[] = [];
+				for (const [index, route] of pending.entries()) {
+					const own = pending
+						.slice(0, index)
+						.find((other) => other.method === route.method && pattern(other.path) === pattern(route.path));
+					const existing = registrations.findLast(
+						(other) => other.method === route.method && pattern(other.path) === pattern(route.path),
+					);
+					if (own || (existing && !/^core\.(ts|js)$/.test(existing.extension)))
+						return yield* Effect.fail(
+							new ExtensionError({
+								message: `Route ${route.method} ${route.path} conflicts with ${(own ?? existing)?.extension}.`,
+							}),
+						);
+					if (existing) overrides.push(`${route.method} ${route.path} (${existing.extension})`);
+				}
+				for (const item of pendingDocuments)
+					for (const [key, schema] of Object.entries(item.components.schemas)) {
+						const previous = [...documents, ...pendingDocuments.filter((other) => other !== item)].find(
+							(other) => key in other.components.schemas,
+						)?.components.schemas[key];
+						if (
+							previous &&
+							Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(previous) !==
+								Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(schema)
+						)
+							return yield* Effect.fail(
+								new ExtensionError({
+									message: `OpenAPI schema ${key} conflicts with an earlier extension; give the schema a distinct identifier.`,
+								}),
+							);
+					}
+				registrations.push(...pending);
+				documents.push(...pendingDocuments);
+				yield* diagnostic(name, "ext.loaded", null, { overrides });
 			}).pipe(Effect.catchCause((cause) => failed(name, cause, "ext.failed")));
 			registering = false;
 			const elapsed = (yield* DateTime.nowAsDate).getTime() - started;
@@ -298,6 +352,7 @@ const make = (directory: string) =>
 											() =>
 												hook.handler(event.payload, {
 													...data(extension.name),
+													...capabilities(extension.name),
 													db: sql,
 													publicationFence: messages.fence,
 													event,
@@ -317,6 +372,7 @@ const make = (directory: string) =>
 													() =>
 														job.handler({
 															...data(extension.name),
+															...capabilities(extension.name),
 															db: sql,
 															publicationFence: messages.fence,
 															scheduledAt,
@@ -349,6 +405,7 @@ const make = (directory: string) =>
 		for (const route of selected) matcher.on(route.method, route.path, route);
 		return {
 			registrations: selected,
+			openapi: document(selected, documents),
 			diagnostics: Ref.get(diagnostics),
 			acknowledgeDiagnostics: (transactions: ReadonlyArray<string>) =>
 				Ref.update(diagnostics, (items) => items.filter((item) => !transactions.includes(item.transaction))),
@@ -390,7 +447,6 @@ const make = (directory: string) =>
 						);
 					if ((yield* Ref.get(statuses)).find((item) => item.name === route.extension)?.status !== "loaded")
 						return unavailable();
-					const publishedThrough = (yield* messages.fence).published_through;
 					const web = yield* HttpServerRequest.toWeb(request);
 					const headers = new Headers(web.headers);
 					for (const name of ["x-boot-secret", "authorization", "cookie"]) headers.delete(name);
@@ -405,8 +461,13 @@ const make = (directory: string) =>
 									!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
 										(request.headers["x-comms-scopes"] ?? "").split(",").includes("write"),
 								),
+								...capabilities(
+									route.extension,
+									who,
+									!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
+										(request.headers["x-comms-scopes"] ?? "").split(",").includes("write"),
+								),
 								db: sql,
-								publishedThrough,
 								publicationFence: messages.fence,
 								params: matched.params,
 								query: matched.searchParams,
@@ -426,7 +487,12 @@ const make = (directory: string) =>
 								const expected = cause.reasons.find(
 									(reason) => reason._tag === "Fail" && Schema.is(KernelError)(reason.error),
 								);
-								if (expected?._tag === "Fail" && Schema.is(KernelError)(expected.error)) return yield* expected.error;
+								if (
+									expected?._tag === "Fail" &&
+									Schema.is(KernelError)(expected.error) &&
+									cause.reasons.every((reason) => reason._tag === "Fail" && Schema.is(KernelError)(reason.error))
+								)
+									return yield* expected.error;
 								yield* transitions.withPermit(
 									Effect.gen(function* () {
 										yield* failed(route.extension, cause, "ext.error");

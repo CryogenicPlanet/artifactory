@@ -1,7 +1,7 @@
-import { type Crypto, DateTime, Effect, Option, Schema } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { type BootChannel, EventRecord, KernelError } from "./boot-channel.ts";
-import { writerGate } from "./database.ts";
+import { type BootChannel, KernelError } from "./boot-channel.ts";
+import type { Mutate } from "./mutate.ts";
 import { type Identity, validTopic } from "./messages.ts";
 import { Pages } from "./pages.ts";
 
@@ -13,11 +13,10 @@ const StoredTopic = Schema.Struct({
 });
 
 // Messages holds its mutation permit until the tombstone and its single subtree event publish.
-export const deleteTopic = <E>(
+export const deleteTopic = (
 	sql: SqlClient,
-	crypto: Crypto.Crypto,
+	mutate: Mutate,
 	boot: BootChannel["Service"],
-	relay: Effect.Effect<void, E>,
 	identity: Identity,
 	path: string,
 	key?: string,
@@ -26,28 +25,21 @@ export const deleteTopic = <E>(
 		if (!validTopic(path) || (key !== undefined && (key.length < 1 || key.length > 200)))
 			return yield* new KernelError({ code: "input_invalid" });
 		const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))({ path, delete: true });
-		yield* relay;
-		const transaction = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
 		const now = (yield* DateTime.nowAsDate).getTime();
-		let reserved = false;
-		const result = yield* sql
-			.withTransaction(
+		return yield* mutate({
+			...(key === undefined
+				? {}
+				: {
+						idempotency: {
+							instance: identity.instance,
+							key,
+							kind: "topic.deleted",
+							input: encoded,
+							outcome: Schema.fromJsonString(TopicDeletion),
+						},
+					}),
+			body: (reserve) =>
 				Effect.gen(function* () {
-					yield* writerGate(sql, boot.epoch);
-					if (key !== undefined) {
-						const receipts =
-							yield* sql`SELECT input,outcome FROM topic_idempotency WHERE instance=${identity.instance} AND key=${key}`.pipe(
-								Effect.flatMap(
-									Schema.decodeUnknownEffect(
-										Schema.Array(Schema.Struct({ input: Schema.String, outcome: Schema.String })),
-									),
-								),
-							);
-						if (receipts[0]) {
-							if (receipts[0].input !== encoded) return yield* new KernelError({ code: "idempotency_conflict" });
-							return yield* Schema.decodeEffect(Schema.fromJsonString(TopicDeletion))(receipts[0].outcome);
-						}
-					}
 					const deleted =
 						yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${path} OR substr(${path},1,length(path)+1)=path||'/') LIMIT 1`;
 					if (deleted.length) return yield* new KernelError({ code: "topic_not_found" });
@@ -75,8 +67,7 @@ export const deleteTopic = <E>(
 						if (!authored[0] || authored[0].total === 0 || authored[0].others > 0)
 							return yield* new KernelError({ code: "author_required" });
 					}
-					reserved = true;
-					const range = yield* boot.reserve(transaction, 1);
+					const range = yield* reserve(1);
 					const outcome = { path, deleted_at: now, seq: range.to };
 					// Page-only topics have a published empty metadata image, even without an earlier SQL row.
 					const before = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))(
@@ -88,11 +79,11 @@ export const deleteTopic = <E>(
 						const parts = path.split("/");
 						yield* sql`INSERT INTO topics(path,parent,name,meta,last_seq,created_at,updated_seq,previous,deleted_at) VALUES(${path},${parts.length === 1 ? null : parts.slice(0, -1).join("/")},${parts.at(-1) ?? path},'{}',${range.to},${now},${range.to},${before},${now})`;
 					}
-					const event = yield* Schema.encodeEffect(Schema.fromJsonString(EventRecord))({
+					const event = {
 						seq: range.to,
 						at: now,
 						type: "topic.deleted",
-						level: "info",
+						level: "info" as const,
 						actor: identity.agent,
 						instance: identity.instance,
 						generation: boot.generation,
@@ -100,25 +91,8 @@ export const deleteTopic = <E>(
 						topic: path,
 						message_id: null,
 						payload: outcome,
-					});
-					yield* sql`INSERT INTO mutation_batches VALUES(${transaction},${range.from},${range.to},1)`;
-					yield* sql`INSERT INTO outbox VALUES(${range.to},${transaction},${event},NULL)`;
-					if (key !== undefined) {
-						const json = yield* Schema.encodeEffect(Schema.fromJsonString(TopicDeletion))(outcome);
-						yield* sql`INSERT INTO topic_idempotency VALUES(${identity.instance},${key},${encoded},${json})`;
-					}
-					return outcome;
+					};
+					return { outcome, events: [event] };
 				}),
-			)
-			.pipe(Effect.result);
-		if (result._tag === "Failure") {
-			// Only a confirmed rollback permits resolution of a possibly lost reservation reply.
-			if (reserved) {
-				yield* boot.reserve(transaction, 1);
-				yield* boot.abort(transaction);
-			}
-			return yield* result.failure;
-		}
-		yield* relay;
-		return result.success;
-	}).pipe(Effect.uninterruptible);
+		});
+	});

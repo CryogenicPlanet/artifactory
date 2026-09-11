@@ -1,6 +1,8 @@
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { BootChannel, KernelError } from "./boot-channel.ts";
+import { initializeMentions } from "./message-mentions.ts";
+import { migrateIdempotency } from "./idempotency.ts";
 
 export const writerGate = (sql: SqlClient.SqlClient, epoch: string) =>
 	Effect.gen(function* () {
@@ -15,7 +17,7 @@ export const initialize = Effect.gen(function* () {
 		Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ user_version: Schema.Int })))),
 	);
 	const version = versions[0]?.user_version;
-	if (version === undefined || version > 6) return yield* new KernelError({ code: "app_schema_unsupported" });
+	if (version === undefined || version > 7) return yield* new KernelError({ code: "app_schema_unsupported" });
 	yield* sql`PRAGMA journal_mode = WAL`;
 	yield* sql`PRAGMA synchronous = FULL`;
 	yield* sql.withTransaction(
@@ -26,7 +28,7 @@ export const initialize = Effect.gen(function* () {
 				yield* sql`SELECT id,seq,topic,agent,instance,body,tags,meta,created_at FROM messages LIMIT 1`;
 				yield* sql`SELECT seq,transaction_id,event,shipped_at FROM outbox LIMIT 1`;
 				yield* sql`SELECT id,from_seq,to_seq,count FROM mutation_batches LIMIT 1`;
-				yield* sql`SELECT instance,key,input,message_id,transaction_id FROM idempotency LIMIT 1`;
+				if (version < 7) yield* sql`SELECT instance,key,input,message_id,transaction_id FROM idempotency LIMIT 1`;
 			} else {
 				yield* sql`CREATE TABLE topics(path TEXT PRIMARY KEY,parent TEXT,name TEXT NOT NULL,meta TEXT NOT NULL,last_seq INTEGER NOT NULL,created_at INTEGER NOT NULL)`;
 				yield* sql`CREATE INDEX topics_parent ON topics(parent)`;
@@ -53,7 +55,6 @@ export const initialize = Effect.gen(function* () {
 				yield* sql`ALTER TABLE topics ADD COLUMN updated_seq INTEGER NOT NULL DEFAULT 0`;
 				yield* sql`ALTER TABLE topics ADD COLUMN previous TEXT`;
 				yield* sql`CREATE TABLE topic_idempotency(instance TEXT NOT NULL,key TEXT NOT NULL,input TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(instance,key))`;
-				// Retain schema4 tables for existing data and saved-generation compatibility; core no longer uses them.
 				yield* sql`CREATE TABLE reactions(message_id TEXT NOT NULL,instance TEXT NOT NULL,emoji TEXT NOT NULL,active INTEGER NOT NULL,previous_active INTEGER NOT NULL,updated_seq INTEGER NOT NULL,PRIMARY KEY(message_id,instance,emoji))`;
 				yield* sql`CREATE TABLE reaction_idempotency(instance TEXT NOT NULL,key TEXT NOT NULL,message TEXT NOT NULL,emoji TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(instance,key))`;
 				yield* sql`CREATE VIRTUAL TABLE messages_fts USING fts5(message_id UNINDEXED, body, previous_body, tokenize='unicode61 remove_diacritics 2')`;
@@ -72,17 +73,20 @@ export const initialize = Effect.gen(function* () {
 				yield* sql`ALTER TABLE topics ADD COLUMN deleted_at INTEGER`;
 				yield* sql`PRAGMA user_version = 6`;
 			}
+			if (version < 7) {
+				yield* migrateIdempotency(sql);
+				yield* initializeMentions(sql);
+				yield* sql`PRAGMA user_version = 7`;
+			}
 			yield* sql`SELECT deleted_at FROM topics LIMIT 1`;
 			yield* sql`SELECT name,emoji,color,status FROM agents LIMIT 1`;
 			yield* sql`SELECT ns,key,value,updated_seq,previous FROM kv LIMIT 1`;
 			yield* sql`SELECT updated_seq,previous FROM topics LIMIT 1`;
-			yield* sql`SELECT instance,key,input,outcome FROM topic_idempotency LIMIT 1`;
 			yield* sql`SELECT message_id,body,previous_body FROM messages_fts LIMIT 1`;
 			yield* sql`SELECT edited_at,deleted_at,updated_seq,previous FROM messages LIMIT 1`;
-			yield* sql`SELECT outcome FROM idempotency LIMIT 1`;
+			yield* sql`SELECT instance,key,kind,input_hash,outcome FROM idempotency LIMIT 1`;
 			yield* sql`SELECT archived_at FROM topics LIMIT 1`;
 			yield* sql`SELECT instance,topic,seq FROM reads LIMIT 1`;
-			yield* sql`SELECT instance,key,topic,requested_seq,effective_seq FROM read_idempotency LIMIT 1`;
 		}),
 	);
 });

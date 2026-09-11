@@ -5,7 +5,6 @@ import { Message, Messages, StoredMessage, validTopic, type Identity } from "./m
 import { publishedTopics } from "./published-topics.ts";
 import { publishedMessages } from "./published-messages.ts";
 import { Pages } from "./pages.ts";
-import { effectiveCursor } from "./read-marks.ts";
 
 export const TopicSummary = Schema.Struct({
 	path: Schema.String,
@@ -22,20 +21,12 @@ export const TopicResult = Schema.Struct({
 	archived_by: Schema.NullOr(Schema.String),
 	subtopics: Schema.Array(TopicSummary),
 	messages: Schema.Array(Message),
-	cursor: Schema.Int,
+	fence: Schema.Int,
 	unread: Schema.Int,
 	index: Schema.NullOr(Schema.String),
 	pages: Schema.Array(Schema.String),
 });
 const StoredTopic = Schema.Struct({ ...TopicSummary.fields, meta: Schema.fromJsonString(Schema.JsonObject) });
-const mentionMatches = (body: string, agentHome: string | null, instanceHome: string | null) => {
-	for (const match of body.matchAll(/(?:^|[\s([])(@[a-z0-9][a-z0-9._/-]*)(?![/._-])(?=$|[\s\p{P}])/gu)) {
-		const target = match[1];
-		if (target && validTopic(target) && (target === "@here" || target === agentHome || target === instanceHome))
-			return true;
-	}
-	return false;
-};
 const make = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const messages = yield* Messages;
@@ -106,7 +97,7 @@ const make = Effect.gen(function* () {
 								.sort((left, right) => left.path.length - right.path.length)[0]?.path ?? null,
 						subtopics,
 						messages: [...recent].reverse(),
-						cursor: ceiling,
+						fence: ceiling,
 						unread:
 							own?.unread ?? rows.filter((row) => !row.path.includes("/")).reduce((sum, row) => sum + row.unread, 0),
 						index: page.index,
@@ -115,56 +106,7 @@ const make = Effect.gen(function* () {
 				}),
 			);
 		});
-	const inbox = (
-		identity: Identity,
-		since: number,
-		limit: number,
-		mode: "agent" | "instance" = "agent",
-		maxScan = Number.POSITIVE_INFINITY,
-	) =>
-		sql.withTransaction(
-			Effect.gen(function* () {
-				yield* sql`SELECT epoch FROM kernel_writer`;
-				const ceiling = (yield* messages.fence).published_through;
-				if (since > ceiling) return yield* new KernelError({ code: "query_invalid" });
-				const agentHome = mode === "agent" ? `@${identity.agent}` : null;
-				const instanceHome =
-					identity.label !== undefined &&
-					/^[a-z0-9][a-z0-9._-]*$/.test(identity.label) &&
-					validTopic(`@${identity.agent}/${identity.label}`)
-						? `@${identity.agent}/${identity.label}`
-						: null;
-				const home = agentHome ?? instanceHome;
-				let scanned = since;
-				let scannedRows = 0;
-				const items: Array<typeof Message.Type> = [];
-				while (items.length < limit && scannedRows < maxScan) {
-					const batch =
-						yield* sql`WITH visible_messages AS (${publishedMessages(sql, ceiling)}) SELECT * FROM visible_messages WHERE deleted_at IS NULL AND seq>${scanned} AND seq<=${ceiling} AND instance<>${identity.instance} ORDER BY seq LIMIT ${Math.min(200, maxScan - scannedRows)}`.pipe(
-							Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(StoredMessage))),
-						);
-					for (const message of batch) {
-						scanned = message.seq;
-						scannedRows++;
-						if (
-							(home !== null && (message.topic === home || message.topic.startsWith(`${home}/`))) ||
-							mentionMatches(message.body, agentHome, instanceHome)
-						)
-							items.push(message);
-						if (items.length === limit) break;
-					}
-					if (batch.length < 200) break;
-				}
-				return {
-					items,
-					cursor: items.at(-1)?.seq ?? since,
-					timed_out: false,
-					drained: false,
-					...(Number.isFinite(maxScan) ? { scan_truncated: scannedRows >= maxScan } : {}),
-				};
-			}),
-		);
-	return { detail, inbox, cursor: (identity: Identity) => effectiveCursor(sql, identity.instance, "~inbox") };
+	return { detail };
 });
 export class Topics extends Context.Service<Topics, Effect.Success<typeof make>>()("comms/server/Topics") {}
 export const layer = Layer.effect(Topics, make);

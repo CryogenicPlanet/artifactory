@@ -1,7 +1,41 @@
-import { Config, Context, Effect, Layer, Redacted, Ref, Schema } from "effect";
+import { Config, Context, Deferred, Effect, Layer, Redacted, Ref, Schema, Semaphore } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
-export class KernelError extends Schema.TaggedError<KernelError>()("KernelError", { code: Schema.String }) {}
+export const KernelErrorCode = Schema.Literals([
+	"app_schema_unsupported",
+	"author_required",
+	"batch_missing",
+	"boot_unavailable",
+	"cursor_ahead",
+	"event_cursor_invalid",
+	"extension_migration_conflict",
+	"extension_migration_invalid",
+	"generation_not_live",
+	"health_context_invalid",
+	"health_create_invalid",
+	"health_failed",
+	"health_read_invalid",
+	"health_response_too_large",
+	"health_route_failed",
+	"idempotency_conflict",
+	"idempotency_migration_invalid",
+	"input_invalid",
+	"message_not_found",
+	"query_invalid",
+	"public_pages_limit",
+	"rehearsal_append_forbidden",
+	"rehearsal_events_forbidden",
+	"rehearsal_reservation_conflict",
+	"scope_required",
+	"sql_unsupported",
+	"stale_writer",
+	"topic_archived",
+	"topic_exists",
+	"topic_not_found",
+	"unsupported_media_type",
+	"webhook_response_too_large",
+]);
+export class KernelError extends Schema.TaggedError<KernelError>()("KernelError", { code: KernelErrorCode }) {}
 export const EventRecord = Schema.Struct({
 	seq: Schema.Int,
 	at: Schema.Int,
@@ -34,18 +68,6 @@ export const Batch = Schema.Struct({
 	events: Schema.Array(EventRecord),
 });
 export type Batch = typeof Batch.Type;
-const AgentRoster = Schema.Struct({
-	items: Schema.Array(
-		Schema.Struct({
-			agent: Schema.String,
-			kind: Schema.String,
-			instance: Schema.String,
-			label: Schema.String,
-			created_at: Schema.Int,
-			last_seen_at: Schema.NullOr(Schema.Int),
-		}),
-	),
-});
 const Range = Schema.Struct({ transaction: Schema.String, from: Schema.Int, to: Schema.Int });
 const make = Effect.gen(function* () {
 	const epoch = yield* Config.String("WRITER_EPOCH");
@@ -61,10 +83,10 @@ const make = Effect.gen(function* () {
 		} | null>(null);
 		const next = yield* Ref.make(initial);
 		return {
-			agents: Effect.fail(new KernelError({ code: "rehearsal_identity_forbidden" })),
 			epoch,
 			filename,
 			generation,
+			changed: (_after: number): Effect.Effect<number, KernelError> => Effect.never,
 			fence: Ref.get(next).pipe(Effect.map((value) => ({ published_through: value - 1 }))),
 			reserve: (transaction: string, count: number) =>
 				Effect.gen(function* () {
@@ -92,7 +114,7 @@ const make = Effect.gen(function* () {
 	const url = yield* Config.String("BOOT_URL");
 	const secret = yield* Config.Redacted("BOOT_SECRET");
 	const client = yield* HttpClient.HttpClient;
-	const request = <S extends Schema.Constraint>(path: string, schema: S, payload?: Schema.Json) =>
+	const request = <S extends Schema.Constraint>(path: string, schema: S, payload?: Schema.Json, timeout = 1500) =>
 		Effect.gen(function* () {
 			let request =
 				payload === undefined
@@ -103,15 +125,72 @@ const make = Effect.gen(function* () {
 			if (response.status !== 200) return yield* new KernelError({ code: "boot_unavailable" });
 			return yield* response.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)));
 		}).pipe(
-			Effect.timeout("1500 millis"),
+			Effect.timeout(timeout),
 			Effect.mapError(() => new KernelError({ code: "boot_unavailable" })),
 		);
+	const scope = yield* Effect.scope;
+	const signal = yield* Ref.make(yield* Deferred.make<void>());
+	const cached = yield* Ref.make<number | null>(null);
+	const available = yield* Ref.make(true);
+	const started = yield* Ref.make(false);
+	const initialize = yield* Semaphore.make(1);
+	const notify = Effect.gen(function* () {
+		const next = yield* Deferred.make<void>();
+		yield* Deferred.succeed(yield* Ref.getAndSet(signal, next), undefined);
+	});
+	const advance = (result: { readonly published_through: number }) =>
+		Effect.gen(function* () {
+			const previous = yield* Ref.getAndUpdate(cached, (value) => Math.max(value ?? 0, result.published_through));
+			yield* Ref.set(available, true);
+			if (previous === null || result.published_through > previous) yield* notify;
+		}).pipe(Effect.uninterruptible);
+	const fenceSchema = Schema.Struct({ published_through: Schema.Int });
+	const follow = Effect.gen(function* () {
+		while (true) {
+			const after = yield* Ref.get(cached);
+			if (after === null) return;
+			const result = yield* request(`/_boot/seq?since=${after}&wait=60`, fenceSchema, undefined, 65_000).pipe(
+				Effect.result,
+			);
+			if (result._tag === "Success") yield* advance(result.success);
+			else {
+				yield* Ref.set(available, false);
+				yield* notify;
+				// Only failed channel requests retry on a timer; healthy idle readers share one boot wait.
+				yield* Effect.sleep("1 second");
+			}
+		}
+	});
+	const fence = Effect.gen(function* () {
+		if (!(yield* Ref.get(started)))
+			yield* initialize.withPermit(
+				Effect.gen(function* () {
+					if ((yield* Ref.get(cached)) === null) yield* request("/_boot/seq", fenceSchema).pipe(Effect.tap(advance));
+					yield* Effect.gen(function* () {
+						if (!(yield* Ref.getAndSet(started, true))) yield* follow.pipe(Effect.forkIn(scope));
+					}).pipe(Effect.uninterruptible);
+				}),
+			);
+		if (!(yield* Ref.get(available))) return yield* new KernelError({ code: "boot_unavailable" });
+		const value = yield* Ref.get(cached);
+		if (value === null) return yield* new KernelError({ code: "boot_unavailable" });
+		return { published_through: value };
+	});
+	const changed = (after: number) =>
+		Effect.gen(function* () {
+			while (true) {
+				const pending = yield* Ref.get(signal);
+				const current = (yield* fence).published_through;
+				if (current > after) return current;
+				yield* Deferred.await(pending);
+			}
+		});
 	return {
-		agents: request("/_boot/agents", AgentRoster),
 		epoch,
 		filename,
 		generation,
-		fence: request("/_boot/seq", Schema.Struct({ published_through: Schema.Int })),
+		fence,
+		changed,
 		events: (input: EventQuery) => {
 			const params = new URLSearchParams({ since: String(input.since), limit: String(input.limit) });
 			if (input.types?.length) params.set("types", input.types.join(","));
@@ -119,7 +198,7 @@ const make = Effect.gen(function* () {
 			return request(`/_boot/events?${params}`, EventPage);
 		},
 		reserve: (transaction: string, count: number) => request("/_boot/seq/reserve", Range, { transaction, count }),
-		append: (batch: Batch) => request("/_boot/events/append", Schema.Struct({ published_through: Schema.Int }), batch),
+		append: (batch: Batch) => request("/_boot/events/append", fenceSchema, batch).pipe(Effect.tap(advance)),
 		abort: (transaction: string) =>
 			client
 				.execute(

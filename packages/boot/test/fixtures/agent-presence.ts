@@ -28,6 +28,16 @@ const run = Effect.gen(function* () {
 		yield* sql`ALTER TABLE backups DROP COLUMN generation`;
 		yield* sql`DROP TABLE mint_receipts`;
 		yield* sql`ALTER TABLE sessions DROP COLUMN last_seen_at`;
+		yield* sql`DROP TABLE public_paths`;
+		yield* sql`DROP INDEX events_type_seq`;
+		yield* sql`DROP INDEX events_actor_seq`;
+		yield* sql`DROP INDEX events_instance_seq`;
+		yield* sql`DROP INDEX events_level_seq`;
+		yield* sql`DROP INDEX events_topic_seq`;
+		yield* sql`ALTER TABLE events DROP COLUMN type`;
+		yield* sql`ALTER TABLE events DROP COLUMN actor`;
+		yield* sql`ALTER TABLE events DROP COLUMN instance`;
+		yield* sql`ALTER TABLE events DROP COLUMN level`;
 		yield* sql`ALTER TABLE events DROP COLUMN topic`;
 		yield* sql`DROP TABLE topic_moves`;
 		yield* sql`DROP TABLE topic_page_moves`;
@@ -49,59 +59,33 @@ const run = Effect.gen(function* () {
 	}
 	yield* Effect.gen(function* () {
 		const auth = yield* Auth;
-		const before = yield* auth.roster;
-		assert.deepEqual(
-			before.items.map((item) => [item.agent, item.kind, item.instance, item.label, item.created_at]),
-			[
-				["codex", "codex", "family", "laptop", 3],
-				["rahul", "human", "human", "human", 2],
-			],
-		);
+		const activity = sql`SELECT id,last_used_at AS seen FROM tokens WHERE kind='access'
+			UNION ALL SELECT id,last_seen_at AS seen FROM sessions ORDER BY id`;
+		const before = yield* activity;
 		if (process.argv[3] === "resume") {
-			assert.ok(before.items.every((item) => item.last_seen_at !== null && item.last_seen_at > 100));
+			assert.equal((yield* sql`SELECT id FROM tokens WHERE id='access' AND last_used_at>100`).length, 1);
+			assert.equal((yield* sql`SELECT id FROM sessions WHERE id='human' AND last_seen_at>100`).length, 1);
 			yield* auth.logout("b".repeat(43));
-			assert.equal((yield* auth.roster).items.length, 1);
-			// Human-minted families have no enrollment, and still belong in the app roster.
-			yield* sql`INSERT INTO tokens VALUES('mint-access','mint-pair','mint-family','pi','access','mint-hash','job','["read"]',9999999999999,5,200,NULL,NULL,NULL)`;
-			assert.deepEqual(
-				(yield* auth.roster).items.find((item) => item.instance === "mint-family"),
-				{
-					agent: "pi",
-					kind: "agent",
-					instance: "mint-family",
-					label: "job",
-					created_at: 5,
-					last_seen_at: 200,
-				},
-			);
+			assert.deepEqual(yield* sql`SELECT id FROM sessions`, []);
 			return;
 		}
-		assert.deepEqual(
-			before.items.map((item) => item.last_seen_at),
-			[100, null],
-		);
 		assert.ok(Result.isFailure(yield* auth.authenticateSession("invalid").pipe(Effect.result)));
 		assert.ok(Result.isFailure(yield* auth.authenticateAccess("invalid").pipe(Effect.result)));
-		assert.deepEqual(yield* auth.roster, before);
+		assert.deepEqual(yield* activity, before);
 		yield* auth.authenticateSession("b".repeat(43));
 		yield* auth.authenticateAccess("a".repeat(43));
-		const active = yield* auth.roster;
-		assert.ok(
-			active.items.every(
-				(item) => item.last_seen_at !== null && item.last_seen_at > 100 && item.last_seen_at < 9999999999999,
-			),
+		const active = yield* activity;
+		assert.equal(
+			(yield* sql`SELECT id FROM tokens WHERE id='access' AND last_used_at>100 AND last_used_at<9999999999999`).length,
+			1,
 		);
-		assert.deepEqual(Object.keys(active.items[0] ?? {}).sort(), [
-			"agent",
-			"created_at",
-			"instance",
-			"kind",
-			"label",
-			"last_seen_at",
-		]);
+		assert.equal(
+			(yield* sql`SELECT id FROM sessions WHERE id='human' AND last_seen_at>100 AND last_seen_at<9999999999999`).length,
+			1,
+		);
 		yield* sql`UPDATE tokens SET revoked_at=1 WHERE family='family'`;
 		assert.ok(Result.isFailure(yield* auth.authenticateAccess("a".repeat(43)).pipe(Effect.result)));
-		assert.deepEqual(yield* auth.roster, active);
+		assert.deepEqual(yield* activity, active);
 	}).pipe(
 		Effect.provide(
 			authLayer({ rpId: "localhost", expectedOrigin: "http://localhost" }).pipe(

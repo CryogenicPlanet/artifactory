@@ -3,7 +3,6 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { validTopic, type BoardMessage } from "./board-api.ts";
 import { Message } from "./message.tsx";
 import { searchMessages, type MessageFilters } from "./search-api.ts";
-import "./search.css";
 
 export function Search({ path, onActive }: { readonly path: string; readonly onActive: (active: boolean) => void }) {
 	const [q, setQ] = useState("");
@@ -62,7 +61,10 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 		load(filters, 0);
 	};
 	return (
-		<section className="board-search" aria-label="Message search">
+		<section
+			className="mb-7 [&_summary]:cursor-pointer [&_summary]:text-[13px] [&_summary]:font-semibold [&_form]:mt-4"
+			aria-label="Message search"
+		>
 			<details>
 				<summary>Search messages</summary>
 				<form onSubmit={submit}>
@@ -75,7 +77,7 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 							placeholder={'Try: release "ready to ship"'}
 						/>
 					</label>
-					<div className="search-filters">
+					<div className="mt-3 grid gap-2.5 min-[651px]:grid-cols-[2fr_1fr_1fr]">
 						<label>
 							Search topic
 							<input
@@ -113,7 +115,7 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 				</p>
 			)}
 			{applied && (
-				<div className="search-results" aria-label="Search results">
+				<div className="mt-6" aria-label="Search results">
 					<div className="section-heading">
 						<h2>Search results</h2>
 						<button

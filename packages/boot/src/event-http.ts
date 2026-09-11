@@ -2,7 +2,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { DateTime, Effect, Ref, Schema, type Semaphore, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import type { Auth } from "./auth.ts";
 import type { VerifiedIdentity } from "./enrollment.ts";
 import { publicEventResponse } from "./public-event-http.ts";
 import { Batch, type Events, EventError } from "./events.ts";
@@ -53,18 +52,13 @@ export const eventRoute = (
 	identity: VerifiedIdentity | null,
 	gate: Semaphore.Semaphore,
 	revalidate: Effect.Effect<boolean> = Effect.succeed(true),
-	roster: Auth["Service"]["roster"] | null = null,
 ) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const url = new URL(request.url, "http://localhost");
-		const internal = [
-			"/_boot/seq",
-			"/_boot/seq/reserve",
-			"/_boot/seq/abort",
-			"/_boot/events/append",
-			"/_boot/agents",
-		].includes(url.pathname);
+		const internal = ["/_boot/seq", "/_boot/seq/reserve", "/_boot/seq/abort", "/_boot/events/append"].includes(
+			url.pathname,
+		);
 		const query = ["/_boot/events", "/api/events", "/_boot/stream", "/api/stream"].includes(url.pathname);
 		if (!internal && !query) return null;
 		let attempt: Attempt | null = null;
@@ -91,6 +85,34 @@ export const eventRoute = (
 		const bodyText = request.method === "POST" ? yield* readBody(request, Schema.Unknown).pipe(Effect.result) : null;
 		const service = yield* Ref.get(store);
 		if (!service) return failure("events_unavailable", 503);
+		if (url.pathname === "/_boot/seq" && request.method === "GET") {
+			const params = url.searchParams;
+			const after = Number(params.get("since") ?? "0");
+			const wait = Number(params.get("wait") ?? "0");
+			if (
+				[...params.keys()].some((key) => !["since", "wait"].includes(key) || params.getAll(key).length !== 1) ||
+				![...params.values()].every((value) => /^[0-9]+$/.test(value)) ||
+				!Number.isSafeInteger(after) ||
+				after < 0 ||
+				!Number.isSafeInteger(wait) ||
+				wait < 0 ||
+				wait > 60
+			)
+				return failure("query_invalid", 400);
+			return yield* Effect.gen(function* () {
+				if (wait > 0) yield* service.changed(after).pipe(Effect.timeoutOption(wait * 1000));
+				// Waiting holds no operation permit. Recheck attempt ownership before revealing the result.
+				return yield* gate
+					.withPermit(
+						Effect.gen(function* () {
+							if (!attempt || !(yield* Ref.get(attempts)).some((item) => item.epoch === attempt.epoch))
+								return failure("stale_attempt", 403);
+							return HttpServerResponse.jsonUnsafe({ published_through: (yield* service.state).published_through });
+						}),
+					)
+					.pipe(Effect.timeout("2 seconds"));
+			}).pipe(Effect.catchCause(() => Effect.succeed(failure("events_unavailable", 503))));
+		}
 		if (query) {
 			if (request.method !== "GET") return failure("method_invalid", 405);
 			const read: typeof service.query = (input) =>
@@ -113,7 +135,7 @@ export const eventRoute = (
 						orElse: () => Effect.fail(new EventError({ code: "events_unavailable" })),
 					}),
 				);
-			return yield* publicEventResponse(request, identity, read).pipe(
+			return yield* publicEventResponse(request, identity, read, service.changed).pipe(
 				Effect.catchTag("EventError", (error) =>
 					Effect.succeed(
 						failure(
@@ -144,13 +166,6 @@ export const eventRoute = (
 					const bodyValue = bodyText ? bodyText.success : undefined;
 
 					if (!attempt) return failure("child_forbidden", 403);
-					if (url.pathname === "/_boot/agents") {
-						if (request.method !== "GET") return failure("method_invalid", 405);
-						if (!roster) return failure("agents_unavailable", 503);
-						return HttpServerResponse.jsonUnsafe(yield* roster, { headers: { "cache-control": "no-store" } });
-					}
-					if (url.pathname === "/_boot/seq" && request.method === "GET")
-						return HttpServerResponse.jsonUnsafe({ published_through: (yield* service.state).published_through });
 					if (request.method !== "POST") return failure("method_invalid", 405);
 					if (url.pathname === "/_boot/seq/reserve") {
 						const body = yield* Schema.decodeUnknownEffect(reserveBody)(bodyValue);

@@ -10,14 +10,10 @@ export default function standup(api: Api) {
 		handler: (_request, ctx) =>
 			Effect.gen(function* () {
 				const since = (yield* DateTime.nowAsDate).getTime() - 86400000;
-				const rows = yield* ctx.db.withTransaction(
-					Effect.gen(function* () {
-						yield* ctx.db`SELECT epoch FROM kernel_writer`;
-						const ceiling = (yield* ctx.publicationFence).published_through;
-						return yield* ctx.db`WITH visible_messages AS (${publishedMessages(ctx.db, ceiling)})
+				const rows = yield* ctx.read(
+					(ceiling) => ctx.db`WITH visible_messages AS (${publishedMessages(ctx.db, ceiling)})
   SELECT agent,COUNT(*) AS messages FROM visible_messages
-  WHERE deleted_at IS NULL AND created_at>=${since} GROUP BY agent ORDER BY agent`;
-					}),
+  WHERE deleted_at IS NULL AND created_at>=${since} GROUP BY agent ORDER BY agent`,
 				);
 				return Response.json(
 					yield* Schema.decodeUnknownEffect(

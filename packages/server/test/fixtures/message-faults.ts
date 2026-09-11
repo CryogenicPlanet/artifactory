@@ -32,10 +32,11 @@ const program = Effect.gen(function* () {
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
 
 			const channel: BootChannel["Service"] = {
-				agents: Effect.succeed({ items: [] }),
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 2,
+				changed: (after) =>
+					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
 					Effect.tap(() =>
 						holdFence
@@ -61,7 +62,7 @@ const program = Effect.gen(function* () {
 							return yield* unavailable();
 						}
 						const result = yield* events.append(batch, epoch).pipe(Effect.mapError(unavailable));
-						if (testingMutation && mode === "append-lost" && !failedAppend) {
+						if (testingMutation && ["append-lost", "numeric-retry"].includes(mode) && !failedAppend) {
 							failedAppend = true;
 							return yield* unavailable();
 						}
@@ -80,6 +81,22 @@ const program = Effect.gen(function* () {
 					const initial = yield* messages.create(who, input, "create-key");
 					const sql = yield* SqlClient.SqlClient;
 					const topics = yield* Topics;
+					if (mode === "numeric-retry") {
+						testingMutation = true;
+						const edit = messages.update(who, String(initial.seq), { body: "changed" }, "alias-edit");
+						assert.equal((yield* edit.pipe(Effect.result))._tag, "Failure");
+						const edited = yield* edit;
+						assert.equal(edited.id, initial.id);
+						assert.deepEqual(yield* edit, edited);
+						failedAppend = false;
+						const remove = messages.remove(who, String(initial.seq), "alias-delete");
+						assert.equal((yield* remove.pipe(Effect.result))._tag, "Failure");
+						const deleted = yield* remove;
+						assert.deepEqual(yield* remove, deleted);
+						assert.equal((yield* events.query({ since: 0, limit: 100, types: ["message.edited"] })).items.length, 1);
+						assert.equal((yield* events.query({ since: 0, limit: 100, types: ["message.deleted"] })).items.length, 1);
+						return yield* Console.log("MESSAGE_RECOVERED");
+					}
 					if (mode === "admission") {
 						const originalState = yield* events.state;
 						const originalOutbox = yield* sql`SELECT * FROM outbox ORDER BY seq`;
@@ -106,17 +123,13 @@ const program = Effect.gen(function* () {
 						assert.deepEqual(yield* events.state, beforeMerged);
 						assert.deepEqual(yield* messages.get(initial.id), changed);
 						const ceiling = beforeMerged.published_through;
-						for (const attempt of [
-							messages.list({ since: ceiling + 1, limit: 10 }),
-							topics.inbox(who, ceiling + 1, 10),
-						]) {
+						for (const attempt of [messages.list({ since: ceiling + 1, limit: 10 })]) {
 							const result = yield* attempt.pipe(Effect.result);
 							assert.equal(result._tag, "Failure");
 							if (result._tag === "Failure")
-								assert.equal(Schema.is(KernelError)(result.failure) && result.failure.code, "query_invalid");
+								assert.equal(Schema.is(KernelError)(result.failure) && result.failure.code, "cursor_ahead");
 						}
 						assert.equal((yield* messages.list({ since: ceiling, limit: 10 })).cursor, ceiling);
-						assert.equal((yield* topics.inbox(who, ceiling, 10)).cursor, ceiling);
 						// Older versions admitted this aggregate size through individually bounded PATCH requests.
 						yield* sql`UPDATE messages SET body=${"x".repeat(60000)} WHERE id=${initial.id}`;
 						assert.equal(typeof (yield* messages.remove(who, initial.id)).deleted_at, "number");
@@ -125,6 +138,9 @@ const program = Effect.gen(function* () {
 					}
 					const registrations: Array<Parameters<Api["route"]>[2]> = [];
 					standup({
+						context: () => Effect.die("not used"),
+						mount: () => {},
+						migrate: () => Effect.die("not used"),
 						route: (_method, _path, options) => {
 							registrations.push(options);
 						},
@@ -146,16 +162,28 @@ const program = Effect.gen(function* () {
 								delete: () => Effect.die("Standup must remain read-only"),
 							}),
 							db: sql,
-							publishedThrough: 0,
+							messages: { query: messages.list, create: () => Effect.die("read only") },
+							topics: {
+								read: (path, options) => topics.detail(who, path, options?.depth, options?.archived),
+								meta: () => Effect.die("read only"),
+							},
+							emit: () => Effect.die("read only"),
+							events: { query: channel.events, changed: channel.changed },
+							mutate: () => Effect.die("Standup remains read only"),
+							read: (task) =>
+								sql.withTransaction(
+									Effect.gen(function* () {
+										yield* sql`SELECT epoch FROM kernel_writer`;
+										return yield* task((yield* messages.fence).published_through);
+									}),
+								),
 							publicationFence: messages.fence,
 							params: {},
 							query: {},
 						});
-						// Extension handlers intentionally accept unknown failures; normalize them at this boundary.
+						// An unexpected standup failure must fail this test instead of extending production error codes.
 						// oxlint-disable-next-line effecttsgo/any-unknown-in-error-context
-						const response = yield* (Effect.isEffect(work) ? work : Effect.tryPromise(() => work)).pipe(
-							Effect.mapError(() => new KernelError({ code: "standup_failed" })),
-						);
+						const response = yield* (Effect.isEffect(work) ? work : Effect.tryPromise(() => work)).pipe(Effect.orDie);
 						return yield* Effect.tryPromise(() => response.json()).pipe(
 							Effect.flatMap(
 								Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ agent: Schema.String, messages: Schema.Int }))),
@@ -199,10 +227,7 @@ const program = Effect.gen(function* () {
 					assert.equal(retry.seq, initial.seq);
 					assert.equal((yield* messages.get(initial.id)).body, "changed");
 					assert.deepEqual(yield* messages.create(who, input, "create-key"), initial);
-					assert.equal(
-						(yield* sql`SELECT event FROM outbox WHERE json_extract(event,'$.type')='message.edited'`).length,
-						1,
-					);
+					assert.equal((yield* events.query({ since: 0, limit: 100, types: ["message.edited"] })).items.length, 1);
 					// A failed delete must retain the previous published message until its event resolves.
 					failedAppend = false;
 					if (["append-before", "append-lost"].includes(mode)) {
@@ -219,10 +244,7 @@ const program = Effect.gen(function* () {
 					assert.equal((yield* messages.list({ since: 0, limit: 100 })).items.length, 0);
 					assert.equal((yield* topics.detail(who, input.topic)).unread, 0);
 					assert.deepEqual(yield* counts, []);
-					assert.equal(
-						(yield* sql`SELECT event FROM outbox WHERE json_extract(event,'$.type')='message.deleted'`).length,
-						1,
-					);
+					assert.equal((yield* events.query({ since: 0, limit: 100, types: ["message.deleted"] })).items.length, 1);
 					assert.equal((yield* sql`SELECT seq FROM outbox WHERE shipped_at IS NULL`).length, 0);
 					yield* Console.log("MESSAGE_RECOVERED");
 				}).pipe(

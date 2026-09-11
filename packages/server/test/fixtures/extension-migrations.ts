@@ -1,0 +1,77 @@
+import { strict as assert } from "node:assert";
+import { BunRuntime, BunServices } from "@effect/platform-bun";
+import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { Console, Effect, FileSystem, Schema } from "effect";
+import { SqlClient } from "effect/unstable/sql";
+import { KernelError } from "../../src/kernel/boot-channel.ts";
+import { makeExtensionMigrate } from "../../src/kernel/extension-migrations.ts";
+
+const run = Effect.gen(function* () {
+	const fs = yield* FileSystem.FileSystem;
+	const root = yield* fs.makeTempDirectoryScoped();
+	yield* Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql`CREATE TABLE kernel_writer(singleton INTEGER PRIMARY KEY,epoch TEXT)`;
+		yield* sql`INSERT INTO kernel_writer VALUES(1,'current')`;
+		const migrate = yield* makeExtensionMigrate(sql, "current", "example");
+		const create = "CREATE TABLE example_data(value TEXT)";
+		yield* migrate("001-create", create);
+		yield* migrate("001-create", create);
+		assert.deepEqual(yield* sql`SELECT extension,name,length(checksum) AS size FROM extension_migrations`, [
+			{ extension: "example", name: "001-create", size: 64 },
+		]);
+		const errorCode = (error: unknown) => (Schema.is(KernelError)(error) ? error.code : "unexpected_failure");
+		const insert = "INSERT INTO example_data VALUES('once')";
+		yield* Effect.all([migrate("002-insert", insert), migrate("002-insert", insert)], { concurrency: 2 });
+		assert.deepEqual(yield* sql`SELECT value FROM example_data`, [{ value: "once" }]);
+		assert.equal(
+			errorCode(yield* migrate("002-insert", "INSERT INTO example_data VALUES('changed')").pipe(Effect.flip)),
+			"extension_migration_conflict",
+		);
+		const second = yield* makeExtensionMigrate(sql, "current", "second");
+		yield* second("002-insert", insert);
+		assert.deepEqual(yield* sql`SELECT value FROM example_data`, [{ value: "once" }, { value: "once" }]);
+
+		// A failed receipt insert must roll back even DDL that has already executed.
+		yield* sql`CREATE TRIGGER reject_migration BEFORE INSERT ON extension_migrations WHEN NEW.name='003-atomic' BEGIN SELECT RAISE(ABORT,'test receipt failure'); END`;
+		assert.equal(
+			(yield* migrate("003-atomic", "CREATE TABLE rolled_back(value TEXT)").pipe(Effect.exit))._tag,
+			"Failure",
+		);
+		assert.deepEqual(yield* sql`SELECT name FROM sqlite_master WHERE name='rolled_back'`, []);
+		assert.deepEqual(yield* sql`SELECT name FROM extension_migrations WHERE name='003-atomic'`, []);
+		yield* sql`DROP TRIGGER reject_migration`;
+		yield* migrate("003-atomic", "CREATE TABLE rolled_back(value TEXT)");
+		assert.deepEqual(yield* sql`SELECT name FROM sqlite_master WHERE name='rolled_back'`, [{ name: "rolled_back" }]);
+
+		assert.equal(
+			(yield* migrate("004-repair", "INSERT INTO missing_table VALUES(1)").pipe(Effect.exit))._tag,
+			"Failure",
+		);
+		yield* migrate("004-repair", "INSERT INTO example_data VALUES('repaired')");
+		for (const statement of [
+			"CREATE TABLE partial(value TEXT); DROP TABLE example_data",
+			"COMMIT",
+			"PRAGMA user_version=9",
+			"--comment\nDELETE FROM example_data",
+			"INSERT INTO example_data VALUES('nul\u0000')",
+		]) {
+			assert.equal(errorCode(yield* migrate("rejected", statement).pipe(Effect.flip)), "extension_migration_invalid");
+		}
+		assert.equal(errorCode(yield* migrate("", create).pipe(Effect.flip)), "extension_migration_invalid");
+		yield* sql`UPDATE kernel_writer SET epoch='replacement'`;
+		assert.equal(errorCode(yield* migrate("001-create", create).pipe(Effect.flip)), "stale_writer");
+		assert.equal(
+			errorCode(yield* migrate("005-stale", "CREATE TABLE forbidden(value TEXT)").pipe(Effect.flip)),
+			"stale_writer",
+		);
+		assert.deepEqual(yield* sql`SELECT name FROM sqlite_master WHERE name IN ('forbidden','partial')`, []);
+		assert.deepEqual(yield* sql`SELECT value FROM example_data`, [
+			{ value: "once" },
+			{ value: "once" },
+			{ value: "repaired" },
+		]);
+		yield* Console.log("EXTENSION_MIGRATIONS_ATOMIC");
+	}).pipe(Effect.provide(SqliteClient.layer({ filename: `${root}/app.db` })));
+}).pipe(Effect.scoped, Effect.provide(BunServices.layer));
+run.pipe(BunRuntime.runMain);

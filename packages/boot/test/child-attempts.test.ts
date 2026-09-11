@@ -116,7 +116,7 @@ describe("durable child ownership across kernel lifetimes", () => {
 		await execute(root, { op: "legacy", bootId: firstBoot });
 		expect(await execute(root, { op: "recover", bootId: nextBoot })).toMatchObject({
 			result: "Failure",
-			version: [{ user_version: 13 }],
+			version: [{ user_version: 14 }],
 			rows: [{ id: "legacy", boot_id: null, closed: 0 }],
 		});
 		await writeFile(join(root, "attempts/legacy.closed"), "legacy");

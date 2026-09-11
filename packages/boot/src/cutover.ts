@@ -68,6 +68,8 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 				yield* recovery.prepare(yield* freshEpoch, record.candidate_epoch ?? undefined);
 				yield* sql`UPDATE cutover SET phase='restoring' WHERE singleton=1`;
 			}
+			// The replacement app must republish its grants before activation can expose its pages.
+			yield* sql`DELETE FROM public_paths`;
 			yield* backup.restore(saved);
 			yield* recovery.prepare(yield* freshEpoch);
 			yield* sql`UPDATE cutover SET phase='restored' WHERE singleton=1`;
@@ -142,7 +144,9 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						const clone = path.join(materialized, "rehearsal.db");
 						yield* backup.clone(clone);
 						const epoch = yield* freshEpoch;
-						const sequence = yield* backup.prepareClone(clone, epoch);
+						yield* backup.prepareClone(clone, epoch);
+						// Read after cloning: the boot allocator includes pruned events and outstanding reservations.
+						const sequence = (yield* events.state).next;
 						const rehearsed = yield* supervisor
 							.launch(generation, clone, "rehearsal", sequence, epoch)
 							.pipe(Effect.provideContext(context));

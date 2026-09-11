@@ -6,53 +6,61 @@ import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 const execute = promisify(execFile);
 
-it("runs actual message/read/context routes and rolls back every probe row without publishing its events", async (test) => {
+it("runs actual message/read/topic routes and rolls back every probe row without publishing its events", async (test) => {
 	const fixture = await conversation(test),
 		app = await fixture.launch();
 	await app.setup();
 	const cookie = await app.login();
 	await app.ready(cookie);
-	for (const table of ["messages", "topics", "idempotency"])
+	for (const table of ["messages", "topics"])
 		expect(await fixture.sql(`SELECT COUNT(*) count FROM ${table}`)).toEqual([{ count: 0 }]);
 	await expect
 		.poll(() =>
 			fixture.sql("SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type')='ext.loaded'", "boot.db"),
 		)
-		.toEqual([{ count: 2 }]);
+		.toEqual([{ count: 3 }]);
 	expect(
-		await fixture.sql("SELECT COUNT(*) count FROM outbox WHERE json_extract(event,'$.type')<>'ext.loaded'"),
+		await fixture.sql(
+			"SELECT COUNT(*) count FROM outbox WHERE json_extract(event,'$.type') NOT IN ('ext.loaded','pages.public')",
+		),
 	).toEqual([{ count: 0 }]);
-	expect(await fixture.sql("SELECT COUNT(*) count FROM mutation_batches WHERE id NOT LIKE 'ext:%'")).toEqual([
-		{ count: 0 },
-	]);
+	expect(
+		await fixture.sql("SELECT COUNT(*) count FROM idempotency WHERE kind NOT IN ('ext.loaded','pages.public')"),
+	).toEqual([{ count: 0 }]);
+	expect(
+		await fixture.sql(
+			"SELECT COUNT(*) count FROM mutation_batches WHERE NOT EXISTS (SELECT 1 FROM idempotency WHERE kind IN ('ext.loaded','pages.public') AND (CASE WHEN kind='pages.public' THEN json_extract(outcome,'$') ELSE json_extract(outcome,'$.seq') END) BETWEEN mutation_batches.from_seq AND mutation_batches.to_seq)",
+		),
+	).toEqual([{ count: 0 }]);
 	expect(await fixture.sql("SELECT state FROM event_batches WHERE state='aborted'", "boot.db")).toEqual([
 		{ state: "aborted" },
 	]);
 	expect(
-		await fixture.sql("SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type')<>'ext.loaded'", "boot.db"),
+		await fixture.sql(
+			"SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type') NOT IN ('ext.loaded','pages.public')",
+			"boot.db",
+		),
 	).toEqual([{ count: 0 }]);
 	const posted = await app.post("/api/messages", { topic: "after-health", body: "ordinary writes publish" }, cookie);
 	expect(posted.status).toBe(200);
 	expect(await fixture.sql("SELECT COUNT(*) count FROM messages")).toEqual([{ count: 1 }]);
 }, 20000);
 
-for (const kind of ["create", "read", "context"])
+for (const kind of ["create", "read", "topic"])
 	it(`rejects a broken actual ${kind} route even when it returns HTTP 200`, async (test) => {
 		const fixture = await conversation(test);
 		const seed = join(fixture.root, "seed");
 		await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
-		const source = join(seed, kind === "context" ? "context.ts" : "conversation.ts");
+		const source = join(seed, kind === "topic" ? "topics-http.ts" : "conversation.ts");
 		const before = await readFile(source, "utf8");
 		const anchor =
 			kind === "create"
 				? 'const who = yield* identity("write");'
 				: kind === "read"
 					? 'const who = yield* identity("read");'
-					: "return HttpServerResponse.text(text, {";
+					: "return result;";
 		const replacement =
-			kind === "context"
-				? "return HttpServerResponse.text(`# ${topic}`, {"
-				: "return HttpServerResponse.jsonUnsafe({ items: [] });";
+			kind === "topic" ? "return { ...result, messages: [] };" : "return HttpServerResponse.jsonUnsafe({ items: [] });";
 		expect(before).toContain(anchor);
 		await writeFile(source, before.replace(anchor, replacement));
 		const app = await fixture.launch(join(seed, "server.ts"));
@@ -82,7 +90,7 @@ it("rehearses a WAL-inclusive SQLite clone without changing live rows, epoch or 
 		.poll(() =>
 			fixture.sql("SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type')='ext.loaded'", "boot.db"),
 		)
-		.toEqual([{ count: 2 }]);
+		.toEqual([{ count: 3 }]);
 	expect((await app.post("/api/messages", { topic: "wal", body: "committed WAL data" }, cookie)).status).toBe(200);
 	expect((await stat(join(fixture.root, "comms.db-wal"))).size).toBeGreaterThan(32);
 	await cp(join(fixture.root, "comms.db"), join(fixture.root, "main-only.db"));

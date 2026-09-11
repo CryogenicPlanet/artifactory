@@ -43,7 +43,9 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 	const input = { topic: "@codex/task", body: "Original", tags: ["question"], meta: { pinned: true } };
 	const created = await (await call("POST", "/api/messages", owner, input, "create")).json();
 	const path = `/api/messages/${created.id}`;
-	expect(await (await call("GET", path, reader)).json()).toEqual(created);
+	const one = async (seq: number, access: string) =>
+		(await (await call("GET", `/api/messages?since=${seq - 1}&limit=1`, access)).json()).items[0];
+	expect(await one(created.seq, reader)).toEqual(created);
 	for (const access of [sibling, reader]) {
 		expect((await call("PATCH", path, access, { body: "Denied" })).status).toBe(403);
 		const deniedDelete = await call("DELETE", path, access);
@@ -61,7 +63,7 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 	const patch = { body: "Edited", tags: [], meta: { status: "answered" } };
 	const edited = await (await call("PATCH", path, owner, patch, "edit")).json();
 	expect(edited).toMatchObject({ ...created, ...patch, edited_at: expect.any(Number) });
-	expect(await (await call("GET", path, reader)).json()).toEqual(edited);
+	expect(await one(created.seq, reader)).toEqual(edited);
 	expect(await (await call("POST", "/api/messages", owner, input, "create")).json()).toEqual(created);
 	expect((await call("PATCH", path, owner, { body: "different" }, "edit")).status).toBe(409);
 	const human = await fetch(app.url + path, {
@@ -81,14 +83,13 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 	expect(deleted).toMatchObject({ id: created.id, seq: created.seq, deleted_at: expect.any(Number) });
 	expect(await (await call("DELETE", path, owner, undefined, "delete")).json()).toEqual(deleted);
 	expect(await (await call("DELETE", path, owner)).json()).toEqual(deleted);
-	expect((await call("GET", path, reader)).status).toBe(404);
+	expect(await one(created.seq, reader)).toBeUndefined();
 	expect((await call("PATCH", path, owner, { body: "Resurrect" })).status).toBe(404);
 	expect(await (await call("POST", "/api/messages", owner, input, "create")).json()).toEqual(created);
-	for (const list of ["/api/messages?since=0", "/api/inbox?since=0"])
+	for (const list of ["/api/messages?since=0"])
 		expect((await (await call("GET", list, sibling)).json()).items).toEqual([]);
 	const topic = await (await call("GET", "/api/topics/@codex/task", reader)).json();
 	expect(topic).toMatchObject({ path: "@codex/task", messages: [], unread: 0 });
-	expect(await (await call("GET", "/api/ctx?topic=@codex", reader)).text()).not.toContain("Human correction");
 	const events = await (await call("GET", "/api/events?since=0&types=message.*", owner)).json();
 	expect(events.items.map((event: { type: string }) => event.type)).toEqual([
 		"message.created",
@@ -123,7 +124,7 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 	expect((await call("POST", "/api/messages", owner, { topic: "archived/child/deep", body: "Forbidden" })).status).toBe(
 		409,
 	);
-	expect((await call("GET", `/api/messages/${retained.id}`, reader)).status).toBe(200);
+	expect(await one(retained.seq, reader)).toEqual(retained);
 	await fixture.sql("UPDATE kernel_writer SET epoch='replaced'");
 	expect((await call("PATCH", `/api/messages/${retained.id}`, owner, { body: "Forbidden stale writer" })).status).toBe(
 		503,
@@ -132,5 +133,8 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 	await app.stop();
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
-	expect((await fetch(resumed.url + path, { headers: { cookie } })).status).toBe(404);
+	expect(
+		(await (await fetch(resumed.url + "/api/messages?since=0&topic=@codex/task", { headers: { cookie } })).json())
+			.items,
+	).toEqual([]);
 }, 30000);

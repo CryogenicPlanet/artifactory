@@ -1,7 +1,10 @@
-import { BunRuntime, BunServices } from "@effect/platform-bun";
+import { BunRuntime, BunServices, BunHttpPlatform } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Config, Console, Effect, Ref, FileSystem, Layer, Path, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { Etag } from "effect/unstable/http";
+import { layer as topicsLayer } from "../../src/kernel/topics.ts";
+import { layer as pagesLayer } from "../../src/kernel/pages.ts";
 import { BootChannel } from "../../src/kernel/boot-channel.ts";
 import { layer as messagesLayer } from "../../src/kernel/messages.ts";
 import { Lifecycle, layer as lifecycleLayer, type State } from "../../src/kernel/lifecycle.ts";
@@ -61,14 +64,22 @@ const run = Effect.gen(function* () {
 				diagnostics: yield* extensions.diagnostics,
 			}),
 		);
-	}).pipe(Effect.provide(extensionsLayer(directory).pipe(Layer.provide(messagesLayer))));
+	}).pipe(
+		Effect.provide(
+			extensionsLayer(directory).pipe(
+				Layer.provide(topicsLayer.pipe(Layer.provideMerge(messagesLayer), Layer.provideMerge(pagesLayer(directory)))),
+				Layer.provide(BunHttpPlatform.layer),
+				Layer.provide(Etag.layer),
+			),
+		),
+	);
 }).pipe(
 	Effect.scoped,
 	Effect.provideService(BootChannel, {
-		agents: Effect.succeed({ items: [] }),
 		epoch: "test",
 		filename: ":memory:",
 		generation: 1,
+		changed: () => Effect.never,
 		fence: Effect.succeed({ published_through: 0 }),
 		events: (input) => Effect.succeed({ items: [], cursor: input.since, timed_out: false, drained: false }),
 		reserve: (transaction, count) => Effect.succeed({ transaction, from: 1, to: count }),

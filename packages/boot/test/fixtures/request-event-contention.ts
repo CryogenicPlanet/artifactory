@@ -4,13 +4,14 @@ import { Clock, Console, Deferred, Effect, Layer, Ref } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
 import { Events, eventsSchema, layer } from "../../src/events.ts";
-import { eventRoutingSchema } from "../../src/event-routing-schema.ts";
+import { eventFilterSchema, eventRoutingSchema } from "../../src/event-routing-schema.ts";
 import { requestEvents } from "../../src/request-events.ts";
 import { traffic } from "../../src/traffic.ts";
 
 const main = Effect.gen(function* () {
 	yield* eventsSchema;
 	yield* eventRoutingSchema;
+	yield* eventFilterSchema;
 	return yield* Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* Events;

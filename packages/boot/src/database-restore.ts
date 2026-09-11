@@ -104,6 +104,8 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				yield* recovery.prepare(yield* freshEpoch, record.candidate_epoch ?? undefined);
 				yield* sql`UPDATE db_restore_requests SET phase='rollback' WHERE proof_id=${record.proof_id}`;
 			}
+			// The replacement app must republish its grants before activation can expose its pages.
+			yield* sql`DELETE FROM public_paths`;
 			yield* backup.restore((yield* saved(record.safety_backup)).path);
 			yield* recovery.prepare(yield* freshEpoch);
 			yield* sql`UPDATE db_restore_requests SET phase='failed',failure='restore_not_accepted' WHERE proof_id=${record.proof_id}`;
@@ -116,6 +118,8 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				const target = yield* saved(record.backup);
 				if (target.published_through !== record.restored_to_seq)
 					return yield* new ChildError({ code: "restore_backup_changed" });
+				// The replacement app must republish its grants before activation can expose its pages.
+				yield* sql`DELETE FROM public_paths`;
 				yield* backup.restore(target.path);
 				const epoch = yield* freshEpoch;
 				yield* recovery.prepare(epoch);

@@ -1,4 +1,4 @@
-import { Crypto, Effect, Ref, Schema, Stream, type Scope } from "effect";
+import { Cause, Crypto, Effect, Ref, Schema, Stream, type Scope } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
 import { BootChannel, KernelError } from "./boot-channel.ts";
@@ -79,20 +79,29 @@ export const probeHealth = <E, R>(
 						!listed.items.some((item) => item.id === message.id && item.seq === message.seq && item.body === bodyMarker)
 					)
 						return yield* new KernelError({ code: "health_read_invalid" });
-					const digest = yield* call("GET", `/api/ctx?topic=${topic}&since=0&budget=4000`);
-					if (!digest.includes(bodyMarker) || !digest.includes(topic) || !digest.includes(`#${message.seq}`))
+					const topicView = yield* call("GET", `/api/topics/${topic}?mark=0`);
+					const detail = yield* Schema.decodeEffect(
+						Schema.fromJsonString(Schema.Struct({ path: Schema.String, messages: Schema.Array(Message) })),
+					)(topicView);
+					if (
+						detail.path !== topic ||
+						!detail.messages.some((item) => item.id === message.id && item.body === bodyMarker)
+					)
 						return yield* new KernelError({ code: "health_context_invalid" });
 					return yield* new RolledBack();
 				}),
 			)
-			.pipe(Effect.result);
-		// Typed failure arrives only after the outer rollback succeeds. A rollback defect must leave evidence pending.
+			.pipe(Effect.exit);
+		// Effect.result would discard a rollback defect accompanying a typed failure. Never resolve that uncertainty.
+		if (result._tag === "Success") return yield* new KernelError({ code: "health_failed" });
+		if (result.cause.reasons.length === 0 || !result.cause.reasons.every(Cause.isFailReason))
+			return yield* Effect.failCause(result.cause);
 		const reservation = yield* Ref.get(probe.reservation);
 		if (reservation) {
 			yield* boot.reserve(reservation.transaction, reservation.count);
 			yield* boot.abort(reservation.transaction);
 		}
-		if (result._tag !== "Failure" || !Schema.is(RolledBack)(result.failure))
+		if (!result.cause.reasons.some((reason) => Cause.isFailReason(reason) && Schema.is(RolledBack)(reason.error)))
 			return yield* new KernelError({ code: "health_failed" });
 		return { status: "ok" };
 	}).pipe(Effect.provide(probeLayer));

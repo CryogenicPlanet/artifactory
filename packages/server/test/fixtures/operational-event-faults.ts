@@ -24,10 +24,11 @@ const program = Effect.gen(function* () {
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
 
 			const channel: BootChannel["Service"] = {
-				agents: Effect.succeed({ items: [] }),
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 2,
+				changed: (after) =>
+					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
 					Effect.map((state) => ({ published_through: state.published_through })),
 					Effect.mapError(unavailable),
@@ -83,14 +84,15 @@ const program = Effect.gen(function* () {
 						.recordEvent({ ...input, payload: { extension: "different" } })
 						.pipe(Effect.result);
 					assert.equal(conflict._tag, "Failure");
-					assert.equal((yield* sql`SELECT seq FROM outbox`).length, 1);
-					assert.equal((yield* sql`SELECT seq FROM outbox WHERE shipped_at IS NULL`).length, 0);
+					assert.equal((yield* sql`SELECT seq FROM outbox`).length, 0);
+					assert.equal((yield* sql`SELECT key FROM idempotency WHERE kind='ext.loaded'`).length, 1);
 					const delivered = yield* events.query({ since: 0, limit: 100 });
 					assert.deepEqual(delivered.items, [retry]);
 					yield* sql`UPDATE kernel_writer SET epoch='replaced'`;
 					const stale = yield* messages.recordEvent({ ...input, transaction: "b".repeat(32) }).pipe(Effect.result);
 					assert.equal(stale._tag, "Failure");
-					assert.equal((yield* sql`SELECT seq FROM outbox`).length, 1);
+					assert.deepEqual((yield* events.query({ since: 0, limit: 100 })).items, [retry]);
+					assert.equal((yield* sql`SELECT seq FROM outbox`).length, 0);
 					yield* Console.log("OPERATIONAL_EVENT_RECOVERED");
 				}).pipe(Effect.provide(Layer.mergeAll(messagesLayer, lifecycleLayer)));
 			}).pipe(

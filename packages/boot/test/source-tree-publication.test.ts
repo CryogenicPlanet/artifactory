@@ -105,6 +105,16 @@ describe("typed source tree publication", () => {
 			"ALTER TABLE source_changes DROP COLUMN desired_directory",
 			"ALTER TABLE versions DROP COLUMN previous_directory",
 			"ALTER TABLE versions DROP COLUMN directory",
+			"DROP TABLE public_paths",
+			"DROP INDEX events_type_seq",
+			"DROP INDEX events_actor_seq",
+			"DROP INDEX events_instance_seq",
+			"DROP INDEX events_level_seq",
+			"DROP INDEX events_topic_seq",
+			"ALTER TABLE events DROP COLUMN type",
+			"ALTER TABLE events DROP COLUMN actor",
+			"ALTER TABLE events DROP COLUMN instance",
+			"ALTER TABLE events DROP COLUMN level",
 			"ALTER TABLE events DROP COLUMN topic",
 			"DROP TABLE topic_moves",
 			"DROP TABLE topic_page_moves",
@@ -120,7 +130,7 @@ describe("typed source tree publication", () => {
 		expect(await env.sql("SELECT previous_directory,directory FROM versions")).toEqual([
 			{ previous_directory: 0, directory: 0 },
 		]);
-		expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 13 }]);
+		expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 14 }]);
 	});
 
 	it.for(["file to directory", "directory to file"] as const)(

@@ -2,7 +2,6 @@ import { Effect, Schema } from "effect";
 import { useId, useState } from "react";
 import { type BoardError } from "./board-api.ts";
 import { saveTopic, type TopicMutation } from "./topic-control-api.ts";
-import "./topic-controls.css";
 
 export function TopicControls({
 	path,
@@ -48,7 +47,7 @@ export function TopicControls({
 	};
 	return (
 		<details
-			className="topic-controls"
+			className="mb-7 rounded-lg border border-[#e3e8df] px-[18px] py-[14px] text-[13px] [&>summary]:cursor-pointer [&>summary]:font-semibold [&>summary]:text-[#68705f] [&>form]:mt-5 [&_textarea]:min-h-[140px] [&_textarea]:font-mono"
 			onToggle={(event) => {
 				if (event.currentTarget.open && !busy && !uncertain && !dirty) {
 					setDraft(JSON.stringify(meta, null, 2));
@@ -93,7 +92,7 @@ export function TopicControls({
 					Save metadata
 				</button>
 			</form>
-			<div className="topic-archive-controls">
+			<div className="mt-5 border-t border-[#e3e8df] pt-2">
 				<p className="field-hint">
 					{parentArchived
 						? "A parent topic is archived. Unarchive the parent before changing this topic."

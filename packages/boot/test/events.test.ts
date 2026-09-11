@@ -140,6 +140,7 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 	await app.sql("DROP TABLE refresh_idempotency");
 	for (const table of ["child_attempts", "backups", "cutover"]) await app.sql(`DROP TABLE ${table}`);
 	await app.sql("ALTER TABLE sessions DROP COLUMN last_seen_at");
+	await app.sql("DROP TABLE public_paths");
 	await app.sql("PRAGMA user_version=5");
 	await app.sql("INSERT INTO settings VALUES('preserved','value')");
 	await app.sql("INSERT INTO source_batches VALUES('pending','lock','rahul',1,'publishing')");
@@ -150,7 +151,7 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 		"SELECT batch,path,hex(before) AS before_bytes,before_mode,hex(desired) AS desired_bytes,desired_mode FROM source_changes",
 	);
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
-	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 13 }]);
+	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 14 }]);
 	expect(await app.sql("SELECT value FROM settings WHERE key='preserved'")).toEqual([{ value: "value" }]);
 	expect(
 		await app.sql(
@@ -313,13 +314,17 @@ it("backfills legacy routing without altering pending state or original event by
 	await app.run({ op: "reserve", transaction: "pending" });
 	const before = await app.sql("SELECT event FROM events");
 	const pending = await app.sql("SELECT * FROM seq");
-	await app.sql("ALTER TABLE events DROP COLUMN topic");
+	for (const column of ["type", "actor", "instance", "level", "topic"]) {
+		await app.sql(`DROP INDEX events_${column}_seq`);
+		await app.sql(`ALTER TABLE events DROP COLUMN ${column}`);
+	}
 	await app.sql("DROP TABLE topic_moves");
 	await app.sql("DROP TABLE topic_page_moves");
 	await app.sql("DROP TABLE db_restore_requests");
 	for (const column of ["before_directory", "desired_directory"])
 		await app.sql(`ALTER TABLE source_changes DROP COLUMN ${column}`);
 	for (const column of ["previous_directory", "directory"]) await app.sql(`ALTER TABLE versions DROP COLUMN ${column}`);
+	await app.sql("DROP TABLE public_paths");
 	await app.sql("PRAGMA user_version=12");
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
 	expect(await app.sql("SELECT topic FROM events")).toEqual([{ topic: "project/thread" }]);
@@ -327,3 +332,28 @@ it("backfills legacy routing without altering pending state or original event by
 	expect(await app.sql("SELECT * FROM seq")).toEqual(pending);
 	expect(await app.run({ op: "query", topic: "project", since: 0 })).toMatchObject({ success: { items: [event(1)] } });
 });
+
+it("migrates indexed projections without changing routed topics, JSON bytes or pending publication", async (test) => {
+	const app = await store(test);
+	await app.run({ op: "boot", event: { ...event(1), instance: null } });
+	await app.sql("UPDATE events SET topic='moved/thread'");
+	await app.run({ op: "reserve", transaction: "pending" });
+	const before = await app.sql("SELECT seq,transaction_id,event,topic FROM events");
+	const pending = await app.sql("SELECT * FROM seq");
+	for (const column of ["type", "actor", "instance", "level", "topic"])
+		await app.sql(`DROP INDEX events_${column}_seq`);
+	for (const column of ["type", "actor", "instance", "level"])
+		await app.sql(`ALTER TABLE events DROP COLUMN ${column}`);
+	await app.sql("DROP TABLE public_paths");
+	await app.sql("PRAGMA user_version=13");
+	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
+	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
+	expect(await app.sql("SELECT seq,transaction_id,event,topic FROM events")).toEqual(before);
+	expect(await app.sql("SELECT * FROM seq")).toEqual(pending);
+	expect(await app.sql("SELECT type,actor,instance,level,topic FROM events")).toEqual([
+		{ type: "message.created", actor: "rahul", instance: null, level: "info", topic: "moved/thread" },
+	]);
+	expect(
+		await app.run({ op: "query", since: 0, topic: "moved", types: ["message.*"], agent: "rahul", level: "info" }),
+	).toMatchObject({ success: { items: [{ ...event(1), instance: null, topic: "moved/thread" }], cursor: 1 } });
+}, 15000);

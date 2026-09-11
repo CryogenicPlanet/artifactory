@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
-it("loads package index.ts in file order, isolates failures, and retains directory-scoped KV after reload", async (test) => {
+it("loads packages in order, rejects a second core override atomically, and retains directory-scoped KV", async (test) => {
 	const fixture = await conversation(test);
 	const seed = join(fixture.root, "package-seed");
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
@@ -19,9 +19,19 @@ it("loads package index.ts in file order, isolates failures, and retains directo
 		await writeFile(join(directory, "wrong.ts"), "throw Error('main must not load');");
 		if (source !== undefined) await writeFile(join(directory, "index.ts"), source);
 	};
-	await writeFile(join(seed, "ext/core.ts"), route("core file"));
+	await writeFile(
+		join(seed, "ext/core.ts"),
+		`import {CoreApi,coreHandlers} from "../conversation.ts";
+export default api=>{api.mount(CoreApi,coreHandlers);api.route("GET","/api/package-order",{description:"Core package ordering",scope:"read",handler:async()=>Response.json("core file")});};`,
+	);
 	await writeFile(join(seed, "ext/a-first.ts"), route("first file"));
-	await packageSource("core", route("core directory"));
+	await packageSource(
+		"core",
+		`export default api=>{
+ api.route("GET","/api/conflict-partial",{description:"Must not leak",scope:"read",handler:async()=>Response.json("wrong")});
+ api.route("GET","/api/package-order",{description:"Second core override",scope:"read",handler:async()=>Response.json("core directory")});
+};`,
+	);
 	await packageSource("missing");
 	await packageSource("broken", "invalid TypeScript !");
 	await packageSource(
@@ -32,7 +42,7 @@ it("loads package index.ts in file order, isolates failures, and retains directo
 		"zz-package",
 		`import {Effect} from "effect";
 export default api=>{
- api.route("GET","/api/package-order",{description:"Package ordering",scope:"read",handler:async()=>Response.json("last package")});
+ api.route("GET","/api/package-tail",{description:"Package tail",scope:"read",handler:async()=>Response.json("last package")});
  api.route("PUT","/api/package-kv",{description:"Save package scratch",scope:"write",handler:(_req,ctx)=>ctx.kv().set("saved",{value:"retained"}).pipe(Effect.as(Response.json("saved")))});
  api.route("GET","/api/package-kv",{description:"Read package scratch",scope:"read",handler:(_req,ctx)=>ctx.kv().get("saved").pipe(Effect.map(Response.json))});
 };`,
@@ -44,8 +54,10 @@ export default api=>{
 	const cookie = await app.login();
 	await app.ready(cookie);
 	const get = (path: string) => fetch(`${app.url}${path}`, { headers: { cookie } });
-	expect(await (await get("/api/package-order")).json()).toBe("last package");
-	expect((await get("/api/package-partial")).status).toBe(503);
+	expect(await (await get("/api/package-order")).json()).toBe("first file");
+	expect(await (await get("/api/package-tail")).json()).toBe("last package");
+	expect((await get("/api/conflict-partial")).status).toBe(404);
+	expect((await get("/api/package-partial")).status).toBe(404);
 	const statuses = await (await get("/api/ext")).json();
 	expect(statuses.map((entry: { name: string }) => entry.name)).toEqual([
 		"core.ts",
@@ -58,6 +70,15 @@ export default api=>{
 		"subscriptions",
 		"zz-package",
 	]);
+	expect(statuses).toContainEqual(
+		expect.objectContaining({
+			name: "core",
+			status: "disabled",
+			registrations: [],
+			error: expect.stringContaining("conflicts with a-first.ts"),
+		}),
+	);
+	expect((await (await get("/api")).json()).paths["/api/package-order"].get.description).toContain("a-first.ts");
 	for (const name of ["broken", "missing", "partial"])
 		expect(statuses).toContainEqual(expect.objectContaining({ name, status: "disabled" }));
 	expect((await get("/api/standup")).status).toBe(200);

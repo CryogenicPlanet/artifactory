@@ -39,7 +39,7 @@ const main = Effect.gen(function* () {
 	} finally {
 		bootstrap.close();
 	}
-	const next = yield* backup.prepareClone(filename, "rehearsal");
+	yield* backup.prepareClone(filename, "rehearsal");
 	const initialized = new Database(filename);
 	let epoch: unknown;
 	try {
@@ -48,9 +48,9 @@ const main = Effect.gen(function* () {
 	} finally {
 		initialized.close();
 	}
-	// The same absent domain table is valid before domain initialization, and corrupt afterwards.
-	const corrupt = yield* backup.prepareClone(filename, "second-probe").pipe(Effect.result);
-	return { next, epoch, corrupt: corrupt._tag };
+	// Clone preparation owns only the kernel fence; editable domain schema is validated by child health.
+	const prepared = yield* backup.prepareClone(filename, "second-probe").pipe(Effect.result);
+	return { epoch, prepared: prepared._tag };
 }).pipe(
 	Effect.scoped,
 	Effect.provide(BunServices.layer),

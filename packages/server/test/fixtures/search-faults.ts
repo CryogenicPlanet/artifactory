@@ -9,7 +9,6 @@ import { AppRecovery, layer as recoveryLayer } from "../../../boot/src/app-recov
 import { BootChannel, KernelError } from "../../src/kernel/boot-channel.ts";
 import { initialize } from "../../src/kernel/database.ts";
 import { Messages, layer as messagesLayer } from "../../src/kernel/messages.ts";
-import { Search, layer as searchLayer } from "../../src/kernel/search.ts";
 
 const program = Effect.gen(function* () {
 	const root = process.argv[2];
@@ -23,10 +22,11 @@ const program = Effect.gen(function* () {
 			let failAppend = false;
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
 			const channel: BootChannel["Service"] = {
-				agents: Effect.succeed({ items: [] }),
 				epoch,
 				filename: `${root}/comms.db`,
 				generation: 1,
+				changed: (after) =>
+					events.changed(after).pipe(Effect.mapError(() => new KernelError({ code: "boot_unavailable" }))),
 				fence: events.state.pipe(
 					Effect.map((state) => ({ published_through: state.published_through })),
 					Effect.mapError(unavailable),
@@ -41,7 +41,6 @@ const program = Effect.gen(function* () {
 				yield* initialize;
 				return yield* Effect.gen(function* () {
 					const messages = yield* Messages,
-						search = yield* Search,
 						sql = yield* SqlClient.SqlClient;
 					const who = { agent: "rahul", instance: "search", request: "test", kind: "human" as const };
 					const original = yield* messages.create(who, {
@@ -49,7 +48,7 @@ const program = Effect.gen(function* () {
 						body: "previous solar phrase",
 						tags: ["old"],
 					});
-					const find = (q: string) => search.find({ q, since: 0, limit: 10 });
+					const find = (q: string) => messages.list({ recursive: true, q, since: 0, limit: 10 });
 					const filtered = (tag: string, q: string, agent = "rahul") =>
 						messages.list({ tag, q, agent, since: 0, limit: 10 });
 					const other = yield* messages.create(
@@ -58,7 +57,9 @@ const program = Effect.gen(function* () {
 					);
 					assert.deepEqual((yield* filtered("old", "solar", "codex")).items, [other]);
 					assert.equal(
-						(yield* search.find({ q: "solar", since: Number.MAX_SAFE_INTEGER, limit: 10 }).pipe(Effect.result))._tag,
+						(yield* messages
+							.list({ recursive: true, q: "solar", since: Number.MAX_SAFE_INTEGER, limit: 10 })
+							.pipe(Effect.result))._tag,
 						"Failure",
 					);
 					// Exercise a real schema3 ->4 backfill with an existing message, not just a fresh index.
@@ -69,11 +70,16 @@ const program = Effect.gen(function* () {
 					yield* sql`ALTER TABLE topics DROP COLUMN updated_seq`;
 					yield* sql`ALTER TABLE topics DROP COLUMN previous`;
 					yield* sql`ALTER TABLE topics DROP COLUMN deleted_at`;
-					yield* sql`DROP TABLE topic_idempotency`;
 					yield* sql`DROP TABLE agents`;
 					yield* sql`DROP TABLE kv`;
 					yield* sql`DROP TABLE reactions`;
-					yield* sql`DROP TABLE reaction_idempotency`;
+					yield* sql`ALTER TABLE messages DROP COLUMN mentions`;
+					yield* sql`ALTER TABLE messages DROP COLUMN previous_mentions`;
+					yield* sql`DROP INDEX outbox_unshipped`;
+					yield* sql`DROP INDEX outbox_transaction`;
+					yield* sql`DROP TABLE idempotency`;
+					yield* sql`CREATE TABLE idempotency(instance TEXT NOT NULL,key TEXT NOT NULL,input TEXT NOT NULL,message_id TEXT NOT NULL,transaction_id TEXT NOT NULL,outcome TEXT,PRIMARY KEY(instance,key))`;
+					yield* sql`CREATE TABLE read_idempotency(instance TEXT NOT NULL,key TEXT NOT NULL,topic TEXT NOT NULL,requested_seq INTEGER NOT NULL,effective_seq INTEGER NOT NULL,PRIMARY KEY(instance,key))`;
 					yield* sql`PRAGMA user_version = 3`;
 					yield* initialize;
 					assert.equal((yield* find("solar")).items[0]?.id, original.id);
@@ -118,7 +124,7 @@ const program = Effect.gen(function* () {
 					assert.equal((yield* find("phantom")).items.length, 0);
 					assert.equal((yield* sql`SELECT * FROM messages_fts WHERE messages_fts MATCH 'phantom'`).length, 0);
 					yield* Console.log("SEARCH_PUBLISHED");
-				}).pipe(Effect.provide(searchLayer.pipe(Layer.provideMerge(messagesLayer))));
+				}).pipe(Effect.provide(messagesLayer));
 			}).pipe(
 				Effect.provide(SqliteClient.layer({ filename: channel.filename, disableWAL: true })),
 				Effect.provideService(BootChannel, channel),

@@ -76,7 +76,7 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch) 
 		).pipe(Effect.timeout("5 seconds"));
 		const processId = yield* Deferred.await(pid);
 		const secret = options.env.BOOT_SECRET ?? "";
-		const control = (action: "go" | "accepted" | "live" | "frozen" | "draining") =>
+		const transition = (action: "go" | "accepted" | "live" | "frozen" | "draining") =>
 			Effect.gen(function* () {
 				const response = yield* client.execute(
 					HttpClientRequest.post(`http://127.0.0.1:${port}/_kernel/control`).pipe(
@@ -85,7 +85,10 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch) 
 					),
 				);
 				if (response.status !== 200) return yield* new ChildError({ code: "child_control_failed" });
-			}).pipe(Effect.timeout("5 seconds"));
+				return yield* Effect.void;
+			});
+		const control = (action: Parameters<typeof transition>[0]) => transition(action).pipe(Effect.timeout("5 seconds"));
+		const drain = transition("draining");
 		const health = Effect.gen(function* () {
 			// Only initialization readiness is polled. Once the DB/router is installed, one full probe owns its deadline.
 			while (true) {
@@ -102,16 +105,42 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch) 
 				yield* Effect.sleep("20 millis");
 			}
 		});
-		const stop = Effect.gen(function* () {
-			yield* Scope.close(scope, Exit.void);
-			yield* handle.exitCode.pipe(Effect.exit);
-			if (yield* handle.isRunning) return yield* new ChildError({ code: "keeper_closure_unproven" });
-			const receipt = yield* fs
-				.readFileString(options.receipt)
-				.pipe(Effect.mapError(() => new ChildError({ code: "child_closure_unproven" })));
-			if (receipt !== options.attempt) return yield* new ChildError({ code: "child_closure_unproven" });
-		});
-		return { port, pid: processId, stderr, control, health, stop, exited: handle.exitCode.pipe(Effect.exit) };
+		const ping = client
+			.execute(HttpClientRequest.get(`http://127.0.0.1:${port}/_kernel/ping`, { headers: { "x-boot-secret": secret } }))
+			.pipe(
+				Effect.flatMap((response) =>
+					response.status === 200 &&
+					response.headers["x-comms-writer-epoch"] === options.env.WRITER_EPOCH &&
+					response.headers["x-comms-kernel-protocol"] === "2"
+						? Effect.void
+						: Effect.fail(new ChildError({ code: "child_unresponsive" })),
+				),
+				Effect.timeout("5 seconds"),
+			);
+		// A watchdog and a cutover may close the same lifetime concurrently. Cache the
+		// complete closure result; neither a caller interruption nor a retry skips proof.
+		const stop = yield* Effect.cached(
+			Effect.gen(function* () {
+				yield* Scope.close(scope, Exit.void);
+				yield* handle.exitCode.pipe(Effect.exit);
+				if (yield* handle.isRunning) return yield* new ChildError({ code: "keeper_closure_unproven" });
+				const receipt = yield* fs
+					.readFileString(options.receipt)
+					.pipe(Effect.mapError(() => new ChildError({ code: "child_closure_unproven" })));
+				if (receipt !== options.attempt) return yield* new ChildError({ code: "child_closure_unproven" });
+			}).pipe(Effect.uninterruptible),
+		);
+		return {
+			port,
+			pid: processId,
+			stderr,
+			control,
+			drain,
+			health,
+			ping,
+			stop,
+			exited: handle.exitCode.pipe(Effect.exit),
+		};
 	}).pipe(
 		Effect.onError(() => Scope.close(scope, Exit.void)),
 		Effect.catch((error) =>

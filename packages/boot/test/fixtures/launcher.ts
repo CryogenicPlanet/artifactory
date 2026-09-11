@@ -18,15 +18,13 @@ const main = Effect.gen(function* () {
 		entryFile: path.basename(entry),
 		dependenciesDirectory,
 		auth: { rpId: "comms.test", expectedOrigin: "https://comms.test" },
-	});
-}).pipe(
-	Effect.scoped,
-	Effect.provide(
-		Layer.mergeAll(
-			BunServices.layer,
-			BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, idleTimeout: 0, gracefulShutdownTimeout: "2 seconds" }),
-			FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.RequestInit)(fetchOptions))),
+	}).pipe(
+		Effect.provide(
+			Layer.mergeAll(
+				BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, idleTimeout: 0, gracefulShutdownTimeout: "2 seconds" }),
+				FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.RequestInit)(fetchOptions))),
+			),
 		),
-	),
-);
+	);
+}).pipe(Effect.scoped, Effect.provide(BunServices.layer));
 main.pipe(BunRuntime.runMain);
