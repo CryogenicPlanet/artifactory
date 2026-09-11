@@ -17,12 +17,6 @@ interface Proposal {
 	readonly tree?: boolean;
 	readonly coordinatorOwned?: boolean;
 }
-export interface Anchor {
-	readonly old_string: string;
-	readonly new_string: string;
-	readonly replace_all?: boolean;
-}
-
 const make = (dataDirectory: string) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
@@ -71,6 +65,8 @@ const make = (dataDirectory: string) =>
 				)
 					return yield* new SourceRejected({ code: "path_conflict", path: write.path });
 				const before = yield* io.read(write.path);
+				if (write.baseVersion !== undefined && before.sha !== write.baseVersion)
+					return yield* new SourceRejected({ code: "stale_base", path: write.path });
 				if (write.mode !== undefined && (!Number.isSafeInteger(write.mode) || write.mode < 0 || write.mode > 0o777))
 					return yield* new SourceRejected({ code: "invalid_path", path: write.path });
 				changes.push({
@@ -251,31 +247,6 @@ const make = (dataDirectory: string) =>
 						if (baseVersion !== undefined && current.sha !== baseVersion)
 							return yield* new SourceRejected({ code: "stale_base", path: name });
 						if (content !== null) yield* headroom.check(content.byteLength);
-						return yield* lock.stage(owner, name, content, current.mode);
-					}),
-				),
-			edit: (owner: Ownership, name: string, edits: readonly Anchor[], baseVersion?: string | null) =>
-				guard(
-					Effect.gen(function* () {
-						const current = yield* read(name, owner);
-						if (baseVersion !== undefined && current.sha !== baseVersion)
-							return yield* new SourceRejected({ code: "stale_base", path: name });
-						let text = yield* Effect.try({
-							try: () => new TextDecoder("utf-8", { fatal: true }).decode(current.content ?? new Uint8Array()),
-							catch: () => new SourceRejected({ code: "invalid_text", path: name }),
-						});
-						for (const edit of edits) {
-							if (edit.old_string === "" || !text.includes(edit.old_string))
-								return yield* new SourceRejected({ code: "anchor_not_found", path: name });
-							const first = text.indexOf(edit.old_string);
-							if (!edit.replace_all && text.indexOf(edit.old_string, first + 1) !== -1)
-								return yield* new SourceRejected({ code: "ambiguous_anchor", path: name });
-							text = edit.replace_all
-								? text.split(edit.old_string).join(edit.new_string)
-								: text.slice(0, first) + edit.new_string + text.slice(first + edit.old_string.length);
-						}
-						const content = new TextEncoder().encode(text);
-						yield* headroom.check(content.byteLength);
 						return yield* lock.stage(owner, name, content, current.mode);
 					}),
 				),

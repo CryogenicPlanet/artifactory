@@ -269,15 +269,23 @@ export const editRoute = (
 				const image = yield* editing.source.read(name, reader);
 				if (image.content === null) return errorResponse("file_not_found", 404);
 				return HttpServerResponse.uint8Array(image.content, {
-					headers: { "content-type": "application/octet-stream", "x-comms-base-version": image.sha ?? "" },
+					headers: {
+						"content-type": "application/octet-stream",
+						"x-comms-base-version": image.sha ?? "",
+						etag: `"${image.sha}"`,
+						"cache-control": "no-store",
+					},
 				});
 			}
+			if (request.method !== "PUT" && request.method !== "DELETE") return errorResponse("method_invalid", 405);
+			const match = request.headers["if-match"];
+			const absent = request.headers["if-none-match"];
 			if (
-				request.method !== "PUT" &&
-				request.method !== "DELETE" &&
-				!(route === "/_boot/fs/edit" && request.method === "POST")
+				(match !== undefined && (absent !== undefined || !/^"[a-f0-9]{64}"$/.test(match))) ||
+				(absent !== undefined && absent !== "*")
 			)
-				return errorResponse("method_invalid", 405);
+				return errorResponse("precondition_invalid", 400);
+			const baseVersion = match !== undefined ? match.slice(1, -1) : absent === "*" ? null : undefined;
 			if (name.startsWith("pages/")) {
 				if (request.method !== "PUT" && request.method !== "DELETE") return errorResponse("method_invalid", 405);
 				if (url.search) return errorResponse("unsupported_query", 400);
@@ -285,7 +293,9 @@ export const editRoute = (
 				return yield* authoritative(
 					editing.withPagePublication(
 						Effect.acquireUseRelease(
-							editing.source.preparePages(identity.agent, [{ path: name, content }]),
+							editing.source.preparePages(identity.agent, [
+								{ path: name, content, ...(baseVersion === undefined ? {} : { baseVersion }) },
+							]),
 							(id) =>
 								editing.source
 									.publish(id)
@@ -298,28 +308,8 @@ export const editRoute = (
 			if (!known) return yield* new EditRejected({ code: "lock_required", holder: null, transitions: [] });
 			if (known.holder_family !== identity.id)
 				return yield* new EditRejected({ code: "locked", holder: known, transitions: [] });
-			if (route === "/_boot/fs/edit") {
-				const input = yield* body(
-					Schema.Struct({
-						path: Schema.String,
-						edits: Schema.Array(
-							Schema.Struct({
-								old_string: Schema.String,
-								new_string: Schema.String,
-								replace_all: Schema.optionalKey(Schema.Boolean),
-							}),
-						),
-						baseVersion: Schema.optionalKey(Schema.NullOr(Schema.String)),
-					}),
-				);
-				yield* authoritative(editing.source.edit(owner(), input.path, input.edits, input.baseVersion));
-			} else {
-				let content: Uint8Array | null = null;
-				if (request.method === "PUT") {
-					content = yield* readBytes(request, name);
-				}
-				yield* authoritative(editing.source.stage(owner(), name, content));
-			}
+			const content = request.method === "PUT" ? yield* readBytes(request, name) : null;
+			yield* authoritative(editing.source.stage(owner(), name, content, baseVersion));
 			if (url.searchParams.get("reload") === "0")
 				return HttpServerResponse.jsonUnsafe({ staged: true, lock: (yield* editing.lock.inspect).value });
 			return HttpServerResponse.jsonUnsafe(

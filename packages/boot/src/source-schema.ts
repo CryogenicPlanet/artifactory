@@ -9,8 +9,6 @@ export class SourceRejected extends Schema.TaggedError<SourceRejected>()("Source
 		"external_conflict",
 		"stale_base",
 		"idempotency_conflict",
-		"anchor_not_found",
-		"ambiguous_anchor",
 		"invalid_text",
 		"version_unavailable",
 		"generation_unavailable",
@@ -36,6 +34,7 @@ export interface Write {
 	readonly path: string;
 	readonly content: Uint8Array | null;
 	readonly mode?: number;
+	readonly baseVersion?: string | null;
 }
 export const Batch = Schema.Struct({
 	id: Schema.String,

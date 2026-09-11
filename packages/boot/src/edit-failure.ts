@@ -69,10 +69,8 @@ const policy = {
 	invalid_path: invalid,
 	path_conflict: conflict,
 	external_conflict: conflict,
-	stale_base: conflict,
+	stale_base: { ...conflict, status: 412 },
 	idempotency_conflict: conflict,
-	anchor_not_found: conflict,
-	ambiguous_anchor: conflict,
 	invalid_text: invalid,
 	version_unavailable: invalid,
 	generation_unavailable: invalid,
@@ -109,6 +107,10 @@ const policy = {
 	revert_selection_invalid: invalid,
 	idempotency_key_invalid: invalid,
 	query_invalid: invalid,
+	precondition_invalid: {
+		...invalid,
+		hint: "Use one quoted SHA-256 If-Match value from GET ETag, or If-None-Match: * for an absent file.",
+	},
 	file_not_found: {
 		status: 404,
 		retriable: false,

@@ -71,25 +71,19 @@ const routes = [
 		"get",
 		["/_boot/fs/{path}", "/api/fs/{path}"],
 		"fs",
-		"Read app/ or pages/ source, browse a directory, or list file versions with ?history. path may contain slashes.",
+		"Read app/ or pages/ source, browse a directory, or list file versions with ?history. path may contain slashes. Raw files return ETag for conditional writes.",
 	],
 	[
 		"put",
 		["/_boot/fs/{path}", "/api/fs/{path}"],
 		"fs",
-		"Write raw source bytes. app/ requires your edit lock; ?reload=0 stages, ?check=1 rehearses, ?release=1 releases after success. pages/ publishes without the app lock.",
+		"Write raw source bytes. Optional If-Match: quoted SHA-256 ETag or If-None-Match: *; mismatch returns 412. app/ requires your edit lock; ?reload=0 stages, ?check=1 rehearses, ?release=1 releases after success. pages/ publishes without the app lock.",
 	],
 	[
 		"delete",
 		["/_boot/fs/{path}", "/api/fs/{path}"],
 		"fs",
-		"Delete source. app/ requires your edit lock and follows reload semantics; pages/ publishes directly.",
-	],
-	[
-		"post",
-		["/_boot/fs/edit", "/api/fs/edit"],
-		"fs",
-		"Stage anchored app edits: {path,edits:[{old_string,new_string,replace_all?}],baseVersion?}. Requires your edit lock; reload/check/release query flags match source PUT.",
+		"Delete source. Optional If-Match: quoted SHA-256 ETag or If-None-Match: *; mismatch returns 412. app/ requires your edit lock and follows reload semantics; pages/ publishes directly.",
 	],
 	["get", ["/_boot/lock", "/api/lock"], "fs", "Inspect the current source edit lock."],
 	[

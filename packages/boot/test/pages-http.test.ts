@@ -544,3 +544,61 @@ it("rechecks credentials after a keyed revert waits behind another request", asy
 	expect((await queued).status).toBe(401);
 	expect(await readFile(join(env.root, "data/pages/held.md"), "utf8")).toBe("after");
 }, 15000);
+
+it("conditionally writes raw bytes on both aliases without lost updates or retired anchored dispatch", async (test) => {
+	const env = await fixture(test),
+		app = await env.start();
+	expect((await app.call(`${app.url}/api/lock`, { method: "POST", body: "{}" })).status).toBe(200);
+	for (const root of ["app", "pages"]) {
+		const target = `${app.url}/api/fs/${root}/conditional.bin${root === "app" ? "?reload=0" : ""}`;
+		const readTarget = `${app.url}/_boot/fs/${root}/conditional.bin`;
+		const bytes = new Uint8Array([0, 255, 128, 10]);
+		expect((await app.call(target, { method: "PUT", headers: { "if-none-match": "*" }, body: bytes })).status).toBe(
+			200,
+		);
+		const read = await app.call(readTarget);
+		const etag = read.headers.get("etag");
+		expect(etag).toBe(`"${createHash("sha256").update(bytes).digest("hex")}"`);
+		if (etag === null) throw new Error("Missing source ETag");
+		expect(read.headers.get("x-comms-base-version")).toBe(etag.slice(1, -1));
+		expect(new Uint8Array(await read.arrayBuffer())).toEqual(bytes);
+		for (const headers of [
+			{ "if-match": "*" },
+			{ "if-match": `W/${etag}` },
+			{ "if-match": `${etag}, ${etag}` },
+			{ "if-match": etag, "if-none-match": "*" },
+			{ "if-none-match": etag },
+		])
+			expect((await app.call(target, { method: "PUT", headers, body: "invalid" })).status).toBe(400);
+		expect(
+			(await app.call(target, { method: "PUT", headers: { "if-none-match": "*" }, body: "overwrite" })).status,
+		).toBe(412);
+		const results = await Promise.all(
+			["one", "two"].map((body) =>
+				app.call(target, {
+					method: "PUT",
+					headers: { "if-match": etag },
+					body,
+				}),
+			),
+		);
+		expect(results.map((result) => result.status).sort()).toEqual([200, 412]);
+		const stale = await app.call(target, { method: "DELETE", headers: { "if-match": etag } });
+		expect(stale.status).toBe(412);
+		expect(await stale.json()).toMatchObject({ error: { code: "stale_base", retriable: false } });
+		const current = await app.call(readTarget);
+		const currentTag = current.headers.get("etag");
+		if (currentTag === null) throw new Error("Missing replacement ETag");
+		expect(["one", "two"]).toContain(await current.text());
+		expect((await app.call(target, { method: "DELETE", headers: { "if-match": currentTag } })).status).toBe(200);
+		expect((await app.call(readTarget)).status).toBe(404);
+		expect(
+			(await app.call(target, { method: "PUT", headers: { "if-match": currentTag }, body: "resurrect" })).status,
+		).toBe(412);
+	}
+	for (const prefix of ["/_boot", "/api"])
+		expect((await app.call(`${app.url}${prefix}/fs/edit`, { method: "POST", body: "{}" })).status).toBe(405);
+	expect(await env.sql("SELECT * FROM source_changes")).toEqual([]);
+	expect(await env.sql("SELECT COUNT(*) AS n FROM versions WHERE path='pages/conditional.bin'")).toEqual([{ n: 3 }]);
+	await expect(readFile(join(env.root, "data/app/conditional.bin"))).rejects.toMatchObject({ code: "ENOENT" });
+}, 15000);

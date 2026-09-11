@@ -17,7 +17,7 @@ const Input = Schema.Struct({
 		"read",
 		"history",
 		"previous",
-		"anchors",
+		"conditional",
 		"prepare_failure",
 		"init",
 	]),
@@ -129,36 +129,25 @@ const main = Effect.gen(function* () {
 			}
 			const holder = (yield* lock.acquire("one", "codex")).value;
 			const owner = { id: holder.id, family: holder.holder_family };
-			if (input.op === "anchors") {
+			if (input.op === "conditional") {
 				const start = yield* files.read(name, owner);
-				const rejected = yield* files
-					.edit(owner, name, [
-						{ old_string: "one", new_string: "two" },
-						{ old_string: "absent", new_string: "oops" },
-					])
-					.pipe(Effect.result);
-				const untouched = yield* files.read(name, owner);
-				yield* files.edit(owner, name, [{ old_string: "one", new_string: "two" }], start.sha);
-				const stale = yield* files
-					.edit(owner, name, [{ old_string: "two", new_string: "three" }], start.sha)
-					.pipe(Effect.result);
-				yield* files.stage(owner, name, new TextEncoder().encode("aaa"));
-				const ambiguous = yield* files.edit(owner, name, [{ old_string: "aa", new_string: "b" }]).pipe(Effect.result);
+				const bytes = (value: string) => new TextEncoder().encode(value);
+				yield* files.stage(owner, name, bytes("two"), start.sha);
+				const stale = yield* files.stage(owner, name, bytes("three"), start.sha).pipe(Effect.result);
+				const current = yield* files.read(name, owner);
 				const concurrent = yield* Effect.forEach(
-					[
-						files.edit(owner, name, [{ old_string: "aaa", new_string: "first" }]),
-						files.edit(owner, name, [{ old_string: "aaa", new_string: "second" }]),
-					],
-					(effect) => Effect.result(effect),
+					["first", "second"],
+					(value) => files.stage(owner, name, bytes(value), current.sha).pipe(Effect.result),
 					{ concurrency: 2 },
 				);
+				const existing = yield* files.stage(owner, name, bytes("overwrite"), null).pipe(Effect.result);
+				yield* files.stage(owner, "app/new.bin", new Uint8Array([0, 255, 128]), null);
 				return {
-					rejected,
-					untouched: new TextDecoder().decode(untouched.content ?? new Uint8Array()),
 					stale,
-					ambiguous,
 					concurrent,
+					existing,
 					disk: new TextDecoder().decode((yield* files.read(name)).content ?? new Uint8Array()),
+					binary: Array.from((yield* files.read("app/new.bin", owner)).content ?? []),
 				};
 			}
 			if (input.op === "prepare_failure") {

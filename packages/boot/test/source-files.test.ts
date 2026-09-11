@@ -154,14 +154,13 @@ describe("recoverable source publication", () => {
 		expect(await env.sql("SELECT COUNT(*) AS n FROM source_changes")).toEqual([{ n: 1 }]);
 		expect(await env.sql("SELECT * FROM versions")).toEqual([]);
 	});
-	it("keeps anchored edits atomic, detects stale/overlapping anchors, and serializes concurrent holder edits", async (test) => {
+	it("compares holder-overlay bytes atomically, refuses stale or present bases, and stages binary files", async (test) => {
 		const env = await fixture(test);
-		const result = await env.call({ op: "anchors" });
+		const result = await env.call({ op: "conditional" });
 		expect(result).toMatchObject({
-			rejected: { _tag: "Failure", failure: { code: "anchor_not_found" } },
-			untouched: "one",
 			stale: { _tag: "Failure", failure: { code: "stale_base" } },
-			ambiguous: { _tag: "Failure", failure: { code: "ambiguous_anchor" } },
+			existing: { _tag: "Failure", failure: { code: "stale_base" } },
+			binary: [0, 255, 128],
 			disk: "one",
 		});
 		const concurrent = Schema.decodeUnknownSync(
