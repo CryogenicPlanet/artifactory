@@ -32,6 +32,8 @@ export const initializeBootSchema = Effect.gen(function* () {
 	const version = versions[0]?.user_version;
 	if (version === undefined) return yield* Effect.die("Missing boot schema version");
 	if (version > 16) return yield* new BootSchemaTooNew({ found: version, supported: 16 });
+	// New stores can reclaim deleted pages incrementally; legacy conversion needs offline maintenance.
+	if (version === 0) yield* sql`PRAGMA auto_vacuum = INCREMENTAL`;
 	yield* sql`PRAGMA journal_mode = WAL`;
 	yield* sql`PRAGMA synchronous = FULL`;
 	if (version === 16) return;
