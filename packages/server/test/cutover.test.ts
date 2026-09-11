@@ -2,6 +2,7 @@ import { request } from "node:http";
 import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { Console, Effect } from "effect";
 import { conversation } from "./fixtures/conversation.ts";
 
 it("stages, rehearses and accepts an edit, rejects broken source, and repairs it without losing acknowledged messages", async (test) => {
@@ -161,11 +162,34 @@ it("repairs a broken first seed through boot editing without an available app", 
 }, 20000);
 
 it("drains admitted slow bodies and reauthenticates queued mutations before forwarding", async (test) => {
+	const started = performance.now();
+	const phases: Array<{ phase: string; elapsed_ms: number }> = [];
+	const phase = (name: string) => phases.push({ phase: name, elapsed_ms: Math.round(performance.now() - started) });
+	let traffic: unknown = null;
+	let bootOutput = () => "";
+	let finished = false;
+	let reported = false;
+	const responses: { upload?: number; reload?: number; queued?: number; outcome?: unknown } = {};
+	const reportFailure = () => {
+		if (finished || reported) return;
+		reported = true;
+		const evidence = JSON.stringify({ phases, traffic, responses, output: bootOutput() })
+			.replace(/\/setup is open, code \S+/g, "/setup code [redacted]")
+			.replace(/[A-Za-z0-9_-]{43,}/g, "[redacted]")
+			.slice(-40000);
+		return Effect.runPromise(Console.error("Cutover drain failure evidence", evidence));
+	};
+	test.onTestFinished(reportFailure);
+	phase("launch");
 	const fixture = await conversation(test),
 		app = await fixture.launch();
+	bootOutput = app.output;
+	phase("setup");
 	await app.setup();
 	const cookie = await app.login();
+	phase("initial readiness");
 	await app.ready(cookie);
+	phase("stage source");
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 	const source = await readFile(join(import.meta.dirname, "../src/server.ts"), "utf8");
 	expect(
@@ -177,12 +201,15 @@ it("drains admitted slow bodies and reauthenticates queued mutations before forw
 			})
 		).status,
 	).toBe(200);
+	phase("start held upload");
 	const upload = request(`${app.url}/api/messages`, {
 		method: "POST",
 		headers: { cookie, origin: "https://comms.test", "content-type": "application/json" },
 	});
 	const pending: Promise<unknown>[] = [];
 	test.onTestFinished(async () => {
+		// Snapshot before teardown settles the pending requests with shutdown responses.
+		await reportFailure();
 		upload.destroy();
 		await app.stop();
 		await Promise.allSettled(pending);
@@ -191,29 +218,52 @@ it("drains admitted slow bodies and reauthenticates queued mutations before forw
 		upload.on("error", reject);
 		upload.on("response", (response) => {
 			response.resume();
-			response.on("end", () => resolve(response.statusCode ?? 0));
+			response.on("end", () => {
+				responses.upload = response.statusCode ?? 0;
+				resolve(responses.upload);
+			});
 			response.on("error", reject);
 		});
 	});
 	pending.push(completed);
 	void completed.catch(() => undefined);
 	upload.write('{"topic":"held","body":"');
-	const state = async () => (await (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json()).traffic;
+	const state = async () => {
+		traffic = (await (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json()).traffic;
+		return traffic;
+	};
 	await expect.poll(state).toMatchObject({ admitted: 1 });
-	const reload = app.post("/api/reload", {}, cookie);
+	phase("reload and freeze");
+	const reload = app.post("/api/reload", {}, cookie).then((response) => {
+		responses.reload = response.status;
+		return response;
+	});
 	pending.push(reload);
 	void reload.catch(() => undefined);
 	await expect.poll(state, { timeout: 10000 }).toMatchObject({ frozen: true, admitted: 1 });
-	const queued = app.post("/api/messages", { topic: "held", body: "must be refused after logout" }, cookie);
+	phase("queue mutation");
+	const queued = app
+		.post("/api/messages", { topic: "held", body: "must be refused after logout" }, cookie)
+		.then((response) => {
+			responses.queued = response.status;
+			return response;
+		});
 	pending.push(queued);
 	void queued.catch(() => undefined);
 	await expect.poll(state).toMatchObject({ queued: 1 });
+	phase("logout");
 	expect((await app.post("/_boot/auth/logout", {}, cookie)).status).toBe(204);
+	phase("finish held upload");
 	upload.end('acknowledged held body"}');
 	expect(await completed).toBe(200);
-	expect(await (await reload).json()).toMatchObject({ status: "live" });
+	phase("await reload");
+	responses.outcome = await (await reload).json();
+	expect(responses.outcome).toMatchObject({ status: "live" });
+	phase("await queued refusal");
 	expect((await queued).status).toBe(401);
+	phase("verify durable message");
 	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system'")).toEqual([
 		{ body: "acknowledged held body" },
 	]);
+	finished = true;
 }, 20000);
