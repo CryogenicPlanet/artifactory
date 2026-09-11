@@ -1,6 +1,7 @@
 import { request } from "node:http";
 import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Console, Effect } from "effect";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
@@ -155,11 +156,17 @@ it("reauthenticates a held revert body and fences a replaced lock before staging
 
 for (const input of [{}, { path: "app/note.txt" }])
 	it(`replays the exact ${"path" in input ? "path" : "latest-batch"} undo outcome across restart without replacing later edits`, async (test) => {
+		const started = performance.now();
+		const phases: Array<{ phase: string; at_ms: number }> = [];
+		const phase = (name: string) => phases.push({ phase: name, at_ms: Math.round(performance.now() - started) });
+		test.onTestFinished(() => Effect.runPromise(Console.error("Source undo replay phases", input, phases)));
+		phase("setup_start");
 		const fixture = await conversation(test),
 			app = await fixture.launch();
 		await app.setup();
 		const cookie = await app.login();
 		await app.ready(cookie);
+		phase("initial_live");
 		expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 		expect(
 			await (
@@ -170,7 +177,9 @@ for (const input of [{}, { path: "app/note.txt" }])
 				})
 			).json(),
 		).toMatchObject({ status: "live" });
+		phase("first_edit_live");
 		const replies = await Promise.all([0, 1].map(() => app.post("/api/revert", input, cookie, "lost-revert-response")));
+		phase("undo_responses");
 		const first = await replies[0]?.json();
 		expect(await replies[1]?.json()).toEqual(first);
 		expect(first).toMatchObject({ status: "live" });
@@ -188,10 +197,13 @@ for (const input of [{}, { path: "app/note.txt" }])
 			(await fetch(`${app.url}/api/lock`, { method: "DELETE", headers: { cookie, origin: "https://comms.test" } }))
 				.status,
 		).toBe(200);
+		phase("later_edit_live_lock_released");
 		const generations = await fixture.sql("SELECT n FROM generations", "boot.db");
 		await app.stop();
+		phase("boot_stopped");
 		const resumed = await fixture.launch();
 		await resumed.ready(cookie);
+		phase("restarted_live");
 		expect(await (await fetch(`${resumed.url}/api/fs/app/note.txt`, { headers: { cookie } })).text()).toBe(
 			"later edit",
 		);
@@ -206,4 +218,6 @@ for (const input of [{}, { path: "app/note.txt" }])
 		expect(
 			await fixture.sql("SELECT COUNT(*) AS n FROM settings WHERE key LIKE 'source-revert-result:%'", "boot.db"),
 		).toEqual([{ n: 1 }]);
-	}, 20000);
+		phase("assertions_complete");
+		// Three real cutovers plus boot restart exceeded 20s in Linux CI; each readiness/production deadline stays unchanged.
+	}, 45000);

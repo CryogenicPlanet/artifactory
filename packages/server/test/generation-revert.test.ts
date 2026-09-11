@@ -348,7 +348,9 @@ it("keeps source and live writes intact when generation dependency preparation f
 	]);
 	await app.ready(cookie);
 	phase("assertions_complete");
-}, 60000);
+	// Linux measured 26.1s cold preparation + 2.1s refusal + 29.1s repaired preparation (58.7s total).
+	// Budget both full preparations together; their individual readiness and production deadlines remain unchanged.
+}, 120000);
 
 it("refuses missing, malformed or aliased source provenance and missing retained source without changing editable bytes", async (test) => {
 	const fixture = await conversation(test),
