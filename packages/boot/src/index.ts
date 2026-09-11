@@ -120,6 +120,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 				Effect.gen(function* () {
 					yield* authorize;
 					const state = yield* Ref.get(phase);
+					if (state._tag === "Ready" && (yield* Ref.get(supervisor.current)))
+						yield* coordinator.retryCleanup(authorize);
 					if (
 						state._tag === "Ready" &&
 						(!force || ((yield* Ref.get(supervisor.current)) && (yield* recoveryIntents(sql)).count === 0))

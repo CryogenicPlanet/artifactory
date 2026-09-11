@@ -88,7 +88,17 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			if (held?.id === owner.id && held.holder_family === owner.family && held.cutover_in_flight)
 				yield* lock.finish(owner, { succeeded, release });
 		});
+	const pendingCleanup = yield* Ref.make<{ readonly proposal: string; readonly owner: Ownership } | null>(null);
+	const completeCleanup = Effect.gen(function* () {
+		const cleanup = yield* Ref.get(pendingCleanup);
+		if (!cleanup) return;
+		yield* sources.recover;
+		yield* sources.discard(cleanup.proposal);
+		yield* finish(cleanup.owner, false);
+		yield* Ref.update(pendingCleanup, (current) => (current === cleanup ? null : current));
+	});
 	const recover = Effect.gen(function* () {
+		yield* completeCleanup;
 		const record = yield* read;
 		if (!record) {
 			yield* Ref.set(ready, true);
@@ -347,9 +357,9 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 				}
 				if (!prior) yield* supervisor.release;
 				// Source publication may have committed even when its completion response failed.
-				yield* sources.recover;
-				yield* sources.discard(proposal);
-				yield* finish(owner, false);
+				// Keep the exact proposal/outcome until cleanup succeeds, including across HTTP retries.
+				yield* Ref.set(pendingCleanup, { proposal, owner });
+				yield* completeCleanup;
 				if (failedGeneration) yield* generations.failed(failedGeneration.n, error, stderr);
 				yield* refresh;
 				if (
@@ -442,6 +452,10 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 		);
 
 	return {
+		retryCleanup: <E, R>(authorize: Effect.Effect<void, E, R>) =>
+			authorize.pipe(
+				Effect.andThen(supervisor.operationGate.withPermit(authorize.pipe(Effect.andThen(completeCleanup)))),
+			),
 		reload: (owner: Ownership, reloadOptions?: Parameters<typeof performReload>[1]) =>
 			supervisor.operationGate.withPermit(performReload(owner, reloadOptions)),
 		reset,
