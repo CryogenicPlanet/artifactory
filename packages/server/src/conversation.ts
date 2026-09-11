@@ -3,11 +3,11 @@ import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { HttpApi, HttpApiBuilder, OpenApi } from "effect/unstable/httpapi";
 import { sqlGroup, sqlHandlers } from "./sql-http.ts";
 import type { Extensions } from "./kernel/ext.ts";
-import { routes as onboardingRoutes } from "./onboarding.ts";
+import { description as onboardingDescription, routes as onboardingRoutes } from "./onboarding.ts";
 import { identity, failure } from "./conversation-request.ts";
 export const SystemApi = HttpApi.make("comms-system").add(sqlGroup);
 export const routes = (extensions: Extensions["Service"]) => {
-	const system = OpenApi.fromApi(SystemApi);
+	const system = OpenApi.fromApi(SystemApi.add(onboardingDescription));
 	const specification = {
 		...system,
 		paths: Object.fromEntries(

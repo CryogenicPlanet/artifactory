@@ -1,9 +1,37 @@
 import type { OpenAPISpec } from "effect/unstable/httpapi/OpenApi";
-import { Crypto, Effect, Layer } from "effect";
+import { Crypto, Effect, Layer, Schema } from "effect";
+import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { identity } from "./conversation-request.ts";
 import { Pages } from "./ext/core/pages.ts";
 import { escapeHtml } from "./page-markdown.ts";
+
+/** Input-free manual routes contribute to the same assembled discovery document. */
+export const description = HttpApiGroup.make("onboarding").add(
+	HttpApiEndpoint.get("api", "/api", { success: Schema.Unknown }).annotate(
+		OpenApi.Description,
+		"Describe the assembled API, including loaded extensions and boot recovery routes. Requires read.",
+	),
+	HttpApiEndpoint.get("init", "/init", {
+		success: [
+			Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/markdown" })),
+			Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/html" })),
+		],
+	}).annotate(
+		OpenApi.Description,
+		"Public editable orientation, served as Markdown or HTML according to Accept. Includes verified identity when authenticated.",
+	),
+	HttpApiEndpoint.get("initMarkdown", "/init.md", {
+		success: Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/markdown" })),
+	}).annotate(
+		OpenApi.Description,
+		"Public editable orientation as Markdown, including live routes and an init-text-only version stamp.",
+	),
+	HttpApiEndpoint.get("manifest", "/.well-known/agent.json", { success: Schema.Unknown }).annotate(
+		OpenApi.Description,
+		"Public machine manifest with the assembled API endpoints, components and onboarding links.",
+	),
+);
 
 export const orientation = (markdownOnly: boolean, endpoints: OpenAPISpec["paths"]) =>
 	Effect.gen(function* () {

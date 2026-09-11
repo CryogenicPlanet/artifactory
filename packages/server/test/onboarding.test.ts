@@ -16,6 +16,19 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	const discovery = await (await fetch(app.url + "/api", { headers: { cookie: first } })).json();
 	expect(manifest.endpoints).toEqual(discovery.paths);
 	expect(manifest.components).toEqual(discovery.components);
+	for (const path of ["/api", "/api/ext", "/init", "/init.md", "/.well-known/agent.json"]) {
+		expect(discovery.paths[path].get.description.length).toBeGreaterThan(20);
+		expect(Object.keys(discovery.paths[path])).toEqual(["get"]);
+	}
+	expect(Object.keys(discovery.paths["/init"].get.responses["200"].content).sort()).toEqual([
+		"text/html",
+		"text/markdown",
+	]);
+	expect(Object.keys(discovery.paths["/init.md"].get.responses["200"].content)).toEqual(["text/markdown"]);
+	expect(discovery.paths["/api"].get.description).toContain("Requires read");
+	expect(discovery.paths["/api/ext"].get.description).toContain("Requires read");
+	for (const path of ["/init", "/init.md", "/.well-known/agent.json"])
+		expect(discovery.paths[path].get.description).toContain("Public");
 	for (const [path, method, access] of [
 		["/auth/enroll", "post", "public"],
 		["/auth/enroll/{id}", "post", "device-secret"],
