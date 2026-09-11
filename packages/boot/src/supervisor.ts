@@ -251,7 +251,12 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 				yield* recordAttempt(value, "starting");
 				yield* (yield* ChildAttempts).opened(value.id);
 				yield* value.process.control("go");
-				yield* value.process.health.pipe(Effect.timeout("5 seconds"));
+				yield* value.process.health.pipe(
+					Effect.timeoutOrElse({
+						duration: "5 seconds",
+						orElse: () => Effect.fail(new ChildError({ code: "health_failed" })),
+					}),
+				);
 				yield* (yield* Generations).healthy(generation.n);
 				yield* activate(value);
 			}).pipe(Effect.exit);
