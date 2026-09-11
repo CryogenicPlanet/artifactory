@@ -1,3 +1,7 @@
+import { extensionCapabilities } from "../../src/ext/core/capabilities.ts";
+import { layer as topicsLayer } from "../../src/ext/core/topics.ts";
+import { layer as pagesLayer } from "../../src/ext/core/pages.ts";
+import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { strict as assert } from "node:assert";
 import { SqlClient } from "effect/unstable/sql";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
@@ -7,9 +11,9 @@ import { initializeBootSchema } from "../../../boot/src/boot-schema.ts";
 import { Events, layer as eventsLayer } from "../../../boot/src/events.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../../boot/src/app-recovery.ts";
 import { BootChannel, KernelError } from "../../src/kernel/boot-channel.ts";
-import { initialize } from "../../src/kernel/database.ts";
-import { Messages, layer as messagesLayer } from "../../src/kernel/messages.ts";
-import { markView } from "../../src/read-view.ts";
+import { initialize } from "../../src/ext/core/schema.ts";
+import { Messages, layer as messagesLayer } from "../../src/ext/core/messages.ts";
+import { markView } from "../../src/ext/core/read-view.ts";
 import { Lifecycle, type State } from "../../src/kernel/lifecycle.ts";
 const program = Effect.gen(function* () {
 	const [root, mode = "normal"] = process.argv.slice(2);
@@ -59,7 +63,13 @@ const program = Effect.gen(function* () {
 						requests: yield* Ref.make(0),
 						healthy: yield* Ref.make(true),
 					});
-					const view = markView(who, [initial], input.topic).pipe(Effect.provide(lifecycle));
+					const view = Effect.gen(function* () {
+						const ctx = (yield* extensionCapabilities)("read-mark-fixture", who, false);
+						yield* markView(ctx, [initial], input.topic);
+					}).pipe(
+						Effect.provide(lifecycle),
+						Effect.provide(topicsLayer.pipe(Layer.provideMerge(pagesLayer(`${root}/pages`)))),
+					);
 					if (mode === "frozen") {
 						yield* Ref.set(state, "frozen");
 						yield* view;
@@ -80,7 +90,7 @@ const program = Effect.gen(function* () {
 						assert.equal(Schema.is(KernelError)(rejected.failure) && rejected.failure.code, "stale_writer");
 					assert.deepEqual(yield* sql`SELECT topic,seq FROM reads`, [{ topic: input.topic, seq: initial.seq }]);
 					yield* Console.log("READ_RECOVERED");
-				}).pipe(Effect.provide(messagesLayer));
+				}).pipe(Effect.provide(messagesLayer.pipe(Layer.provideMerge(publicationLayer))));
 			}).pipe(
 				Effect.provide(SqliteClient.layer({ filename: channel.filename, disableWAL: true })),
 				Effect.provideService(BootChannel, channel),

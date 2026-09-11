@@ -1,8 +1,9 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { Console, Effect, Schema } from "effect";
 import { expect, it, type TestContext } from "vitest";
@@ -12,13 +13,17 @@ import { authenticator } from "./fixtures/authenticator.ts";
 const ceremony = Schema.Struct({ id: Schema.String, options: Schema.Struct({ challenge: Schema.String }) });
 const childState = Schema.Struct({ child: Schema.Struct({ state: Schema.String, attempt: Schema.Int }) });
 
-async function launch(test: TestContext, mode = "normal") {
+async function launch(test: TestContext, mode = "normal", blockedAttempts = false) {
 	const root = await mkdtemp(join(tmpdir(), "comms-auth-http-"));
 	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
 	const seed = join(root, "seed");
 	await mkdir(seed);
 	await copyFile(join(import.meta.dirname, "fixtures/child.ts"), join(seed, "fixture.ts"));
 	await writeFile(join(seed, "child.ts"), `import { serve } from "./fixture.ts"; serve(${JSON.stringify(mode)});`);
+	if (blockedAttempts) {
+		await mkdir(join(root, "data"));
+		await writeFile(join(root, "data", "attempts"), "preserve this obstruction");
+	}
 	const processHandle = spawn("bun", [join(import.meta.dirname, "fixtures/launcher.ts")], {
 		env: { ...process.env, ENTRY: join(seed, "child.ts"), DATA_DIR: join(root, "data") },
 		stdio: ["ignore", "pipe", "pipe"],
@@ -99,7 +104,7 @@ async function launch(test: TestContext, mode = "normal") {
 		if (!header || !cookie) throw new Error("Missing session cookie");
 		return { response, cookie, header, payload };
 	};
-	return { url, code, post, setup, login, device };
+	return { url, code, post, setup, login, device, root };
 }
 
 it("creates a passkey and a protected session, forwards verified identity, and logs out", async (test) => {
@@ -262,6 +267,35 @@ it("keeps real setup and login working after all child attempts fail without exp
 
 	await app.post("/_boot/auth/logout", {}, session.cookie);
 	expect((await fetch(`${app.url}/_boot/status`, { headers })).status).toBe(401);
+	const relogged = await app.login(2);
+	expect((await fetch(`${app.url}/_boot/status`, { headers: { cookie: relogged.cookie } })).status).toBe(200);
+});
+
+it("keeps real authentication available when the attempt receipt directory cannot be created", async (test) => {
+	const app = await launch(test, "normal", true);
+	await app.setup();
+	const session = await app.login();
+	const headers = { cookie: session.cookie };
+	await expect
+		.poll(
+			async () =>
+				Schema.decodeUnknownSync(childState)(await (await fetch(`${app.url}/_boot/status`, { headers })).json()).child
+					.state,
+			{ timeout: 5000 },
+		)
+		.toBe("failed");
+	for (const path of ["/health", "/_boot", "/auth/login", "/_boot/db/backups"])
+		expect((await fetch(`${app.url}${path}`, { headers })).status).toBe(200);
+	expect((await fetch(`${app.url}/echo`, { headers })).status).toBe(503);
+	const stored = await promisify(execFile)("bun", [
+		join(import.meta.dirname, "fixtures/store.ts"),
+		join(app.root, "data", "boot.db"),
+		"SELECT count(*) AS count FROM child_attempts",
+	]);
+	expect(
+		Schema.decodeSync(Schema.fromJsonString(Schema.Array(Schema.Struct({ count: Schema.Int }))))(stored.stdout),
+	).toEqual([{ count: 0 }]);
+	await app.post("/_boot/auth/logout", {}, session.cookie);
 	const relogged = await app.login(2);
 	expect((await fetch(`${app.url}/_boot/status`, { headers: { cookie: relogged.cookie } })).status).toBe(200);
 });

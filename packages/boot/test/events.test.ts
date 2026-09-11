@@ -130,6 +130,7 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 	await app.sql("DROP TABLE topic_moves");
 	await app.sql("DROP TABLE topic_page_moves");
 	await app.sql("DROP TABLE db_restore_requests");
+	await app.sql("ALTER TABLE generations DROP COLUMN backup_id");
 	for (const column of ["before_directory", "desired_directory"])
 		await app.sql(`ALTER TABLE source_changes DROP COLUMN ${column}`);
 	for (const column of ["previous_directory", "directory"]) await app.sql(`ALTER TABLE versions DROP COLUMN ${column}`);
@@ -151,7 +152,7 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 		"SELECT batch,path,hex(before) AS before_bytes,before_mode,hex(desired) AS desired_bytes,desired_mode FROM source_changes",
 	);
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
-	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 14 }]);
+	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 15 }]);
 	expect(await app.sql("SELECT value FROM settings WHERE key='preserved'")).toEqual([{ value: "value" }]);
 	expect(
 		await app.sql(
@@ -310,6 +311,7 @@ it("backfills legacy routing without altering pending state or original event by
 	await app.sql("DROP TABLE topic_moves");
 	await app.sql("DROP TABLE topic_page_moves");
 	await app.sql("DROP TABLE db_restore_requests");
+	await app.sql("ALTER TABLE generations DROP COLUMN backup_id");
 	for (const column of ["before_directory", "desired_directory"])
 		await app.sql(`ALTER TABLE source_changes DROP COLUMN ${column}`);
 	for (const column of ["previous_directory", "directory"]) await app.sql(`ALTER TABLE versions DROP COLUMN ${column}`);
@@ -334,6 +336,9 @@ it("migrates indexed projections without changing routed topics, JSON bytes or p
 	for (const column of ["type", "actor", "instance", "level"])
 		await app.sql(`ALTER TABLE events DROP COLUMN ${column}`);
 	await app.sql("DROP TABLE public_paths");
+	await app.sql("ALTER TABLE generations DROP COLUMN backup_id");
+	for (const column of ["source_generation", "prior_generation", "source_batch"])
+		await app.sql(`ALTER TABLE db_restore_requests DROP COLUMN ${column}`);
 	await app.sql("PRAGMA user_version=13");
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });

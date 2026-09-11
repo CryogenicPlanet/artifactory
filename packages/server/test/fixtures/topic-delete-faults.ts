@@ -1,3 +1,4 @@
+import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { strict as assert } from "node:assert";
 import { SqlClient } from "effect/unstable/sql";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
@@ -7,10 +8,10 @@ import { initializeBootSchema } from "../../../boot/src/boot-schema.ts";
 import { Events, layer as eventsLayer } from "../../../boot/src/events.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../../boot/src/app-recovery.ts";
 import { BootChannel, KernelError } from "../../src/kernel/boot-channel.ts";
-import { initialize } from "../../src/kernel/database.ts";
-import { Messages, layer as messagesLayer } from "../../src/kernel/messages.ts";
-import { layer as topicsLayer } from "../../src/kernel/topics.ts";
-import { layer as pagesLayer } from "../../src/kernel/pages.ts";
+import { initialize } from "../../src/ext/core/schema.ts";
+import { Messages, layer as messagesLayer } from "../../src/ext/core/messages.ts";
+import { layer as topicsLayer } from "../../src/ext/core/topics.ts";
+import { layer as pagesLayer } from "../../src/ext/core/pages.ts";
 
 const program = Effect.gen(function* () {
 	const [root, mode] = process.argv.slice(2);
@@ -141,7 +142,10 @@ const program = Effect.gen(function* () {
 					yield* Console.log("DELETE_RECOVERED");
 				}).pipe(
 					Effect.provide(
-						topicsLayer.pipe(Layer.provide(pagesLayer(`${root}/pages`)), Layer.provideMerge(messagesLayer)),
+						topicsLayer.pipe(
+							Layer.provide(pagesLayer(`${root}/pages`)),
+							Layer.provideMerge(messagesLayer.pipe(Layer.provideMerge(publicationLayer))),
+						),
 					),
 				);
 			}).pipe(

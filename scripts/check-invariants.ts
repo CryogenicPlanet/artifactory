@@ -38,7 +38,58 @@ function checkInvariants() {
 			}
 			if (specifier.includes("repos/")) failures.push(`${label}: vendored references must not be imported`);
 		}
+		// Static ownership guard: interpolation remains opaque; this is not a SQL validator.
+		function checkDomainSql(node: ts.Node, text: string) {
+			if (!relative(root, path).startsWith(`packages${sep}boot${sep}src${sep}`)) return;
+			const tokens =
+				text.match(
+					/--[^\n]*|\/\*[\s\S]*?\*\/|"(?:""|[^"])*"|'(?:''|[^'])*'|`(?:``|[^`])*`|\[[^\]]*\]|[a-z_][a-z_0-9]*|[.;(),]/gi,
+				) ?? [];
+			const words = tokens.filter((token) => !token.startsWith("--") && !token.startsWith("/*"));
+			const identifier = (token: string) => token.replace(/^["'`[]|["'`\]]$/g, "").toLowerCase();
+			let depth = 0;
+			const fromDepths = new Set<number>();
+			for (const [index, token] of words.entries()) {
+				const keyword = token.toUpperCase();
+				if (token === "(") depth++;
+				if (token === ")") {
+					fromDepths.delete(depth);
+					depth--;
+				}
+				if (/^(WHERE|GROUP|ORDER|HAVING|LIMIT|UNION|EXCEPT|INTERSECT|RETURNING|;)$/i.test(token))
+					fromDepths.delete(depth);
+				if (keyword === "FROM") fromDepths.add(depth);
+
+				if (
+					!["FROM", "JOIN", "INTO", "UPDATE", "TABLE", "REFERENCES"].includes(keyword) &&
+					!(token === "," && fromDepths.has(depth)) &&
+					!(keyword === "ON" && words.slice(0, index).some((word) => /^(INDEX|TRIGGER)$/i.test(word)))
+				)
+					continue;
+				let next = index + 1;
+				while (/^(IF|NOT|EXISTS|OR|ABORT|FAIL|IGNORE|REPLACE|ROLLBACK)$/i.test(words[next] ?? "")) next++;
+				let grouped = 0;
+				while (words[next] === "(") {
+					grouped++;
+					next++;
+				}
+				if (grouped && !/^(SELECT|WITH)$/i.test(words[next] ?? "")) fromDepths.add(depth + grouped);
+				if (words[next + 1] === ".") next += 2;
+				const table = identifier(words[next] ?? "");
+				if (["topics", "messages", "reads", "agents"].includes(table)) {
+					const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+					failures.push(`${relative(root, path)}:${line}: boot must not know app domain table ${table}`);
+				}
+			}
+		}
 		function visit(node: ts.Node) {
+			if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) checkDomainSql(node, node.text);
+			if (ts.isTemplateExpression(node))
+				checkDomainSql(
+					node,
+					[node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join(" __interpolation__ "),
+				);
+
 			if (ts.isImportTypeNode(node)) {
 				failures.push(`${relative(root, path)}: use a top-level import type declaration instead of an inline import`);
 			}

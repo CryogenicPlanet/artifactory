@@ -2,6 +2,49 @@
 
 This is the handoff and remaining-work ledger for Codex. Implementation resumed with explicit owner authorization after the review landed. This records integrated changes, active isolated work and remaining requirements; worker reports alone are not completion claims.
 
+## Agent handoff — owner requested stop and checkpoint
+
+The owner requested a fast wrap-up because usage is low and will transfer remaining work to another agent. **Do not interpret this checkpoint as completion.** This section supersedes older status paragraphs below.
+
+Integrated in the checkpoint based on `2979676`: SSE/preparation/metrics and Linux fixtures; corrected core ownership using the actual public extension read/mutate API; numeric query schemas; actual HttpApi error encoding; combined source/database restore; terminal health reporting; boot literal errors/durable events/signed restart; queued restore requests with credential/grant revalidation; auth full-Cause rollback hardening; removal of boot-to-app page-write policy; raw journal/undo concurrency fixes; optional digest example; concrete startup graph and all three admission renames. Known source conflicts retain actionable nonretry409; unexpected/mixed failures produce nonretry500.
+
+**Validation at handoff:** root frozen install, check and build pass. The installed patched Bun adapter SHA256 is `5ee2f05cb5ab5bb5a50c73e6aa2ed2bc58aa41c666bcad2dc79a9f1cab97b341`. Root core acceptance passed17/17 tests in six files before the later95-path boot integration. That boot integration passed42 final boundary tests plus check/build and fresh reviews in isolation. The final startup composition passed88/88 tests across17files, check/build and fresh review in isolation; its exact34 afterimages were then applied to root. The earlier519/519 full root suite predates these new bundles. **The final combined checkout has not had a full test run or Linux acceptance.** Logs: `/tmp/comms-boot-policy-root-install.log`, `/tmp/comms-handoff-root-check.log`, `/tmp/comms-handoff-root-build.log`, `/tmp/comms-core-wave-root-tests.log`.
+
+Next agent should first run the full retained suite with actual Node22.22.3 and two workers, review current CI, then integrate remaining handoffs deliberately. Preserve the owner's uncommitted `SPEC.md`, `docs/tech.md`, `docs/database.md`, and `docs/pr-1/`; they are excluded from this commit. Do not replace them with worker copies.
+
+Remaining work and reusable handoffs:
+
+- **Startup graph and admission renames are already integrated; do not apply again.** Final handoff: `/var/folders/2j/z4115t_51pv7sxxrq1_j7_xh0000gn/T/comms-startup-final-swv7zfjf/handoff`, manifest `89fc6e3bef6504aa2a6e4bff9bbbc9eb7f002e4d19ababcd127672298e494fbe`. It removes seven nullable service Refs and proxy positional arguments. Preserve its proven `Context.pick` fix: capturing runtime Scope in the installed proxy leaks request leases. Older startup35 handoff is superseded.
+- **Source-only seed reset** is frozen but unintegrated: `/var/folders/2j/z4115t_51pv7sxxrq1_j7_xh0000gn/T/comms-source-reset-k7sqa9no/handoff`,32 paths, manifest `6c6eb38b9d176b9db9ab127e45d44671e6dc6931c5b1027c05fdd2fb8321e8b4`. Base is the older combined-restore handoff. Preserve newer auth/event/page/startup changes; schema16/reset_pin must compose deliberately. Reset preserves messages, pages and identities.
+- **Simpler account listings:** `/var/folders/2j/z4115t_51pv7sxxrq1_j7_xh0000gn/T/comms-account-simple-2fs9_qdn/handoff`,8 paths, manifest `0c02de70c229e6aa905eb1f0d378807330ad07eb85241b60fe6f19f48d015834`.
+- **Boot discovery descriptors:** `/tmp/comms-boot-discovery-handoff`,5 paths, manifest `b374fe364174cc12686d7f67d109989408b46fcc313f16b7f10f36820320895a`. Update descriptors for now-implemented restart/combined restore; inspect notes about app self-listing.
+- **Request diagnostics covering boot/auth while app is down:** `/private/var/folders/2j/z4115t_51pv7sxxrq1_j7_xh0000gn/T/comms-request-diagnostics-hupm98vw/handoff`,4 paths, manifest `681aed1984481fd78c2bff99637fc18c33536bb42d7907955de10c359d0b510e`. Preserve actual request scope and exclude feed self-logging when composing with startup graph.
+- Further boot consolidation remains: canonical proof/IPC/schema/route duplication and cheap EditLock upsert. The approximately7,250-line boot target is **not achieved**; do not claim relocation or state cleanup meets it. UI state choice still needs reconciliation with the owner's tech document. Rehearsal suppressed-call reporting is missing. Physical main-file/WAL event quota and Linux/container UID/descendant/reboot acceptance remain unestablished. Source-undo exact outcome replay and signed settings still need narrow conformance decisions. Database portability stays a separate future PR.
+
+The applied coherent manifests are `/var/folders/2j/z4115t_51pv7sxxrq1_j7_xh0000gn/T/comms-core-restore-wave-vockzoo9/handoff` (156 paths, `93d1d005f53b7d1c8c0058338c6beabd5eb34a3c9f7562eb5f9959ed48ecfcd0`) and `/var/folders/2j/z4115t_51pv7sxxrq1_j7_xh0000gn/T/comms-boot-policy-wave-2jx_n79s/handoff` (95 paths, `796f0e5ed671bb364ff74e67b012617d7143a142c0f46207c8cda693b473605c`). Their NOTES distinguish final accepted runs from superseded failure logs. Never blindly apply an old beforeimage over this checkpoint.
+
+## Latest checkpoint: direction correction
+
+The pushed PR head is `297967650e28770dacf817a94f6d015fed70cb28`. The current uncommitted checkout additionally contains the 30-path SSE/preparation/metrics handoff, 11 Linux fixture corrections and deployment documentation. Exact-root check/build pass, and the full retained suite passes **519/519 tests across 136 files**, 390.17 seconds, using actual Node 22 and two workers (`/tmp/comms-later-linux-root-tests.log`). This is local regression evidence, not architecture completion or Linux acceptance.
+
+The corrected 156-path core/typed-query/error/terminal-health/combined-restore handoff is now also applied locally, with every before/after hash verified. Core consumes public read/mutation capabilities, rather than privileged message/topic services; unused public mutation guards are rejected instead of exposing a nested-read deadlock. Root check/build and **17/17 focused tests across six files** pass in 27.36 seconds (`/tmp/comms-core-wave-root-tests.log`), and a fresh root architecture review found no actionable findings. The worker's 119 distinct passing tests across runs are separate evidence. The preceding 519-test full run predates this integration; full acceptance of the newer combined checkout remains to run.
+
+That pushed head's Linux run [34578266101](https://github.com/CryogenicPlanet/artifactory/actions/runs/34578266101) finished **500 passed / 14 failed across 514 tests and 133 files**, 907.92 seconds; check/build and three serial diagnostics pass. Nine failures correspond to the fixture corrections already in the uncommitted root; one corresponds to the pending terminal-initialization health fix. Four remain uncovered: a broken-startup aggregate budget, corrupted-entry retry polling, stderr readiness polling and a six-cutover tree-revert timeout. The last passes locally in 12.09 seconds with its unchanged 60-second budget; Linux's stalled phase is unknown. Evidence: `/tmp/comms-linux-34578266101-ledger.md`. None of the pending fixes is Linux-validated by this run.
+
+The owner's new direction check, `docs/pr-1/direction-check-2979676.md`, takes priority over landing more routes:
+
+1. Core must consume the public extension API. The frozen 104-path ownership relocation still leaves privileged service dependencies and is insufficient. Its replacement must put domain semantics on the same public read/mutation capabilities extensions use; do not add one public wrapper per HTTP route merely to disguise those dependencies.
+2. Boot must never call the app for page-write policy. Remove the callback, publication-fence polling and app-policy gates. Preserve raw `/_boot/fs` and `/api/fs` repair aliases, authentication, safe paths and journal/recovery ordering. Those privileged raw edits do not enforce archived/deleted-topic policy; app-owned operations enforce their own domain rules. Do not silently route recovery aliases through the editable app or introduce an actor-relay framework.
+3. Requests queue during database restore. Preserve the existing bounded queue and timeout; revalidate credentials and anonymous grants after waiting, and prove queue/resume against a real restore.
+
+Separate isolated workers own these three corrections. No additional route wave is to be committed before the core public-API correction. The digest example is actually absent and has a bounded restoration worker. Numeric query schemas, startup nullable references/positional arguments, the three admission renames and remaining auth consolidation still need completion.
+
+Current boot production is **9,361 lines in 78 TypeScript files**, so the review's approximately 7,250-line target is not met. Count actual deletions and retained safety machinery separately; moving a policy into another boot module does not reduce boot ownership. Page journal publication still needs generic exclusion against active app reservations to prevent concurrent physical move/journal conflicts; this is a local ordering check, with no app callback or retry loop.
+
+Other reviewed handoffs are ready or being composed in isolation: actual HttpApi error encoding; boot literal errors and nonretry defect propagation; durable boot transitions; signed restart with bounded shutdown; combined source/database restore; boot discovery descriptors; broader request diagnostics; simpler account listings. Source-only seed reset is still being validated. Their individual test counts are not root acceptance. Rehearsal suppressed-call reporting and Linux/container ownership/reboot acceptance remain explicit gaps.
+
+Older checkpoint descriptions below are historical; this section controls current status.
+
 ## Prior checkpoint and authoritative review
 
 - Repository: `CryogenicPlanet/artifactory`; the old `CryogenicPlanet/comms` git remote redirects there.
@@ -59,7 +102,7 @@ Topic move (30 paths, 59 focused tests), SQL (21 paths, 36 focused tests), and b
 
 All writers use isolated copies. The parent alone integrates frozen before/after manifests into this checkout and preserves owner-owned spec/review files.
 
-Current lanes: parent acceptance of the 115-path SQL/move/storage/backup integration; a separate integrator validating SSE/preparation/metrics; exact-head Linux monitoring; isolated signed-restart implementation; isolated core-domain/publication ownership split; and bounded designs for combined restore and source reset. The table below records the earlier wave's ownership boundaries, not a claim that those workers are all still active.
+Current lanes: public-API core correction and app/combined-restore integration; page-policy boundary removal; restore request queuing; boot error/event/restart integration; source-only seed reset; and restoration of the digest example. The latest full root acceptance is recorded above. The table below records the earlier wave's ownership boundaries, not a claim that those workers are all still active.
 
 | Lane | Scope / dependency |
 | --- | --- |

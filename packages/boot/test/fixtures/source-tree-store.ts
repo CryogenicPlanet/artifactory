@@ -1,3 +1,4 @@
+import { layer as eventsLayer } from "../../src/events.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect, FileSystem, Schema } from "effect";
@@ -90,6 +91,7 @@ const main = Effect.gen(function* () {
 			SourceRejected: (error) => Effect.succeed({ error: error.code, path: error.path }),
 			SqlError: () => Effect.succeed({ error: "sql_error" }),
 		}),
+		Effect.provide(eventsLayer(Effect.void)),
 		Effect.provide(SqliteClient.layer({ filename: `${root}/boot.db`, disableWAL: true })),
 		Effect.provideService(FileSystem.FileSystem, instrumented),
 	);

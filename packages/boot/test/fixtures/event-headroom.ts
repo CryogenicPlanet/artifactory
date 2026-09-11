@@ -54,13 +54,12 @@ Effect.gen(function* () {
 		}
 		assert.deepEqual(yield* events.state, cleared);
 		assert.deepEqual(yield* sql`SELECT id FROM event_batches WHERE id='refused'`, []);
-		const store = yield* Ref.make<Events["Service"] | null>(events);
 		const attempts = yield* Ref.make<readonly Attempt[]>([
 			{ secret: "test", epoch: "epoch", host: "localhost", generation: 1, state: "live" },
 		]);
 		const gate = yield* Semaphore.make(1);
 		const route = yield* Ref.make<Destination | null>(null);
-		const response = yield* eventRoute(store, attempts, null, gate, route).pipe(
+		const response = yield* eventRoute(events, attempts, null, gate, route).pipe(
 			Effect.provideService(
 				HttpServerRequest.HttpServerRequest,
 				HttpServerRequest.fromWeb(
@@ -96,7 +95,7 @@ Effect.gen(function* () {
 		assert.equal((yield* events.state).published_through, 4);
 
 		const send = (pathname: string, body: string, secret = "test") =>
-			eventRoute(store, attempts, null, gate, route).pipe(
+			eventRoute(events, attempts, null, gate, route).pipe(
 				Effect.provideService(
 					HttpServerRequest.HttpServerRequest,
 					HttpServerRequest.fromWeb(

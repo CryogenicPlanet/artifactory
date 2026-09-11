@@ -15,6 +15,7 @@ import { layer as generationsLayer } from "../../src/generations.ts";
 import { layer as kernelBootLayer } from "../../src/kernel-boot.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { databaseBackup } from "../../src/database-backup.ts";
+import { metrics } from "../../src/metrics.ts";
 import type { ActiveChild, ChildStatus, Supervisor } from "../../src/supervisor.ts";
 import { traffic } from "../../src/traffic.ts";
 
@@ -47,6 +48,7 @@ const main = Effect.gen(function* () {
 			started_at: 1,
 			healthy_at: 1,
 			retired_at: null,
+			backup_id: null,
 		} satisfies ActiveChild["generation"];
 		const attempt = {
 			epoch: "original",
@@ -75,7 +77,7 @@ const main = Effect.gen(function* () {
 						if (action === "frozen") {
 							yield* Deferred.succeed(frozen, undefined);
 							if (mode === "freeze-failure" || mode === "closure-failure")
-								return yield* new ChildError({ code: "frozen_failed" });
+								return yield* new ChildError({ code: "child_control_failed" });
 						}
 					}),
 			},
@@ -95,6 +97,7 @@ const main = Effect.gen(function* () {
 			}),
 			fail: () => Effect.void,
 			child: {
+				metrics: yield* metrics,
 				traffic: routing,
 				sourceError: yield* Ref.make<string | null>(null),
 				channelGate: yield* Semaphore.make(1),
@@ -112,7 +115,7 @@ const main = Effect.gen(function* () {
 				}),
 			},
 			launch: () => Effect.die("Unused launch"),
-			admit: () => Effect.void,
+			recordAttempt: () => Effect.void,
 			activate: () => Effect.void,
 			retire: () =>
 				Effect.gen(function* () {
@@ -165,7 +168,9 @@ const main = Effect.gen(function* () {
 									.clone(destination)
 									.pipe(
 										Effect.andThen(
-											mode === "interrupt" ? Effect.never : Effect.fail(new ChildError({ code: "clone_failed" })),
+											mode === "interrupt"
+												? Effect.never
+												: Effect.fail(new ChildError({ code: "cutover_backup_invalid" })),
 										),
 									),
 						}
@@ -182,7 +187,7 @@ const main = Effect.gen(function* () {
 		const releaseWrite = yield* Deferred.make<void>();
 		const writer = yield* Effect.scoped(
 			Effect.gen(function* () {
-				yield* routing.admit;
+				yield* routing.awaitDestination;
 				yield* Deferred.succeed(admitted, undefined);
 				yield* Deferred.await(releaseWrite);
 				const batch = yield* events.reserve("write", 1, "original");

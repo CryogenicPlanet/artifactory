@@ -1,14 +1,17 @@
+import { layer as durableEventsLayer } from "../../src/events.ts";
 /* oxlint-disable effecttsgo/node-builtin-import */
 import assert from "node:assert/strict";
 import { Clock, Console, Context, Effect, Layer, Result } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Auth, layer } from "../../src/auth.ts";
-import { EditLock, layer as editLockLayer } from "../../src/edit-lock.ts";
+import { EditLock, layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 import { Events, layer as eventsLayer } from "../../src/events.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import type { AssertionProof } from "../../src/enrollment.ts";
 import type { RevokeFamily } from "../../src/refresh-schema.ts";
 import { authenticator } from "./authenticator.ts";
+
+const editLockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 
 export const fails = <A, E, R>(effect: Effect.Effect<A, E, R>, code?: string) =>
 	effect.pipe(

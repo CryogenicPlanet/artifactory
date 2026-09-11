@@ -74,19 +74,21 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 	] satisfies Array<[string, string, unknown]>)
 		expect((await call(method, target, body)).status).toBe(409);
 	expect((await app.post("/api/messages", { topic: "project/notes/child", body: "denied" }, cookie)).status).toBe(409);
+	// Raw filesystem repair is intentionally independent of app topic policy, including its alias.
 	for (const target of ["project/index.md", "project/notes/note.md", "project/new/note.md"])
-		expect(await (await page("PUT", target, "denied")).json()).toMatchObject({ error: { code: "topic_archived" } });
-	expect((await page("DELETE", "project/notes/note.md")).status).toBe(409);
+		expect((await page("PUT", target, "raw repair")).status).toBe(200);
+	expect((await page("DELETE", "project/notes/note.md")).status).toBe(200);
 	for (const selector of [
 		{ path: "pages/project/notes/note.md" },
 		{ batch: pageWrite.batch },
 		{ version: pageHistory.items[0].id },
 	])
-		expect(await (await app.post("/api/revert", selector, cookie)).json()).toMatchObject({
-			error: { code: "topic_archived" },
-		});
+		expect((await app.post("/api/revert", selector, cookie)).status).toBe(200);
 	expect(await (await page("GET", "project/notes/note.md")).text()).toBe("retained page");
-	expect(await get("/api/fs/pages/project/notes/note.md?history")).toEqual(pageHistory);
+	await fixture.sql("UPDATE topics SET deleted_at=1 WHERE path='project/notes'");
+	expect((await page("PUT", "project/notes/raw-deleted.md", "deleted topic repair")).status).toBe(200);
+	expect(await (await page("GET", "project/notes/raw-deleted.md")).text()).toBe("deleted topic repair");
+	await fixture.sql("UPDATE topics SET deleted_at=NULL WHERE path='project/notes'");
 	expect(await fixture.sql("SELECT * FROM source_changes", "boot.db")).toEqual([]);
 	expect((await page("PUT", "project-other/note.md", "sibling")).status).toBe(200);
 	expect((await call("PUT", "/api/topics/project", { archived: false })).status).toBe(200);

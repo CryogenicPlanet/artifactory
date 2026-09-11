@@ -1,4 +1,5 @@
-import { Cause, Effect, Schema, Semaphore } from "effect";
+import { respond, subscriptionErrors } from "./response.ts";
+import { Effect, Schema, Semaphore } from "effect";
 import type { Api, BackgroundContext } from "../../kernel/extension-api.ts";
 import { FetchHttpClient, HttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
@@ -13,13 +14,18 @@ const Receipt = Schema.Struct({
 	created_at: Schema.Int,
 	since: Schema.Int,
 });
-const definition = HttpApi.make("subscriptions").add(
+export const definition = HttpApi.make("subscriptions").add(
 	HttpApiGroup.make("subscriptions").add(
-		HttpApiEndpoint.post("create", "/api/subscriptions", { payload: Input, success: Receipt }).annotate(
+		HttpApiEndpoint.post("create", "/api/subscriptions", {
+			error: subscriptionErrors,
+			payload: Input,
+			success: Receipt,
+		}).annotate(
 			OpenApi.Description,
 			"Persist a webhook subscription from the current published cursor. Requires read and write. Supply Idempotency-Key for retries.",
 		),
 		HttpApiEndpoint.get("list", "/api/subscriptions", {
+			error: subscriptionErrors,
 			success: Schema.Struct({
 				items: Schema.Array(
 					Schema.Struct({
@@ -35,44 +41,15 @@ const definition = HttpApi.make("subscriptions").add(
 			OpenApi.Description,
 			"List this instance’s active webhook subscriptions and retry status. Humans can list all subscriptions.",
 		),
-		HttpApiEndpoint.delete("remove", "/api/subscriptions/:id", { params: { id: Schema.String } }).annotate(
+		HttpApiEndpoint.delete("remove", "/api/subscriptions/:id", {
+			error: subscriptionErrors,
+			params: { id: Schema.String },
+		}).annotate(
 			OpenApi.Description,
 			"Stop a webhook subscription owned by this instance. Humans can stop any subscription; deletion is idempotent.",
 		),
 	),
 );
-const ScopeFailure = Schema.Struct({ code: Schema.Literal("scope_required") });
-const respond = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-	effect.pipe(
-		Effect.catchCause((cause) => {
-			if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
-			const reason = cause.reasons.find(
-				(reason) => reason._tag === "Fail" && Schema.is(SubscriptionError)(reason.error),
-			);
-			const own = reason?._tag === "Fail" && Schema.is(SubscriptionError)(reason.error) ? reason.error : null;
-			const scopeRequired = cause.reasons.some(
-				(reason) => reason._tag === "Fail" && Schema.is(ScopeFailure)(reason.error),
-			);
-			const status = own?.status ?? (scopeRequired ? 403 : 503),
-				code = own?.code ?? (scopeRequired ? "scope_required" : "subscription_unavailable");
-			return Effect.succeed(
-				HttpServerResponse.jsonUnsafe(
-					{
-						error: {
-							code,
-							message: "Subscription request failed.",
-							hint:
-								status === 503
-									? "Retry with the same Idempotency-Key."
-									: "Check /api and the subscription documentation.",
-							retriable: status === 503,
-						},
-					},
-					{ status },
-				),
-			);
-		}),
-	);
 
 export default (api: Api) =>
 	Effect.gen(function* () {

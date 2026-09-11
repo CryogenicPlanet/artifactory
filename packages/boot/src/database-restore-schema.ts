@@ -5,6 +5,33 @@ export const DatabaseRestoreParams = Schema.Struct({
 	idempotency_key: Schema.optionalKey(Schema.String),
 });
 export type DatabaseRestore = typeof DatabaseRestoreParams.Type;
+export const GenerationRestoreParams = Schema.Struct({
+	generation: Schema.Int.check(Schema.isGreaterThan(0)),
+	withDb: Schema.Literal(true),
+	idempotency_key: Schema.optionalKey(Schema.String),
+});
+export type GenerationRestore = typeof GenerationRestoreParams.Type;
+export type RestoreSelection = DatabaseRestore | GenerationRestore;
+export interface RestoreTarget {
+	readonly backup: string;
+	readonly published_through: number;
+}
+export const validRestoreSelection = (params: RestoreSelection) =>
+	"backup" in params
+		? validDatabaseRestore(params)
+		: Number.isSafeInteger(params.generation) &&
+			params.generation > 0 &&
+			params.withDb === true &&
+			(params.idempotency_key === undefined || /^[\x20-\x7e]{1,128}$/.test(params.idempotency_key));
+export const canonicalGenerationRestore = (params: GenerationRestore, sessionId: string, target: RestoreTarget) =>
+	JSON.stringify({
+		generation: params.generation,
+		withDb: true,
+		backup: target.backup,
+		published_through: target.published_through,
+		session: sessionId,
+		...(params.idempotency_key === undefined ? {} : { idempotency_key: params.idempotency_key }),
+	});
 export const DatabaseRestoreInput = Schema.Union([
 	DatabaseRestoreParams,
 	Schema.Struct({ id: Schema.String, idempotency_key: Schema.optionalKey(Schema.String) }),
@@ -34,6 +61,9 @@ export const DatabaseRestoreRequest = Schema.Struct({
 	phase: Schema.Literals(["authorized", "restoring", "working", "rollback", "restored", "failed"]),
 	safety_backup: Schema.NullOr(Schema.String),
 	generation: Schema.NullOr(Schema.Int),
+	source_generation: Schema.NullOr(Schema.Int),
+	prior_generation: Schema.NullOr(Schema.Int),
+	source_batch: Schema.NullOr(Schema.String),
 	restored_to_seq: Schema.Int,
 	event_seq: Schema.NullOr(Schema.Int),
 	failure: Schema.NullOr(Schema.String),

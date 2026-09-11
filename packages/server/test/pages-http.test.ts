@@ -176,7 +176,7 @@ it("merges page-only topic directories without manufacturing messages or changin
 	expect((await get("/api/topics/project/reference")).pages).toEqual(["guide.md"]);
 }, 20000);
 
-it("hides deleted page ancestry at the published fence and rejects page mutations while retaining administrative reads", async (test) => {
+it("hides deleted page ancestry at the published fence while retaining raw filesystem repair", async (test) => {
 	const fixture = await conversation(test);
 	for (const topic of ["gone", "gone/page-only", "gone/deep", "gone-other"]) {
 		await mkdir(join(fixture.root, "pages", topic), { recursive: true });
@@ -230,9 +230,9 @@ it("hides deleted page ancestry at the published fence and rejects page mutation
 	expect(listing).toContain("gone-other");
 	expect((await fetch(app.url + "/p/gone-other/readme.md")).status).toBe(200);
 	for (const method of ["PUT", "DELETE"])
-		expect((await write("/api/fs/pages/gone/page-only/readme.md", method)).status).toBe(409);
+		expect((await write("/api/fs/pages/gone/page-only/readme.md", method)).status).toBe(200);
 	expect(await (await get("/api/fs/pages/gone/readme.md")).text()).toBe("# gone");
 	expect((await write("/api/fs/pages/gone-other/readme.md", "PUT")).status).toBe(200);
 	await fixture.sql(`ALTER TABLE topics RENAME COLUMN deleted_at TO missing_deleted_at`);
-	expect((await write("/api/fs/pages/gone/new.md", "PUT")).status).toBe(503);
+	expect((await write("/api/fs/pages/gone/new.md", "PUT")).status).toBe(200);
 }, 20000);

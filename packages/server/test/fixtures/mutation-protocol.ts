@@ -1,3 +1,4 @@
+import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
@@ -10,7 +11,7 @@ import { makeOutboxRelay } from "../../src/kernel/outbox.ts";
 import { HealthProbe, layer as probeLayer } from "../../src/kernel/health-probe.ts";
 import { HttpServerResponse } from "effect/unstable/http";
 import { probeHealth } from "../../src/kernel/health.ts";
-import { Messages, layer as messagesLayer } from "../../src/kernel/messages.ts";
+import { Messages, layer as messagesLayer } from "../../src/ext/core/messages.ts";
 import { Lifecycle, layer as lifecycleLayer } from "../../src/kernel/lifecycle.ts";
 import { makeMutate } from "../../src/kernel/mutate.ts";
 
@@ -196,7 +197,7 @@ const program = Effect.gen(function* () {
 						yield* assertEmpty;
 						assert.deepEqual(yield* events.state, pending);
 					}).pipe(
-						Effect.provide(messagesLayer),
+						Effect.provide(messagesLayer.pipe(Layer.provideMerge(publicationLayer))),
 						Effect.provideService(SqlClient.SqlClient, mutationSql),
 						Effect.provideService(BootChannel, boot),
 					);
@@ -260,7 +261,10 @@ const program = Effect.gen(function* () {
 								if (denied._tag === "Failure")
 									assert.equal(Schema.is(KernelError)(denied.failure) && denied.failure.code, "boot_unavailable");
 							}
-						}).pipe(Effect.provide(messagesLayer), Effect.provideService(BootChannel, boot));
+						}).pipe(
+							Effect.provide(messagesLayer.pipe(Layer.provideMerge(publicationLayer))),
+							Effect.provideService(BootChannel, boot),
+						);
 						assert.equal(appends, 1);
 						yield* sql`ROLLBACK`;
 						assert.deepEqual(yield* records(), [{ value: "original" }]);

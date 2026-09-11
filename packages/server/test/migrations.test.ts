@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { cp, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it } from "vitest";
@@ -22,10 +23,13 @@ for (const stage of ["rehearsal", "candidate"]) {
 				headers: { cookie, origin: "https://comms.test" },
 				body: migration(body),
 			});
+		const failedAt = performance.now();
 		const failed = await put(
 			`yield* sql\`CREATE TABLE custom_data(value TEXT)\`; if (process.env.STATE === "${stage}") { yield* sql\`DELETE FROM messages\`; return yield* Effect.die("migration deliberately failed"); }`,
 		);
 		expect(await failed.json()).toMatchObject({ status: "failed" });
+		// Terminal migration failures must not consume the 30-second rehearsal readiness budget.
+		expect(performance.now() - failedAt).toBeLessThan(10000);
 		await app.ready(cookie);
 		expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: "acknowledged" }]);
 		expect(await fixture.sql("SELECT * FROM migrations WHERE migration_id=2")).toEqual([]);
@@ -44,53 +48,92 @@ for (const stage of ["rehearsal", "candidate"]) {
 	}, 35000);
 }
 
-it("does not open or migrate the candidate database before the guarded go command", async (test) => {
-	const fixture = await conversation(test),
-		app = await fixture.launch();
-	await app.setup();
-	const cookie = await app.login();
-	await app.ready(cookie);
-	await app.stop();
-	await fixture.sql("DROP TABLE migrations");
-	await fixture.sql("DROP TABLE webhook_subscriptions");
-	await fixture.sql("UPDATE kernel_writer SET epoch='candidate-test'");
-	const child = spawn("bun", [join(import.meta.dirname, "../src/server.ts")], {
-		env: {
-			...process.env,
-			PORT: "0",
-			BOOT_SECRET: "candidate-test-secret",
-			BOOT_URL: "http://127.0.0.1:1",
-			WRITER_EPOCH: "candidate-test",
-			APP_DATABASE: join(fixture.root, "comms.db"),
-			PAGES_DIRECTORY: join(fixture.root, "pages"),
-			STATE: "candidate",
-			GENERATION: "100",
-		},
-		stdio: ["ignore", "pipe", "pipe"],
-	});
-	test.onTestFinished(async () => {
-		if (child.exitCode === null && child.signalCode === null) {
-			const exited = once(child, "exit");
-			child.kill("SIGKILL");
-			await exited;
+for (const fails of [false, true]) {
+	it(`waits for guarded go before migrating, then reports ${fails ? "terminal initialization failure" : "successful migration"}`, async (test) => {
+		const fixture = await conversation(test),
+			app = await fixture.launch();
+		await app.setup();
+		const cookie = await app.login();
+		await app.ready(cookie);
+		await app.stop();
+		await fixture.sql("DROP TABLE migrations");
+		await fixture.sql("DROP TABLE webhook_subscriptions");
+		await fixture.sql("UPDATE kernel_writer SET epoch='candidate-test'");
+		let entry = join(import.meta.dirname, "../src/server.ts");
+		if (fails) {
+			const seed = join(fixture.root, "failed-seed");
+			await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
+			await symlink(join(import.meta.dirname, "../node_modules"), join(seed, "node_modules"));
+			await writeFile(
+				join(seed, "migrations/002_failure.ts"),
+				migration('return yield* Effect.die("private migration failure sentinel");'),
+			);
+			entry = join(seed, "server.ts");
 		}
-	});
-	let output = "";
-	child.stdout.on("data", (data: Buffer) => {
-		output += data.toString();
-	});
-	child.stderr.on("data", () => {});
-	await expect.poll(() => /COMMS_CHILD_PORT=(\d+)/.exec(output)?.[1]).toBeTruthy();
-	const port = /COMMS_CHILD_PORT=(\d+)/.exec(output)?.[1];
-	await delay(100);
-	expect(await fixture.sql("SELECT name FROM sqlite_master WHERE name='migrations'")).toEqual([]);
-	const response = await fetch(`http://127.0.0.1:${port}/_kernel/control`, {
-		method: "POST",
-		headers: { "x-boot-secret": "candidate-test-secret", "content-type": "application/json" },
-		body: JSON.stringify({ action: "go" }),
-	});
-	expect(response.status).toBe(200);
-	await expect
-		.poll(() => fixture.sql("SELECT name FROM sqlite_master WHERE name='migrations'"))
-		.toEqual([{ name: "migrations" }]);
-}, 20000);
+		const child = spawn("bun", [entry], {
+			env: {
+				...process.env,
+				PORT: "0",
+				BOOT_SECRET: "candidate-test-secret",
+				BOOT_URL: "http://127.0.0.1:1",
+				WRITER_EPOCH: "candidate-test",
+				APP_DATABASE: join(fixture.root, "comms.db"),
+				PAGES_DIRECTORY: join(fixture.root, "pages"),
+				STATE: "candidate",
+				GENERATION: "100",
+			},
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		test.onTestFinished(async () => {
+			if (child.exitCode === null && child.signalCode === null) {
+				const exited = once(child, "exit");
+				child.kill("SIGKILL");
+				await exited;
+			}
+		});
+		let output = "";
+		child.stdout.on("data", (data: Buffer) => {
+			output += data.toString();
+		});
+		child.stderr.on("data", () => {});
+		await expect.poll(() => /COMMS_CHILD_PORT=(\d+)/.exec(output)?.[1]).toBeTruthy();
+		const port = /COMMS_CHILD_PORT=(\d+)/.exec(output)?.[1];
+		const healthUrl = `http://127.0.0.1:${port}/health`;
+		const headers = { "x-boot-secret": "candidate-test-secret" };
+		const starting = await fetch(healthUrl, { headers });
+		expect(starting.status).toBe(503);
+		expect(starting.headers.get("x-comms-health-ready")).toBeNull();
+		expect(await starting.text()).toBe("");
+		await delay(100);
+		expect(await fixture.sql("SELECT name FROM sqlite_master WHERE name='migrations'")).toEqual([]);
+		const response = await fetch(`http://127.0.0.1:${port}/_kernel/control`, {
+			method: "POST",
+			headers: { "x-boot-secret": "candidate-test-secret", "content-type": "application/json" },
+			body: JSON.stringify({ action: "go" }),
+		});
+		expect(response.status).toBe(200);
+		if (fails) {
+			await expect
+				.poll(async () => (await fetch(healthUrl, { headers })).headers.get("x-comms-health-ready"), { timeout: 5000 })
+				.toBe("1");
+			const failed = await fetch(healthUrl, { headers });
+			expect(failed.status).toBe(503);
+			expect(await failed.json()).toEqual({ status: "failed" });
+			for (const rejectedHeaders of [{}, { ...headers, "x-forwarded-host": "comms.test" }]) {
+				const rejected = await fetch(healthUrl, { headers: rejectedHeaders });
+				expect(rejected.status, Object.keys(rejectedHeaders).join(",")).toBe(403);
+				expect(rejected.headers.get("x-comms-health-ready")).toBeNull();
+				expect(await rejected.text()).toBe("");
+			}
+			const unavailable = await fetch(`http://127.0.0.1:${port}/api/messages`, { headers });
+			expect(unavailable.status).toBe(503);
+			expect(unavailable.headers.get("x-comms-health-ready")).toBeNull();
+			expect(await unavailable.text()).toBe("");
+			expect(await fixture.sql("SELECT name FROM sqlite_master WHERE name='migrations'")).toEqual([]);
+		} else {
+			await expect
+				.poll(() => fixture.sql("SELECT name FROM sqlite_master WHERE name='migrations'"))
+				.toEqual([{ name: "migrations" }]);
+		}
+	}, 20000);
+}

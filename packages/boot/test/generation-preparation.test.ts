@@ -1,13 +1,16 @@
 import { BunServices } from "@effect/platform-bun";
 import { it } from "@effect/vitest";
 import { Effect, FileSystem, Path, Ref } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { describe, expect } from "vitest";
 import { GenerationPreparation, layer } from "../src/generation-preparation.ts";
 import { PreparationProcess } from "../src/preparation-process.ts";
+import { copySource } from "../src/snapshots.ts";
 
 const fixture = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
+	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 	const root = yield* fs.realPath(yield* fs.makeTempDirectoryScoped());
 	const source = path.join(root, "app");
 	yield* fs.makeDirectory(path.join(source, "ui/public"), { recursive: true });
@@ -18,6 +21,8 @@ const fixture = Effect.gen(function* () {
 	yield* fs.writeFileString(path.join(source, "bun.lock"), "lock-one");
 	yield* fs.writeFileString(path.join(source, "ui/index.html"), "first");
 	yield* fs.writeFileString(path.join(source, "ui/vite.config.ts"), "config-one");
+	yield* fs.makeDirectory(path.join(source, "board"));
+	yield* fs.writeFileString(path.join(source, "board/source.txt"), "editable source");
 	const installs = yield* Ref.make(0);
 	const builds = yield* Ref.make(0);
 	const commands = PreparationProcess.of({
@@ -32,10 +37,13 @@ const fixture = Effect.gen(function* () {
 		build: (workspace, output) =>
 			Effect.gen(function* () {
 				yield* Ref.update(builds, (n) => n + 1);
-				// A Vite config can write into its own working dependencies without poisoning the cache.
+				// A Vite config can write into its own working dependencies without changing the saved runtime dependencies.
 				yield* fs.writeFileString(path.join(workspace, "node_modules/pkg/index.js"), "build mutation");
-				yield* fs.makeDirectory(output);
-				yield* fs.copyFile(path.join(workspace, "ui/index.html"), path.join(output, "index.html"));
+				yield* copySource(path.join(workspace, "ui"), output).pipe(
+					Effect.provideService(FileSystem.FileSystem, fs),
+					Effect.provideService(Path.Path, path),
+					Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+				);
 			}).pipe(Effect.orDie),
 	});
 	const service = yield* GenerationPreparation.pipe(
@@ -45,8 +53,7 @@ const fixture = Effect.gen(function* () {
 	const prepare = (n: number) =>
 		Effect.gen(function* () {
 			const snapshot = path.join(root, `snapshot-${n}`);
-			yield* fs.makeDirectory(path.join(snapshot, "board"), { recursive: true });
-			yield* fs.writeFileString(path.join(snapshot, "board/source.txt"), "editable source");
+			yield* copySource(source, snapshot);
 			yield* service.prepare(source, snapshot);
 			return snapshot;
 		});
@@ -54,17 +61,18 @@ const fixture = Effect.gen(function* () {
 });
 
 describe("generation preparation", () => {
-	it.effect("reuses matching artifacts and copies board output while isolating working dependencies", () =>
+	it.effect("installs each generation independently and preserves source despite build mutations", () =>
 		Effect.scoped(
 			Effect.gen(function* () {
 				const { fs, path, root, installs, builds, prepare } = yield* fixture;
 				const first = yield* prepare(1);
 				const second = yield* prepare(2);
-				expect(yield* Ref.get(installs)).toBe(1);
-				expect(yield* Ref.get(builds)).toBe(1);
+				expect(yield* Ref.get(installs)).toBe(2);
+				expect(yield* Ref.get(builds)).toBe(2);
 				expect(yield* fs.readFileString(path.join(first, "board/source.txt"))).toBe("editable source");
 				const dependencies = yield* fs.realPath(path.join(first, "node_modules"));
-				expect(dependencies.startsWith(path.join(root, "prepared/dependencies"))).toBe(true);
+				expect(dependencies).toBe(path.join(first, "node_modules"));
+				yield* fs.writeFileString(path.join(second, "node_modules/alias/index.js"), "other generation mutation");
 				expect(yield* fs.readFileString(path.join(first, "node_modules/alias/index.js"))).toBe("installed");
 				expect(yield* fs.realPath(`${first}.board`)).toBe(`${first}.board`);
 				yield* fs.writeFileString(`${second}.board/index.html`, "changed");
@@ -74,7 +82,7 @@ describe("generation preparation", () => {
 		).pipe(Effect.provide(BunServices.layer)),
 	);
 
-	it.effect("invalidates builds for index, configuration, public files and lock-only edits", () =>
+	it.effect("builds every generation from its current HTML, configuration, public files and lock", () =>
 		Effect.scoped(
 			Effect.gen(function* () {
 				const { fs, path, source, installs, builds, prepare } = yield* fixture;
@@ -86,15 +94,18 @@ describe("generation preparation", () => {
 					"bun.lock",
 				].entries()) {
 					yield* fs.writeFileString(path.join(source, file), `changed-${index}`);
-					yield* prepare(index + 2);
+					const snapshot = yield* prepare(index + 2);
+					expect(yield* fs.readFileString(path.join(snapshot, file))).toBe(`changed-${index}`);
+					if (file.startsWith("ui/"))
+						expect(yield* fs.readFileString(path.join(`${snapshot}.board`, file.slice(3)))).toBe(`changed-${index}`);
 				}
-				expect(yield* Ref.get(installs)).toBe(2);
+				expect(yield* Ref.get(installs)).toBe(5);
 				expect(yield* Ref.get(builds)).toBe(5);
 			}),
 		).pipe(Effect.provide(BunServices.layer)),
 	);
 
-	it.effect("supports a headless runtime manifest and hashes nested UI dist inputs", () =>
+	it.effect("preserves nested UI dist inputs and supports a headless runtime manifest", () =>
 		Effect.scoped(
 			Effect.gen(function* () {
 				const { fs, path, source, builds, prepare } = yield* fixture;
@@ -102,13 +113,36 @@ describe("generation preparation", () => {
 				yield* fs.writeFileString(path.join(source, "ui/src/ui/dist/value.ts"), "one");
 				yield* prepare(1);
 				yield* fs.writeFileString(path.join(source, "ui/src/ui/dist/value.ts"), "two");
-				yield* prepare(2);
+				const second = yield* prepare(2);
+				expect(yield* fs.readFileString(`${second}.board/src/ui/dist/value.ts`)).toBe("two");
 				expect(yield* Ref.get(builds)).toBe(2);
 				yield* fs.remove(path.join(source, "ui"), { recursive: true });
 				const headless = yield* prepare(3);
 				expect(yield* fs.exists(path.join(headless, "node_modules/pkg/index.js"))).toBe(true);
 				expect(yield* fs.exists(`${headless}.board`)).toBe(false);
 				expect(yield* Ref.get(builds)).toBe(2);
+			}),
+		).pipe(Effect.provide(BunServices.layer)),
+	);
+
+	it.effect("rejects a symlinked UI root before running editable build code", () =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { fs, path, root, source, builds, commands } = yield* fixture;
+				yield* fs.rename(path.join(source, "ui"), path.join(root, "external-ui"));
+				yield* fs.symlink(path.join(root, "external-ui"), path.join(source, "ui"));
+				const snapshot = path.join(root, "candidate");
+				yield* fs.makeDirectory(snapshot);
+				const service = yield* GenerationPreparation.pipe(
+					Effect.provide(layer({ dataDirectory: root })),
+					Effect.provideService(PreparationProcess, commands),
+				);
+				expect(yield* service.prepare(source, snapshot).pipe(Effect.result)).toMatchObject({
+					_tag: "Failure",
+					failure: { _tag: "SnapshotRejected" },
+				});
+				expect(yield* Ref.get(builds)).toBe(0);
+				expect(yield* fs.exists(`${snapshot}.board`)).toBe(false);
 			}),
 		).pipe(Effect.provide(BunServices.layer)),
 	);

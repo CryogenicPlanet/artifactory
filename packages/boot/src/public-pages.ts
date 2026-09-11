@@ -1,24 +1,16 @@
-import { Context, Effect, FileSystem, Layer, Path, Schema, type Ref, type Semaphore } from "effect";
+import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { pagePath } from "./public-paths.ts";
-import { pageWriteAdmission } from "./page-write-admission.ts";
-import type { Destination } from "./traffic.ts";
 
 export class PublicPagesUnavailable extends Schema.TaggedError<PublicPagesUnavailable>()(
 	"PublicPagesUnavailable",
 	{},
 ) {}
-const make = (
-	directory: string,
-	operationGate: Semaphore.Semaphore,
-	channelGate: Semaphore.Semaphore,
-	route: Ref.Ref<Destination | null>,
-) =>
+const make = (directory: string) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
 		const bootSql = yield* SqlClient.SqlClient;
-		const withWrite = yield* pageWriteAdmission(operationGate, channelGate, route);
 		const check = (pathname: string) =>
 			Effect.gen(function* () {
 				if (!pathname.startsWith("/p/") || /%2f|%5c/i.test(pathname)) return null;
@@ -43,15 +35,10 @@ const make = (
 				Effect.timeout("1 second"),
 				Effect.catchCause(() => Effect.fail(new PublicPagesUnavailable({}))),
 			);
-		return { check, withWrite };
+		return { check };
 	});
 /** Anonymous admission reads only boot-owned published grants; unrelated app work never holds its read gate. */
 export class PublicPages extends Context.Service<PublicPages, Effect.Success<ReturnType<typeof make>>>()(
 	"comms/boot/PublicPages",
 ) {}
-export const layer = (
-	directory: string,
-	operationGate: Semaphore.Semaphore,
-	channelGate: Semaphore.Semaphore,
-	route: Ref.Ref<Destination | null>,
-) => Layer.effect(PublicPages, make(directory, operationGate, channelGate, route));
+export const layer = (directory: string) => Layer.effect(PublicPages, make(directory));

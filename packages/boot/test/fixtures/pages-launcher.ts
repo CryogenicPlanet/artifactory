@@ -12,7 +12,10 @@ Effect.gen(function* () {
 		readFile: (name) =>
 			Effect.gen(function* () {
 				const bytes = yield* fs.readFile(name);
-				if (name === path.join(root, "data/pages/held.md") && (yield* fs.exists(path.join(root, "pause-page")))) {
+				if (
+					[path.join(root, "data/pages/held.md"), path.join(root, "data/pages/original/file.txt")].includes(name) &&
+					(yield* fs.exists(path.join(root, "pause-page")))
+				) {
 					yield* fs.writeFileString(path.join(root, "page-captured"), "ready");
 					while (yield* fs.exists(path.join(root, "pause-page"))) yield* Effect.sleep("10 millis");
 				}

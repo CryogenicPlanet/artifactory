@@ -2,24 +2,29 @@ import type { Crypto, FileSystem, Layer, Path, Schema } from "effect";
 import type { HttpApi, HttpApiGroup } from "effect/unstable/httpapi";
 import type { Etag } from "effect/unstable/http";
 import type { HttpPlatform } from "effect/unstable/http/HttpPlatform";
-import type { Topics } from "./topics.ts";
-import type { Pages } from "./pages.ts";
+import type { Topics } from "../ext/core/topics.ts";
+import type { Pages } from "../ext/core/pages.ts";
 import type { Lifecycle } from "./lifecycle.ts";
 import type { BootChannel, KernelError } from "./boot-channel.ts";
-import type { ExtensionCapabilities } from "./extension-capabilities.ts";
+import type { ExtensionCapabilities } from "../ext/core/capabilities.ts";
 import type { makeExtensionMigrate } from "./extension-migrations.ts";
 import type { Effect } from "effect";
 import type { HttpRouter, HttpServerRequest } from "effect/unstable/http";
 import type { HttpMethod } from "effect/unstable/http/HttpMethod";
 import type { SqlClient } from "effect/unstable/sql";
-import type { Messages, Identity } from "./messages.ts";
+import type { Messages } from "../ext/core/messages.ts";
+import type { Publication } from "./publication.ts";
+import type { Identity } from "./identity.ts";
 import type { EventRecord } from "./boot-channel.ts";
 import type { ExtensionData } from "./extension-data.ts";
 import type { Work } from "./extension-work.ts";
 
 export interface RequestContext extends Identity, ExtensionData, ExtensionCapabilities {
 	readonly db: SqlClient.SqlClient;
-	readonly publicationFence: Messages["Service"]["fence"];
+	readonly publicationFence: Effect.Effect<
+		{ readonly published_through: number },
+		Effect.Error<Publication["Service"]["fence"]>
+	>;
 	readonly params: Readonly<Record<string, string | undefined>>;
 	readonly query: Readonly<Record<string, string | ReadonlyArray<string>>>;
 }
@@ -30,16 +35,25 @@ export type RequestServices =
 export type Hook = () => Work<void> | void;
 export interface BackgroundContext extends ExtensionData, ExtensionCapabilities {
 	readonly db: SqlClient.SqlClient;
-	readonly publicationFence: Messages["Service"]["fence"];
+	readonly publicationFence: Effect.Effect<
+		{ readonly published_through: number },
+		Effect.Error<Publication["Service"]["fence"]>
+	>;
 }
 export interface CronContext extends BackgroundContext {
 	readonly db: SqlClient.SqlClient;
-	readonly publicationFence: Messages["Service"]["fence"];
+	readonly publicationFence: Effect.Effect<
+		{ readonly published_through: number },
+		Effect.Error<Publication["Service"]["fence"]>
+	>;
 	readonly scheduledAt: number;
 }
 export interface EventContext extends ExtensionData, ExtensionCapabilities {
 	readonly db: SqlClient.SqlClient;
-	readonly publicationFence: Messages["Service"]["fence"];
+	readonly publicationFence: Effect.Effect<
+		{ readonly published_through: number },
+		Effect.Error<Publication["Service"]["fence"]>
+	>;
 	readonly event: typeof EventRecord.Type;
 }
 export type EventHandler = (payload: Schema.Json, context: EventContext) => Work<void> | void;
@@ -48,6 +62,7 @@ type OnArguments =
 	| [event: "shutdown", handler: Hook]
 	| [event: `${string}.${string}` | "*", handler: EventHandler];
 export type ExtensionServices =
+	| Publication
 	| Messages
 	| Topics
 	| Pages

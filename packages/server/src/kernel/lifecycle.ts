@@ -40,3 +40,8 @@ export const poisonUncertainWriter = (cause: Cause.Cause<unknown>) =>
 		const lifecycle = Option.getOrNull(yield* Effect.serviceOption(Lifecycle));
 		if (lifecycle) yield* Ref.set(lifecycle.healthy, false);
 	});
+
+/** A request already counted by the HTTP admission gate may finish while freeze waits for it. */
+export class RequestMutation extends Context.Service<RequestMutation, Ref.Ref<boolean>>()(
+	"comms/server/RequestMutation",
+) {}

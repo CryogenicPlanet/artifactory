@@ -1,3 +1,4 @@
+import { layer as durableEventsLayer } from "../../src/events.ts";
 /* oxlint-disable effecttsgo/node-builtin-import */
 import assert from "node:assert/strict";
 import { BunServices } from "@effect/platform-bun";
@@ -6,12 +7,13 @@ import { Console, Context, Effect, FileSystem, Layer, Result, Schema } from "eff
 import { SqlClient } from "effect/unstable/sql";
 import { Auth, layer as authLayer } from "../../src/auth.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
-import { layer as lockLayer } from "../../src/edit-lock.ts";
+import { layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 import { layer as eventsLayer } from "../../src/events.ts";
 import { authentication } from "../../src/auth-http.ts";
 import { AddPasskey } from "../../src/passkey-management-schema.ts";
 import { authenticator } from "./authenticator.ts";
 
+const lockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const filename = process.argv[2],
 	scenario = process.argv[3];
 if (!filename) throw new Error("Missing database");

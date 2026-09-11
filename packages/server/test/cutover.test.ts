@@ -71,14 +71,14 @@ it("restores a pre-flip backup when candidate-only initialization changes live d
 	const response = await app.post("/api/messages", { topic: "retained", body: "acknowledged before failure" }, cookie);
 	const acknowledged = await response.json();
 	expect(response.status).toBe(200);
-	const source = await readFile(join(import.meta.dirname, "../src/kernel/database.ts"), "utf8");
+	const source = await readFile(join(import.meta.dirname, "../src/ext/core/schema.ts"), "utf8");
 	const changed = source.replace(
 		"yield* sql`PRAGMA synchronous = FULL`;",
 		`yield* sql\`PRAGMA synchronous = FULL\`;
 if (process.env.STATE === "candidate") { yield* sql\`DELETE FROM messages\`; return yield* Effect.die("candidate migration failed"); }`,
 	);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const edited = await fetch(`${app.url}/api/fs/app/kernel/database.ts`, {
+	const edited = await fetch(`${app.url}/api/fs/app/ext/core/schema.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: changed,

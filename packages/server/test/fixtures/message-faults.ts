@@ -1,3 +1,4 @@
+import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { strict as assert } from "node:assert";
 import { SqlClient } from "effect/unstable/sql";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
@@ -7,10 +8,10 @@ import { initializeBootSchema } from "../../../boot/src/boot-schema.ts";
 import { Events, layer as eventsLayer } from "../../../boot/src/events.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../../boot/src/app-recovery.ts";
 import { BootChannel, KernelError } from "../../src/kernel/boot-channel.ts";
-import { initialize } from "../../src/kernel/database.ts";
-import { Messages, layer as messagesLayer } from "../../src/kernel/messages.ts";
-import { Topics, layer as topicsLayer } from "../../src/kernel/topics.ts";
-import { layer as pagesLayer } from "../../src/kernel/pages.ts";
+import { initialize } from "../../src/ext/core/schema.ts";
+import { Messages, layer as messagesLayer } from "../../src/ext/core/messages.ts";
+import { Topics, layer as topicsLayer } from "../../src/ext/core/topics.ts";
+import { layer as pagesLayer } from "../../src/ext/core/pages.ts";
 import standup from "../../src/ext/standup.ts";
 import type { Api } from "../../src/kernel/extension-api.ts";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
@@ -163,13 +164,19 @@ const program = Effect.gen(function* () {
 								delete: () => Effect.die("Standup must remain read-only"),
 							}),
 							db: sql,
-							messages: { query: messages.list, create: () => Effect.die("read only") },
+							generation: channel.generation,
+							messages: {
+								query: messages.list,
+								create: () => Effect.die("read only"),
+							},
 							topics: {
 								read: (path, options) => topics.detail(who, path, options?.depth, options?.archived),
 								meta: () => Effect.die("read only"),
+								markRead: () => Effect.die("read only"),
 							},
 							emit: () => Effect.die("read only"),
 							events: { query: channel.events, changed: channel.changed },
+							drained: Effect.never,
 							mutate: () => Effect.die("Standup remains read only"),
 							read: (task) =>
 								sql.withTransaction(
@@ -250,7 +257,10 @@ const program = Effect.gen(function* () {
 					yield* Console.log("MESSAGE_RECOVERED");
 				}).pipe(
 					Effect.provide(
-						topicsLayer.pipe(Layer.provide(pagesLayer(`${root}/pages`)), Layer.provideMerge(messagesLayer)),
+						topicsLayer.pipe(
+							Layer.provide(pagesLayer(`${root}/pages`)),
+							Layer.provideMerge(messagesLayer.pipe(Layer.provideMerge(publicationLayer))),
+						),
 					),
 				);
 			}).pipe(

@@ -3,6 +3,8 @@
 !Dockerfile
 !package.json
 !bun.lock
+!patches/
+!patches/@effect%2Fplatform-bun@4.0.0-rc.113.patch
 !tsconfig.json
 !tsconfig.base.json
 !packages/

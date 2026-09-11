@@ -1,9 +1,10 @@
 import { BunServices } from "@effect/platform-bun";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, FileSystem, Path, Ref } from "effect";
+import { Effect, Fiber, FileSystem, Path, Ref, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { describe, expect } from "vitest";
+import { ChildError } from "../src/child-process.ts";
 import { PreparationProcess, layer } from "../src/preparation-process.ts";
 
 describe("preparation deadlines", () => {
@@ -59,9 +60,12 @@ describe("preparation deadlines", () => {
 					expect(yield* Ref.get(done)).toBe(false);
 					yield* TestClock.adjust("1 second");
 					const result = yield* Fiber.join(running);
-					expect(result._tag).toBe("Failure");
-					if (result._tag === "Failure") {
-						expect(result.failure.code).toContain("Timeout");
+					expect(result).toMatchObject({
+						_tag: "Failure",
+						failure: { _tag: "ChildError", code: `preparation_${operation}_timeout` },
+					});
+					if (result._tag === "Failure" && Schema.is(ChildError)(result.failure)) {
+						expect(result.failure.code).toBe(`preparation_${operation}_timeout`);
 						expect(result.failure.stderr?.length).toBe(8192);
 					}
 				}),

@@ -1,3 +1,4 @@
+import { committed, captureRefusal } from "./auth-primitives.ts";
 import { generateRegistrationOptions, verifyRegistrationResponse } from "@simplewebauthn/server";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -84,76 +85,67 @@ export const makePasskeyManagement = <E, R>(
 			);
 		const finishPasskeyRegistration = (params: AddPasskey, proof: AssertionProof, sessionId: string) =>
 			mutex.withPermit(
-				sql
-					.withTransaction(
-						Effect.gen(function* () {
-							if (!validPasskeyLabel(params.label) || !validPasskeyId(params.registration))
-								return yield* new AuthError({ code: "invalid_request" });
-							yield* verify("passkey.add", yield* canonicalPasskeyAdd(params, sessionId), proof);
-							yield* liveSession(sessionId);
-							const rows = yield* sql`SELECT challenge,setup_generation,expires_at FROM auth_challenges
+				committed(
+					sql,
+					Effect.gen(function* () {
+						if (!validPasskeyLabel(params.label) || !validPasskeyId(params.registration))
+							return yield* new AuthError({ code: "invalid_request" });
+						yield* verify("passkey.add", yield* canonicalPasskeyAdd(params, sessionId), proof);
+						yield* liveSession(sessionId);
+						const rows = yield* sql`SELECT challenge,setup_generation,expires_at FROM auth_challenges
 				WHERE id=${params.registration} AND ceremony='passkey.register'`;
-							const challenge = (yield* Schema.decodeUnknownEffect(Schema.Array(challengeRow))(rows))[0];
-							if (
-								!challenge ||
-								challenge.setup_generation !== registrationBinding(sessionId, params.label) ||
-								challenge.expires_at <= (yield* Clock.currentTimeMillis)
-							)
-								return yield* new AuthError({ code: "challenge_invalid" });
-							const result = yield* Effect.tryPromise({
-								try: () =>
-									verifyRegistrationResponse({
-										response: params.response,
-										expectedChallenge: challenge.challenge,
-										expectedOrigin: config.expectedOrigin,
-										expectedRPID: config.rpId,
-										requireUserVerification: true,
-									}),
-								catch: () => new AuthError({ code: "registration_invalid" }),
-							});
-							if (!result.verified) return yield* new AuthError({ code: "registration_invalid" });
-							yield* liveSession(sessionId);
-							const now = yield* Clock.currentTimeMillis;
-							if (challenge.expires_at <= now) return yield* new AuthError({ code: "challenge_invalid" });
-							const credential = result.registrationInfo.credential;
-							if ((yield* sql`SELECT id FROM passkeys WHERE id=${credential.id}`).length)
-								return yield* new AuthError({ code: "passkey_exists" });
-							const publicKey = Buffer.from(credential.publicKey).toString("base64url");
-							const transports = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(
-								credential.transports ?? [],
-							);
-							yield* sql`INSERT INTO passkeys (id,public_key,counter,transports,label,created_at)
+						const challenge = (yield* Schema.decodeUnknownEffect(Schema.Array(challengeRow))(rows))[0];
+						if (
+							!challenge ||
+							challenge.setup_generation !== registrationBinding(sessionId, params.label) ||
+							challenge.expires_at <= (yield* Clock.currentTimeMillis)
+						)
+							return yield* new AuthError({ code: "challenge_invalid" });
+						const result = yield* Effect.tryPromise({
+							try: () =>
+								verifyRegistrationResponse({
+									response: params.response,
+									expectedChallenge: challenge.challenge,
+									expectedOrigin: config.expectedOrigin,
+									expectedRPID: config.rpId,
+									requireUserVerification: true,
+								}),
+							catch: () => new AuthError({ code: "registration_invalid" }),
+						});
+						if (!result.verified) return yield* new AuthError({ code: "registration_invalid" });
+						yield* liveSession(sessionId);
+						const now = yield* Clock.currentTimeMillis;
+						if (challenge.expires_at <= now) return yield* new AuthError({ code: "challenge_invalid" });
+						const credential = result.registrationInfo.credential;
+						if ((yield* sql`SELECT id FROM passkeys WHERE id=${credential.id}`).length)
+							return yield* new AuthError({ code: "passkey_exists" });
+						const publicKey = Buffer.from(credential.publicKey).toString("base64url");
+						const transports = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(
+							credential.transports ?? [],
+						);
+						yield* sql`INSERT INTO passkeys (id,public_key,counter,transports,label,created_at)
 				VALUES (${credential.id},${publicKey},${credential.counter},${transports},${params.label},${now})`;
-							yield* sql`DELETE FROM auth_challenges WHERE id=${params.registration}`;
-							return { credentialId: credential.id };
-						}).pipe(Effect.catchIf(Schema.is(AuthError), Effect.succeed)),
-					)
-					.pipe(
-						// A valid assertion is consumed on semantic refusal; storage failures roll it back.
-						// oxlint-disable-next-line effecttsgo/flat-map-conditional-to-filter-or-fail
-						Effect.flatMap((result) => (Schema.is(AuthError)(result) ? Effect.fail(result) : Effect.succeed(result))),
-					),
+						yield* sql`DELETE FROM auth_challenges WHERE id=${params.registration}`;
+						return { credentialId: credential.id };
+					}).pipe(captureRefusal(Schema.is(AuthError))),
+				),
 			);
 		const deletePasskey = (params: DeletePasskey, proof: AssertionProof, sessionId: string) =>
 			mutex.withPermit(
-				sql
-					.withTransaction(
-						Effect.gen(function* () {
-							if (!validPasskeyId(params.id)) return yield* new AuthError({ code: "invalid_request" });
-							yield* verify("passkey.delete", canonicalPasskeyDelete(params, sessionId), proof);
-							yield* liveSession(sessionId);
-							const credentials = yield* sql`SELECT id FROM passkeys`;
-							if (!credentials.some((row) => row.id === params.id))
-								return yield* new AuthError({ code: "passkey_not_found" });
-							if (credentials.length <= 1) return yield* new AuthError({ code: "last_passkey" });
-							yield* sql`DELETE FROM passkeys WHERE id=${params.id}`;
-							return { deleted: params.id };
-						}).pipe(Effect.catchIf(Schema.is(AuthError), Effect.succeed)),
-					)
-					.pipe(
-						// oxlint-disable-next-line effecttsgo/flat-map-conditional-to-filter-or-fail
-						Effect.flatMap((result) => (Schema.is(AuthError)(result) ? Effect.fail(result) : Effect.succeed(result))),
-					),
+				committed(
+					sql,
+					Effect.gen(function* () {
+						if (!validPasskeyId(params.id)) return yield* new AuthError({ code: "invalid_request" });
+						yield* verify("passkey.delete", canonicalPasskeyDelete(params, sessionId), proof);
+						yield* liveSession(sessionId);
+						const credentials = yield* sql`SELECT id FROM passkeys`;
+						if (!credentials.some((row) => row.id === params.id))
+							return yield* new AuthError({ code: "passkey_not_found" });
+						if (credentials.length <= 1) return yield* new AuthError({ code: "last_passkey" });
+						yield* sql`DELETE FROM passkeys WHERE id=${params.id}`;
+						return { deleted: params.id };
+					}).pipe(captureRefusal(Schema.is(AuthError))),
+				),
 			);
 		return { listPasskeys, startPasskeyRegistration, finishPasskeyRegistration, deletePasskey };
 	});

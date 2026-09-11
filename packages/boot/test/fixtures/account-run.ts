@@ -1,16 +1,18 @@
+import { layer as durableEventsLayer } from "../../src/events.ts";
 /* oxlint-disable effecttsgo/node-builtin-import */
 import assert from "node:assert/strict";
 import { BunServices } from "@effect/platform-bun";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
-import { Clock, Console, Context, Crypto, Effect, Layer, Ref } from "effect";
+import { Clock, Console, Context, Crypto, Effect, Layer } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
 import { Auth, layer } from "../../src/auth.ts";
 import { accountRoute } from "../../src/account-http.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { layer as eventsLayer } from "../../src/events.ts";
-import { layer as editLockLayer } from "../../src/edit-lock.ts";
+import { layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 
+const editLockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const filename = process.argv[2];
 if (!filename) throw new Error("Missing database");
 const run = Effect.gen(function* () {
@@ -22,7 +24,6 @@ const run = Effect.gen(function* () {
 		),
 	);
 	const auth = Context.get(context, Auth);
-	const store = yield* Ref.make<Auth["Service"] | null>(auth);
 	const now = yield* Clock.currentTimeMillis;
 	const enrollmentId = (letter: string) => `e_${letter.repeat(43)}`;
 	const familyId = (letter: string) => `f_${letter.repeat(43)}`;
@@ -32,7 +33,7 @@ const run = Effect.gen(function* () {
 	yield* sql`INSERT INTO sessions (id,hash,created_at,expires_at) VALUES('human',${hash},${now},${now + 100000})`;
 	const cookie = `__Host-comms_session=${token}`;
 	const request = (path: string, headers: Readonly<Record<string, string>> = { cookie }) =>
-		accountRoute(store).pipe(
+		accountRoute(auth).pipe(
 			Effect.provideService(
 				HttpServerRequest.HttpServerRequest,
 				HttpServerRequest.fromWeb(new Request(`https://comms.test${path}`, { headers })),
@@ -139,8 +140,6 @@ const run = Effect.gen(function* () {
 		assert.equal((yield* request("/_boot/tokens?status=pending")).status, 400);
 		yield* sql`UPDATE sessions SET expires_at=0 WHERE id='human'`;
 		assert.equal((yield* request("/_boot/tokens")).status, 401);
-		yield* Ref.set(store, null);
-		assert.equal((yield* request("/_boot/tokens")).status, 503);
 	}
 });
 await Effect.runPromise(

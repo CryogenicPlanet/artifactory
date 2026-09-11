@@ -14,7 +14,17 @@ async function store(test: TestContext) {
 		const { stdout } = await execute("bun", [join(import.meta.dirname, "fixtures", fixture), ...args]);
 		return Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(stdout);
 	};
-	const run = (input: unknown) => command("events-store.ts", root, JSON.stringify(input));
+	const run = async (input: unknown) => {
+		// Oversized policies must reach validation without hitting Linux's per-argument size limit.
+		const directory = await mkdtemp(join(root, "input-"));
+		try {
+			const path = join(directory, "input.json");
+			await writeFile(path, JSON.stringify(input));
+			return await command("events-store.ts", root, "--input-file", path);
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	};
 	const sql = (statement: string) => command("store.ts", join(root, "boot.db"), statement);
 	const check = (path: string) => command("public-page-check.ts", root, path);
 	const append = async (seq: number, type: string, topic: string | null, payload: unknown) => {
@@ -169,6 +179,9 @@ it("adopts an older boot store with an empty grant projection without guessing f
 		await app.sql("SELECT name FROM pragma_table_xinfo('events') WHERE name IN ('type','actor','instance','level')"),
 	);
 	for (const column of columns) await app.sql(`ALTER TABLE events DROP COLUMN ${column.name}`);
+	await app.sql("ALTER TABLE generations DROP COLUMN backup_id");
+	for (const column of ["source_generation", "prior_generation", "source_batch"])
+		await app.sql(`ALTER TABLE db_restore_requests DROP COLUMN ${column}`);
 	await app.sql("PRAGMA user_version=13");
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
 	expect(await app.sql("SELECT * FROM public_paths")).toEqual([]);

@@ -4,6 +4,12 @@ The lead owns integration and acceptance. Workers make bounded changes in isolat
 
 ## Current state
 
+**Handoff checkpoint:** the owner requested stopping and committing the integrated work for another agent. The new leading handoff section in `docs/codex-scratchpad.md` is authoritative. Root frozen install/check/build pass; a full suite on the final combined checkout is still required. Startup graph/admission renames are integrated. Source-only reset, account simplification, boot discovery and broader request diagnostics have separate unintegrated handoffs. Boot size reduction and platform acceptance remain incomplete.
+
+The pushed head is `2979676`. Current uncommitted SSE/preparation/metrics and Linux fixture corrections pass check/build and **519/519 tests across 136 files** locally. The owner's direction check identifies unresolved architectural intent despite these passing tests: core must actually consume the public extension API, boot must lose the app-policy callback for page writes, and restore requests must queue with post-wait authentication. These corrections precede landing any further routes. File relocation alone does not complete extension ownership.
+
+The subsequent corrected core, numeric schemas, actual HttpApi error encoding, terminal health and combined-restore integration is now in the checkout. Root check/build and 17 focused tests pass; fresh root review verifies actual public-capability consumption. Its full root suite remains pending. Page-policy removal, queuing and boot/auth corrections are being composed separately before the next acceptance run.
+
 The branch provides passkey sign-in, agent enrollment/refresh, conversations, topics, pages, editable runtime generations, journaled source history, rehearsed reload/rollback, backup inventory and signed database restore. Extensions provide routes, lifecycle hooks, cron, data and webhook subscriptions. These existing capabilities do not establish completion of the review.
 
 Review changes committed through `6c21a88`:
@@ -17,9 +23,9 @@ Review changes committed through `6c21a88`:
 
 Lifecycle changes passed combined acceptance (393/393 tests across 103 files, plus check/build): reset consecutive startup failures after healthy activation, emit demotion events, and apply separate drain/backup/candidate-health deadlines. The drain timeout preserves admitted writes and returns typed retriable `freeze_timeout` after safe cleanup.
 
-The API, shared mutation protocol, typed HTTP validation, extension-owned core, public-page projection/CSP, event indexes, signal-driven waits, 30-day receipts and UI simplification are integrated. The final exact-checkout suite passes **454/454 tests across 121 files**, with locked install, check and build passing. Live browser acceptance passes the core board flows. Graceful shutdown now drains admitted work and records positive child closure before listener teardown; the built launcher exits promptly rather than waiting for an internal long-poll timeout.
+The earlier API, shared mutation protocol, typed HTTP validation, public-page projection/CSP, event indexes, signal-driven waits, 30-day receipts and UI simplification wave passed **454/454 tests across 121 files**, with locked install, check and build passing. Live browser acceptance passed the core board flows. The core mount in that wave did not establish public-API ownership of domain behavior. Subsequent signed-restart work also found additional shutdown edges involving stalled writes, hooks and unread responses; its reviewed isolated correction is not yet integrated.
 
-The next 115-path integration is accepted locally: app-owned topic moves, guarded local SQL writes, app-owned backup scheduling and storage safeguards. Exact before/after hashes matched; check/build and fresh static seam review pass. The full run produced 498 passes and 17 failures. Reviewed fixture corrections resolve all 16 retained failing cases; one test of the deleted boot move coordinator was removed. Root verification then passed 27 tests across nine affected files, plus the generation-restore case separately. This establishes passing evidence for all 514 retained tests across runs, not one 514-test run. SSE relocation, preparation simplification and metrics remain in a separate isolated integration.
+The 115-path SQL/move/storage/backup integration is pushed in `2979676`. Its historical full run produced 498 passes and 17 failures, subsequently resolved with reviewed fixture corrections. The newer exact-root 519-test pass includes that wave and the uncommitted SSE/preparation/metrics integration. See the scratchpad for logs and remaining limits.
 
 ## Parallel groups and dependencies
 

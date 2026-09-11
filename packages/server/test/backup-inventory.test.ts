@@ -151,12 +151,15 @@ it("keeps inventory available while the app is down without creating files or ch
 	await rm(join(fixture.root, "comms.db"));
 	const down = await fixture.launch();
 	await expect
-		.poll(async () => {
-			const response = await fetch(`${down.url}/_boot/status`, { headers: { cookie } });
-			return Schema.decodeUnknownSync(Schema.Struct({ child: Schema.Struct({ state: Schema.String }) }))(
-				await response.json(),
-			).child.state;
-		})
+		.poll(
+			async () => {
+				const response = await fetch(`${down.url}/_boot/status`, { headers: { cookie } });
+				return Schema.decodeUnknownSync(Schema.Struct({ child: Schema.Struct({ state: Schema.String }) }))(
+					await response.json(),
+				).child.state;
+			},
+			{ timeout: 5000 },
+		)
 		.toBe("failed");
 	await fixture.sql(
 		"INSERT INTO backups(id,path,reason,bytes,taken_at) VALUES ('missing','/private/unavailable.db','pre-flip',999,1)",

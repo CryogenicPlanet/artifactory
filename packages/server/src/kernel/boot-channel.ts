@@ -9,6 +9,7 @@ export const KernelErrorCode = Schema.Literals([
 	"invalid_storage_sample",
 	"unsafe_artifact_path",
 	"boot_unavailable",
+	"boot_handler_failed",
 	"cursor_ahead",
 	"event_cursor_invalid",
 	"event_storage_over_budget",
@@ -67,10 +68,14 @@ export const EventPage = Schema.Struct({
 	drained: Schema.Boolean,
 });
 export interface EventQuery {
-	readonly since: number;
+	readonly since?: number;
 	readonly limit: number;
 	readonly types?: ReadonlyArray<string>;
 	readonly topic?: string;
+	readonly agent?: string;
+	readonly instance?: string;
+	readonly level?: string;
+	readonly requestActor?: string;
 }
 export const Batch = Schema.Struct({
 	transaction: Schema.String,
@@ -79,6 +84,9 @@ export const Batch = Schema.Struct({
 	events: Schema.Array(EventRecord),
 });
 export type Batch = typeof Batch.Type;
+const HandlerFailure = Schema.Struct({
+	error: Schema.Struct({ code: Schema.Literal("handler_failed"), retriable: Schema.Literal(false) }),
+});
 const Range = Schema.Struct({ transaction: Schema.String, from: Schema.Int, to: Schema.Int });
 const make = Effect.gen(function* () {
 	const epoch = yield* Config.String("WRITER_EPOCH");
@@ -134,6 +142,10 @@ const make = Effect.gen(function* () {
 					: HttpClientRequest.post(`${url}${path}`).pipe(HttpClientRequest.bodyJsonUnsafe(payload));
 			request = request.pipe(HttpClientRequest.setHeader("x-boot-secret", Redacted.value(secret)));
 			const response = yield* client.execute(request);
+			if (response.status === 500) {
+				yield* response.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(HandlerFailure)));
+				return yield* new KernelError({ code: "boot_handler_failed" });
+			}
 			if (response.status === 409 && path === "/_boot/db/backup") {
 				const body = yield* response.json.pipe(
 					Effect.flatMap(
@@ -165,6 +177,16 @@ const make = Effect.gen(function* () {
 				);
 				return yield* new KernelError({ code: body.error.code });
 			}
+			if (response.status === 400 && path.startsWith("/_boot/events?")) {
+				const refusal = yield* response.json.pipe(
+					Effect.flatMap(
+						Schema.decodeUnknownEffect(
+							Schema.Struct({ error: Schema.Struct({ code: Schema.Literals(["query_invalid", "cursor_ahead"]) }) }),
+						),
+					),
+				);
+				return yield* new KernelError({ code: refusal.error.code });
+			}
 			if (response.status !== 200) return yield* new KernelError({ code: "boot_unavailable" });
 			return yield* response.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)));
 		}).pipe(
@@ -176,7 +198,7 @@ const make = Effect.gen(function* () {
 	const scope = yield* Effect.scope;
 	const signal = yield* Ref.make(yield* Deferred.make<void>());
 	const cached = yield* Ref.make<number | null>(null);
-	const available = yield* Ref.make(true);
+	const unavailable = yield* Ref.make<KernelError["code"] | null>(null);
 	const started = yield* Ref.make(false);
 	const initialize = yield* Semaphore.make(1);
 	const notify = Effect.gen(function* () {
@@ -186,7 +208,7 @@ const make = Effect.gen(function* () {
 	const advance = (result: { readonly published_through: number }) =>
 		Effect.gen(function* () {
 			const previous = yield* Ref.getAndUpdate(cached, (value) => Math.max(value ?? 0, result.published_through));
-			yield* Ref.set(available, true);
+			yield* Ref.set(unavailable, null);
 			if (previous === null || result.published_through > previous) yield* notify;
 		}).pipe(Effect.uninterruptible);
 	const fenceSchema = Schema.Struct({ published_through: Schema.Int });
@@ -199,7 +221,7 @@ const make = Effect.gen(function* () {
 			);
 			if (result._tag === "Success") yield* advance(result.success);
 			else {
-				yield* Ref.set(available, false);
+				yield* Ref.set(unavailable, result.failure.code);
 				yield* notify;
 				// Only failed channel requests retry on a timer; healthy idle readers share one boot wait.
 				yield* Effect.sleep("1 second");
@@ -216,7 +238,8 @@ const make = Effect.gen(function* () {
 					}).pipe(Effect.uninterruptible);
 				}),
 			);
-		if (!(yield* Ref.get(available))) return yield* new KernelError({ code: "boot_unavailable" });
+		const failure = yield* Ref.get(unavailable);
+		if (failure !== null) return yield* new KernelError({ code: failure });
 		const value = yield* Ref.get(cached);
 		if (value === null) return yield* new KernelError({ code: "boot_unavailable" });
 		return { published_through: value };
@@ -238,9 +261,13 @@ const make = Effect.gen(function* () {
 		fence,
 		changed,
 		events: (input: EventQuery) => {
-			const params = new URLSearchParams({ since: String(input.since), limit: String(input.limit) });
+			const params = new URLSearchParams({ limit: String(input.limit) });
+			if (input.since !== undefined) params.set("since", String(input.since));
 			if (input.types?.length) params.set("types", input.types.join(","));
 			if (input.topic !== undefined) params.set("topic", input.topic);
+			for (const field of ["agent", "instance", "level"] as const)
+				if (input[field] !== undefined) params.set(field, input[field]);
+			if (input.requestActor !== undefined) params.set("request_actor", input.requestActor);
 			return request(`/_boot/events?${params}`, EventPage);
 		},
 		reserve: (transaction: string, count: number) => request("/_boot/seq/reserve", Range, { transaction, count }),
@@ -256,9 +283,19 @@ const make = Effect.gen(function* () {
 				.pipe(
 					Effect.timeout("1500 millis"),
 					Effect.flatMap((response) =>
-						response.status === 204 ? Effect.void : Effect.fail(new KernelError({ code: "boot_unavailable" })),
+						Effect.gen(function* () {
+							if (response.status === 204) return;
+							if (response.status === 500) {
+								yield* response.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(HandlerFailure)));
+								return yield* new KernelError({ code: "boot_handler_failed" });
+							}
+							return yield* new KernelError({ code: "boot_unavailable" });
+						}),
 					),
-					Effect.mapError(() => new KernelError({ code: "boot_unavailable" })),
+					Effect.mapError((error) =>
+						Schema.is(KernelError)(error) ? error : new KernelError({ code: "boot_unavailable" }),
+					),
+					Effect.asVoid,
 				),
 	};
 });

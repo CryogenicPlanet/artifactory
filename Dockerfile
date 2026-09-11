@@ -2,6 +2,7 @@
 FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS build
 WORKDIR /opt/comms
 COPY package.json bun.lock ./
+COPY patches ./patches
 COPY packages/boot/package.json packages/boot/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/ui/package.json packages/ui/package.json
@@ -15,6 +16,7 @@ RUN bun run build
 FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS dependencies
 WORKDIR /opt/comms
 COPY package.json bun.lock ./
+COPY patches ./patches
 COPY packages/boot/package.json packages/boot/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/ui/package.json packages/ui/package.json

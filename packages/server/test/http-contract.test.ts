@@ -1,9 +1,12 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { errorSchemas } from "../src/error-contract.ts";
 import { Cause, Data, Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 import { ConnectionError, SqlError, SqlSyntaxError } from "effect/unstable/sql/SqlError";
 import { expect, it } from "vitest";
-import { failure } from "../src/conversation-request.ts";
+import { failure, refusal } from "../src/conversation-request.ts";
 import { KernelError } from "../src/kernel/boot-channel.ts";
 import { boundedRequest, RequestValidation, layer as bodyLayer } from "../src/request-schema.ts";
 
@@ -63,13 +66,14 @@ it("runs declared payload, query and success schemas with bounded request bodies
 					mode: Schema.optionalKey(Schema.Literals(["ok", "invalid-result", "refused"])),
 				}),
 				success: Schema.Struct({ count: Schema.Int }),
+				error: errorSchemas,
 			}).middleware(RequestValidation),
 		),
 	);
 	let called = 0;
 	const handlers = HttpApiBuilder.group(api, "test", (handlers) =>
 		handlers.handle("echo", ({ payload, query }) =>
-			failure(
+			refusal(
 				Effect.gen(function* () {
 					called++;
 					if (query.mode === "refused") return yield* new KernelError({ code: "author_required" });
@@ -135,4 +139,9 @@ it("preserves binary payload bytes while buffering the shared request boundary",
 	);
 	const bytes = await Effect.runPromise(buffered.arrayBuffer);
 	expect(Array.from(new Uint8Array(bytes))).toEqual([255, 0, 128, 65]);
+});
+
+it("executes retained HttpApi error codecs and OpenAPI status contracts", async () => {
+	const { stdout } = await promisify(execFile)("bun", [new URL("./fixtures/http-errors.ts", import.meta.url).pathname]);
+	expect(stdout).toContain("HTTP error contracts passed");
 });

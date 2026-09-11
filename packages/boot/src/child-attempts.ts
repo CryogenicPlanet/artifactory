@@ -12,7 +12,6 @@ const make = (directory: string) =>
 		const crypto = yield* Crypto.Crypto;
 		const bootId = validateKernelBootId((yield* KernelBoot).id);
 		const receipts = path.join(directory, "attempts");
-		yield* fs.makeDirectory(receipts, { recursive: true, mode: 0o700 });
 		const closed = (id: string, receipt: string) =>
 			Effect.gen(function* () {
 				const expected = path.join(receipts, `${id}.closed`);
@@ -25,6 +24,7 @@ const make = (directory: string) =>
 		return {
 			reserve: (generation: number) =>
 				Effect.gen(function* () {
+					yield* fs.makeDirectory(receipts, { recursive: true, mode: 0o700 });
 					const id = Buffer.from(yield* crypto.randomBytes(32)).toString("hex");
 					const receipt = path.join(receipts, `${id}.closed`);
 					yield* sql`INSERT INTO child_attempts(id,generation,receipt,boot_id) VALUES(${id},${generation},${receipt},${bootId})`;

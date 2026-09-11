@@ -50,7 +50,8 @@ async function fixture(test: TestContext) {
 				return url;
 			})
 			.not.toBe("");
-		await expect.poll(async () => (await fetch(`${url}/health`)).status).toBe(200);
+		// The listener becomes live before the authentication store is ready, including on restart.
+		await expect.poll(async () => (await fetch(`${url}/auth/login`)).status).toBe(200);
 		const code = () => {
 			const value = [...output.matchAll(/\/setup is open, code ([A-F0-9]+)/g)].at(-1)?.[1];
 			if (!value) throw new Error("Missing setup code");

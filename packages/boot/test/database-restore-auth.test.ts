@@ -6,7 +6,19 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
 
-for (const scenario of ["http-challenge", "binding", "semantic", "transaction", "replay", "idempotency"]) {
+for (const scenario of [
+	"http-challenge",
+	"binding",
+	"semantic",
+	"transaction",
+	"mixed-refusal",
+	"replay",
+	"idempotency",
+	"combined-binding",
+	"combined-replay",
+	"combined-http",
+	"combined-late-session",
+]) {
 	test(`database restore authorization: ${scenario}`, async ({ onTestFinished }) => {
 		const directory = await mkdtemp(join(tmpdir(), "comms-restore-auth-test-"));
 		onTestFinished(() => rm(directory, { recursive: true, force: true }));

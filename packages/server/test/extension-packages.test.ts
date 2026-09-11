@@ -11,7 +11,7 @@ it("loads packages in order, rejects a second core override atomically, and reta
 		`export default api=>api.route("GET","/api/package-order",{description:"Package ordering",scope:"read",handler:async()=>Response.json(${JSON.stringify(value)})});`;
 	const packageSource = async (name: string, source?: string) => {
 		const directory = join(seed, "ext", name);
-		await mkdir(directory);
+		await mkdir(directory, { recursive: true });
 		await writeFile(
 			join(directory, "package.json"),
 			JSON.stringify({ name: "ignored-manifest-name", main: "wrong.ts", exports: "./wrong.ts" }),
@@ -21,8 +21,8 @@ it("loads packages in order, rejects a second core override atomically, and reta
 	};
 	await writeFile(
 		join(seed, "ext/core.ts"),
-		`import {CoreApi,coreHandlers} from "../conversation.ts";
-export default api=>{api.mount(CoreApi,coreHandlers);api.route("GET","/api/package-order",{description:"Core package ordering",scope:"read",handler:async()=>Response.json("core file")});};`,
+		`import {Api as CoreApi,coreHandlers} from "./core/api.ts";
+export default api=>{api.mount(CoreApi,coreHandlers(api));api.route("GET","/api/package-order",{description:"Core package ordering",scope:"read",handler:async()=>Response.json("core file")});};`,
 	);
 	await writeFile(join(seed, "ext/a-first.ts"), route("first file"));
 	await packageSource(

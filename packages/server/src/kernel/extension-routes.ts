@@ -10,7 +10,6 @@ export const reserved = (path: string) => {
 			"/api/revert",
 			"/api/generations",
 			"/api/events",
-			"/api/stream",
 			"/api/tokens",
 			"/auth",
 			"/approve",

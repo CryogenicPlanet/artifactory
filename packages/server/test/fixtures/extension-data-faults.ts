@@ -1,3 +1,4 @@
+import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { strict as assert } from "node:assert";
 import { SqlClient } from "effect/unstable/sql";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
@@ -7,8 +8,8 @@ import { initializeBootSchema } from "../../../boot/src/boot-schema.ts";
 import { Events, layer as eventsLayer } from "../../../boot/src/events.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../../boot/src/app-recovery.ts";
 import { BootChannel, KernelError } from "../../src/kernel/boot-channel.ts";
-import { initialize } from "../../src/kernel/database.ts";
-import { Messages, layer as messagesLayer } from "../../src/kernel/messages.ts";
+import { initialize } from "../../src/ext/core/schema.ts";
+import { Messages, layer as messagesLayer } from "../../src/ext/core/messages.ts";
 import { extensionData } from "../../src/kernel/extension-data.ts";
 import { Lifecycle, layer as lifecycleLayer } from "../../src/kernel/lifecycle.ts";
 const program = Effect.gen(function* () {
@@ -116,7 +117,9 @@ const program = Effect.gen(function* () {
 					if (staleRead._tag === "Failure")
 						assert.equal(staleRead.failure._tag === "KernelError" && staleRead.failure.code, "stale_writer");
 					yield* Console.log("EXTENSION_DATA_RECOVERED");
-				}).pipe(Effect.provide(Layer.mergeAll(messagesLayer, lifecycleLayer)));
+				}).pipe(
+					Effect.provide(Layer.mergeAll(messagesLayer.pipe(Layer.provideMerge(publicationLayer)), lifecycleLayer)),
+				);
 			}).pipe(
 				Effect.provide(SqliteClient.layer({ filename: channel.filename, disableWAL: true })),
 				Effect.provideService(BootChannel, channel),

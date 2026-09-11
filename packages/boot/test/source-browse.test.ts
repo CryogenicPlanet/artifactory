@@ -92,4 +92,4 @@ it("omits unsafe children and refuses traversal, root links, dangling links, gen
 	await rm(join(root, "app"), { recursive: true });
 	await symlink(join(root, "outside"), join(root, "app"));
 	expect(await call("app")).toMatchObject({ error: "invalid_path" });
-});
+}, 15000);

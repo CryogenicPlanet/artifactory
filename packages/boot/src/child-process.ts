@@ -3,7 +3,35 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 export class ChildError extends Schema.TaggedError<ChildError>()("ChildError", {
-	code: Schema.String,
+	code: Schema.Literals([
+		"accepted_snapshot_missing",
+		"backup_live_child_required",
+		"boot_shutting_down",
+		"child_closure_unproven",
+		"child_control_failed",
+		"child_exited",
+		"child_receipt_invalid",
+		"child_unresponsive",
+		"cutover_backup_invalid",
+		"cutover_backup_missing",
+		"cutover_recovery_required",
+		"health_failed",
+		"incompatible_schema",
+		"keeper_closure_unproven",
+		"preparation_build_failed",
+		"preparation_build_timeout",
+		"preparation_group_closure_unproven",
+		"preparation_group_probe_failed",
+		"preparation_install_failed",
+		"preparation_install_timeout",
+		"restore_backup_changed",
+		"restore_backup_invalid",
+		"restore_record_missing",
+		"restore_recovery_required",
+		"restore_rehearsal_failed",
+		"restore_safety_backup_missing",
+		"restore_snapshot_missing",
+	]),
 	stderr: Schema.optionalKey(Schema.String),
 }) {
 	get message() {
@@ -143,14 +171,18 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch) 
 		};
 	}).pipe(
 		Effect.onError(() => Scope.close(scope, Exit.void)),
-		Effect.catch((error) =>
-			Effect.gen(function* () {
+		Effect.catchCause((cause) => {
+			const reason = cause.reasons[0];
+			if (cause.reasons.length !== 1 || reason?._tag !== "Fail" || !Schema.is(ChildError)(reason.error))
+				return Effect.failCause(cause);
+			const error = reason.error;
+			return Effect.gen(function* () {
 				return yield* new ChildError({
-					code: Schema.is(ChildError)(error) ? error.code : String(error),
+					code: error.code,
 					stderr: yield* Ref.get(stderr),
 				});
-			}),
-		),
+			});
+		}),
 	);
 });
 export type RunningChild = Effect.Success<ReturnType<typeof launchChild>>;

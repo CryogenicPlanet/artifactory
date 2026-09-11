@@ -1,3 +1,4 @@
+import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
@@ -7,8 +8,8 @@ import { initializeBootSchema } from "../../../boot/src/boot-schema.ts";
 import { Events, layer as eventsLayer } from "../../../boot/src/events.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../../boot/src/app-recovery.ts";
 import { BootChannel, KernelError } from "../../src/kernel/boot-channel.ts";
-import { initialize } from "../../src/kernel/database.ts";
-import { Messages, layer as messagesLayer } from "../../src/kernel/messages.ts";
+import { initialize } from "../../src/ext/core/schema.ts";
+import { Messages, layer as messagesLayer } from "../../src/ext/core/messages.ts";
 
 const program = Effect.gen(function* () {
 	const root = process.argv[2];
@@ -126,7 +127,7 @@ const program = Effect.gen(function* () {
 					assert.equal((yield* find("phantom")).items.length, 0);
 					assert.equal((yield* sql`SELECT * FROM messages_fts WHERE messages_fts MATCH 'phantom'`).length, 0);
 					yield* Console.log("SEARCH_PUBLISHED");
-				}).pipe(Effect.provide(messagesLayer));
+				}).pipe(Effect.provide(messagesLayer.pipe(Layer.provideMerge(publicationLayer))));
 			}).pipe(
 				Effect.provide(SqliteClient.layer({ filename: channel.filename, disableWAL: true })),
 				Effect.provideService(BootChannel, channel),

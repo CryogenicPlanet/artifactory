@@ -2,10 +2,12 @@
 import assert from "node:assert/strict";
 import { BunServices } from "@effect/platform-bun";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
-import { Clock, Console, Effect, Layer, Ref, Schema } from "effect";
+import { Cause, Clock, Console, Effect, Exit, Layer, Schema, Semaphore } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
-import type { Auth } from "../../src/auth.ts";
+import type { SqlError } from "effect/unstable/sql/SqlError";
+import { AuthError } from "../../src/auth.ts";
 import { authentication, sessionCookie } from "../../src/auth-http.ts";
+import { makeDatabaseRestoreAuth } from "../../src/database-restore-auth.ts";
 import { DatabaseRestoreRequest } from "../../src/database-restore-schema.ts";
 import { enrollmentRoute } from "../../src/enrollment-http.ts";
 import { fails, tokenSession } from "./token-session.ts";
@@ -35,10 +37,154 @@ const run = Effect.gen(function* () {
 		});
 	const authorize = (proof: typeof authentication.Type, id = backup, owner = session.id, key?: string) =>
 		auth.authorizeDatabaseRestore({ backup: id, ...(key === undefined ? {} : { idempotency_key: key }) }, proof, owner);
+
+	if (scenario === "mixed-refusal") {
+		const mutex = yield* Semaphore.make(1);
+		const refusal = new AuthError({ code: "authentication_invalid" });
+		const faults: readonly Effect.Effect<unknown, Schema.SchemaError | SqlError>[] = [
+			Effect.die("verifier defect"),
+			Schema.decodeUnknownEffect(Schema.Int)("bad"),
+			sql`SELECT * FROM missing_auth_table`,
+			Effect.interrupt,
+			Effect.void,
+		];
+		for (const extra of faults) {
+			const proof = yield* proofFor();
+			const before = yield* sql`SELECT counter FROM passkeys`;
+			const fault = yield* extra.pipe(Effect.exit);
+			const cause = Exit.isFailure(fault) ? Cause.combine(Cause.fail(refusal), fault.cause) : Cause.fail(refusal);
+			const authorizeRestore = yield* makeDatabaseRestoreAuth(
+				() =>
+					Effect.gen(function* () {
+						// Simulate a verifier failing after its proof and counter writes.
+						yield* sql`DELETE FROM auth_challenges WHERE id=${proof.id}`;
+						yield* sql`UPDATE passkeys SET counter=counter+1`;
+						return yield* Effect.failCause(cause);
+					}),
+				mutex,
+			);
+			const outcome = yield* authorizeRestore({ backup }, proof, session.id).pipe(Effect.exit);
+			assert.ok(Exit.isFailure(outcome));
+			const rollback = Exit.isFailure(fault);
+			assert.deepEqual(yield* sql`SELECT counter FROM passkeys`, rollback ? before : [{ counter: 3 }]);
+			assert.equal((yield* sql`SELECT id FROM auth_challenges WHERE id=${proof.id}`).length, rollback ? 1 : 0);
+			assert.equal((yield* sql`SELECT proof_id FROM db_restore_requests`).length, 0);
+			assert.deepEqual(outcome.cause.reasons, cause.reasons);
+			yield* sql`DELETE FROM auth_challenges WHERE id=${proof.id}`;
+		}
+		return;
+	}
+
+	if (scenario?.startsWith("combined-")) {
+		yield* sql`INSERT INTO generations(n,snapshot_dir,entry_file,status,good,started_at,backup_id)
+ VALUES(1,'/private/source','main.ts','retired',1,0,${backup}), (2,'/private/other','main.ts','retired',1,0,${backup})`;
+		const selection = { generation: 1, withDb: true, idempotency_key: "combined" } as const;
+		const challenge = yield* auth.startGenerationRestoreAssertion(selection, session.id);
+		const proof = yield* Schema.decodeUnknownEffect(authentication)({
+			id: challenge.id,
+			response: device.assertion(challenge.options.challenge, ++counter),
+		});
+		const combined = (input = selection, owner = session.id, value = proof) =>
+			auth.authorizeDatabaseRestore(input, value, owner);
+		if (scenario === "combined-http") {
+			const request = (params: unknown, cookie = session.token, extra: Record<string, string> = {}) =>
+				enrollmentRoute(auth, { rpId: "comms.test", expectedOrigin: "https://comms.test" }).pipe(
+					Effect.provideService(
+						HttpServerRequest.HttpServerRequest,
+						HttpServerRequest.fromWeb(
+							new Request("https://comms.test/_boot/auth/challenge", {
+								method: "POST",
+								headers: { origin: "https://comms.test", cookie: `${sessionCookie}=${cookie}`, ...extra },
+								body: JSON.stringify({ action: "generation.restore", params }),
+							}),
+						),
+					),
+				);
+			assert.equal((yield* request(selection))?.status, 200);
+			for (const input of [
+				{ generation: 1 },
+				{ generation: 0, withDb: true },
+				{ generation: 1.5, withDb: true },
+				{ generation: Number.MAX_SAFE_INTEGER + 1, withDb: true },
+				{ generation: 1, withDb: false },
+				{ ...selection, backup },
+				{ ...selection, path: "app/main.ts" },
+				{ ...selection, idempotency_key: "" },
+			])
+				assert.equal((yield* request(input))?.status, 400);
+			assert.equal((yield* request(selection, ""))?.status, 401);
+			assert.equal((yield* request(selection, session.token, { authorization: "Bearer invalid" }))?.status, 401);
+			assert.equal((yield* request(selection, session.token, { origin: "https://evil.test" }))?.status, 403);
+			return;
+		}
+		if (scenario === "combined-late-session") {
+			yield* sql`CREATE TRIGGER expire_during_proof AFTER UPDATE OF counter ON passkeys BEGIN UPDATE sessions SET expires_at=0; END`;
+			yield* fails(combined(), "session_invalid");
+			assert.equal((yield* sql`SELECT * FROM db_restore_requests`).length, 0);
+			assert.equal((yield* sql`SELECT * FROM auth_challenges WHERE id=${proof.id}`).length, 0);
+			return;
+		}
+		if (scenario === "combined-binding") {
+			yield* fails(
+				auth.authorizeDatabaseRestore({ ...selection, generation: 2 }, proof, session.id),
+				"challenge_invalid",
+			);
+			yield* fails(authorize(proof, backup, session.id, "combined"), "challenge_invalid");
+			yield* fails(
+				auth.authorizeDatabaseRestore({ ...selection, idempotency_key: "changed" }, proof, session.id),
+				"challenge_invalid",
+			);
+			yield* fails(combined(selection, "other-session"), "session_invalid");
+			yield* sql`UPDATE backups SET published_through=8 WHERE id=${backup}`;
+			yield* fails(combined(), "challenge_invalid");
+			yield* sql`UPDATE backups SET published_through=7 WHERE id=${backup}`;
+			yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through) VALUES(${alternate},'/private/alternate','pre-flip',64,0,7)`;
+			yield* sql`UPDATE generations SET backup_id=${alternate} WHERE n=1`;
+			yield* fails(combined(), "challenge_invalid");
+			yield* sql`UPDATE generations SET backup_id=${backup},good=0 WHERE n=1`;
+			yield* fails(combined(), "generation_not_restorable");
+			yield* sql`UPDATE generations SET good=1,snapshot_dir=NULL WHERE n=1`;
+			yield* fails(combined(), "generation_not_restorable");
+			yield* sql`UPDATE generations SET snapshot_dir='/private/source',backup_id=NULL WHERE n=1`;
+			yield* fails(combined(), "backup_not_restorable");
+			yield* sql`UPDATE generations SET backup_id=${backup} WHERE n=1`;
+			const receipt = yield* combined();
+			assert.equal(receipt.source_generation, 1);
+			assert.equal(receipt.generation, null);
+			assert.equal(receipt.backup, backup);
+			assert.equal(receipt.restored_to_seq, 7);
+			assert.equal(receipt.prior_generation, null);
+			assert.equal(receipt.source_batch, null);
+			return;
+		}
+		const receipt = yield* combined();
+		yield* sql`UPDATE db_restore_requests SET phase='restored'`;
+		// Catalog pruning cannot make a terminal receipt execute again or require a new proof.
+		yield* sql`DELETE FROM backups`;
+		yield* sql`UPDATE generations SET snapshot_dir=NULL,backup_id=NULL`;
+		assert.equal((yield* combined()).phase, "restored");
+		const unrelated = yield* proofFor(backup, session.id, "combined");
+		assert.equal((yield* combined(selection, session.id, unrelated)).proof_id, receipt.proof_id);
+		assert.equal((yield* sql`SELECT * FROM auth_challenges WHERE id=${unrelated.id}`).length, 1);
+		yield* fails(authorize(unrelated, backup, session.id, "combined"), "idempotency_conflict");
+		yield* fails(
+			auth.authorizeDatabaseRestore({ ...selection, generation: 2 }, unrelated, session.id),
+			"idempotency_conflict",
+		);
+		yield* fails(
+			combined(selection, session.id, {
+				...proof,
+				response: { ...proof.response, response: { ...proof.response.response, signature: "AAAA" } },
+			}),
+			"assertion_invalid",
+		);
+		yield* auth.logout(session.token);
+		yield* fails(combined(), "session_invalid");
+		return;
+	}
 	if (scenario === "http-challenge") {
-		const store = yield* Ref.make<Auth["Service"] | null>(auth);
 		const request = (params: unknown, cookie = session.token, extra: Record<string, string> = {}) =>
-			enrollmentRoute(store, { rpId: "comms.test", expectedOrigin: "https://comms.test" }).pipe(
+			enrollmentRoute(auth, { rpId: "comms.test", expectedOrigin: "https://comms.test" }).pipe(
 				Effect.provideService(
 					HttpServerRequest.HttpServerRequest,
 					HttpServerRequest.fromWeb(

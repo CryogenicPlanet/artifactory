@@ -104,50 +104,31 @@ it("wait excludes own messages, advances empty cursor, and omitted since starts 
 		"wat=1",
 	])
 		expect((await app.get(`/api/events?${query}`)).status, query).toBe(400);
-	expect((await app.get("/api/stream", { headers: { "last-event-id": "nope" } })).status).toBe(400);
-	expect((await app.get("/api/stream", { headers: { "x-no-read": "1" } })).status).toBe(403);
+	expect((await app.get("/_boot/stream")).status).toBe(404);
+	expect((await app.get("/api/stream")).status).toBe(404);
+	expect((await app.get("/api/events?request_actor=other")).status).toBe(400);
+	expect((await app.get("/api/events", { headers: { "x-no-read": "1" } })).status).toBe(403);
 }, 10000);
 
-it("SSE resumes, survives child retirement, emits heartbeats, and disconnect stops polling", async (test) => {
+it("boot long-poll survives child retirement, emits heartbeats, and disconnect releases its subscription", async (test) => {
 	const app = await launch(test);
-	await app.post("/emit", event());
-	await app.post("/emit", event({ instance: "caller-family" }));
-	const longBody = app.get("/api/events?since=2&types=no.match&wait=11").then((response) => response.text());
+	const longBody = app.get("/api/events?since=0&types=no.match&wait=11").then((response) => response.text());
 	const controller = new AbortController();
 	test.onTestFinished(() => controller.abort());
-	const response = await app.get("/api/stream?limit=1", {
-		headers: { "last-event-id": "1" },
-		signal: controller.signal,
-	});
-	expect(response.headers.get("content-type")).toContain("text/event-stream");
+	const response = await app.get("/api/events?wait=60", { signal: controller.signal });
 	const reader = response.body?.getReader();
-	if (!reader) throw new Error("Missing stream");
-	let received = "";
-	const readUntil = async (needle: string) => {
-		while (!received.includes(needle)) {
-			const part = await reader.read();
-			if (part.done) throw new Error("Stream ended");
-			received += new TextDecoder().decode(part.value);
-		}
-	};
-	await readUntil("id: 2\n");
-	expect(received).not.toContain("id: 1\n");
-	await app.post("/retire", {});
-	await app.post("/emit", event());
-	await readUntil("id: 3\n");
-	await readUntil(": heartbeat\n\n");
-	const started = performance.now();
-	received = "";
-	await readUntil(": heartbeat\n\n");
-	expect(performance.now() - started).toBeGreaterThan(8500);
+	if (!reader) throw new Error("Missing wait body");
+	await reader.read();
 	controller.abort();
 	await reader.cancel().catch(() => {});
-	await delay(300);
+	await app.post("/retire", {});
+	await app.post("/emit", event());
 	const body = await longBody;
 	expect(body.startsWith("\n\n")).toBe(true);
-	expect(JSON.parse(body)).toEqual({ items: [], cursor: 3, timed_out: true, drained: false });
+	expect(JSON.parse(body)).toEqual({ items: [], cursor: 1, timed_out: true, drained: false });
 	const stopped = await json(await app.get("/stats"));
-	await delay(300);
+	await app.post("/emit", event());
+	await delay(200);
 	expect(await json(await app.get("/stats"))).toEqual(stopped);
 }, 15000);
 
@@ -170,7 +151,7 @@ it("revoked credentials and captured expiry stop an open stream before new event
 		const controller = new AbortController();
 		test.onTestFinished(() => controller.abort());
 		const responses = await Promise.all(
-			["/api/stream", "/api/events?wait=2"].map((path) => app.get(path, { headers, signal: controller.signal })),
+			["/api/events?wait=2"].map((path) => app.get(path, { headers, signal: controller.signal })),
 		);
 		const readers = responses.map((response) => {
 			const reader = response.body?.getReader();

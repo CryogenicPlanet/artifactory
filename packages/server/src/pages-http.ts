@@ -1,8 +1,8 @@
-import { Messages } from "./kernel/messages.ts";
+import { Messages } from "./ext/core/messages.ts";
 import { Cause, Effect, FileSystem, Layer, Option, Scope, Stream } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, Mime } from "effect/unstable/http";
 import { failure, identity } from "./conversation-request.ts";
-import { PageRejected, Pages } from "./kernel/pages.ts";
+import { PageRejected, Pages } from "./ext/core/pages.ts";
 import { escapeHtml, pageDocument, pageHref } from "./page-markdown.ts";
 import { routes as assetRoutes } from "./page-assets.ts";
 

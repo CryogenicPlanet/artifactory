@@ -2,7 +2,7 @@ import type { OpenAPISpec } from "effect/unstable/httpapi/OpenApi";
 import { Crypto, Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { identity } from "./conversation-request.ts";
-import { Pages } from "./kernel/pages.ts";
+import { Pages } from "./ext/core/pages.ts";
 import { escapeHtml } from "./page-markdown.ts";
 
 export const orientation = (markdownOnly: boolean, endpoints: OpenAPISpec["paths"]) =>

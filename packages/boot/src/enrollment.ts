@@ -1,3 +1,4 @@
+import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -43,9 +44,6 @@ const tokenRow = Schema.Struct({
 	expires_at: Schema.Int,
 	revoked_at: Schema.NullOr(Schema.Int),
 });
-const denied = (code: string) => Effect.fail(new AuthError({ code }));
-const randomToken = (crypto: Crypto.Crypto) =>
-	Effect.map(crypto.randomBytes(32), (bytes) => Buffer.from(bytes).toString("base64url"));
 
 /** Enrollment and collection share the passkey service's admission mutex and boot transaction. */
 export const makeEnrollment = <E, R>(
@@ -56,15 +54,11 @@ export const makeEnrollment = <E, R>(
 		const sql = yield* SqlClient.SqlClient;
 		const crypto = yield* Crypto.Crypto;
 		const events = yield* Events;
-		const random = randomToken(crypto);
-		const hash = (value: string) =>
-			crypto
-				.digest("SHA-256", new TextEncoder().encode(value))
-				.pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
+		const { hash, random } = authSecrets(crypto);
 		const read = (id: string) =>
 			sql`SELECT * FROM enrollments WHERE id=${id}`.pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(enrollmentRow))),
-				Effect.flatMap((rows) => (rows[0] ? Effect.succeed(rows[0]) : denied("enrollment_invalid"))),
+				Effect.flatMap((rows) => (rows[0] ? Effect.succeed(rows[0]) : refuse("enrollment_invalid"))),
 			);
 		const enrollmentInfo = (id: string) =>
 			Effect.gen(function* () {
@@ -91,7 +85,7 @@ export const makeEnrollment = <E, R>(
 					!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(input.kind) ||
 					!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/.test(input.host)
 				)
-					return yield* denied("invalid_request");
+					return yield* refuse("invalid_request");
 				const id = `e_${yield* random}`,
 					secret = yield* random,
 					family = `f_${yield* random}`;
@@ -107,69 +101,64 @@ export const makeEnrollment = <E, R>(
 			});
 		const decideEnrollment = (params: EnrollmentDecision, proof: AssertionProof) =>
 			mutex.withPermit(
-				sql
-					.withTransaction(
-						Effect.gen(function* () {
-							if (!validDecision(params)) return yield* denied("invalid_request");
-							yield* verify(params, proof);
-							// A valid proof is consumed even if the pending enrollment became terminal. SQL failures still roll everything back.
-							return yield* Effect.gen(function* () {
-								const row = yield* read(params.id),
-									now = yield* Clock.currentTimeMillis;
-								if (row.expires_at <= now) return yield* denied("enrollment_expired");
-								if (row.status !== "pending") return yield* denied("enrollment_decided");
-								const scopes = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(
-									["read", "write", "fs"].filter((scope) => params.scopes.some((value) => value === scope)),
-								);
-								const access = params.long_lived ? 604800 : 86400,
-									refresh = params.long_lived ? 7776000 : 2592000;
-								yield* sql`UPDATE enrollments SET status=${params.decision === "approve" ? "approved" : "denied"},scopes=${scopes},access_seconds=${access},refresh_seconds=${refresh} WHERE id=${params.id}`;
-								yield* events.writeBoot({
-									at: now,
-									type: params.decision === "approve" ? "enrollment.approved" : "enrollment.denied",
-									level: "info",
-									actor: "rahul",
-									instance: null,
-									generation: 0,
-									request_id: null,
-									topic: null,
-									message_id: null,
-									payload: {
-										id: params.id,
-										agent: row.agent_name,
-										label: row.host,
-										scopes: params.scopes,
-										long_lived: params.long_lived,
-									},
-								});
-								return { status: params.decision === "approve" ? "approved" : "denied" };
-							}).pipe(Effect.catchTag("AuthError", (error) => Effect.succeed(error)));
-						}),
-					)
-					.pipe(
-						// Keep only semantic refusal outside the committed proof transaction.
-						// oxlint-disable-next-line effecttsgo/flat-map-conditional-to-filter-or-fail
-						Effect.flatMap((result) => (Schema.is(AuthError)(result) ? Effect.fail(result) : Effect.succeed(result))),
-					),
+				committed(
+					sql,
+					Effect.gen(function* () {
+						if (!validDecision(params)) return yield* refuse("invalid_request");
+						yield* verify(params, proof);
+						// A valid proof is consumed even if the pending enrollment became terminal. SQL failures still roll everything back.
+						return yield* Effect.gen(function* () {
+							const row = yield* read(params.id),
+								now = yield* Clock.currentTimeMillis;
+							if (row.expires_at <= now) return yield* refuse("enrollment_expired");
+							if (row.status !== "pending") return yield* refuse("enrollment_decided");
+							const scopes = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(
+								["read", "write", "fs"].filter((scope) => params.scopes.some((value) => value === scope)),
+							);
+							const access = params.long_lived ? 604800 : 86400,
+								refresh = params.long_lived ? 7776000 : 2592000;
+							yield* sql`UPDATE enrollments SET status=${params.decision === "approve" ? "approved" : "denied"},scopes=${scopes},access_seconds=${access},refresh_seconds=${refresh} WHERE id=${params.id}`;
+							yield* events.writeBoot({
+								at: now,
+								type: params.decision === "approve" ? "enrollment.approved" : "enrollment.denied",
+								level: "info",
+								actor: "rahul",
+								instance: null,
+								generation: 0,
+								request_id: null,
+								topic: null,
+								message_id: null,
+								payload: {
+									id: params.id,
+									agent: row.agent_name,
+									label: row.host,
+									scopes: params.scopes,
+									long_lived: params.long_lived,
+								},
+							});
+							return { status: params.decision === "approve" ? "approved" : "denied" };
+						}).pipe(captureRefusal(Schema.is(AuthError)));
+					}),
+				),
 			);
 		const collectEnrollment = (id: string, secret: string) =>
 			mutex.withPermit(
 				sql.withTransaction(
 					Effect.gen(function* () {
-						if (!/^[A-Za-z0-9_-]{43}$/.test(secret)) return yield* denied("device_secret_invalid");
+						if (!/^[A-Za-z0-9_-]{43}$/.test(secret)) return yield* refuse("device_secret_invalid");
 						const digest = yield* hash(secret);
 						const rows = yield* sql`SELECT * FROM enrollments WHERE id=${id} AND device_secret_hash=${digest}`.pipe(
 							Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(enrollmentRow))),
 						);
 						const row = rows[0];
-						if (!row) return yield* denied("device_secret_invalid");
-						if (row.status === "collected") return yield* denied("already_collected");
-						if (row.status === "denied") return yield* denied("enrollment_denied");
+						if (!row) return yield* refuse("device_secret_invalid");
+						if (row.status === "collected") return yield* refuse("already_collected");
+						if (row.status === "denied") return yield* refuse("enrollment_denied");
 						const now = yield* Clock.currentTimeMillis;
-						if (row.expires_at <= now) return yield* denied("enrollment_expired");
+						if (row.expires_at <= now) return yield* refuse("enrollment_expired");
 						if (row.status === "pending") return { status: "pending" as const, expires_at: row.expires_at };
 						if (row.status !== "approved" || !row.scopes || !row.access_seconds || !row.refresh_seconds)
-							return yield* denied("enrollment_invalid");
+							return yield* refuse("enrollment_invalid");
 						const scopes = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Array(Scope)))(row.scopes);
 						const access = yield* random,
 							refresh = yield* random,
@@ -203,7 +192,7 @@ export const makeEnrollment = <E, R>(
 		const authenticateAccess = (token: string) =>
 			sql.withTransaction(
 				Effect.gen(function* () {
-					if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return yield* denied("token_invalid");
+					if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return yield* refuse("token_invalid");
 					const digest = yield* hash(token),
 						now = yield* Clock.currentTimeMillis;
 					const rows =
@@ -211,8 +200,8 @@ export const makeEnrollment = <E, R>(
 							Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(tokenRow))),
 						);
 					const row = rows[0];
-					if (!row || row.revoked_at !== null) return yield* denied("token_invalid");
-					if (row.expires_at <= now) return yield* denied("token_expired");
+					if (!row || row.revoked_at !== null) return yield* refuse("token_invalid");
+					if (row.expires_at <= now) return yield* refuse("token_expired");
 					yield* sql`UPDATE tokens SET last_used_at=${now} WHERE id=${row.id}`;
 					yield* expireRefreshReceipts(sql, now);
 					return {

@@ -1,11 +1,11 @@
-import { Effect, Ref, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { EnrollmentStatus } from "./account-queries.ts";
-import { AuthError } from "./auth.ts";
-import { authErrorResponse, authFailure, humanSession, type AuthStore } from "./auth-http.ts";
+import { AuthError, type Auth } from "./auth.ts";
+import { authFailure, humanSession } from "./auth-http.ts";
 
 /** Human-only account metadata, available without a healthy app or a fresh assertion. */
-export const accountRoute = (store: AuthStore) =>
+export const accountRoute = (auth: Auth["Service"]) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const url = new URL(request.url, "http://localhost");
@@ -13,8 +13,6 @@ export const accountRoute = (store: AuthStore) =>
 		if (request.method !== "GET" || (!enrollments && url.pathname !== "/_boot/tokens")) return null;
 		return yield* authFailure(
 			Effect.gen(function* () {
-				const auth = yield* Ref.get(store);
-				if (!auth) return authErrorResponse("boot_unavailable", 503);
 				yield* humanSession(auth, request);
 				const params = url.searchParams;
 				const allowed = enrollments ? ["status", "limit", "before"] : ["limit", "before"];

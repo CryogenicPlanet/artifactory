@@ -1,12 +1,18 @@
-import { Cause, Effect, Ref, Schema, Stream } from "effect";
+import { isSqlError } from "effect/unstable/sql/SqlError";
+import { isHttpClientError } from "effect/unstable/http/HttpClientError";
+import { ChildError } from "./child-process.ts";
+import { Cause, Effect, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth } from "./auth.ts";
 import { assertionProof, authenticate, body, humanSession } from "./auth-http.ts";
+import { databaseRestoreResponse } from "./database-restore-http.ts";
+import type { DatabaseRestore } from "./database-restore.ts";
 import { FreezeTimeout, type Cutover } from "./cutover.ts";
+import type { BootMetrics } from "./metrics.ts";
 import { EditAuthority, EditRejected, type EditLock, type Ownership } from "./edit-lock.ts";
 import type { VerifiedIdentity } from "./enrollment.ts";
 import { BreakLock } from "./lock-break-schema.ts";
-import type { PublicPages } from "./public-pages.ts";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { SourceFiles } from "./source-files.ts";
 import { ArtifactRetentionRejected } from "./artifact-retention.ts";
 import { StorageRejected } from "./storage-headroom.ts";
@@ -17,9 +23,10 @@ export interface Editing {
 	readonly source: SourceFiles["Service"];
 	readonly lock: EditLock["Service"];
 	readonly cutover: Cutover;
-	readonly pages: PublicPages["Service"];
+	readonly withPagePublication: <A, E, R>(
+		effect: Effect.Effect<A, E, R>,
+	) => Effect.Effect<A, E | SourceRejected | SqlError | Schema.SchemaError, R>;
 }
-export type EditStore = Ref.Ref<Editing | null>;
 const errorResponse = (code: string, status: number, holder?: unknown) =>
 	HttpServerResponse.jsonUnsafe(
 		{
@@ -31,9 +38,7 @@ const errorResponse = (code: string, status: number, holder?: unknown) =>
 						? "Inspect the boot-owned artifact paths before retrying; no unsafe path was deleted."
 						: status === 507
 							? "Free space in DATA_DIR or expand its volume, then retry. Protected recovery artifacts are retained."
-							: code === "topic_archived"
-								? "Unarchive the topic and its archived ancestors before changing its pages."
-								: "GET /_boot/status for diagnostics. POST /api/lock before app edits; repair staged source and POST /api/reload to retry.",
+							: "GET /_boot/status for diagnostics. POST /api/lock before app edits; repair staged source and POST /api/reload to retry.",
 				retriable: status === 503,
 			},
 			...(holder === undefined ? {} : { lock: holder }),
@@ -41,7 +46,13 @@ const errorResponse = (code: string, status: number, holder?: unknown) =>
 		{ status, headers: { "cache-control": "no-store" } },
 	);
 
-export const editRoute = (store: EditStore, auth: Auth["Service"], identity: VerifiedIdentity) =>
+export const editRoute = (
+	editing: Editing,
+	auth: Auth["Service"],
+	identity: VerifiedIdentity,
+	metrics: BootMetrics,
+	restore: DatabaseRestore,
+) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const url = new URL(request.url, "http://localhost");
@@ -54,8 +65,6 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 		)
 			return null;
 		if (!identity.scopes.includes("fs")) return yield* new AuthError({ code: "scope_required" });
-		const editing = yield* Ref.get(store);
-		if (!editing) return errorResponse("editing_unavailable", 503);
 		if (!editing.writable && (request.method !== "GET" || !route.startsWith("/_boot/fs/")))
 			return errorResponse("editing_unavailable", 503);
 		return yield* Effect.gen(function* () {
@@ -104,7 +113,26 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 						withDb: Schema.optionalKey(Schema.Boolean),
 					}),
 				);
-				if (input.withDb === true) return errorResponse("database_restore_unavailable", 501);
+				if (input.withDb === true) {
+					if (
+						input.generation === undefined ||
+						!Number.isSafeInteger(input.generation) ||
+						input.generation < 1 ||
+						input.path !== undefined ||
+						input.batch !== undefined ||
+						input.version !== undefined
+					)
+						return errorResponse("revert_selection_invalid", 400);
+					const session = yield* humanSession(auth, request);
+					const proof = yield* assertionProof(request);
+					const key = request.headers["idempotency-key"];
+					return yield* databaseRestoreResponse(
+						restore,
+						{ generation: input.generation, withDb: true, ...(key === undefined ? {} : { idempotency_key: key }) },
+						proof,
+						session.id,
+					);
+				}
 				if (
 					[input.path, input.batch, input.version, input.generation].filter((value) => value !== undefined).length >
 						1 ||
@@ -124,23 +152,25 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 						return yield* new EditRejected({ code: "locked", holder: known, transitions: [] });
 					return HttpServerResponse.jsonUnsafe(yield* authoritative(editing.cutover.reload(owner(), { undo })));
 				}
-				return yield* authoritative(
-					Effect.acquireUseRelease(
-						editing.source.preparePageUndo(identity.agent, undo),
-						(id) =>
-							Effect.gen(function* () {
-								if (id !== null) {
-									yield* editing.pages.withWrite(yield* editing.source.proposalPaths(id), editing.source.publish(id));
-									return HttpServerResponse.jsonUnsafe({ published: true, batch: id });
-								}
-								if (!known) return yield* new EditRejected({ code: "lock_required", holder: null, transitions: [] });
-								if (known.holder_family !== identity.id)
-									return yield* new EditRejected({ code: "locked", holder: known, transitions: [] });
-								return HttpServerResponse.jsonUnsafe(yield* editing.cutover.reload(owner(), { undo }));
-							}),
-						(id) => (id === null ? Effect.void : editing.source.discard(id).pipe(Effect.ignore)),
-					),
-				);
+				if (yield* editing.source.undoTargetsPages(undo))
+					return yield* authoritative(
+						editing.withPagePublication(
+							Effect.acquireUseRelease(
+								editing.source.preparePageUndo(identity.agent, undo),
+								(id) =>
+									Effect.gen(function* () {
+										if (id === null) return yield* new SourceRejected({ code: "batch_missing", path: "pages" });
+										yield* editing.source.publish(id);
+										return HttpServerResponse.jsonUnsafe({ published: true, batch: id });
+									}),
+								(id) => (id === null ? Effect.void : editing.source.discard(id).pipe(Effect.ignore)),
+							),
+						),
+					);
+				if (!known) return yield* new EditRejected({ code: "lock_required", holder: null, transitions: [] });
+				if (known.holder_family !== identity.id)
+					return yield* new EditRejected({ code: "locked", holder: known, transitions: [] });
+				return HttpServerResponse.jsonUnsafe(yield* authoritative(editing.cutover.reload(owner(), { undo })));
 			}
 			if ([...url.searchParams.keys()].some((key) => !["reload", "check", "release", "history"].includes(key)))
 				return errorResponse("unsupported_query", 400);
@@ -189,8 +219,7 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 				if (url.search) return errorResponse("unsupported_query", 400);
 				const content = request.method === "PUT" ? yield* readBytes(request, name) : null;
 				return yield* authoritative(
-					editing.pages.withWrite(
-						[name],
+					editing.withPagePublication(
 						Effect.acquireUseRelease(
 							editing.source.preparePages(identity.agent, [{ path: name, content }]),
 							(id) =>
@@ -238,12 +267,34 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 				),
 			);
 		}).pipe(
-			Effect.catch((error) => {
+			Effect.catchCause((cause) => {
+				if (Cause.hasInterruptsOnly(cause))
+					return Effect.failCause(Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason)));
+				const expected =
+					cause.reasons.length > 0 &&
+					cause.reasons.every(
+						(reason) =>
+							reason._tag === "Fail" &&
+							(Schema.is(StorageRejected)(reason.error) ||
+								Schema.is(ArtifactRetentionRejected)(reason.error) ||
+								Schema.is(FreezeTimeout)(reason.error) ||
+								Schema.is(EditRejected)(reason.error) ||
+								Schema.is(SourceRejected)(reason.error) ||
+								Schema.is(AuthError)(reason.error) ||
+								Schema.is(ChildError)(reason.error) ||
+								Cause.isTimeoutError(reason.error) ||
+								isHttpClientError(reason.error) ||
+								(isSqlError(reason.error) && reason.error.isRetryable)),
+					);
+				if (!expected) return Effect.succeed(errorResponse("handler_failed", 500));
+				const found = Cause.findError(cause);
+				const error = found._tag === "Success" ? found.success : undefined;
 				if (Schema.is(StorageRejected)(error) || Schema.is(ArtifactRetentionRejected)(error))
 					return Effect.succeed(errorResponse(error.code, error.code === "unsafe_artifact_path" ? 409 : 507));
 				if (Schema.is(FreezeTimeout)(error)) return Effect.succeed(errorResponse(error.code, 503));
 				if (Schema.is(EditRejected)(error))
-					return Effect.succeed(
+					return Effect.as(
+						error.code === "locked" || error.code === "cutover_in_flight" ? metrics.lockWait : Effect.void,
 						errorResponse(error.code, error.code === "authority_expired" ? 401 : 423, error.holder),
 					);
 				if (Schema.is(SourceRejected)(error))
@@ -252,14 +303,7 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 							error.code,
 							error.code === "publication_pending"
 								? 503
-								: [
-											"stale_base",
-											"ambiguous_anchor",
-											"anchor_not_found",
-											"idempotency_conflict",
-											"topic_deleted",
-											"topic_archived",
-									  ].includes(error.code)
+								: ["stale_base", "ambiguous_anchor", "anchor_not_found", "idempotency_conflict"].includes(error.code)
 									? 409
 									: 400,
 						),
@@ -268,10 +312,6 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 					return Effect.succeed(errorResponse(error.code, error.code === "invalid_request" ? 400 : 401));
 				return Effect.succeed(errorResponse("edit_unavailable", 503));
 			}),
-			Effect.catchCauseIf(
-				(cause) => !Cause.hasInterruptsOnly(cause),
-				() => Effect.succeed(errorResponse("edit_unavailable", 503)),
-			),
 		);
 	});
 

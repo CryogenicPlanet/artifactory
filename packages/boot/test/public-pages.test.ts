@@ -5,23 +5,17 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
-it("keeps grant reads independent of write gates while serializing publication with app policy", async (test) => {
+it("checks exact public grants and safe paths without an app store or publication fence", async (test) => {
 	const root = await mkdtemp(join(tmpdir(), "comms-public-policy-"));
 	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
 	const result = await promisify(execFile)("bun", [join(import.meta.dirname, "fixtures/public-pages.ts"), root]);
 	expect(JSON.parse(result.stdout)).toEqual({
-		beforeSettlement: 0,
-		settled: "published once",
-		writes: 1,
-		stuck: "Failure",
 		initial: true,
-		blocked: "Success",
-		after: true,
-		reservation: "Failure",
+		directory: true,
+		childPrivate: true,
+		unsafe: true,
+		pending: true,
 		deleted: true,
-		refused: "Failure",
-		replacement: false,
-		missing: "Success",
 		notCreated: true,
 	});
 });

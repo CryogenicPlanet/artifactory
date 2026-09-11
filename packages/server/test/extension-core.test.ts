@@ -77,7 +77,10 @@ api.mount(definition,HttpApiBuilder.group(definition,"mixed-input",h=>h.handle("
 			expect.objectContaining({
 				name: "core.ts",
 				status: "loaded",
-				registrations: expect.arrayContaining([expect.objectContaining({ path: "/api/messages" })]),
+				registrations: expect.arrayContaining([
+					expect.objectContaining({ path: "/api/messages" }),
+					expect.objectContaining({ path: "/api/me" }),
+				]),
 			}),
 			expect.objectContaining({ name: "a-typed.ts", status: "loaded" }),
 			expect.objectContaining({
@@ -92,6 +95,19 @@ api.mount(definition,HttpApiBuilder.group(definition,"mixed-input",h=>h.handle("
 			}),
 		]),
 	);
+	// Core and extension writes must contend on the same publication instance.
+	const concurrent = await Promise.all([
+		app.post("/api/messages", { topic: "core", body: "concurrent core write" }, cookie),
+		app.post("/api/typed", { value: "concurrent extension write" }, cookie),
+	]);
+	expect(concurrent.map((response) => response.status)).toEqual([200, 200]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE body='concurrent core write'")).toEqual([
+		{ body: "concurrent core write" },
+	]);
+	expect(await fixture.sql("SELECT value FROM extension_entries WHERE value='concurrent extension write'")).toEqual([
+		{ value: "concurrent extension write" },
+	]);
+	expect((await get("/api/me")).status).toBe(200);
 	const root = await get("/api/topics?mark=0");
 	expect(root.status).toBe(200);
 	expect(await root.json()).toMatchObject({ path: "" });

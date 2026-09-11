@@ -1,5 +1,6 @@
 import { Crypto, Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { Events } from "./events.ts";
 import { Batch, SourceRejected, Version, type Change } from "./source-schema.ts";
 import { sameImage, type sourceIO } from "./source-io.ts";
 import type { TreeEntry } from "./source-tree-publication.ts";
@@ -16,6 +17,7 @@ export interface UndoSelection {
 export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Success<ReturnType<typeof sourceIO>>) {
 	const sql = yield* SqlClient.SqlClient;
 	const crypto = yield* Crypto.Crypto;
+	const events = yield* Events;
 	const pending = sql`SELECT * FROM source_batches WHERE state = 'publishing'`.pipe(
 		Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Batch))),
 		Effect.map((rows) => rows[0] ?? null),
@@ -106,6 +108,27 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
 				yield* recordVersions(batch, changes);
+				for (const change of changes) {
+					if (sameImage(change.before, change.desired)) continue;
+					yield* events.writeBoot({
+						at: batch.at,
+						type: "fs.write",
+						level: "info",
+						actor: batch.agent,
+						instance: null,
+						generation: 0,
+						request_id: null,
+						topic: null,
+						message_id: null,
+						payload: {
+							batch: batch.id,
+							path: change.path,
+							before_sha: change.before.sha,
+							sha: change.desired.sha,
+							deleted: change.desired.content === null && !change.desired.directory,
+						},
+					});
+				}
 				yield* sql`UPDATE source_batches SET state = 'published' WHERE id = ${batch.id}`;
 				yield* sql`DELETE FROM source_changes WHERE batch = ${batch.id}`;
 			}),

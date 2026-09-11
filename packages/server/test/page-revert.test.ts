@@ -1,8 +1,21 @@
+import { setTimeout as delay } from "node:timers/promises";
+import { Schema } from "effect";
 import { request } from "node:http";
 import { symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
+
+// Background app mutations can reserve between calls; retry only the explicit refusal before publication.
+const pagePublication = async (send: () => Promise<Response>) => {
+	const pending = Schema.Struct({ error: Schema.Struct({ code: Schema.Literal("publication_pending") }) });
+	for (let attempt = 0; ; attempt++) {
+		const response = await send();
+		if (attempt === 4 || response.status !== 503 || !Schema.is(pending)(await response.clone().json())) return response;
+		await response.body?.cancel();
+		await delay(20);
+	}
+};
 
 it("undoes page paths, batches and retained deletions without taking or disturbing the app lock", async (test) => {
 	const fixture = await conversation(test),
@@ -12,19 +25,25 @@ it("undoes page paths, batches and retained deletions without taking or disturbi
 	await app.ready(cookie);
 	const generations = await fixture.sql("SELECT n FROM generations", "boot.db");
 	const write = (content: string | null) =>
-		fetch(`${app.url}/api/fs/pages/undo/index.md`, {
-			method: content === null ? "DELETE" : "PUT",
-			headers: { cookie, origin: "https://comms.test" },
-			...(content === null ? {} : { body: content }),
-		});
+		pagePublication(() =>
+			fetch(`${app.url}/api/fs/pages/undo/index.md`, {
+				method: content === null ? "DELETE" : "PUT",
+				headers: { cookie, origin: "https://comms.test" },
+				...(content === null ? {} : { body: content }),
+			}),
+		);
 	const read = () => fetch(`${app.url}/api/fs/pages/undo/index.md`, { headers: { cookie } });
 	expect((await write("first")).status).toBe(200);
-	expect(await (await app.post("/api/revert", { path: "pages/undo/index.md" }, cookie)).json()).toMatchObject({
+	expect(
+		await (await pagePublication(() => app.post("/api/revert", { path: "pages/undo/index.md" }, cookie))).json(),
+	).toMatchObject({
 		published: true,
 	});
 	expect((await read()).status).toBe(404);
 	expect(await fixture.sql("SELECT * FROM edit_lock", "boot.db")).toEqual([]);
-	const created = await (await write("second")).json();
+	const createdResponse = await write("second");
+	expect(createdResponse.status).toBe(200);
+	const created = await createdResponse.json();
 	const history = await (await fetch(`${app.url}/api/fs/pages/undo/index.md?history`, { headers: { cookie } })).json();
 	const createdVersion = history.items[0].id;
 	expect((await write(null)).status).toBe(200);
@@ -50,7 +69,9 @@ it("undoes page paths, batches and retained deletions without taking or disturbi
 		[{ version: createdVersion }, "second"],
 		[{ batch: created.batch }, null],
 	] as const) {
-		expect(await (await app.post("/_boot/revert", selection, cookie)).json()).toMatchObject({ published: true });
+		expect(await (await pagePublication(() => app.post("/_boot/revert", selection, cookie))).json()).toMatchObject({
+			published: true,
+		});
 		const response = await read();
 		expect(expected === null ? response.status : await response.text()).toBe(expected === null ? 404 : expected);
 	}
@@ -69,11 +90,13 @@ it("keeps a page undo target across restart and never confuses omitted history b
 	const cookie = await app.login();
 	await app.ready(cookie);
 	const put = (url: string, content: string) =>
-		fetch(`${url}/api/fs/pages/undo/note.md`, {
-			method: "PUT",
-			headers: { cookie, origin: "https://comms.test" },
-			body: content,
-		});
+		pagePublication(() =>
+			fetch(`${url}/api/fs/pages/undo/note.md`, {
+				method: "PUT",
+				headers: { cookie, origin: "https://comms.test" },
+				body: content,
+			}),
+		);
 	expect((await put(app.url, "before")).status).toBe(200);
 	expect((await put(app.url, "after")).status).toBe(200);
 	const selection = { path: "pages/undo/note.md" };
@@ -81,7 +104,9 @@ it("keeps a page undo target across restart and never confuses omitted history b
 	await app.stop();
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
-	expect(await (await resumed.post("/api/revert", selection, cookie, "page-lost-response")).json()).toMatchObject({
+	expect(
+		await (await pagePublication(() => resumed.post("/api/revert", selection, cookie, "page-lost-response"))).json(),
+	).toMatchObject({
 		published: true,
 	});
 	expect(await (await fetch(`${resumed.url}/api/fs/pages/undo/note.md`, { headers: { cookie } })).text()).toBe(

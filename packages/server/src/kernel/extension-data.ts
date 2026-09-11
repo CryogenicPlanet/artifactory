@@ -2,13 +2,14 @@ import { Crypto, Effect, Option, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
 import { Lifecycle } from "./lifecycle.ts";
-import { Messages, type Identity } from "./messages.ts";
+import { Publication } from "./publication.ts";
+import type { Identity } from "./identity.ts";
 
 /** Per-extension scratch data and logs use the kernel's serialized, epoch-fenced outbox. */
 export const extensionData = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const crypto = yield* Crypto.Crypto;
-	const messages = yield* Messages;
+	const publication = yield* Publication;
 	const lifecycle = yield* Lifecycle;
 	return (filename: string, who?: Identity, writable = true) => {
 		const namespace = filename;
@@ -21,7 +22,7 @@ export const extensionData = Effect.gen(function* () {
 				if (Option.isSome(yield* Effect.serviceOption(sql.transactionService)))
 					return yield* new KernelError({ code: "input_invalid" });
 				const transaction = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
-				return yield* messages.recordEvent(
+				return yield* publication.recordEvent(
 					{
 						transaction,
 						type,
@@ -61,7 +62,7 @@ export const extensionData = Effect.gen(function* () {
 							Effect.gen(function* () {
 								if (!valid(key)) return yield* new KernelError({ code: "input_invalid" });
 								yield* sql`SELECT epoch FROM kernel_writer`;
-								const fence = (yield* messages.fence).published_through;
+								const fence = (yield* publication.fence).published_through;
 								const rows =
 									yield* sql`SELECT CASE WHEN updated_seq<=${fence} THEN value ELSE previous END AS value FROM kv WHERE ns=${namespace} AND key=${key}`.pipe(
 										Effect.flatMap(

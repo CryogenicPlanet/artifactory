@@ -1,8 +1,12 @@
+import { it } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
-import { expect, it } from "vitest";
+import { TestClock } from "effect/testing";
+import { expect } from "vitest";
 import { traffic } from "../src/traffic.ts";
-it("maintenance rejects new reads and waits for the admitted scope without freezing ordinary cutover reads", async () => {
-	const result = await Effect.runPromise(
+
+it.effect(
+	"restore queues reads while ordinary cutovers leave them admitted, then drains and resumes scoped requests",
+	() =>
 		Effect.scoped(
 			Effect.gen(function* () {
 				const gate = yield* traffic;
@@ -12,25 +16,55 @@ it("maintenance rejects new reads and waits for the admitted scope without freez
 				const release = yield* Deferred.make<void>();
 				const request = yield* Effect.scoped(
 					Effect.gen(function* () {
-						yield* gate.requests.admit;
+						yield* gate.requests.awaitDestination;
 						yield* Deferred.succeed(admitted, undefined);
 						yield* Deferred.await(release);
 					}),
 				).pipe(Effect.forkScoped);
 				yield* Deferred.await(admitted);
 				yield* gate.requests.freeze;
-				const paused = yield* gate.requests.admit.pipe(Effect.result);
-				const state = yield* gate.requests.state;
+				const queued = yield* Effect.scoped(gate.requests.awaitDestination).pipe(Effect.forkScoped);
+				yield* TestClock.adjust("1 millis");
+				expect(yield* gate.requests.state).toEqual({ frozen: true, admitted: 1, queued: 1 });
 				yield* Deferred.succeed(release, undefined);
 				yield* Fiber.join(request);
 				yield* gate.requests.drained;
 				yield* gate.requests.release;
-				const next = yield* gate.requests.admit;
-				return { paused, state, before, after: next.revision };
+				expect(yield* Fiber.join(queued)).toMatchObject({ waited: true, revision: before + 1 });
+				expect(yield* gate.requests.state).toEqual({ frozen: false, admitted: 0, queued: 0 });
 			}),
 		),
-	);
-	expect(result.paused).toMatchObject({ _tag: "Failure", failure: { code: "freeze_queue_full" } });
-	expect(result.state).toEqual({ frozen: true, admitted: 1, queued: 0 });
-	expect(result.after).toBe(result.before + 1);
-});
+);
+
+it.effect("bounds the restore queue and releases slots after interruption and the ten-second deadline", () =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const gate = (yield* traffic).requests;
+			yield* gate.freeze;
+			const waiting = yield* Effect.forEach(Array.from({ length: 128 }), () =>
+				Effect.scoped(gate.awaitDestination).pipe(Effect.result, Effect.forkScoped),
+			);
+			yield* TestClock.adjust("1 millis");
+			expect(yield* gate.state).toEqual({ frozen: true, admitted: 0, queued: 128 });
+			expect(yield* gate.awaitDestination.pipe(Effect.result)).toMatchObject({
+				_tag: "Failure",
+				failure: { code: "freeze_queue_full" },
+			});
+			const first = waiting[0];
+			if (!first) return yield* Effect.die("Missing queued request");
+			yield* Fiber.interrupt(first);
+			expect((yield* gate.state).queued).toBe(127);
+			const replacement = yield* Effect.scoped(gate.awaitDestination).pipe(Effect.result, Effect.forkScoped);
+			yield* TestClock.adjust("9 seconds");
+			expect((yield* gate.state).queued).toBe(128);
+			yield* TestClock.adjust("1 second");
+			for (const pending of [...waiting.slice(1), replacement]) {
+				expect(yield* Fiber.join(pending)).toMatchObject({ _tag: "Failure", failure: { _tag: "TimeoutError" } });
+			}
+			expect(yield* gate.state).toEqual({ frozen: true, admitted: 0, queued: 0 });
+			yield* gate.release;
+			expect(yield* Effect.scoped(gate.awaitDestination)).toMatchObject({ waited: false });
+			expect(yield* gate.state).toEqual({ frozen: false, admitted: 0, queued: 0 });
+		}),
+	),
+);

@@ -51,13 +51,13 @@ for (const kind of ["create", "read", "topic"])
 		const fixture = await conversation(test);
 		const seed = join(fixture.root, "seed");
 		await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
-		const source = join(seed, kind === "topic" ? "topics-http.ts" : "conversation.ts");
+		const source = join(seed, kind === "topic" ? "ext/core/topics-http.ts" : "ext/core/api.ts");
 		const before = await readFile(source, "utf8");
 		const anchor =
 			kind === "create"
-				? 'const who = yield* identity("write");'
+				? 'const ctx = yield* extension.context("write");'
 				: kind === "read"
-					? 'const who = yield* identity("read");'
+					? 'const ctx = yield* extension.context("read");'
 					: "return result;";
 		const replacement =
 			kind === "topic" ? "return { ...result, messages: [] };" : "return HttpServerResponse.jsonUnsafe({ items: [] });";

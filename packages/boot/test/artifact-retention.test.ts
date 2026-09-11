@@ -258,3 +258,26 @@ it("keeps a closed old fallback for the operation that must restart it, then pru
 	expect(await app.exists("gen/1")).toBe(false);
 	expect(await app.exists("backups/fallback-pre-flip.db")).toBe(false);
 });
+
+it("retains combined restore source and fallback plus exact backup links from protected generations", async (test) => {
+	const app = await store(test);
+	for (let n = 1; n <= 9; n++) await app.generation(n);
+	await app.backup("source-copy", "pre-flip", 99);
+	await app.backup("fallback-copy", "pre-flip", 98);
+	await app.backup("operation-copy", "pre-flip", 97);
+	await app.backup("newest-copy", "pre-flip", 96);
+	await app.backup("target", "hourly", 95);
+	await app.sql("UPDATE generations SET backup_id='source-copy' WHERE n=1");
+	await app.sql("UPDATE generations SET backup_id='fallback-copy' WHERE n=2");
+	await app.sql("UPDATE generations SET backup_id='operation-copy' WHERE n=3");
+	await app.sql("UPDATE generations SET backup_id='newest-copy' WHERE n=9");
+	await app.sql(`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,generation,source_generation,prior_generation,restored_to_seq)
+ VALUES('proof','hash','session','target','working',8,1,2,0)`);
+	expect(await app.prune({ capacity: 100, preserve: [3] })).toMatchObject({ failure: { code: "backup_budget" } });
+	for (const n of [1, 2, 3, 8, 9]) expect(await app.exists(`gen/${n}`)).toBe(true);
+	for (const id of ["source-copy", "fallback-copy", "operation-copy", "newest-copy", "target"])
+		expect(await app.exists(`backups/${id}.db`)).toBe(true);
+	await app.sql("UPDATE db_restore_requests SET phase='restored'");
+	expect(await app.prune({ capacity: 500 })).toMatchObject({ success: { removed_backups: 4 } });
+	expect(await app.exists("backups/newest-copy.db")).toBe(true);
+});

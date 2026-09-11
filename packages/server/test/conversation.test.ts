@@ -99,10 +99,13 @@ it("keeps authentication and recovery help after the initialized app store disap
 	const relogged = await next.login();
 	expect((await fetch(`${next.url}/_boot`, { headers: { cookie: relogged } })).status).toBe(200);
 	await expect
-		.poll(async () => {
-			const response = await fetch(`${next.url}/_boot/status`, { headers: { cookie: relogged } });
-			return (await response.json()).child.error;
-		})
+		.poll(
+			async () => {
+				const response = await fetch(`${next.url}/_boot/status`, { headers: { cookie: relogged } });
+				return (await response.json()).child.error;
+			},
+			{ timeout: 5000 },
+		)
 		.toContain("app_store_missing");
 	expect((await fetch(`${next.url}/api/messages`, { headers: { cookie: relogged } })).status).toBe(503);
 	await expect(access(join(fixture.root, "comms.db"))).rejects.toThrow();

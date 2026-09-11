@@ -1,3 +1,5 @@
+import { Publication, layer as publicationLayer } from "./kernel/publication.ts";
+import { extensionCapabilities } from "./ext/core/capabilities.ts";
 // oxlint-disable-next-line effecttsgo/node-builtin-import -- Effect Crypto has no constant-time comparison.
 import { timingSafeEqual } from "node:crypto";
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
@@ -17,28 +19,26 @@ import {
 	Ref,
 	Schema,
 	Semaphore,
-	Stream,
 	type Scope,
 } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { BootChannel, type KernelError, layer as channelLayer } from "./kernel/boot-channel.ts";
-import { initialize } from "./kernel/database.ts";
+import { initialize } from "./ext/core/schema.ts";
 import { migrate } from "./kernel/migrations.ts";
-import { type Topics, layer as topicsLayer } from "./kernel/topics.ts";
-import { Messages, layer as messagesLayer } from "./kernel/messages.ts";
+import { type Topics, layer as topicsLayer } from "./ext/core/topics.ts";
+import { type Messages, layer as messagesLayer } from "./ext/core/messages.ts";
 import { probeHealth } from "./kernel/health.ts";
-import { Lifecycle, layer as lifecycleLayer } from "./kernel/lifecycle.ts";
+import { Lifecycle, RequestMutation, layer as lifecycleLayer } from "./kernel/lifecycle.ts";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { type Pages, layer as pagesLayer } from "./kernel/pages.ts";
+import { type Pages, layer as pagesLayer } from "./ext/core/pages.ts";
 import { routes as boardRoutes } from "./board-http.ts";
 import { routes as pageRoutes } from "./pages-http.ts";
 import type { HttpPlatform } from "effect/unstable/http/HttpPlatform";
 import { routes } from "./conversation.ts";
 import { Extensions, layer as extensionsLayer } from "./kernel/ext.ts";
 import { failure } from "./conversation-request.ts";
-import { checkPageWrites, PageWriteCheck, PageWriteUnavailable } from "./kernel/page-write-policy.ts";
-import { reconstructPublicPages } from "./kernel/public-page-policy.ts";
+import { reconstructPublicPages } from "./ext/core/public-page-policy.ts";
 import { backupSchedule } from "./backup-schedule.ts";
 
 type Handler = Effect.Effect<
@@ -92,18 +92,23 @@ const server = Effect.gen(function* () {
 				yield* initialize;
 				yield* migrate(`${import.meta.dirname}/migrations`, boot.epoch);
 				return yield* Effect.gen(function* () {
-					const messages = yield* Messages;
-					const publicPagesContext = yield* Effect.context<SqlClient | BootChannel | Messages | Lifecycle>();
+					const publication = yield* Publication;
+					const publicPagesContext = yield* Effect.context<
+						SqlClient | BootChannel | Publication | Messages | Lifecycle
+					>();
 					yield* Ref.set(initializePublicPages, reconstructPublicPages.pipe(Effect.provideContext(publicPagesContext)));
-					const extensionContext = yield* Layer.build(extensionsLayer(`${import.meta.dirname}/ext`));
+					const extensionContext = yield* Layer.build(
+						extensionsLayer(`${import.meta.dirname}/ext`, yield* extensionCapabilities),
+					);
 					const extensions = Context.get(extensionContext, Extensions);
 					yield* Ref.set(extensionState, extensions.changeState);
-					yield* Ref.set(quiesce, messages.quiesce);
+					yield* Ref.set(quiesce, publication.quiesce);
 					const dispatch = yield* HttpRouter.toHttpEffect(
 						Layer.mergeAll(routes(extensions), pageRoutes, boardRoutes(boardDirectory)),
 					);
 					const context = yield* Effect.context<
 						| BootChannel
+						| Publication
 						| Messages
 						| Topics
 						| Lifecycle
@@ -149,27 +154,7 @@ const server = Effect.gen(function* () {
 							const request = yield* HttpServerRequest.HttpServerRequest;
 							if (request.url === "/health" && request.method === "GET") return yield* health;
 							const state = yield* Ref.get(lifecycle.state);
-							if (request.url === "/_kernel/pages/check" && request.method === "POST") {
-								if (Object.keys(request.headers).some((name) => name.startsWith("x-comms-")))
-									return HttpServerResponse.empty({ status: 403 });
-								if (!["accepted", "live", "frozen"].includes(state)) return HttpServerResponse.empty({ status: 503 });
-								return yield* Effect.gen(function* () {
-									let bytes = 0;
-									const chunks: Uint8Array[] = [];
-									yield* Stream.runForEach(request.stream, (chunk) =>
-										Effect.gen(function* () {
-											bytes += chunk.byteLength;
-											if (bytes > 1048576) return yield* new PageWriteUnavailable({});
-											chunks.push(chunk);
-										}),
-									);
-									const body = Buffer.concat(chunks).toString("utf8");
-									const input = yield* Schema.decodeEffect(Schema.fromJsonString(PageWriteCheck), {
-										onExcessProperty: "error",
-									})(body);
-									return HttpServerResponse.jsonUnsafe(yield* checkPageWrites(boot.filename, boot.epoch, input));
-								}).pipe(Effect.catchCause(() => Effect.succeed(HttpServerResponse.empty({ status: 503 }))));
-							}
+
 							const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method);
 							if (
 								!(yield* Ref.get(lifecycle.healthy)) ||
@@ -195,7 +180,13 @@ const server = Effect.gen(function* () {
 											})
 										: Effect.void,
 							);
-							return admitted ? yield* actual : HttpServerResponse.empty({ status: 503 });
+							if (!admitted) return HttpServerResponse.empty({ status: 503 });
+							if (!mutation) return yield* actual;
+							const active = yield* Ref.make(true);
+							return yield* actual.pipe(
+								Effect.provideService(RequestMutation, active),
+								Effect.ensuring(Ref.set(active, false)),
+							);
 						}),
 					);
 					yield* Effect.gen(function* () {
@@ -203,9 +194,9 @@ const server = Effect.gen(function* () {
 							yield* lifecycle.gate.withPermit(
 								Effect.gen(function* () {
 									if ((yield* Ref.get(lifecycle.state)) === "live") {
-										yield* messages.relay.pipe(Effect.ignore);
+										yield* publication.relay.pipe(Effect.ignore);
 										for (const diagnostic of yield* extensions.diagnostics) {
-											yield* messages
+											yield* publication
 												.recordEvent(diagnostic)
 												.pipe(
 													Effect.andThen(extensions.acknowledgeDiagnostics([diagnostic.transaction])),
@@ -222,13 +213,33 @@ const server = Effect.gen(function* () {
 					return yield* Effect.never;
 				}).pipe(
 					Effect.provide(
-						topicsLayer.pipe(Layer.provideMerge(messagesLayer), Layer.provideMerge(pagesLayer(pagesDirectory))),
+						topicsLayer.pipe(
+							Layer.provideMerge(messagesLayer.pipe(Layer.provideMerge(publicationLayer))),
+							Layer.provideMerge(pagesLayer(pagesDirectory)),
+						),
 					),
 				);
 			}).pipe(Effect.provide(SqliteClient.layer({ filename: boot.filename, disableWAL: true })));
 		});
 		yield* application.pipe(
-			Effect.catchCause((cause) => Effect.logError(cause)),
+			Effect.catchCause((cause) =>
+				Effect.gen(function* () {
+					// A completed initialization failure cannot become ready on a later poll.
+					yield* Ref.set(
+						installed,
+						Effect.gen(function* () {
+							const request = yield* HttpServerRequest.HttpServerRequest;
+							return request.url === "/health" && request.method === "GET"
+								? HttpServerResponse.jsonUnsafe(
+										{ status: "failed" },
+										{ status: 503, headers: { "x-comms-health-ready": "1" } },
+									)
+								: HttpServerResponse.empty({ status: 503 });
+						}),
+					);
+					yield* Effect.logError(cause);
+				}),
+			),
 			Effect.forkScoped,
 		);
 		yield* HttpServer.serveEffect(

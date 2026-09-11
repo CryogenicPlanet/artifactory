@@ -15,7 +15,7 @@ it("preserves a published background message after boot dies immediately after r
 	const background = `${trigger}
 										const fs = yield* FileSystem.FileSystem;
 										if ((yield* fs.exists(${JSON.stringify(marker)})) && !(yield* fs.exists(${JSON.stringify(receipt)}))) {
-											const message = yield* messages.create(
+											const message = yield* (yield* Messages).create(
 												{ agent: "worker", instance: "rollback-job", request: "background", kind: "agent" },
 												{ topic: "rollback", body: "published by restarted live job" }, "rollback-job-once");
 											yield* fs.writeFileString(${JSON.stringify(receipt + ".tmp")}, JSON.stringify(message));
@@ -24,7 +24,10 @@ it("preserves a published background message after boot dies immediately after r
 	expect(server).toContain(trigger);
 	await writeFile(
 		join(seed, "server.ts"),
-		server.replace("\tConfig,", "\tConfig,\n\tFileSystem,").replace(trigger, background),
+		server
+			.replace("type Messages,", "Messages,")
+			.replace("\tConfig,", "\tConfig,\n\tFileSystem,")
+			.replace(trigger, background),
 	);
 
 	// Instrument only a disposable boot copy: hold the exact crash window without
@@ -49,7 +52,7 @@ it("preserves a published background message after boot dies immediately after r
 	await app.ready(cookie);
 	expect((await app.post("/api/messages", { topic: "rollback", body: "before rollback" }, cookie)).status).toBe(200);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const database = await readFile(join(seed, "kernel/database.ts"), "utf8");
+	const database = await readFile(join(seed, "ext/core/schema.ts"), "utf8");
 	const initialize = "yield* sql`PRAGMA synchronous = FULL`;";
 	expect(database).toContain(initialize);
 	const failed = database.replace(
@@ -57,7 +60,7 @@ it("preserves a published background message after boot dies immediately after r
 		`${initialize}
 if (process.env.STATE === "candidate") { yield* Effect.sleep("1500 millis"); return yield* Effect.die("candidate failed"); }`,
 	);
-	const reload = fetch(`${app.url}/api/fs/app/kernel/database.ts`, {
+	const reload = fetch(`${app.url}/api/fs/app/ext/core/schema.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: failed,

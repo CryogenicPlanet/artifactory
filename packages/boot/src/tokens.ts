@@ -1,3 +1,4 @@
+import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AuthError } from "./auth.ts";
@@ -23,7 +24,6 @@ const Token = Schema.Struct({
 	rotated_to: Schema.NullOr(Schema.String),
 	rotated_at: Schema.NullOr(Schema.Int),
 });
-const refuse = (code: string) => Effect.fail(new AuthError({ code }));
 
 /** Hash-only credentials plus a short-lived encrypted receipt. All transitions own one boot SQL transaction. */
 export const makeTokens = <E, R>(
@@ -35,11 +35,7 @@ export const makeTokens = <E, R>(
 		const crypto = yield* Crypto.Crypto;
 		const events = yield* Events;
 		const lock = yield* EditLock;
-		const hash = (value: string) =>
-			crypto
-				.digest("SHA-256", new TextEncoder().encode(value))
-				.pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
-		const random = Effect.map(crypto.randomBytes(32), (bytes) => Buffer.from(bytes).toString("base64url"));
+		const { hash, random } = authSecrets(crypto);
 
 		const event = (
 			type: string,
@@ -70,9 +66,7 @@ export const makeTokens = <E, R>(
 				yield* sql`UPDATE tokens SET revoked_at=${now} WHERE family=${family} AND revoked_at IS NULL`;
 				yield* sql`DELETE FROM refresh_receipts WHERE family=${family}`;
 				yield* sql`DELETE FROM refresh_idempotency WHERE family=${family}`;
-				const released = yield* lock.revokeFamily(family);
-				for (const transition of released.transitions)
-					yield* event(`lock.${transition.type}`, transition.holder_family, transition.agent, now, { ...transition });
+				yield* lock.revokeFamily(family);
 				yield* event(
 					"token.family_revoked",
 					family,
@@ -83,15 +77,10 @@ export const makeTokens = <E, R>(
 				);
 				return { family, revoked: true as const };
 			});
-		const committed = <A, E2, R2>(effect: Effect.Effect<A, E2, R2>) =>
-			sql.withTransaction(effect.pipe(Effect.catchIf(Schema.is(AuthError), (error) => Effect.succeed(error)))).pipe(
-				// Semantic refusals may follow durable revocation or valid proof consumption.
-				// oxlint-disable-next-line effecttsgo/flat-map-conditional-to-filter-or-fail
-				Effect.flatMap((result) => (Schema.is(AuthError)(result) ? Effect.fail(result) : Effect.succeed(result))),
-			);
 		const revokeFamily = (params: RevokeFamily, proof: AssertionProof, sessionId: string) =>
 			mutex.withPermit(
 				committed(
+					sql,
 					Effect.gen(function* () {
 						if (!validFamily(params.family)) return yield* refuse("invalid_request");
 						yield* verify(params, proof);
@@ -100,11 +89,12 @@ export const makeTokens = <E, R>(
 						if (!session.length) return yield* refuse("session_invalid");
 						yield* expireRefreshReceipts(sql, now);
 						return yield* revoke(params.family, "rahul", "human", now);
-					}),
+					}).pipe(captureRefusal(Schema.is(AuthError))),
 				),
 			);
 		const refreshTokens = (secret: string, idempotencyKey?: string) =>
 			committed(
+				sql,
 				Effect.gen(function* () {
 					const now = yield* Clock.currentTimeMillis;
 					yield* expireRefreshReceipts(sql, now);
@@ -264,7 +254,7 @@ export const makeTokens = <E, R>(
 					yield* bind(deadline);
 					yield* event("token.refreshed", row.family, row.agent, now, { family: row.family });
 					return pair;
-				}),
+				}).pipe(captureRefusal(Schema.is(AuthError))),
 			);
 		return { refreshTokens, revokeFamily };
 	});

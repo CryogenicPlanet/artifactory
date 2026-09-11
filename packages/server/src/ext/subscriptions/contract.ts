@@ -3,8 +3,16 @@ const validTopic = (topic: string) =>
 	topic.length <= 200 && /^@?[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(topic);
 
 export class SubscriptionError extends Schema.TaggedError<SubscriptionError>()("SubscriptionError", {
-	code: Schema.String,
-	status: Schema.Int,
+	code: Schema.Literals([
+		"input_invalid",
+		"idempotency_conflict",
+		"subscription_limit",
+		"subscription_not_found",
+		"subscription_unavailable",
+		"webhook_response_too_large",
+		"event_cursor_invalid",
+	]),
+	status: Schema.Literals([400, 404, 409, 503]),
 }) {}
 const Filter = Schema.Struct({
 	topic: Schema.optionalKey(Schema.String),

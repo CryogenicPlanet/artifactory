@@ -4,7 +4,7 @@ import { requireHeadroom, storageHeadroom, type StorageRejected } from "./storag
 import { SnapshotRejected } from "./snapshots.ts";
 
 /** Copies installed package links without letting them escape the installed tree.
- * Writable build workspaces and promoted artifacts never share file inodes. */
+ * Disposable build dependencies and retained generations never share file inodes. */
 export const copyPreparedTree = Effect.fn("copyPreparedTree")(function* (from: string, to: string) {
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
@@ -41,7 +41,7 @@ export const copyPreparedTree = Effect.fn("copyPreparedTree")(function* (from: s
 	yield* copy(root, to);
 });
 
-/** Sync copied bytes and directory entries before an artifact is promoted. */
+/** Sync copied bytes and directory entries before a generation is published. */
 export const syncPreparedTree = Effect.fn("syncPreparedTree")(function* (
 	root: string,
 ): Effect.fn.Return<void, PlatformError, FileSystem.FileSystem | Path.Path> {

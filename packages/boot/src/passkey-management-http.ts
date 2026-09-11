@@ -1,10 +1,10 @@
-import { Effect, Ref, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { AuthError, type AuthConfig } from "./auth.ts";
-import { assertionProof, humanSession, authFailure, authErrorResponse, body, type AuthStore } from "./auth-http.ts";
+import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
+import { assertionProof, humanSession, authFailure, body } from "./auth-http.ts";
 import { PasskeyRegistrationResponse } from "./passkey-management-schema.ts";
 
-export const passkeyManagementRoute = (store: AuthStore, config: AuthConfig) =>
+export const passkeyManagementRoute = (auth: Auth["Service"], config: AuthConfig) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const url = new URL(request.url, "http://localhost");
@@ -17,8 +17,6 @@ export const passkeyManagementRoute = (store: AuthStore, config: AuthConfig) =>
 		if (!list && !start && !finish && !remove) return null;
 		return yield* authFailure(
 			Effect.gen(function* () {
-				const auth = yield* Ref.get(store);
-				if (!auth) return authErrorResponse("boot_unavailable", 503);
 				if (!list && request.headers.origin !== config.expectedOrigin)
 					return yield* new AuthError({ code: "origin_invalid" });
 				if (url.search) return yield* new AuthError({ code: "invalid_request" });

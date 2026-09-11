@@ -1,4 +1,4 @@
-import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema, Scope, Semaphore } from "effect";
+import { Cause, Crypto, Effect, FileSystem, Path, Ref, Schema, Scope, Semaphore } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import { prepareGeneration, snapshotEntry, type ApplicationSource } from "./application.ts";
 import { AppRecovery } from "./app-recovery.ts";
@@ -8,6 +8,7 @@ import type { Attempt } from "./event-http.ts";
 import { Generations, type Generation } from "./generations.ts";
 import { Events } from "./events.ts";
 import { traffic, type Traffic } from "./traffic.ts";
+import { metrics, type BootMetrics } from "./metrics.ts";
 
 export interface ChildStatus {
 	readonly state: "starting" | "live" | "failed";
@@ -33,6 +34,7 @@ export interface SupervisedChild {
 	readonly channelGate: Semaphore.Semaphore;
 	readonly sourceError: Ref.Ref<string | null>;
 	readonly traffic: Traffic;
+	readonly metrics: BootMetrics;
 }
 
 /** Supervisor owns process recovery; the cutover coordinator shares its one operation gate. */
@@ -76,6 +78,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		sourceError,
 		generations: history,
 		traffic: routing,
+		metrics: yield* metrics,
 	} satisfies SupervisedChild;
 	const redact = (text: string) => text.replace(/[a-f0-9]{64}/g, "[redacted]");
 	const fail = (cause: Cause.Cause<unknown>) =>
@@ -127,7 +130,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			}).pipe(Effect.provideService(Scope.Scope, processScope));
 			return { process, attempt, generation, ...owner } satisfies ActiveChild;
 		});
-	const admit = (value: ActiveChild, state: Attempt["state"]) =>
+	const recordAttempt = (value: ActiveChild, state: Attempt["state"]) =>
 		channelGate.withPermit(
 			Ref.update(attempts, (items) => [
 				...items.filter((item) => item.epoch !== value.attempt.epoch),
@@ -148,14 +151,29 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			yield* Ref.set(closing, true);
 			yield* routing.requests.freeze;
 			// Keep the child and its publication channel live until forwarded mutations finish.
-			yield* routing.drained;
+			const mutations = yield* routing.drained.pipe(Effect.timeout("5 seconds"), Effect.exit);
 			const active = yield* Ref.get(current);
-			if (active) yield* active.process.drain.pipe(Effect.ignore);
-			yield* routing.requests.drained;
+			if (active) {
+				const drained =
+					mutations._tag === "Failure"
+						? mutations
+						: yield* active.process.drain.pipe(Effect.timeout("5 seconds"), Effect.exit);
+				// Requests and editable shutdown hooks can hang while ping stays healthy.
+				// Closure preserves the current store; startup reconciles uncertain publication.
+				if (drained._tag === "Failure") {
+					yield* Ref.set(routing.route, null);
+					yield* retire(active);
+				}
+			}
+			// A downstream client can stop reading even after its child has closed.
+			yield* routing.requests.drained.pipe(Effect.timeout("5 seconds"), Effect.ignore);
 			yield* (yield* Events).stopWaiting;
 			yield* Ref.set(current, null);
 			yield* Ref.set(routing.route, null);
-			if (active) yield* retire(active);
+			if (active) {
+				yield* retire(active);
+				yield* (yield* Generations).retired(active.generation.n);
+			}
 		}),
 	);
 	const watch = (active: ActiveChild) =>
@@ -177,10 +195,10 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 	const activate = (value: ActiveChild, state: "accepted" | "live" = "live") =>
 		Effect.gen(function* () {
 			if (state === "live" && (yield* Ref.get(routing.route))?.epoch !== value.attempt.epoch) {
-				yield* admit(value, "accepted");
+				yield* recordAttempt(value, "accepted");
 				yield* value.process.control("accepted");
 			}
-			yield* admit(value, state);
+			yield* recordAttempt(value, state);
 			yield* value.process.control(state);
 			const alreadyWatching = (yield* Ref.get(current))?.attempt.epoch === value.attempt.epoch;
 			yield* Ref.set(current, value);
@@ -213,7 +231,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			const value = yield* launch(generation, recovery.filename, "candidate");
 			const started = yield* Effect.gen(function* () {
 				yield* recovery.prepare(value.attempt.epoch);
-				yield* admit(value, "starting");
+				yield* recordAttempt(value, "starting");
 				yield* (yield* ChildAttempts).opened(value.id);
 				yield* value.process.control("go");
 				yield* value.process.health.pipe(Effect.timeout("5 seconds"));
@@ -227,7 +245,6 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			return value;
 		});
 	const recover = Effect.gen(function* () {
-		const events = yield* Events;
 		const generations = yield* Generations;
 		const choices = yield* prepareGeneration(options);
 		for (const generation of choices) {
@@ -248,24 +265,12 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 				const result = yield* start(generation).pipe(Effect.result);
 				if (result._tag === "Success") return;
 				const stderr = Schema.is(ChildError)(result.failure) ? redact(result.failure.stderr ?? "") : "";
-				yield* generations.failed(generation.n, redact(String(result.failure)), stderr);
+				yield* generations.failed(generation.n, redact(String(result.failure)), stderr, attempt);
 				yield* Ref.update(status, (value) => ({ ...value, stderr }));
 				yield* fail(Cause.fail(result.failure));
 				yield* assertClosure;
 				if (attempt < 3) yield* Effect.sleep(attempt === 1 ? "250 millis" : "500 millis");
 			}
-			yield* events.writeBoot({
-				at: (yield* DateTime.nowAsDate).getTime(),
-				type: "generation.failed",
-				level: "error",
-				actor: "boot",
-				instance: null,
-				generation: generation.n,
-				request_id: null,
-				topic: null,
-				message_id: null,
-				payload: { reason: "startup_failures", attempts: 3 },
-			});
 		}
 		yield* generations.list.pipe(Effect.flatMap((rows) => Ref.set(history, rows)));
 		yield* Ref.update(status, (value): ChildStatus => ({ ...value, state: "failed" }));
@@ -325,7 +330,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		current,
 		assertClosure,
 		launch,
-		admit,
+		recordAttempt,
 		retire,
 		activate,
 		start,

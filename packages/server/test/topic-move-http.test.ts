@@ -149,7 +149,7 @@ it("isolates pending page moves and hides ownership markers after completion", a
 		const page = await get(`/p/${path}`);
 		expect(page.status, path).toBe(503);
 		expect(await page.json()).toMatchObject({ error: { code: "pages_move_pending", retriable: true } });
-		expect((await put(`/api/fs/pages/${path}`, "must not replace moved pages")).status, path).toBe(503);
+		expect((await put(`/api/fs/pages/${path}`, "explicit raw repair")).status, path).toBe(200);
 	}
 	expect(await (await get("/p/unrelated/file.txt")).text()).toBe("unrelated bytes");
 	expect((await put("/api/fs/pages/unrelated/file.txt", "still writable")).status).toBe(200);
@@ -164,7 +164,7 @@ it("isolates pending page moves and hides ownership markers after completion", a
 	const finished = await app.post("/api/topics/original/move", { to: "destination" }, cookie, "pending-move");
 	expect(finished.status, await finished.clone().text()).toBe(200);
 	expect(await fixture.sql("SELECT completed FROM topic_page_continuations")).toEqual([{ completed: 1 }]);
-	expect(await (await get("/p/destination/file.txt")).text()).toBe("original bytes");
+	expect(await (await get("/p/destination/file.txt")).text()).toBe("explicit raw repair");
 	const marker = (await readdir(join(fixture.root, "pages/destination"))).find((name) =>
 		name.startsWith(".comms-move-"),
 	);

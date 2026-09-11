@@ -8,7 +8,7 @@ import { assertWriterHealthy, poisonUncertainWriter } from "./lifecycle.ts";
 import { lookupIdempotency, storeIdempotency, type Idempotency } from "./idempotency.ts";
 
 type Range = { readonly from: number; readonly to: number };
-interface Mutation<A, E, R> {
+export interface Mutation<A, E, R> {
 	readonly idempotency?: Idempotency<A>;
 	readonly guard?: Effect.Effect<void, E, R>;
 	readonly body: (reserve: (count: number) => Effect.Effect<Range, KernelError>) => Effect.Effect<

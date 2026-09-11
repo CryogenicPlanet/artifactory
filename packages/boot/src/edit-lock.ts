@@ -1,5 +1,6 @@
 import { Context, Crypto, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { Events } from "./events.ts";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 export const Lock = Schema.Struct({
@@ -60,6 +61,10 @@ export class EditAuthority extends Context.Service<
 >()("comms/boot/EditAuthority") {}
 export const authorityLayer = (authority: EditAuthority["Service"]) => Layer.succeed(EditAuthority, authority);
 
+interface Actor {
+	readonly agent: string;
+	readonly instance: string;
+}
 export interface Ownership {
 	readonly id: string;
 	readonly family: string;
@@ -94,6 +99,25 @@ const validPath = (path: string) => {
 const make = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const crypto = yield* Crypto.Crypto;
+	const events = yield* Events;
+	const publish = (transitions: readonly Transition[], now: number, actor?: Actor) =>
+		Effect.forEach(
+			transitions,
+			(transition) =>
+				events.writeBoot({
+					at: now,
+					type: transition.type === "staged" ? "fs.staged" : `lock.${transition.type}`,
+					level: "info",
+					actor: actor?.agent ?? transition.agent,
+					instance: actor?.instance ?? transition.holder_family,
+					generation: 0,
+					request_id: null,
+					topic: null,
+					message_id: null,
+					payload: { ...transition },
+				}),
+			{ discard: true },
+		);
 	const read = sql`SELECT * FROM edit_lock WHERE singleton = 1`.pipe(
 		Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Lock))),
 		Effect.map((rows) => rows[0] ?? null),
@@ -129,13 +153,14 @@ const make = Effect.gen(function* () {
 					? reject("stale_lock", lock, transitions)
 					: null;
 	// Domain rejection is a value until COMMIT, so expiry cleanup cannot be rolled back by a refused request.
-	const admit = <A>(
+	const withLockTransaction = <A>(
 		action: (
 			lock: Lock | null,
 			now: number,
 			transitions: Transition[],
 		) => Effect.Effect<Outcome<A> | EditRejected, SqlError | Schema.SchemaError>,
 		checkAuthority = true,
+		actor?: Actor,
 	) =>
 		sql
 			.withTransaction(
@@ -156,7 +181,9 @@ const make = Effect.gen(function* () {
 						transitions.push(yield* drop(lock, "expired"));
 						lock = null;
 					}
-					return yield* action(lock, now, transitions);
+					const result = yield* action(lock, now, transitions);
+					yield* publish(result.transitions, now, actor);
+					return result;
 				}),
 			)
 			.pipe(
@@ -176,7 +203,7 @@ const make = Effect.gen(function* () {
 			const sha = content === null ? null : Buffer.from(yield* crypto.digest("SHA-256", content)).toString("hex");
 			staged.push({ path: write.path, content, sha, mode: content === null ? null : (write.mode ?? null) });
 		}
-		return yield* admit<Lock>((lock, now, transitions) =>
+		return yield* withLockTransaction<Lock>((lock, now, transitions) =>
 			Effect.gen(function* () {
 				const error = ownerError(lock, owner, transitions);
 				if (error || !lock) return error ?? reject("lock_required", lock, transitions);
@@ -206,14 +233,14 @@ const make = Effect.gen(function* () {
 	});
 
 	return {
-		inspect: admit((lock, _now, transitions) => Effect.succeed({ value: lock, transitions }), false),
+		inspect: withLockTransaction((lock, _now, transitions) => Effect.succeed({ value: lock, transitions }), false),
 		acquire: Effect.fn("EditLock.acquire")(function* (
 			family: string,
 			agent: string,
 			options: { readonly ttl?: number; readonly note?: string } = {},
 		) {
 			const id = yield* crypto.randomUUIDv4;
-			return yield* admit<Lock>((lock, now, transitions) =>
+			return yield* withLockTransaction<Lock>((lock, now, transitions) =>
 				Effect.gen(function* () {
 					if (options.ttl !== undefined && (!Number.isSafeInteger(options.ttl) || options.ttl <= 0))
 						return reject("invalid_ttl", lock, transitions);
@@ -248,7 +275,7 @@ const make = Effect.gen(function* () {
 		stageBatch,
 
 		overlay: (owner: Ownership) =>
-			admit((lock, _now, transitions) =>
+			withLockTransaction((lock, _now, transitions) =>
 				Effect.gen(function* () {
 					const error = ownerError(lock, owner, transitions);
 					if (error) return error;
@@ -256,7 +283,7 @@ const make = Effect.gen(function* () {
 				}),
 			),
 		release: (owner: Ownership) =>
-			admit<null>((lock, _now, transitions) =>
+			withLockTransaction<null>((lock, _now, transitions) =>
 				Effect.gen(function* () {
 					const error = ownerError(lock, owner, transitions);
 					if (error || !lock) return error ?? reject("lock_required", lock, transitions);
@@ -266,10 +293,10 @@ const make = Effect.gen(function* () {
 				}),
 			),
 		// Trusted caller only: authentication/assertion verification belongs before these store operations.
-		breakLock: (id: string) => releaseTrusted("broken", undefined, id),
+		breakLock: (id: string, actor?: Actor) => releaseTrusted("broken", undefined, id, actor),
 		revokeFamily: (family: string) => releaseTrusted("revoked", family),
 		pin: (owner: Ownership) =>
-			admit<Lock>((lock, _now, transitions) =>
+			withLockTransaction<Lock>((lock, _now, transitions) =>
 				Effect.gen(function* () {
 					const error = ownerError(lock, owner, transitions);
 					if (error || !lock) return error ?? reject("lock_required", lock, transitions);
@@ -287,7 +314,7 @@ const make = Effect.gen(function* () {
 				}),
 			),
 		finish: (owner: Ownership, options: { readonly succeeded: boolean; readonly release?: boolean }) =>
-			admit<Lock | null>(
+			withLockTransaction<Lock | null>(
 				(lock, now, transitions) =>
 					Effect.gen(function* () {
 						const error = ownerError(lock, owner, transitions);
@@ -318,34 +345,39 @@ const make = Effect.gen(function* () {
 				const transitions: Transition[] = [];
 				if (lock?.cutover_in_flight) transitions.push(yield* drop(lock, "interrupted"));
 				yield* sql`DELETE FROM staging WHERE lock_id NOT IN (SELECT id FROM edit_lock)`;
+				yield* publish(transitions, (yield* DateTime.nowAsDate).getTime());
 				return transitions;
 			}),
 		),
 	};
-	function releaseTrusted(reason: "broken" | "revoked", family?: string, id?: string) {
-		return admit<Lock | null>((lock, _now, transitions) =>
-			Effect.gen(function* () {
-				if (lock && id !== undefined && lock.id !== id) return reject("stale_lock", lock, transitions);
-				if (!lock || (family !== undefined && lock.holder_family !== family)) return { value: lock, transitions };
-				if (lock.cutover_in_flight) {
-					yield* sql`UPDATE edit_lock SET pending_release = ${lock.pending_release ?? reason} WHERE id = ${lock.id}`;
-					transitions.push({
-						type: reason,
-						lock_id: lock.id,
-						holder_family: lock.holder_family,
-						agent: lock.agent,
-						staged: [],
-						deferred: true,
-					});
-					return { value: { ...lock, pending_release: lock.pending_release ?? reason }, transitions };
-				}
-				transitions.push(yield* drop(lock, reason));
-				return { value: null, transitions };
-			}),
+	function releaseTrusted(reason: "broken" | "revoked", family?: string, id?: string, actor?: Actor) {
+		return withLockTransaction<Lock | null>(
+			(lock, _now, transitions) =>
+				Effect.gen(function* () {
+					if (lock && id !== undefined && lock.id !== id) return reject("stale_lock", lock, transitions);
+					if (!lock || (family !== undefined && lock.holder_family !== family)) return { value: lock, transitions };
+					if (lock.cutover_in_flight) {
+						if (lock.pending_release !== null) return { value: lock, transitions };
+						yield* sql`UPDATE edit_lock SET pending_release = ${lock.pending_release ?? reason} WHERE id = ${lock.id}`;
+						transitions.push({
+							type: reason,
+							lock_id: lock.id,
+							holder_family: lock.holder_family,
+							agent: lock.agent,
+							staged: [],
+							deferred: true,
+						});
+						return { value: { ...lock, pending_release: lock.pending_release ?? reason }, transitions };
+					}
+					transitions.push(yield* drop(lock, reason));
+					return { value: null, transitions };
+				}),
+			true,
+			actor,
 		);
 	}
 });
 
-/** Durable ownership and staged source; never publishes files or claims event delivery. */
+/** Durable ownership and staged source; publishes transition events atomically, never publishes files. */
 export class EditLock extends Context.Service<EditLock, Effect.Success<typeof make>>()("comms/boot/EditLock") {}
 export const layer = Layer.effect(EditLock, make);

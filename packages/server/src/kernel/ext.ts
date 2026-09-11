@@ -7,11 +7,11 @@ import { document } from "../extension-http.ts";
 import type { OpenApi } from "effect/unstable/httpapi";
 import { mountApi } from "./extension-mount.ts";
 import { makeExtensionMigrate } from "./extension-migrations.ts";
-import { extensionCapabilities } from "./extension-capabilities.ts";
+import type { extensionCapabilities } from "../ext/core/capabilities.ts";
 import { ExtensionError, work, type Work } from "./extension-work.ts";
 import { parseCron, runCron } from "./extension-cron.ts";
 import { identity } from "../conversation-request.ts";
-import { Messages } from "./messages.ts";
+import { Publication } from "./publication.ts";
 import { Lifecycle, type State } from "./lifecycle.ts";
 import { BootChannel, KernelError } from "./boot-channel.ts";
 import { pageHandler } from "./extension-page.ts";
@@ -67,16 +67,15 @@ const factory = Schema.Struct({
 export class Extensions extends Context.Service<Extensions, Effect.Success<ReturnType<typeof make>>>()(
 	"comms/server/Extensions",
 ) {}
-const make = (directory: string) =>
+const make = (directory: string, capabilities: Effect.Success<typeof extensionCapabilities>) =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path;
 		const sql = yield* SqlClient.SqlClient;
 		const crypto = yield* Crypto.Crypto;
-		const messages = yield* Messages;
+		const publication = yield* Publication;
 		const boot = yield* BootChannel;
 		const lifecycle = yield* Lifecycle;
 		const data = yield* extensionData;
-		const capabilities = yield* extensionCapabilities;
 		const services = yield* Effect.context<ExtensionServices>();
 		const documents: OpenApi.OpenAPISpec[] = [];
 		const parentScope = yield* Scope.Scope;
@@ -152,7 +151,7 @@ const make = (directory: string) =>
 							...data(name, who, writable),
 							...capabilities(name, who, writable),
 							db: sql,
-							publicationFence: messages.fence,
+							publicationFence: publication.fence.pipe(Effect.provideService(Lifecycle, lifecycle)),
 							params: (yield* HttpRouter.RouteContext).params,
 							query: yield* HttpServerRequest.ParsedSearchParams,
 						};
@@ -195,7 +194,12 @@ const make = (directory: string) =>
 						starts.push(() =>
 							args[1](
 								{ reason: "live" },
-								{ ...data(name), ...capabilities(name), db: sql, publicationFence: messages.fence },
+								{
+									...data(name),
+									...capabilities(name),
+									db: sql,
+									publicationFence: publication.fence.pipe(Effect.provideService(Lifecycle, lifecycle)),
+								},
 							),
 						);
 					else if (args[0] === "shutdown") stops.push(args[1]);
@@ -354,7 +358,7 @@ const make = (directory: string) =>
 													...data(extension.name),
 													...capabilities(extension.name),
 													db: sql,
-													publicationFence: messages.fence,
+													publicationFence: publication.fence.pipe(Effect.provideService(Lifecycle, lifecycle)),
 													event,
 												}),
 											true,
@@ -374,7 +378,7 @@ const make = (directory: string) =>
 															...data(extension.name),
 															...capabilities(extension.name),
 															db: sql,
-															publicationFence: messages.fence,
+															publicationFence: publication.fence.pipe(Effect.provideService(Lifecycle, lifecycle)),
 															scheduledAt,
 														}),
 													true,
@@ -468,7 +472,7 @@ const make = (directory: string) =>
 										(request.headers["x-comms-scopes"] ?? "").split(",").includes("write"),
 								),
 								db: sql,
-								publicationFence: messages.fence,
+								publicationFence: publication.fence.pipe(Effect.provideService(Lifecycle, lifecycle)),
 								params: matched.params,
 								query: matched.searchParams,
 							}),
@@ -507,4 +511,5 @@ const make = (directory: string) =>
 				}),
 		};
 	});
-export const layer = (directory: string) => Layer.effect(Extensions, make(directory));
+export const layer = (directory: string, capabilities: Effect.Success<typeof extensionCapabilities>) =>
+	Layer.effect(Extensions, make(directory, capabilities));

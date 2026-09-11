@@ -57,7 +57,7 @@ const keeper = Effect.gen(function* () {
 				throw error;
 			}
 		},
-		catch: (error) => new ChildError({ code: `preparation_group_probe_failed: ${String(error)}` }),
+		catch: (error) => new ChildError({ code: "preparation_group_probe_failed", stderr: String(error) }),
 	});
 	yield* Effect.addFinalizer(() =>
 		Effect.gen(function* () {
@@ -79,7 +79,8 @@ const keeper = Effect.gen(function* () {
 	);
 	yield* child.stderr.pipe(Stream.run(stdio.stderr()), Effect.forkScoped);
 	const code = yield* Effect.raceFirst(child.exitCode, stdio.stdin.pipe(Stream.runDrain, Effect.as(1)));
-	if (code !== 0) return yield* new ChildError({ code: `preparation_${config.operation}_exit_${code}` });
+	if (code !== 0)
+		return yield* new ChildError({ code: `preparation_${config.operation}_failed`, stderr: `Exit status ${code}` });
 }).pipe(Effect.scoped, Effect.provide(BunServices.layer));
 
 keeper.pipe(

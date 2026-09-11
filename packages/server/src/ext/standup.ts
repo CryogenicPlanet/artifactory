@@ -1,5 +1,5 @@
 import { DateTime, Effect, Schema } from "effect";
-import { publishedMessages } from "../kernel/published-messages.ts";
+import { publishedMessages } from "./core/published-messages.ts";
 import type { Api } from "../kernel/extension-api.ts";
 
 /** A deliberately small example; SQL reads use the same app connection as the kernel. */

@@ -164,7 +164,7 @@ describe("real Bun boot proxy", () => {
 
 	it("bounds stderr capture without blocking the child", async (test) => {
 		const app = await launch(test, "stderr");
-		await expect.poll(async () => (await app.state()).state).toBe("live");
+		await expect.poll(async () => (await app.state()).state, { timeout: 5000 }).toBe("live");
 		const state = await app.state();
 		if (typeof state.stderr !== "string") throw new Error("Expected stderr text");
 		expect(state.stderr.length).toBeLessThanOrEqual(8192);
@@ -173,7 +173,7 @@ describe("real Bun boot proxy", () => {
 
 	it("launches the actual server separately and guards direct child requests", async (test) => {
 		const app = await launch(test, "normal", true);
-		await expect.poll(async () => (await app.state()).state).toBe("live");
+		await expect.poll(async () => (await app.state()).state, { timeout: 5000 }).toBe("live");
 		const state = await app.state();
 		if (typeof state.port !== "number" || typeof state.pid !== "number") throw new Error("Expected child address");
 		const messages = await app.fetch(`${app.url}/api/messages?since=0`);

@@ -1,15 +1,17 @@
+import { layer as durableEventsLayer } from "../../src/events.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect, FileSystem, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
-import { layer as lockLayer } from "../../src/edit-lock.ts";
+import { layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 import { SourceFiles, layer as sourceLayer } from "../../src/source-files.ts";
 import { TopicPageMove, layer as moveLayer } from "../../src/topic-page-move.ts";
 import { topicPageMoveSchema } from "../../src/topic-page-move-schema.ts";
 
 import { legacyPageMovePreparation } from "./legacy-page-move-preparation.ts";
 
+const lockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const Input = Schema.Struct({
 	op: Schema.Literals([
 		"prepare",

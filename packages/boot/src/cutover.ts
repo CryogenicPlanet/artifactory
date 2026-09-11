@@ -1,5 +1,5 @@
 import { recoveryIntents } from "./recovery-intents.ts";
-import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
+import { Cause, Clock, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { GenerationPreparation } from "./generation-preparation.ts";
 import { artifactRetention, ArtifactRetentionRejected } from "./artifact-retention.ts";
@@ -122,6 +122,14 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						: options.undo.generation !== undefined
 							? sources.prepareGeneration(owner, options.undo)
 							: sources.prepareUndo(owner, options.undo);
+					if (!options.check) {
+						const started = yield* Clock.monotonicTimeNanos;
+						yield* Effect.addFinalizer(() =>
+							Clock.monotonicTimeNanos.pipe(
+								Effect.flatMap((ended) => supervisor.child.metrics.swap(Number(ended - started) / 1_000_000_000)),
+							),
+						);
+					}
 					let candidate: ActiveChild | null = null;
 					let generation: Generation | null = null;
 
@@ -130,6 +138,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					const closePrior = Effect.gen(function* () {
 						if (prior && !priorClosed) {
 							yield* stop(prior);
+							yield* generations.retired(prior.generation.n);
 							priorClosed = true;
 						}
 					});
@@ -159,21 +168,26 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							.pipe(Effect.provideContext(context));
 						yield* rehearsed.process.health.pipe(
 							Effect.timeout("30 seconds"),
-							Effect.catch((error) =>
-								Effect.gen(function* () {
+							Effect.catchCause((cause) => {
+								const reason = cause.reasons[0];
+								if (cause.reasons.length !== 1 || reason?._tag !== "Fail" || !Schema.is(ChildError)(reason.error))
+									return Effect.failCause(cause);
+								const error = reason.error;
+								return Effect.gen(function* () {
 									return yield* new ChildError({
 										code:
 											options.undo?.generation !== undefined &&
 											Schema.is(ChildError)(error) &&
 											error.code === "health_failed"
-												? "incompatible_schema: restore withDb using a fresh human assertion, or apply a forward source fix"
-												: String(error),
+												? "incompatible_schema"
+												: error.code,
 										stderr: yield* Ref.get(rehearsed.process.stderr),
 									});
-								}),
-							),
+								});
+							}),
 							Effect.ensuring(stop(rehearsed).pipe(Effect.orDie)),
 						);
+						yield* generations.rehearsed(generation.n);
 						if (options.check) {
 							yield* sources.discard(proposal);
 							return { generation: generation.n, status: "checked" };
@@ -215,6 +229,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							yield* sql.withTransaction(
 								Effect.gen(function* () {
 									yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation) VALUES(${id},${saved},'pre-flip',${bytes},${frozenAt},${fence},${generation?.n ?? null})`;
+									yield* sql`UPDATE generations SET backup_id=${id} WHERE n=${generation?.n ?? 0}`;
 									yield* events.writeBoot({
 										at: frozenAt,
 										type: "backup.taken",
@@ -234,7 +249,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						yield* Effect.gen(function* () {
 							if (!candidate || !generation) return yield* Effect.die("Missing candidate");
 							yield* recovery.prepare(candidate.attempt.epoch);
-							yield* supervisor.admit(candidate, "starting");
+							yield* supervisor.recordAttempt(candidate, "starting");
 							yield* owners.opened(candidate.id);
 							yield* candidate.process.control("go");
 							yield* candidate.process.health;
@@ -328,6 +343,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					if (failedGeneration) yield* generations.failed(failedGeneration.n, error, stderr);
 					yield* refresh;
 					if (
+						result.cause.reasons.length === 1 &&
 						failure._tag === "Success" &&
 						(Schema.is(FreezeTimeout)(failure.success) ||
 							Schema.is(StorageRejected)(failure.success) ||

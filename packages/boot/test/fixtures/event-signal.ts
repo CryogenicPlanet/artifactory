@@ -2,7 +2,7 @@ import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect, Fiber, Layer, Ref, Schema } from "effect";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
-import { Events, layer } from "../../src/events.ts";
+import { EventError, Events, layer } from "../../src/events.ts";
 
 Effect.gen(function* () {
 	yield* initializeBootSchema;
@@ -42,7 +42,11 @@ Effect.gen(function* () {
 		yield* Effect.yieldNow;
 		yield* events.stopWaiting;
 		for (const result of [yield* Fiber.join(waiting), yield* events.changed(0).pipe(Effect.result)]) {
-			if (result._tag !== "Failure" || result.failure.code !== "events_unavailable")
+			if (
+				result._tag !== "Failure" ||
+				!Schema.is(EventError)(result.failure) ||
+				result.failure.code !== "events_unavailable"
+			)
 				return yield* Effect.die("Shutdown did not close event waits");
 		}
 		yield* Console.log(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.Int)))(results));

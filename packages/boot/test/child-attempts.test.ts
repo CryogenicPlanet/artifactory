@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -116,9 +116,10 @@ describe("durable child ownership across kernel lifetimes", () => {
 		await execute(root, { op: "legacy", bootId: firstBoot });
 		expect(await execute(root, { op: "recover", bootId: nextBoot })).toMatchObject({
 			result: "Failure",
-			version: [{ user_version: 14 }],
+			version: [{ user_version: 15 }],
 			rows: [{ id: "legacy", boot_id: null, closed: 0 }],
 		});
+		await mkdir(join(root, "attempts"), { recursive: true });
 		await writeFile(join(root, "attempts/legacy.closed"), "legacy");
 		expect(await execute(root, { op: "recover", bootId: nextBoot })).toMatchObject({
 			result: "Success",

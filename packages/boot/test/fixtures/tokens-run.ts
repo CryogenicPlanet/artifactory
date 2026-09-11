@@ -1,15 +1,17 @@
+import { layer as durableEventsLayer } from "../../src/events.ts";
 /* oxlint-disable effecttsgo/node-builtin-import */
 import assert from "node:assert/strict";
 import { BunServices } from "@effect/platform-bun";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { Clock, Console, Effect, FileSystem, Layer, Result, Schema } from "effect";
 import { Auth, layer } from "../../src/auth.ts";
-import { layer as editLockLayer } from "../../src/edit-lock.ts";
+import { layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 import { layer as eventsLayer } from "../../src/events.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { TokenPair } from "../../src/refresh-schema.ts";
 import { fails, tokenSession } from "./token-session.ts";
 
+const editLockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const filename = process.argv[2],
 	scenario = process.argv[3];
 if (!filename) throw new Error("Missing database");
@@ -279,6 +281,7 @@ const run = Effect.gen(function* () {
 			yield* sql`DROP TABLE topic_moves`;
 			yield* sql`DROP TABLE topic_page_moves`;
 			yield* sql`DROP TABLE db_restore_requests`;
+			yield* sql`ALTER TABLE generations DROP COLUMN backup_id`;
 			yield* sql`ALTER TABLE source_changes DROP COLUMN before_directory`;
 			yield* sql`ALTER TABLE source_changes DROP COLUMN desired_directory`;
 			yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;
@@ -291,7 +294,7 @@ const run = Effect.gen(function* () {
 					yield* sql.unsafe(`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : "*"} FROM ${table}`),
 				);
 			assert.deepEqual(after, before);
-			assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 14 }]);
+			assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 15 }]);
 			yield* auth.refreshTokens(original.refresh);
 		}
 	});

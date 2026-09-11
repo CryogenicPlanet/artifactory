@@ -1,7 +1,7 @@
 import { type Crypto, DateTime, Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { type BootChannel, KernelError } from "./boot-channel.ts";
-import type { Identity } from "./messages.ts";
+import type { Identity } from "./identity.ts";
 import type { Mutate } from "./mutate.ts";
 import { sqlInput, sqlQueryFailure, type SqlInput } from "./sql-read.ts";
 import { SqlRows, sqlRows } from "./sql-result.ts";

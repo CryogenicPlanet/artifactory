@@ -1,10 +1,10 @@
-import { Effect, Ref, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { AuthError, type AuthConfig } from "./auth.ts";
-import { assertionProof, authErrorResponse, authFailure, body, humanSession, type AuthStore } from "./auth-http.ts";
+import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
+import { assertionProof, authFailure, body, humanSession } from "./auth-http.ts";
 
 /** These exact routes survive child failure; refresh proves itself, revoke always requires the human. */
-export const tokenRoute = (store: AuthStore, config: AuthConfig) =>
+export const tokenRoute = (auth: Auth["Service"], config: AuthConfig) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const url = new URL(request.url, "http://localhost");
@@ -16,8 +16,6 @@ export const tokenRoute = (store: AuthStore, config: AuthConfig) =>
 		if (!refresh && !family) return null;
 		return yield* authFailure(
 			Effect.gen(function* () {
-				const auth = yield* Ref.get(store);
-				if (!auth) return authErrorResponse("boot_unavailable", 503);
 				if (url.search) return yield* new AuthError({ code: "invalid_request" });
 				if (refresh) {
 					const input = yield* body(Schema.Struct({ refresh: Schema.String }));

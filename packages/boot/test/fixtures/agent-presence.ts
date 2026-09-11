@@ -1,3 +1,4 @@
+import { layer as durableEventsLayer } from "../../src/events.ts";
 /* oxlint-disable effecttsgo/node-builtin-import */
 import assert from "node:assert/strict";
 import { BunServices } from "@effect/platform-bun";
@@ -7,8 +8,9 @@ import { SqlClient } from "effect/unstable/sql";
 import { Auth, layer as authLayer } from "../../src/auth.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { layer as eventsLayer } from "../../src/events.ts";
-import { layer as lockLayer } from "../../src/edit-lock.ts";
+import { layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 
+const lockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const filename = process.argv[2];
 if (!filename) throw new Error("Missing database");
 const run = Effect.gen(function* () {
@@ -42,6 +44,7 @@ const run = Effect.gen(function* () {
 		yield* sql`DROP TABLE topic_moves`;
 		yield* sql`DROP TABLE topic_page_moves`;
 		yield* sql`DROP TABLE db_restore_requests`;
+		yield* sql`ALTER TABLE generations DROP COLUMN backup_id`;
 		yield* sql`ALTER TABLE source_changes DROP COLUMN before_directory`;
 		yield* sql`ALTER TABLE source_changes DROP COLUMN desired_directory`;
 		yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;

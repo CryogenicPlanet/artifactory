@@ -1,8 +1,13 @@
+import { isSqlError } from "effect/unstable/sql/SqlError";
+import { ChildError } from "./child-process.ts";
+import { StorageRejected } from "./storage-headroom.ts";
+import { EventStorageRejected } from "./event-storage.ts";
+import { ArtifactRetentionRejected } from "./artifact-retention.ts";
 // oxlint-disable-next-line effecttsgo/node-builtin-import -- Constant-time comparison is not exposed by Effect Crypto.
 import { timingSafeEqual } from "node:crypto";
-import { DateTime, Effect, Ref, Schema, type Semaphore, Stream } from "effect";
+import { Cause, DateTime, Effect, Ref, Schema, type Semaphore, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import type { BackupCaptureStore } from "./backup-http.ts";
+import type { DatabaseBackup } from "./database-backup.ts";
 import type { Destination } from "./traffic.ts";
 import type { VerifiedIdentity } from "./enrollment.ts";
 import { publicEventResponse } from "./public-event-http.ts";
@@ -15,7 +20,6 @@ export interface Attempt {
 	readonly generation: number;
 	readonly state: "starting" | "accepted" | "live" | "frozen";
 }
-export type EventStore = Ref.Ref<Events["Service"] | null>;
 const reserveBody = Schema.Struct({ transaction: Schema.String, count: Schema.Int });
 const abortBody = Schema.Struct({ transaction: Schema.String });
 const failure = (code: string, status: number) =>
@@ -25,17 +29,78 @@ const failure = (code: string, status: number) =>
 				code,
 				message: "Event operation unavailable.",
 				hint:
-					status === 507
-						? "Free space on the data volume, then retry; existing publication and recovery remain available."
-						: code === "unsafe_artifact_path"
-							? "Inspect and repair boot-owned artifact paths before another request."
-							: code === "scope_required"
-								? "Re-enroll and ask the human to grant read scope."
-								: "Retry infrastructure failures; inspect authenticated boot status.",
+					status === 500
+						? "Inspect bootloader logs. This failure is not an unchanged-retry condition."
+						: status === 507
+							? "Free space on the data volume, then retry; existing publication and recovery remain available."
+							: code === "unsafe_artifact_path"
+								? "Inspect and repair boot-owned artifact paths before another request."
+								: code === "scope_required"
+									? "Re-enroll and ask the human to grant read scope."
+									: "Retry infrastructure failures; inspect authenticated boot status.",
 				retriable: status === 503,
 			},
 		},
 		{ status },
+	);
+// Query and child mutation routes retain their existing distinct refusal statuses.
+const eventStatus = {
+	app_evidence_invalid: [400, 409],
+	app_fence_invalid: [400, 409],
+	app_store_missing: [400, 409],
+	batch_conflict: [400, 409],
+	batch_invalid: [400, 409],
+	body_invalid: [400, 400],
+	body_too_large: [400, 409],
+	candidate_probe_committed: [400, 409],
+	credential_expired: [401, 409],
+	credential_invalid: [401, 409],
+	cursor_ahead: [400, 409],
+	events_unavailable: [503, 409],
+	public_path_invalid: [400, 409],
+	publication_pending: [400, 409],
+	query_invalid: [400, 409],
+	reservation_conflict: [400, 409],
+	reservation_invalid: [400, 409],
+	reservation_mismatch: [400, 409],
+	sequence_exhausted: [400, 409],
+	stale_attempt: [403, 409],
+	topic_move_invalid: [400, 409],
+	topic_move_recovery_required: [400, 409],
+	topic_move_unprepared: [400, 409],
+} as const satisfies Readonly<Record<EventError["code"], readonly [number, number]>>;
+const eventFailure = <A, E, R>(effect: Effect.Effect<A, E, R>, mode: 0 | 1, unavailable = "events_unavailable") =>
+	effect.pipe(
+		Effect.catchCause((cause) => {
+			if (Cause.hasInterruptsOnly(cause))
+				return Effect.failCause(Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason)));
+			const expected =
+				cause.reasons.length > 0 &&
+				cause.reasons.every(
+					(reason) =>
+						reason._tag === "Fail" &&
+						(Schema.is(EventError)(reason.error) ||
+							Schema.is(StorageRejected)(reason.error) ||
+							Schema.is(EventStorageRejected)(reason.error) ||
+							Schema.is(ArtifactRetentionRejected)(reason.error) ||
+							Schema.is(ChildError)(reason.error) ||
+							Cause.isTimeoutError(reason.error) ||
+							(isSqlError(reason.error) && reason.error.isRetryable)),
+				);
+			if (!expected) return Effect.succeed(failure("handler_failed", 500));
+			for (const reason of cause.reasons) {
+				if (reason._tag !== "Fail") continue;
+				const error = reason.error;
+				if (Schema.is(EventError)(error)) return Effect.succeed(failure(error.code, eventStatus[error.code][mode]));
+				if (
+					Schema.is(StorageRejected)(error) ||
+					Schema.is(EventStorageRejected)(error) ||
+					Schema.is(ArtifactRetentionRejected)(error)
+				)
+					return Effect.succeed(failure(error.code, error.code === "unsafe_artifact_path" ? 409 : 507));
+			}
+			return Effect.succeed(failure(unavailable, 503));
+		}),
 	);
 const readBody = <S extends Schema.Constraint>(request: HttpServerRequest.HttpServerRequest, schema: S) =>
 	Effect.gen(function* () {
@@ -53,13 +118,13 @@ const readBody = <S extends Schema.Constraint>(request: HttpServerRequest.HttpSe
 		return yield* Schema.decodeEffect(Schema.fromJsonString(schema))(Buffer.concat(chunks).toString("utf8"));
 	});
 export const eventRoute = (
-	store: EventStore,
+	service: Events["Service"],
 	attempts: Ref.Ref<readonly Attempt[]>,
 	identity: VerifiedIdentity | null,
 	gate: Semaphore.Semaphore,
 	route: Ref.Ref<Destination | null>,
 	revalidate: Effect.Effect<boolean> = Effect.succeed(true),
-	captures?: BackupCaptureStore,
+	backup?: DatabaseBackup,
 ) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
@@ -68,7 +133,7 @@ export const eventRoute = (
 		const internal =
 			capture ||
 			["/_boot/seq", "/_boot/seq/reserve", "/_boot/seq/abort", "/_boot/events/append"].includes(url.pathname);
-		const query = ["/_boot/events", "/api/events", "/_boot/stream", "/api/stream"].includes(url.pathname);
+		const query = ["/_boot/events", "/api/events"].includes(url.pathname);
 		if (!internal && !query) return null;
 		let attempt: Attempt | null = null;
 		if (internal || request.headers["x-boot-secret"] !== undefined) {
@@ -92,8 +157,6 @@ export const eventRoute = (
 		} else if (!identity) return null;
 		else if (!identity.scopes.includes("read")) return failure("scope_required", 403);
 		const bodyText = request.method === "POST" ? yield* readBody(request, Schema.Unknown).pipe(Effect.result) : null;
-		const service = yield* Ref.get(store);
-		if (!service) return failure("events_unavailable", 503);
 		if (capture) {
 			if (request.method !== "POST") return failure("method_invalid", 405);
 			if (url.search || bodyText?._tag !== "Success") return failure("body_invalid", 400);
@@ -101,19 +164,12 @@ export const eventRoute = (
 				onExcessProperty: "error",
 			})(bodyText.success).pipe(Effect.result);
 			if (empty._tag === "Failure") return failure("body_invalid", 400);
-			const backup = captures ? yield* Ref.get(captures) : null;
 			if (!backup || !attempt) return failure("backup_unavailable", 503);
 			// Capture drains app writers, whose final publications need the channel gate.
 			// The operation gate revalidates this exact epoch before touching traffic.
-			return yield* backup.capture({ reason: "hourly", epoch: attempt.epoch }).pipe(
-				Effect.map(HttpServerResponse.jsonUnsafe),
-				Effect.catchTags({
-					StorageRejected: (error) => Effect.succeed(failure(error.code, 507)),
-					ArtifactRetentionRejected: (error) =>
-						Effect.succeed(failure(error.code, error.code === "unsafe_artifact_path" ? 409 : 507)),
-				}),
-				Effect.catchCause(() => Effect.succeed(failure("backup_unavailable", 503))),
-			);
+			return yield* backup
+				.capture({ reason: "hourly", epoch: attempt.epoch })
+				.pipe(Effect.map(HttpServerResponse.jsonUnsafe), (effect) => eventFailure(effect, 1, "backup_unavailable"));
 		}
 		if (url.pathname === "/_boot/seq" && request.method === "GET") {
 			const params = url.searchParams;
@@ -141,7 +197,7 @@ export const eventRoute = (
 						}),
 					)
 					.pipe(Effect.timeout("2 seconds"));
-			}).pipe(Effect.catchCause(() => Effect.succeed(failure("events_unavailable", 503))));
+			}).pipe((effect) => eventFailure(effect, 0));
 		}
 		if (query) {
 			if (request.method !== "GET") return failure("method_invalid", 405);
@@ -165,22 +221,8 @@ export const eventRoute = (
 						orElse: () => Effect.fail(new EventError({ code: "events_unavailable" })),
 					}),
 				);
-			return yield* publicEventResponse(request, identity, read, service.changed).pipe(
-				Effect.catchTag("EventError", (error) =>
-					Effect.succeed(
-						failure(
-							error.code,
-							error.code.startsWith("credential_")
-								? 401
-								: error.code === "stale_attempt"
-									? 403
-									: error.code === "events_unavailable"
-										? 503
-										: 400,
-						),
-					),
-				),
-				Effect.catchCause(() => Effect.succeed(failure("events_unavailable", 503))),
+			return yield* publicEventResponse(request, identity, read, service.changed).pipe((effect) =>
+				eventFailure(effect, 0),
 			);
 		}
 		return yield* gate
@@ -202,7 +244,9 @@ export const eventRoute = (
 					if (!attempt) return failure("child_forbidden", 403);
 					if (request.method !== "POST") return failure("method_invalid", 405);
 					if (url.pathname === "/_boot/seq/reserve") {
-						const body = yield* Schema.decodeUnknownEffect(reserveBody)(bodyValue);
+						const body = yield* Schema.decodeUnknownEffect(reserveBody)(bodyValue).pipe(
+							Effect.mapError(() => new EventError({ code: "body_invalid" })),
+						);
 						return HttpServerResponse.jsonUnsafe(
 							yield* (starting || (completion && body.count === 1) ? service.reserveStartup : service.reserve)(
 								body.transaction,
@@ -212,12 +256,16 @@ export const eventRoute = (
 						);
 					}
 					if (url.pathname === "/_boot/seq/abort") {
-						const body = yield* Schema.decodeUnknownEffect(abortBody)(bodyValue);
+						const body = yield* Schema.decodeUnknownEffect(abortBody)(bodyValue).pipe(
+							Effect.mapError(() => new EventError({ code: "body_invalid" })),
+						);
 						yield* service.abort(body.transaction, attempt.epoch);
 						return HttpServerResponse.empty({ status: 204 });
 					}
 					if (url.pathname === "/_boot/events/append") {
-						const body = yield* Schema.decodeUnknownEffect(Batch)(bodyValue);
+						const body = yield* Schema.decodeUnknownEffect(Batch)(bodyValue).pipe(
+							Effect.mapError(() => new EventError({ code: "body_invalid" })),
+						);
 						if (
 							completion &&
 							(yield* service.state).pending_id === body.transaction &&
@@ -234,13 +282,5 @@ export const eventRoute = (
 					return failure("method_invalid", 405);
 				}).pipe(Effect.timeout("2 seconds")),
 			)
-			.pipe(
-				Effect.catchTags({
-					EventError: (error) => Effect.succeed(failure(error.code, 409)),
-					EventStorageRejected: (error) => Effect.succeed(failure(error.code, 507)),
-					StorageRejected: (error) => Effect.succeed(failure(error.code, 507)),
-					SchemaError: () => Effect.succeed(failure("body_invalid", 400)),
-				}),
-				Effect.catchCause(() => Effect.succeed(failure("events_unavailable", 503))),
-			);
+			.pipe((effect) => eventFailure(effect, 1));
 	});

@@ -1,3 +1,4 @@
+import { layer as durableEventsLayer } from "../../src/events.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Database } from "bun:sqlite";
@@ -6,9 +7,10 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { SqlClient } from "effect/unstable/sql";
 import { AppBackup, layer as backupLayer } from "../../src/app-backup.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
-import { EditLock, layer as lockLayer } from "../../src/edit-lock.ts";
+import { EditLock, layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 import { SourceFiles, layer as sourceLayer } from "../../src/source-files.ts";
 
+const lockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const main = Effect.gen(function* () {
 	const root = process.argv[2];
 	if (!root) return yield* Effect.die("Missing test directory");

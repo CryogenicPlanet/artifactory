@@ -1,6 +1,6 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Console, Effect, Layer, Schema } from "effect";
+import { Console, Effect, FileSystem, Layer, Schema } from "effect";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { Events, layer as eventsLayer, Batch, EventRecord } from "../../src/events.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../src/app-recovery.ts";
@@ -24,7 +24,14 @@ const Input = Schema.Struct({
 const main = Effect.gen(function* () {
 	const root = process.argv[2];
 	if (!root) return yield* Effect.die("Missing root");
-	const input = yield* Schema.decodeEffect(Schema.fromJsonString(Input))(process.argv[3] ?? "{}");
+	const argument = process.argv[3];
+	const inputFile = process.argv[4];
+	if (argument === "--input-file" && !inputFile) return yield* Effect.die("Missing input file");
+	const json =
+		argument === "--input-file" && inputFile
+			? yield* (yield* FileSystem.FileSystem).readFileString(inputFile)
+			: (argument ?? "{}");
+	const input = yield* Schema.decodeEffect(Schema.fromJsonString(Input))(json);
 	yield* Effect.gen(function* () {
 		yield* initializeBootSchema;
 		const result = yield* Effect.gen(function* () {

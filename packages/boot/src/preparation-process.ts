@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Path, Ref, Schema, Stream } from "effect";
+import { Context, Effect, Layer, Path, type PlatformError, Ref, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { ChildError } from "./child-process.ts";
 
@@ -13,8 +13,11 @@ const Configuration = Schema.Struct({
 export class PreparationProcess extends Context.Service<
 	PreparationProcess,
 	{
-		readonly install: (workspace: string) => Effect.Effect<void, ChildError>;
-		readonly build: (workspace: string, output: string) => Effect.Effect<void, ChildError>;
+		readonly install: (workspace: string) => Effect.Effect<void, ChildError | PlatformError.PlatformError>;
+		readonly build: (
+			workspace: string,
+			output: string,
+		) => Effect.Effect<void, ChildError | PlatformError.PlatformError>;
 	}
 >()("comms/boot/PreparationProcess") {}
 
@@ -50,19 +53,26 @@ export const layer = Layer.effect(
 							Effect.forkScoped,
 						);
 						const code = yield* child.exitCode.pipe(
-							Effect.timeout(operation === "install" ? "60 seconds" : "120 seconds"),
+							Effect.timeoutOrElse({
+								duration: operation === "install" ? "60 seconds" : "120 seconds",
+								orElse: () => Effect.fail(new ChildError({ code: `preparation_${operation}_timeout` })),
+							}),
 						);
 						if (code !== 0) return yield* new ChildError({ code: `preparation_${operation}_failed` });
 					}),
 				).pipe(
-					Effect.catch((error) =>
-						Effect.gen(function* () {
+					Effect.catchCause((cause) => {
+						const reason = cause.reasons[0];
+						if (cause.reasons.length !== 1 || reason?._tag !== "Fail" || !Schema.is(ChildError)(reason.error))
+							return Effect.failCause(cause);
+						const error = reason.error;
+						return Effect.gen(function* () {
 							return yield* new ChildError({
-								code: Schema.is(ChildError)(error) ? error.code : `preparation_${operation}_${error._tag}`,
+								code: error.code,
 								stderr: (yield* Ref.get(stderr)).replace(/[a-f0-9]{64}/g, "[redacted]"),
 							});
-						}),
-					),
+						});
+					}),
 				);
 			});
 		return PreparationProcess.of({

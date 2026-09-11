@@ -20,14 +20,14 @@ const main = Effect.gen(function* () {
 		const release = yield* Deferred.make<void>();
 		const attempts = yield* Ref.make(0);
 		const written = yield* Ref.make(0);
-		const store = yield* Ref.make<Events["Service"] | null>({
+		const store: Events["Service"] = {
 			...events,
 			writeBoot: (event) =>
 				Ref.update(attempts, (n) => n + 1).pipe(
 					Effect.andThen(events.writeBoot(event)),
 					Effect.tap(() => Ref.update(written, (n) => n + 1)),
 				),
-		});
+		};
 		const observe = yield* requestEvents(store);
 		const handler = Effect.gen(function* () {
 			const request = yield* HttpServerRequest.HttpServerRequest;
@@ -54,7 +54,7 @@ const main = Effect.gen(function* () {
 					written: yield* Ref.get(written),
 					traffic: yield* admission.state,
 				});
-			yield* admission.admit;
+			yield* admission.awaitDestination;
 			const observed = yield* observe({
 				started: yield* Clock.monotonicTimeNanos,
 				method: request.method,

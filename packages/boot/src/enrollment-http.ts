@@ -1,16 +1,18 @@
-import { Clock, Effect, Ref, Schema } from "effect";
+import { Clock, Effect, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { AuthError, type AuthConfig } from "./auth.ts";
-import { assertionProof, humanSession, authFailure, authErrorResponse, body, type AuthStore } from "./auth-http.ts";
+import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
+import { assertionProof, humanSession, authFailure, body } from "./auth-http.ts";
 import { AddPasskey, DeletePasskey } from "./passkey-management-schema.ts";
 import { MintBinding } from "./token-mint-schema.ts";
-import { DatabaseRestoreInput, databaseRestoreParams } from "./database-restore-schema.ts";
+import { DatabaseRestoreInput, databaseRestoreParams, GenerationRestoreParams } from "./database-restore-schema.ts";
 import { BreakLock } from "./lock-break-schema.ts";
 import { RevokeFamily } from "./refresh-schema.ts";
 import { EnrollmentDecision } from "./enrollment-schema.ts";
 import { approvalClient, approvalPage } from "./enrollment-page.ts";
 
 const challengeInput = Schema.Union([
+	Schema.Struct({ action: Schema.Literal("generation.restore"), params: GenerationRestoreParams }),
+	Schema.Struct({ action: Schema.Literal("boot.restart"), params: Schema.Record(Schema.String, Schema.Never) }),
 	Schema.Struct({ action: Schema.Literal("db.restore"), params: DatabaseRestoreInput }),
 	Schema.Struct({ action: Schema.Literal("passkey.add"), params: AddPasskey }),
 	Schema.Struct({ action: Schema.Literal("passkey.delete"), params: DeletePasskey }),
@@ -31,7 +33,7 @@ const pageHeaders = Object.freeze({
 	"content-security-policy":
 		"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 });
-export const enrollmentRoute = (store: AuthStore, config: AuthConfig) =>
+export const enrollmentRoute = (auth: Auth["Service"], config: AuthConfig) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const url = new URL(request.url, "http://localhost"),
@@ -48,8 +50,6 @@ export const enrollmentRoute = (store: AuthStore, config: AuthConfig) =>
 		if (!create && !poll && !decide && !page && !challenge) return null;
 		return yield* authFailure(
 			Effect.gen(function* () {
-				const auth = yield* Ref.get(store);
-				if (!auth) return authErrorResponse("boot_unavailable", 503);
 				const approveUrl = (id: string) => `${config.expectedOrigin}/approve/${id}`;
 				if (page?.[1]) {
 					const info = yield* auth.enrollmentInfo(page[1]);
@@ -89,6 +89,14 @@ export const enrollmentRoute = (store: AuthStore, config: AuthConfig) =>
 								? auth.startPasskeyAddAssertion(input.params, session.id)
 								: auth.startPasskeyDeleteAssertion(input.params, session.id),
 						);
+					}
+					if (input.action === "generation.restore") {
+						const session = yield* humanSession(auth, request);
+						return HttpServerResponse.jsonUnsafe(yield* auth.startGenerationRestoreAssertion(input.params, session.id));
+					}
+					if (input.action === "boot.restart") {
+						const session = yield* humanSession(auth, request);
+						return HttpServerResponse.jsonUnsafe(yield* auth.startRestartAssertion(session.id));
 					}
 					if (input.action === "db.restore") {
 						const session = yield* humanSession(auth, request);

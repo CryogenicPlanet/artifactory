@@ -1,3 +1,4 @@
+import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
 // Effect Crypto has no constant-time comparison primitive.
 // oxlint-disable-next-line effecttsgo/node-builtin-import
 import { timingSafeEqual } from "node:crypto";
@@ -22,8 +23,15 @@ import {
 	type AddPasskey,
 	type DeletePasskey,
 } from "./passkey-management-schema.ts";
-import { makeDatabaseRestoreAuth } from "./database-restore-auth.ts";
-import { canonicalDatabaseRestore, validDatabaseRestore, type DatabaseRestore } from "./database-restore-schema.ts";
+import { makeDatabaseRestoreAuth, resolveRestoreTarget } from "./database-restore-auth.ts";
+import {
+	canonicalDatabaseRestore,
+	canonicalGenerationRestore,
+	validDatabaseRestore,
+	validRestoreSelection,
+	type DatabaseRestore,
+	type GenerationRestore,
+} from "./database-restore-schema.ts";
 import { makeTokenMint } from "./token-mint.ts";
 import { canonicalMint, validMint, type MintBinding } from "./token-mint-schema.ts";
 import { makeTokens } from "./tokens.ts";
@@ -38,7 +46,41 @@ export interface AuthConfig {
 }
 
 export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
-	code: Schema.String,
+	code: Schema.Literals([
+		"already_collected",
+		"assertion_invalid",
+		"auth_configuration_invalid",
+		"authentication_failed",
+		"authentication_invalid",
+		"backup_not_found",
+		"backup_not_restorable",
+		"challenge_invalid",
+		"device_secret_invalid",
+		"enrollment_decided",
+		"enrollment_denied",
+		"enrollment_expired",
+		"enrollment_invalid",
+		"family_not_found",
+		"family_revoked",
+		"generation_not_restorable",
+		"idempotency_conflict",
+		"invalid_request",
+		"last_passkey",
+		"origin_invalid",
+		"passkey_exists",
+		"passkey_not_found",
+		"refresh_invalid",
+		"registration_failed",
+		"registration_invalid",
+		"restore_in_progress",
+		"scope_required",
+		"session_invalid",
+		"setup_closed",
+		"setup_code_invalid",
+		"setup_required",
+		"token_expired",
+		"token_invalid",
+	]),
 }) {}
 
 const challengeRow = Schema.Struct({
@@ -51,7 +93,6 @@ const challengeRow = Schema.Struct({
 });
 const passkeyRow = Schema.Struct({ id: Schema.String, public_key: Schema.String, counter: Schema.Finite });
 const sessionRow = Schema.Struct({ id: Schema.String, expires_at: Schema.Finite });
-const denied = (code: string) => Effect.fail(new AuthError({ code }));
 const same = (left: string, right: string) => {
 	const a = Buffer.from(left);
 	const b = Buffer.from(right);
@@ -70,11 +111,7 @@ const makeAuth = (config: AuthConfig) =>
 			readonly generation: string;
 			readonly failures: number;
 		} | null>(null);
-		const random = Effect.map(crypto.randomBytes(32), (bytes) => Buffer.from(bytes).toString("base64url"));
-		const hash = (value: string) =>
-			crypto
-				.digest("SHA-256", new TextEncoder().encode(value))
-				.pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
+		const { hash, random } = authSecrets(crypto);
 		const noPasskeys = Effect.gen(function* () {
 			const rows = yield* sql`SELECT id FROM passkeys LIMIT 1`;
 			return rows.length === 0;
@@ -116,7 +153,7 @@ const makeAuth = (config: AuthConfig) =>
 			const row = yield* Schema.decodeUnknownEffect(Schema.Array(challengeRow))(rows);
 			const challenge = row[0];
 			if (!challenge || challenge.ceremony !== ceremony || challenge.expires_at <= (yield* Clock.currentTimeMillis))
-				return yield* denied("challenge_invalid");
+				return yield* refuse("challenge_invalid");
 			return challenge;
 		});
 		const newSession = Effect.gen(function* () {
@@ -132,11 +169,11 @@ const makeAuth = (config: AuthConfig) =>
 			mutex.withPermit(
 				Effect.gen(function* () {
 					const state = yield* setupState;
-					if (!state) return yield* denied("setup_closed");
+					if (!state) return yield* refuse("setup_closed");
 					if (!same(code, state.code)) {
 						if (state.failures + 1 >= 3) yield* rotateSetup;
 						else yield* Ref.set(setup, { ...state, failures: state.failures + 1 });
-						return yield* denied("setup_code_invalid");
+						return yield* refuse("setup_code_invalid");
 					}
 					const options = yield* Effect.tryPromise({
 						try: () =>
@@ -157,10 +194,10 @@ const makeAuth = (config: AuthConfig) =>
 			mutex.withPermit(
 				sql.withTransaction(
 					Effect.gen(function* () {
-						if (!(yield* noPasskeys)) return yield* denied("setup_closed");
+						if (!(yield* noPasskeys)) return yield* refuse("setup_closed");
 						const state = yield* Ref.get(setup);
 						const challenge = yield* takeChallenge(id, "setup");
-						if (!state || challenge.setup_generation !== state.generation) return yield* denied("challenge_invalid");
+						if (!state || challenge.setup_generation !== state.generation) return yield* refuse("challenge_invalid");
 						const verified = yield* Effect.tryPromise({
 							try: () =>
 								verifyRegistrationResponse({
@@ -172,8 +209,8 @@ const makeAuth = (config: AuthConfig) =>
 								}),
 							catch: () => new AuthError({ code: "registration_invalid" }),
 						});
-						if (!verified.verified) return yield* denied("registration_invalid");
-						if (challenge.expires_at <= (yield* Clock.currentTimeMillis)) return yield* denied("challenge_invalid");
+						if (!verified.verified) return yield* refuse("registration_invalid");
+						if (challenge.expires_at <= (yield* Clock.currentTimeMillis)) return yield* refuse("challenge_invalid");
 						const credential = verified.registrationInfo.credential;
 						const publicKey = Buffer.from(credential.publicKey).toString("base64url");
 						const transports = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(
@@ -192,7 +229,7 @@ const makeAuth = (config: AuthConfig) =>
 			);
 		const startLogin = mutex.withPermit(
 			Effect.gen(function* () {
-				if (yield* noPasskeys) return yield* denied("setup_required");
+				if (yield* noPasskeys) return yield* refuse("setup_required");
 				const options = yield* Effect.tryPromise({
 					try: () => generateAuthenticationOptions({ rpID: config.rpId, userVerification: "required" }),
 					catch: () => new AuthError({ code: "authentication_failed" }),
@@ -207,10 +244,10 @@ const makeAuth = (config: AuthConfig) =>
 			binding: string | null,
 		) {
 			const challenge = yield* takeChallenge(id, ceremony);
-			if (challenge.setup_generation !== binding) return yield* denied("challenge_invalid");
+			if (challenge.setup_generation !== binding) return yield* refuse("challenge_invalid");
 			const rows = yield* sql`SELECT id, public_key, counter FROM passkeys WHERE id = ${response.id}`;
 			const credential = (yield* Schema.decodeUnknownEffect(Schema.Array(passkeyRow))(rows))[0];
-			if (!credential) return yield* denied("authentication_invalid");
+			if (!credential) return yield* refuse("authentication_invalid");
 			const verified = yield* Effect.tryPromise({
 				try: () =>
 					verifyAuthenticationResponse({
@@ -227,8 +264,8 @@ const makeAuth = (config: AuthConfig) =>
 					}),
 				catch: () => new AuthError({ code: "authentication_invalid" }),
 			});
-			if (!verified.verified) return yield* denied("authentication_invalid");
-			if (challenge.expires_at <= (yield* Clock.currentTimeMillis)) return yield* denied("challenge_invalid");
+			if (!verified.verified) return yield* refuse("authentication_invalid");
+			if (challenge.expires_at <= (yield* Clock.currentTimeMillis)) return yield* refuse("challenge_invalid");
 			yield* sql`UPDATE passkeys SET counter = ${verified.authenticationInfo.newCounter} WHERE id = ${credential.id}`;
 			yield* sql`DELETE FROM auth_challenges WHERE id = ${id}`;
 		});
@@ -244,12 +281,14 @@ const makeAuth = (config: AuthConfig) =>
 				| "passkey.add"
 				| "passkey.delete"
 				| "token.mint"
-				| "db.restore",
+				| "db.restore"
+				| "generation.restore"
+				| "boot.restart",
 			binding: string,
 		) =>
 			mutex.withPermit(
 				Effect.gen(function* () {
-					if (yield* noPasskeys) return yield* denied("setup_required");
+					if (yield* noPasskeys) return yield* refuse("setup_required");
 					const nonce = yield* random;
 					const bytes = yield* crypto.digest("SHA-256", new TextEncoder().encode(`${action}${binding}${nonce}`));
 					const challenge = Buffer.from(bytes).toString("base64url");
@@ -273,28 +312,43 @@ const makeAuth = (config: AuthConfig) =>
 					return { id: yield* saveChallenge(options.challenge, action, binding), options };
 				}),
 			);
+		const restartBinding = (sessionId: string) => JSON.stringify({ session: sessionId });
+		const startRestartAssertion = (sessionId: string) =>
+			startActionAssertion("boot.restart", restartBinding(sessionId));
+		const authorizeRestart = (proof: AssertionProof, sessionId: string) =>
+			mutex.withPermit(
+				committed(
+					sql,
+					Effect.gen(function* () {
+						yield* verifyAssertion(proof.id, proof.response, "boot.restart", restartBinding(sessionId));
+						const now = yield* Clock.currentTimeMillis;
+						if (!(yield* sql`SELECT id FROM sessions WHERE id=${sessionId} AND expires_at>${now}`).length)
+							return yield* refuse("session_invalid");
+					}).pipe(captureRefusal(Schema.is(AuthError))),
+				),
+			);
 		const startEnrollmentAssertion = (params: EnrollmentDecision) =>
 			validDecision(params)
 				? startActionAssertion("enrollment.decide", canonicalDecision(params))
-				: denied("invalid_request");
+				: refuse("invalid_request");
 		const startRevocationAssertion = (params: RevokeFamily) =>
 			validFamily(params.family)
 				? startActionAssertion("token.revoke", canonicalRevocation(params))
-				: denied("invalid_request");
+				: refuse("invalid_request");
 		const startLockBreakAssertion = (params: BreakLock) =>
 			validLockId(params.id)
 				? startActionAssertion("lock.break", canonicalLockBreak(params))
-				: denied("invalid_request");
+				: refuse("invalid_request");
 		const startPasskeyAddAssertion = (params: AddPasskey, sessionId: string) =>
 			validPasskeyLabel(params.label) && validPasskeyId(params.registration)
 				? canonicalPasskeyAdd(params, sessionId).pipe(
 						Effect.flatMap((binding) => startActionAssertion("passkey.add", binding)),
 					)
-				: denied("invalid_request");
+				: refuse("invalid_request");
 		const startPasskeyDeleteAssertion = (params: DeletePasskey, sessionId: string) =>
 			validPasskeyId(params.id)
 				? startActionAssertion("passkey.delete", canonicalPasskeyDelete(params, sessionId))
-				: denied("invalid_request");
+				: refuse("invalid_request");
 		const passkeys = yield* makePasskeyManagement(
 			config,
 			(action, binding, proof) => verifyAssertion(proof.id, proof.response, action, binding),
@@ -306,7 +360,7 @@ const makeAuth = (config: AuthConfig) =>
 			mutex,
 		);
 		const startMintAssertion = (params: MintBinding) =>
-			validMint(params) ? startActionAssertion("token.mint", canonicalMint(params)) : denied("invalid_request");
+			validMint(params) ? startActionAssertion("token.mint", canonicalMint(params)) : refuse("invalid_request");
 		const mint = yield* makeTokenMint(
 			(params, proof) => verifyAssertion(proof.id, proof.response, "token.mint", canonicalMint(params)),
 			mutex,
@@ -314,12 +368,24 @@ const makeAuth = (config: AuthConfig) =>
 		const startDatabaseRestoreAssertion = (params: DatabaseRestore, sessionId: string) =>
 			validDatabaseRestore(params)
 				? startActionAssertion("db.restore", canonicalDatabaseRestore(params, sessionId))
-				: denied("invalid_request");
-		const authorizeDatabaseRestore = yield* makeDatabaseRestoreAuth(
-			(params, proof, sessionId) =>
-				verifyAssertion(proof.id, proof.response, "db.restore", canonicalDatabaseRestore(params, sessionId)),
-			mutex,
-		);
+				: refuse("invalid_request");
+		const startGenerationRestoreAssertion = (params: GenerationRestore, sessionId: string) =>
+			Effect.gen(function* () {
+				if (!validRestoreSelection(params)) return yield* refuse("invalid_request");
+				const target = yield* resolveRestoreTarget(params).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+				return yield* startActionAssertion("generation.restore", canonicalGenerationRestore(params, sessionId, target));
+			});
+		const authorizeDatabaseRestore = yield* makeDatabaseRestoreAuth((params, proof, sessionId, target) => {
+			if ("backup" in params)
+				return verifyAssertion(proof.id, proof.response, "db.restore", canonicalDatabaseRestore(params, sessionId));
+			if (!target) return refuse("invalid_request");
+			return verifyAssertion(
+				proof.id,
+				proof.response,
+				"generation.restore",
+				canonicalGenerationRestore(params, sessionId, target),
+			);
+		}, mutex);
 		const tokens = yield* makeTokens(
 			(params: RevokeFamily, proof: AssertionProof) =>
 				verifyAssertion(proof.id, proof.response, "token.revoke", canonicalRevocation(params)),
@@ -337,7 +403,7 @@ const makeAuth = (config: AuthConfig) =>
 			const rows =
 				yield* sql`UPDATE sessions SET last_seen_at = ${now} WHERE hash = ${digest} AND expires_at > ${now} RETURNING id, expires_at`;
 			const session = (yield* Schema.decodeUnknownEffect(Schema.Array(sessionRow))(rows))[0];
-			if (!session) return yield* denied("session_invalid");
+			if (!session) return yield* refuse("session_invalid");
 			return { id: session.id, expiresAt: session.expires_at };
 		});
 		const logout = Effect.fn("Auth.logout")(function* (token: string) {
@@ -354,7 +420,10 @@ const makeAuth = (config: AuthConfig) =>
 			startPasskeyDeleteAssertion,
 			...mint,
 			startMintAssertion,
+			startRestartAssertion,
+			authorizeRestart,
 			startDatabaseRestoreAssertion,
+			startGenerationRestoreAssertion,
 			authorizeDatabaseRestore,
 			startLockBreakAssertion,
 			breakLock,

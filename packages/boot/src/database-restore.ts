@@ -9,7 +9,10 @@ import { Auth } from "./auth.ts";
 import { BackupRecord } from "./backup-metadata.ts";
 import { ChildAttempts } from "./child-attempts.ts";
 import { ChildError } from "./child-process.ts";
-import { DatabaseRestoreRequest, type DatabaseRestore as DatabaseRestoreParams } from "./database-restore-schema.ts";
+import { DatabaseRestoreRequest, type RestoreSelection } from "./database-restore-schema.ts";
+import { generationSource } from "./generation-source.ts";
+import { prepareRestoreGeneration } from "./restore-generation.ts";
+import { SourceFiles } from "./source-files.ts";
 import { EditLock } from "./edit-lock.ts";
 import type { AssertionProof } from "./enrollment.ts";
 import { Events } from "./events.ts";
@@ -25,6 +28,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 	const owners = yield* ChildAttempts;
 	const generations = yield* Generations;
 	const lock = yield* EditLock;
+	const sources = yield* SourceFiles;
 	const events = yield* Events;
 	const crypto = yield* Crypto.Crypto;
 	const fs = yield* FileSystem.FileSystem;
@@ -32,6 +36,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 	const retention = yield* artifactRetention(path.dirname(recovery.filename));
 	const headroom = yield* storageHeadroom(path.dirname(recovery.filename));
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
+	const preparationContext = yield* Effect.context<Effect.Services<ReturnType<typeof prepareRestoreGeneration>>>();
 	const ready = yield* Ref.make(false);
 	const freshEpoch = crypto.randomBytes(32).pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
 	const read = (id: string) =>
@@ -81,6 +86,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 		backup: record.backup,
 		safety_backup: record.safety_backup,
 		generation: record.generation,
+		...(record.source_generation === null ? {} : { source_generation: record.source_generation }),
 		restored_to_seq: record.restored_to_seq,
 		event_seq: record.event_seq,
 		...(record.failure ? { error: record.failure } : {}),
@@ -96,10 +102,24 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 	});
 	const selectGeneration = (record: DatabaseRestoreRequest) =>
 		Effect.gen(function* () {
-			const selected = (yield* generations.list).find((item) => item.n === record.generation && item.good === 1);
+			const n =
+				record.phase === "failed" || record.phase === "rollback"
+					? (record.prior_generation ?? record.generation)
+					: record.generation;
+			const selected = (yield* generations.list).find(
+				(item) =>
+					item.n === n && (item.good === 1 || (record.phase === "restoring" && record.source_generation !== null)),
+			);
 			if (!selected) return yield* new ChildError({ code: "restore_snapshot_missing" });
 			return selected;
 		});
+	const completeSource = (record: DatabaseRestoreRequest) =>
+		Effect.gen(function* () {
+			if (record.source_generation !== null && record.phase === "restored" && record.source_batch === null)
+				return yield* new ChildError({ code: "restore_record_missing" });
+			if (record.source_batch !== null) yield* sources.completePublication(record.source_batch);
+		});
+
 	const rollback = (record: DatabaseRestoreRequest) =>
 		Effect.gen(function* () {
 			if (!record.safety_backup) return yield* new ChildError({ code: "restore_safety_backup_missing" });
@@ -134,12 +154,12 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					.pipe(Effect.provideContext(context));
 				const accepted = yield* interruptible(
 					Effect.gen(function* () {
-						yield* supervisor.admit(candidate, "starting");
+						yield* supervisor.recordAttempt(candidate, "starting");
 						yield* owners.opened(candidate.id);
 						yield* candidate.process.control("go");
 						yield* candidate.process.health.pipe(Effect.timeout("5 seconds"));
 						yield* recovery.prepare(epoch, epoch);
-						yield* sql.withTransaction(
+						const acceptance = sql.withTransaction(
 							Effect.gen(function* () {
 								yield* generations.healthy(generation.n);
 								const eventSeq = (yield* events.state).next;
@@ -153,11 +173,38 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 									request_id: null,
 									topic: null,
 									message_id: null,
-									payload: { backup: record.backup, restored_to_seq: record.restored_to_seq },
+									payload: {
+										backup: record.backup,
+										restored_to_seq: record.restored_to_seq,
+										...(record.source_generation === null ? {} : { source_generation: record.source_generation }),
+									},
 								});
 								yield* sql`UPDATE db_restore_requests SET phase='restored',event_seq=${eventSeq} WHERE proof_id=${record.proof_id}`;
 							}),
 						);
+						if (record.source_generation === null) yield* acceptance;
+						else {
+							if (!record.lock_id || !record.lock_family)
+								return yield* new ChildError({ code: "restore_record_missing" });
+							const selectedSource = yield* generationSource(path.dirname(recovery.filename), generation.n).pipe(
+								Effect.provideContext(preparationContext),
+							);
+							// The journal and acceptance commit together; disposal is registered before interruption can observe a proposal.
+							yield* Effect.acquireUseRelease(
+								sources.prepareTrustedTree({ id: record.lock_id, family: record.lock_family }, selectedSource, "rahul"),
+								(proposal) =>
+									sources.publishWithAcceptance(
+										proposal,
+										acceptance.pipe(
+											Effect.andThen(
+												sql`UPDATE db_restore_requests SET source_batch=${proposal} WHERE proof_id=${record.proof_id}`,
+											),
+											Effect.asVoid,
+										),
+									),
+								(proposal) => sources.discard(proposal).pipe(Effect.ignore),
+							);
+						}
 						yield* supervisor.activate(candidate, "live").pipe(Effect.provideContext(context));
 					}),
 				).pipe(Effect.exit);
@@ -171,6 +218,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 		);
 	const restart = (record: DatabaseRestoreRequest) =>
 		Effect.gen(function* () {
+			yield* completeSource(record);
 			if (yield* Ref.get(supervisor.current)) return;
 			yield* supervisor.start(yield* selectGeneration(record)).pipe(Effect.provideContext(context));
 		});
@@ -182,6 +230,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				yield* supervisor.assertClosure;
 				const latest = yield* read(record.proof_id);
 				if (latest.phase === "restored") {
+					yield* completeSource(latest);
 					yield* releaseLock(latest);
 					yield* restart(latest);
 					return;
@@ -191,14 +240,17 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					yield* sql`UPDATE db_restore_requests SET phase='rollback' WHERE proof_id=${record.proof_id}`;
 				} else if (latest.phase !== "working") return yield* Effect.failCause(installed.cause);
 				yield* rollback(yield* read(record.proof_id));
-				yield* restart(latest);
+				yield* restart(yield* read(record.proof_id));
 			} else if (record.phase === "working" || record.phase === "rollback") {
 				yield* rollback(record);
-				yield* restart(record);
+				yield* restart(yield* read(record.proof_id));
 			} else if (record.phase === "authorized") {
 				yield* sql`UPDATE db_restore_requests SET phase='failed',failure='restore_interrupted_before_selection' WHERE proof_id=${record.proof_id}`;
 				yield* releaseLock(record);
-			} else yield* releaseLock(record);
+			} else {
+				yield* completeSource(record);
+				yield* releaseLock(record);
+			}
 		});
 	const recover = supervisor.operationGate.withPermit(
 		Effect.gen(function* () {
@@ -210,19 +262,31 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 			yield* Ref.set(ready, true);
 		}),
 	);
-	const restore = (params: DatabaseRestoreParams, proof: AssertionProof, sessionId: string) =>
+	const restore = (params: RestoreSelection, proof: AssertionProof, sessionId: string) =>
 		supervisor.operationGate.withPermit(
 			Effect.gen(function* () {
 				const pending = yield* recoveryIntents(sql);
-				if (!(yield* Ref.get(ready)) || pending.cutover || pending.move || pending.source)
+				if (!(yield* Ref.get(ready)) || pending.cutover || pending.move)
+					return yield* new ChildError({ code: "restore_recovery_required" });
+				if (
+					pending.source &&
+					!(yield* sql`SELECT proof_id FROM db_restore_requests
+					WHERE phase='restored' AND source_batch IN (SELECT id FROM source_batches WHERE state='publishing')
+					AND (proof_id=${proof.id} OR (session_id=${sessionId} AND idempotency_key=${params.idempotency_key ?? null}))`)
+						.length
+				)
 					return yield* new ChildError({ code: "restore_recovery_required" });
 				yield* supervisor.assertClosure;
 				const record = yield* auth.authorizeDatabaseRestore(params, proof, sessionId);
 				if (record.phase === "restored" || record.phase === "failed") {
+					yield* completeSource(record);
+					if (record.phase === "restored" && record.source_generation !== null && record.lock_id !== null)
+						yield* restart(record);
 					yield* releaseLock(record);
 					return receipt(record);
 				}
-				if (record.phase !== "authorized") return yield* new ChildError({ code: "restore_recovery_required" });
+				if (pending.source || record.phase !== "authorized")
+					return yield* new ChildError({ code: "restore_recovery_required" });
 				const prior = yield* Ref.get(supervisor.current);
 				let priorClosed = false;
 				const close = Effect.gen(function* () {
@@ -250,9 +314,13 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 								current ??
 								(yield* lock.acquire(`boot:restore:${record.proof_id}`, "boot", { note: "Database restore" })).value;
 							yield* lock.pin({ id: held.id, family: held.holder_family });
-							yield* sql`UPDATE db_restore_requests SET generation=${generation.n},lock_id=${held.id},lock_family=${held.holder_family},lock_owned=${current ? 0 : 1} WHERE proof_id=${record.proof_id}`;
+							yield* sql`UPDATE db_restore_requests SET generation=${generation.n},prior_generation=${generation.n},lock_id=${held.id},lock_family=${held.holder_family},lock_owned=${current ? 0 : 1} WHERE proof_id=${record.proof_id}`;
 						}),
 					);
+					if (record.source_generation !== null)
+						yield* prepareRestoreGeneration(yield* read(record.proof_id), target.path, supervisor).pipe(
+							Effect.provideContext(preparationContext),
+						);
 					yield* supervisor.child.traffic.freeze;
 					if (prior) yield* prior.process.control("frozen").pipe(Effect.catch(() => close));
 					yield* supervisor.child.traffic.drained.pipe(Effect.timeout("5 seconds"));
@@ -309,7 +377,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 								: "restore_preparation_failed";
 						yield* sql`UPDATE db_restore_requests SET phase='failed',failure=${failure} WHERE proof_id=${record.proof_id}`;
 						yield* releaseLock(latest);
-						if (latest.generation !== null) yield* restart(latest);
+						if (latest.generation !== null) yield* restart(yield* read(record.proof_id));
 						return receipt(yield* read(record.proof_id));
 					}
 					yield* resume(yield* read(record.proof_id));

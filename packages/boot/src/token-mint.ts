@@ -1,6 +1,6 @@
+import { authSecrets, refuse } from "./auth-primitives.ts";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { AuthError } from "./auth.ts";
 import type { AssertionProof } from "./enrollment.ts";
 import { Scope } from "./enrollment-schema.ts";
 import { Events } from "./events.ts";
@@ -22,7 +22,6 @@ const Token = Schema.Struct({
 	created_at: Schema.Int,
 	revoked_at: Schema.NullOr(Schema.Int),
 });
-const refuse = (code: string) => Effect.fail(new AuthError({ code }));
 const canonicalProof = (proof: AssertionProof) =>
 	JSON.stringify([
 		proof.id,
@@ -44,11 +43,7 @@ export const makeTokenMint = <E, R>(
 		const sql = yield* SqlClient.SqlClient;
 		const crypto = yield* Crypto.Crypto;
 		const events = yield* Events;
-		const random = Effect.map(crypto.randomBytes(32), (bytes) => Buffer.from(bytes).toString("base64url"));
-		const hash = (value: string) =>
-			crypto
-				.digest("SHA-256", new TextEncoder().encode(value))
-				.pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
+		const { hash, random } = authSecrets(crypto);
 		const mintTokens = (params: MintBinding, proof: AssertionProof, sessionId: string, sessionSecret: string) =>
 			mutex.withPermit(
 				sql.withTransaction(

@@ -1,3 +1,4 @@
+import { migrateIdempotency } from "../../src/ext/core/legacy-idempotency.ts";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
@@ -7,7 +8,6 @@ import { EventRecord } from "../../src/kernel/boot-channel.ts";
 import {
 	type Idempotency,
 	lookupIdempotency,
-	migrateIdempotency,
 	operationalInput,
 	storeIdempotency,
 } from "../../src/kernel/idempotency.ts";

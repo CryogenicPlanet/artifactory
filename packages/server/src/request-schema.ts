@@ -1,7 +1,8 @@
+import { errorSchemas } from "./error-contract.ts";
 import { Effect, Layer, Schema, Stream } from "effect";
-import { HttpServerRequest } from "effect/unstable/http";
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiMiddleware } from "effect/unstable/httpapi";
-import { failure } from "./conversation-request.ts";
+import { refusal } from "./conversation-request.ts";
 import { KernelError } from "./kernel/boot-channel.ts";
 
 /** Bound bytes and read time before a declared HttpApi payload is decoded. */
@@ -34,11 +35,17 @@ export const boundedRequest = (maximum: number) =>
  */
 export class RequestValidation extends HttpApiMiddleware.Service<RequestValidation>()(
 	"comms/server/RequestValidation",
+	{ error: errorSchemas },
 ) {}
 export const layer = (maximum: number) =>
 	Layer.succeed(RequestValidation)((handler, { endpoint }) =>
-		failure(
+		refusal(
 			Effect.gen(function* () {
+				yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+					Effect.succeed(
+						response.status >= 400 ? HttpServerResponse.setHeader(response, "cache-control", "no-store") : response,
+					),
+				);
 				const request = yield* HttpServerRequest.HttpServerRequest;
 				const query = yield* HttpServerRequest.ParsedSearchParams;
 				yield* Schema.decodeEffect(Schema.toEncoded(endpoint.query ?? Schema.Record(Schema.String, Schema.Never)), {

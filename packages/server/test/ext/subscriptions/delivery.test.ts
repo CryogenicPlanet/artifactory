@@ -36,7 +36,7 @@ it("waits without polling after an expired retry finds no event, then drains a s
 			const ctx: Parameters<typeof runDelivery>[0] = {
 				read: (effect) => Ref.get(fence).pipe(Effect.flatMap(effect)),
 				events: {
-					query: ({ since }) =>
+					query: ({ since = 0 }) =>
 						Effect.gen(function* () {
 							yield* Ref.update(queries, (n) => n + 1);
 							const end = yield* Ref.get(fence);

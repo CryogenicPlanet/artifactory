@@ -1,6 +1,7 @@
 import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { Console, Effect } from "effect";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
@@ -161,6 +162,11 @@ it("keeps the original generation selection after a lost response and restart an
 }, 30000);
 
 it("restores file-directory replacements and exact empty directories from a retained generation", async (test) => {
+	const started = performance.now();
+	const phases: Array<{ phase: string; at_ms: number }> = [];
+	const phase = (name: string) => phases.push({ phase: name, at_ms: Math.round(performance.now() - started) });
+	test.onTestFailed(() => Effect.runPromise(Console.error("Tree revert fixture diagnostic", phases)));
+	phase("setup_start");
 	const fixture = await conversation(test);
 	const seed = join(fixture.root, "tree-seed");
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
@@ -173,7 +179,16 @@ it("restores file-directory replacements and exact empty directories from a reta
 	await app.setup();
 	const cookie = await app.login();
 	await app.ready(cookie);
+	phase("initial_live");
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
+	let operation = 0;
+	const revert = async (input: unknown) => {
+		const id = ++operation;
+		phase(`revert_${id}_start`);
+		const result: unknown = await (await app.post("/api/revert", input, cookie)).json();
+		phase(`revert_${id}_response`);
+		return result;
+	};
 	const editable = join(fixture.root, "app");
 	await rm(join(editable, "original-file"));
 	await mkdir(join(editable, "original-file"));
@@ -182,7 +197,7 @@ it("restores file-directory replacements and exact empty directories from a reta
 	await writeFile(join(editable, "original-directory"), "remove this replacement file");
 	await rm(join(editable, "original-empty"), { recursive: true });
 	await mkdir(join(editable, "new-empty"));
-	expect(await (await app.post("/api/revert", { generation: 1 }, cookie)).json()).toMatchObject({ status: "live" });
+	expect(await revert({ generation: 1 })).toMatchObject({ status: "live" });
 	expect(await readFile(join(editable, "original-file"), "utf8")).toBe("original file bytes");
 	expect(await readFile(join(editable, "original-directory/nested.txt"), "utf8")).toBe("nested original bytes");
 	expect(await readdir(join(editable, "original-directory"))).toEqual(["nested.txt"]);
@@ -194,7 +209,7 @@ it("restores file-directory replacements and exact empty directories from a reta
 	await writeFile(join(editable, "stable.txt"), "later unrelated edit");
 	await writeFile(join(editable, "later-independent.txt"), "later unrelated file");
 	for (const selection of [{}, { batch: restoredBatch }]) {
-		expect(await (await app.post("/api/revert", selection, cookie)).json()).toMatchObject({ status: "live" });
+		expect(await revert(selection)).toMatchObject({ status: "live" });
 		expect(await readFile(join(editable, "original-file/new-child.txt"), "utf8")).toBe("remove this directory tree");
 		expect(await readFile(join(editable, "original-directory"), "utf8")).toBe("remove this replacement file");
 		expect(await readdir(join(editable, "new-empty"))).toEqual([]);
@@ -202,22 +217,23 @@ it("restores file-directory replacements and exact empty directories from a reta
 		expect(await readFile(join(editable, "stable.txt"), "utf8")).toBe("later unrelated edit");
 		expect(await readFile(join(editable, "later-independent.txt"), "utf8")).toBe("later unrelated file");
 	}
-	expect(await (await app.post("/api/revert", { generation: 1 }, cookie)).json()).toMatchObject({ status: "live" });
+	expect(await revert({ generation: 1 })).toMatchObject({ status: "live" });
 	const restoredVersion = (await history()).id;
-	expect(await (await app.post("/api/revert", { path: "app/original-file" }, cookie)).json()).toMatchObject({
+	expect(await revert({ path: "app/original-file" })).toMatchObject({
 		status: "live",
 	});
 	expect(await readFile(join(editable, "original-file/new-child.txt"), "utf8")).toBe("remove this directory tree");
 	expect(await readFile(join(editable, "original-directory/nested.txt"), "utf8")).toBe("nested original bytes");
 	expect(await readdir(join(editable, "original-empty"))).toEqual([]);
 	expect(await readdir(editable)).not.toContain("new-empty");
-	expect(await (await app.post("/api/revert", { version: restoredVersion }, cookie)).json()).toMatchObject({
+	expect(await revert({ version: restoredVersion })).toMatchObject({
 		status: "live",
 	});
 	expect(await readFile(join(editable, "original-file"), "utf8")).toBe("original file bytes");
 	expect(await readFile(join(editable, "original-directory/nested.txt"), "utf8")).toBe("nested original bytes");
 	expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 	await app.ready(cookie);
+	phase("assertions_complete");
 }, 60000);
 
 it("recreates a missing editable app tree while its saved generation continues serving", async (test) => {

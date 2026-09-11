@@ -47,7 +47,7 @@ it.for(["selection", "lock-release"] as const)(
 				needle,
 				`${needle}
 			if (yield* fs.exists(${JSON.stringify(armed)}))
-				return yield* new ChildError({ code: "restore_fixture_failure" });`,
+				return yield* new ChildError({ code: "restore_recovery_required" });`,
 			),
 		);
 		const app = await fixture.launch();

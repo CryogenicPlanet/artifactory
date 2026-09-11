@@ -66,8 +66,8 @@ it("returns the latest filtered cursor at its long-poll deadline", async () => {
 	expect(JSON.parse(result)).toEqual({ ...page(4), timed_out: true });
 });
 
-it("finishes idle long-poll and SSE bodies when the captured credential expires", async () => {
-	for (const path of ["/api/events?wait=60", "/api/stream"]) {
+it("finishes idle long-poll bodies when the captured credential expires", async () => {
+	for (const path of ["/api/events?wait=60"]) {
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
 				let interrupted = false;
@@ -92,8 +92,7 @@ it("finishes idle long-poll and SSE bodies when the captured credential expires"
 				return Buffer.concat(chunks).toString();
 			}).pipe(Effect.timeout("2 seconds")),
 		);
-		if (path.includes("events")) expect(JSON.parse(result)).toEqual({ ...page(1), drained: true });
-		else expect(result).not.toContain("data:");
+		expect(JSON.parse(result)).toEqual({ ...page(1), drained: true });
 	}
 });
 
@@ -111,53 +110,4 @@ it("finishes a valid drained envelope on a post-header defect", async () => {
 		}),
 	);
 	expect(JSON.parse(result)).toEqual({ ...page(9), drained: true });
-});
-
-it("drains SSE pages in order before waiting and closes on a later query refusal", async () => {
-	const result = await Effect.runPromise(
-		Effect.gen(function* () {
-			const queried: Array<number | undefined> = [];
-			const waited: number[] = [];
-			const response = yield* publicEventResponse(
-				request("/api/stream?since=0&limit=1"),
-				null,
-				(input) =>
-					Effect.gen(function* () {
-						queried.push(input.since);
-						if (queried.length > 3) return yield* new EventError({ code: "credential_invalid" });
-						if (queried.length === 3) return page(3);
-						const seq = queried.length;
-						return {
-							...page(seq),
-							items: [
-								{
-									seq,
-									at: 1,
-									type: "message.created",
-									level: "info" as const,
-									actor: "other",
-									instance: null,
-									generation: 1,
-									request_id: null,
-									topic: "topic",
-									message_id: null,
-									payload: {},
-								},
-							],
-						};
-					}),
-				(cursor) =>
-					Effect.sync(() => {
-						waited.push(cursor);
-						return 4;
-					}),
-			);
-			if (response.body._tag !== "Stream") throw new Error("Expected streaming body");
-			const chunks = yield* Stream.runCollect(response.body.stream.pipe(Stream.orDie));
-			expect(queried).toEqual([0, 1, 2, 3]);
-			expect(waited).toEqual([3]);
-			return Buffer.concat(chunks).toString();
-		}),
-	);
-	expect(result.match(/id: \d/g)).toEqual(["id: 1", "id: 2"]);
 });

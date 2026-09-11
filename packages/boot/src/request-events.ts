@@ -1,17 +1,14 @@
-import { Cause, Clock, Effect, Queue, Ref } from "effect";
+import { Cause, Clock, Effect, Queue } from "effect";
 import type { VerifiedIdentity } from "./enrollment.ts";
-import type { EventStore } from "./event-http.ts";
-import type { EventRecord } from "./events.ts";
+import type { EventRecord, Events } from "./events.ts";
 
 /** Boot-scoped diagnostic writer. Request finalizers never acquire the SQL connection;
  * a blocked store can lose diagnostics, but cannot retain traffic admission. */
-export const requestEvents = (store: EventStore) =>
+export const requestEvents = (events: Events["Service"]) =>
 	Effect.gen(function* () {
 		const pending = yield* Queue.dropping<Omit<typeof EventRecord.Type, "seq">>(256);
 		yield* Effect.gen(function* () {
 			const event = yield* Queue.take(pending);
-			const events = yield* Ref.get(store);
-			if (!events) return yield* Effect.logError("http.request event store unavailable");
 			yield* events.writeBoot(event).pipe(
 				// Do not retry an uncertain commit or include request/error contents in stderr.
 				Effect.catchCauseIf(

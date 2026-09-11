@@ -15,6 +15,7 @@ interface Proposal {
 	readonly agent: string;
 	readonly changes: readonly Change[];
 	readonly tree?: boolean;
+	readonly coordinatorOwned?: boolean;
 }
 export interface Anchor {
 	readonly old_string: string;
@@ -150,7 +151,12 @@ const make = (dataDirectory: string) =>
 				}),
 			);
 
-		const prepareTree = (owner: Ownership, before: readonly TreeEntry[], desired: readonly TreeEntry[]) =>
+		const prepareTree = (
+			owner: Ownership,
+			before: readonly TreeEntry[],
+			desired: readonly TreeEntry[],
+			coordinatorAgent?: string,
+		) =>
 			Effect.uninterruptible(
 				Effect.gen(function* () {
 					const prior = new Map(before.map((entry) => [entry.path, entry.image]));
@@ -162,8 +168,15 @@ const make = (dataDirectory: string) =>
 						desired: next.get(name) ?? absent,
 					}));
 					const id = yield* crypto.randomUUIDv4;
-					const holder = (yield* lock.pin(owner)).value;
-					yield* Ref.set(prepared, { id, owner, agent: holder.agent, changes, tree: true });
+					const agent = coordinatorAgent ?? (yield* lock.pin(owner)).value.agent;
+					yield* Ref.set(prepared, {
+						id,
+						owner,
+						agent,
+						changes,
+						tree: true,
+						coordinatorOwned: coordinatorAgent !== undefined,
+					});
 					return id;
 				}),
 			);
@@ -179,6 +192,46 @@ const make = (dataDirectory: string) =>
 				yield* Ref.set(prepared, { id, owner: null, agent, changes });
 				return id;
 			});
+
+		const publish = <E, R>(id: string, acceptance: Effect.Effect<void, E, R>) =>
+			guard(
+				Effect.gen(function* () {
+					const value = yield* proposal(id);
+					if (value.owner) yield* pinned(value.owner);
+					yield* checkChanges(value.changes);
+					yield* Effect.uninterruptible(
+						Effect.gen(function* () {
+							yield* sql.withTransaction(
+								Effect.gen(function* () {
+									const authority = !value.owner ? Option.getOrNull(yield* Effect.serviceOption(EditAuthority)) : null;
+									if (authority) {
+										const now = (yield* DateTime.nowAsDate).getTime();
+										const active =
+											authority.kind === "human"
+												? yield* sql`SELECT id FROM sessions WHERE id=${authority.id} AND expires_at>${now}`
+												: yield* sql`SELECT id FROM tokens WHERE family=${authority.id} AND kind='access' AND revoked_at IS NULL LIMIT 1`;
+										if (authority.expiresAt <= now || active.length === 0)
+											return yield* new EditRejected({ code: "authority_expired", holder: null, transitions: [] });
+									}
+									yield* journal.begin(
+										{
+											id,
+											lock_id: value.owner?.id ?? null,
+											agent: value.agent,
+											at: (yield* DateTime.nowAsDate).getTime(),
+											state: "publishing",
+										},
+										value.changes,
+									);
+									yield* acceptance;
+								}),
+							);
+							yield* Ref.set(prepared, null);
+						}),
+					);
+					return yield* journal.recover;
+				}),
+			);
 
 		return {
 			// The durable page intent keeps this admission closed between coordinator calls and after restart.
@@ -245,9 +298,16 @@ const make = (dataDirectory: string) =>
 						return yield* lock.stage(owner, name, content, current.mode);
 					}),
 				),
-			proposalPaths: (id: string) =>
-				guard(Effect.map(proposal(id), (value) => value.changes.map((change) => change.path))),
 			prepare: (owner: Ownership) => guard(prepare(owner)),
+			// A durable boot coordinator already owns the pin and must finish it itself.
+			prepareTrustedTree: (owner: Ownership, sourceDirectory: string, agent: string) =>
+				guard(
+					Effect.gen(function* () {
+						yield* available;
+						yield* pinned(owner);
+						return yield* prepareTree(owner, yield* io.inventory(), yield* io.inventory(sourceDirectory), agent);
+					}),
+				),
 			prepareGeneration: (owner: Ownership, selection: UndoSelection) =>
 				guard(
 					Effect.uninterruptibleMask((restore) =>
@@ -318,6 +378,7 @@ const make = (dataDirectory: string) =>
 				),
 			// Trusted page publisher only. App publication requires a pin, via overlay or retained undo history.
 			preparePages: (agent: string, writes: readonly Write[]) => guard(preparePages(agent, writes)),
+			undoTargetsPages: (selection: UndoSelection) => guard(journal.targetsPages(selection)),
 			preparePageUndo: (agent: string, selection: UndoSelection) =>
 				guard(
 					Effect.gen(function* () {
@@ -333,50 +394,26 @@ const make = (dataDirectory: string) =>
 						Effect.gen(function* () {
 							if (!(yield* Ref.get(prepared))) return;
 							const value = yield* proposal(id);
-							if (value.owner) yield* lock.finish(value.owner, { succeeded: false });
+							if (value.owner && !value.coordinatorOwned) yield* lock.finish(value.owner, { succeeded: false });
 							yield* Ref.set(prepared, null);
 						}),
 					),
 				),
-			// Must follow successful rehearsal. The caller alone finalizes the lock after accepted cutover.
-			publish: (id: string) =>
-				guard(
+			// The coordinator's SQL acceptance and the source journal become durable together.
+			publishWithAcceptance: publish,
+			publish: (id: string) => publish(id, Effect.void),
+			completePublication: (id: string) =>
+				semaphore.withPermit(
 					Effect.gen(function* () {
-						const value = yield* proposal(id);
-						if (value.owner) yield* pinned(value.owner);
-						yield* checkChanges(value.changes);
-						yield* Effect.uninterruptible(
-							Effect.gen(function* () {
-								yield* sql.withTransaction(
-									Effect.gen(function* () {
-										const authority = !value.owner
-											? Option.getOrNull(yield* Effect.serviceOption(EditAuthority))
-											: null;
-										if (authority) {
-											const now = (yield* DateTime.nowAsDate).getTime();
-											const active =
-												authority.kind === "human"
-													? yield* sql`SELECT id FROM sessions WHERE id=${authority.id} AND expires_at>${now}`
-													: yield* sql`SELECT id FROM tokens WHERE family=${authority.id} AND kind='access' AND revoked_at IS NULL LIMIT 1`;
-											if (authority.expiresAt <= now || active.length === 0)
-												return yield* new EditRejected({ code: "authority_expired", holder: null, transitions: [] });
-										}
-										yield* journal.begin(
-											{
-												id,
-												lock_id: value.owner?.id ?? null,
-												agent: value.agent,
-												at: (yield* DateTime.nowAsDate).getTime(),
-												state: "publishing",
-											},
-											value.changes,
-										);
-									}),
-								);
-								yield* Ref.set(prepared, null);
-							}),
+						const batches = yield* sql`SELECT state FROM source_batches WHERE id=${id}`.pipe(
+							Effect.flatMap(
+								Schema.decodeUnknownEffect(
+									Schema.Array(Schema.Struct({ state: Schema.Literals(["publishing", "published"]) })),
+								),
+							),
 						);
-						return yield* journal.recover;
+						if (!batches[0]) return yield* new SourceRejected({ code: "batch_missing", path: id });
+						if (batches[0].state === "publishing") yield* journal.recover;
 					}),
 				),
 			recover: semaphore.withPermit(Effect.andThen(pageMoveReady(), journal.recover)),

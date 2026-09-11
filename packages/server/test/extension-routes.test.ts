@@ -9,9 +9,9 @@ it("matches scoped parameter and wildcard routes with the same context and descr
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
 	await writeFile(
 		join(seed, "ext/core.ts"),
-		`import {CoreApi,coreHandlers} from "../conversation.ts";
+		`import {Api as CoreApi,coreHandlers} from "./core/api.ts";
 export default api => {
- api.mount(CoreApi,coreHandlers);
+ api.mount(CoreApi,coreHandlers(api));
  api.route("GET", "/api/route-demo/:id", {description:"Old parameter route",scope:"read",handler:async()=>Response.json("old")});
  api.route("GET", "/api/route-demo/fixed", {description:"Fixed route",scope:"read",handler:async()=>Response.json("fixed")});
 };`,

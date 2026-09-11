@@ -1,15 +1,15 @@
+import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect, FileSystem, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { BootChannel, type Batch, KernelError } from "../../src/kernel/boot-channel.ts";
-import { initialize } from "../../src/kernel/database.ts";
-import { reconstructPublicPages } from "../../src/kernel/public-page-policy.ts";
-import { layer as messagesLayer } from "../../src/kernel/messages.ts";
+import { initialize } from "../../src/ext/core/schema.ts";
+import { reconstructPublicPages } from "../../src/ext/core/public-page-policy.ts";
+import { layer as messagesLayer } from "../../src/ext/core/messages.ts";
 import { layer as lifecycleLayer } from "../../src/kernel/lifecycle.ts";
-import { checkPageWrites, PageWriteCheck } from "../../src/kernel/page-write-policy.ts";
-import { Pages, layer as pagesLayer } from "../../src/kernel/pages.ts";
+import { Pages, layer as pagesLayer } from "../../src/ext/core/pages.ts";
 
 const program = Effect.gen(function* () {
 	const root = process.argv[2];
@@ -87,7 +87,7 @@ const program = Effect.gen(function* () {
 		yield* seed.pipe(Effect.provideService(BootChannel, channel("first")));
 		const reconstruct = (epoch: string) =>
 			reconstructPublicPages.pipe(
-				Effect.provide(Layer.merge(messagesLayer, lifecycleLayer)),
+				Effect.provide(Layer.merge(messagesLayer.pipe(Layer.provideMerge(publicationLayer)), lifecycleLayer)),
 				Effect.provideService(BootChannel, channel(epoch)),
 			);
 		assert.equal((yield* reconstruct("first").pipe(Effect.result))._tag, "Failure");
@@ -127,41 +127,6 @@ const program = Effect.gen(function* () {
 			);
 			assert.equal((yield* pages.resolve("gone/child").pipe(Effect.result))._tag, "Failure");
 		}).pipe(Effect.provide(pagesLayer(`${root}/pages`)), Effect.provideService(BootChannel, channel("second")));
-		const check = (paths: readonly string[], epoch = "second") =>
-			checkPageWrites(`${root}/app.db`, epoch, { paths, published_through: ceiling });
-		assert.deepEqual(yield* check(["pages/guide/private/index.md"]), { allowed: true });
-		assert.deepEqual(yield* check(["pages/gone/child/index.md"]), {
-			allowed: false,
-			code: "topic_deleted",
-			path: "pages/gone/child/index.md",
-		});
-		yield* sql`UPDATE topics SET archived_at=1 WHERE path='guide'`;
-		assert.deepEqual(yield* check(["pages/guide"]), { allowed: false, code: "topic_archived", path: "pages/guide" });
-		assert.deepEqual(yield* check(["pages/guide/public-001/index.md"]), {
-			allowed: false,
-			code: "topic_archived",
-			path: "pages/guide/public-001/index.md",
-		});
-		assert.deepEqual(yield* check(["pages/guide-other/index.md"]), { allowed: true });
-		yield* sql`UPDATE topics SET archived_at=NULL WHERE path='guide'`;
-		yield* sql.withTransaction(
-			Effect.gen(function* () {
-				yield* sql`UPDATE topics SET archived_at=2 WHERE path='guide'`;
-				assert.deepEqual(
-					yield* check(["pages/guide/file.md"]),
-					{ allowed: true },
-					"independent reader does not wait on app writer or see uncommitted domain policy",
-				);
-			}),
-		);
-		assert.equal((yield* check(["pages/guide/file.md"], "stale").pipe(Effect.result))._tag, "Failure");
-		for (const paths of [
-			["app/source.ts"],
-			["pages/../secret"],
-			["pages/a\\b"],
-			Array.from({ length: 257 }, () => "pages/file"),
-		])
-			assert.equal(Schema.is(PageWriteCheck)({ paths, published_through: ceiling }), false);
 		const beforeOverflow = ranges.size;
 		yield* sql`DELETE FROM topics`;
 		yield* sql`WITH RECURSIVE n(value) AS (SELECT 0 UNION ALL SELECT value+1 FROM n WHERE value<4096)
@@ -188,8 +153,6 @@ const program = Effect.gen(function* () {
 		assert.equal(published.length, 3);
 		yield* reconstruct("empty");
 		assert.equal(published.length, 3, "empty snapshot replay is also idempotent");
-		yield* sql`ALTER TABLE topics RENAME COLUMN deleted_at TO missing_deleted_at`;
-		assert.equal((yield* check(["pages/guide/file.md"]).pipe(Effect.result))._tag, "Failure");
 		yield* Console.log("PUBLIC_PAGE_POLICY_VERIFIED");
 	}).pipe(Effect.provide(SqliteClient.layer({ filename: `${root}/app.db`, disableWAL: true })));
 }).pipe(Effect.scoped, Effect.provide(BunServices.layer));

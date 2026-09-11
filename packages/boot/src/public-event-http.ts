@@ -16,19 +16,28 @@ export const publicEventResponse = (
 	request: HttpServerRequest.HttpServerRequest,
 	identity: VerifiedIdentity | null,
 	query: Events["Service"]["query"],
-	changed: (after: number) => Effect.Effect<number, EventError>,
+	changed: Events["Service"]["changed"],
 ) =>
 	Effect.gen(function* () {
 		const url = new URL(request.url, "http://localhost");
-		const sse = url.pathname.endsWith("/stream");
 		const params = url.searchParams;
-		const allowed = ["since", "limit", "topic", "types", "agent", "instance", "level", ...(sse ? [] : ["wait"])];
+		const allowed = [
+			"since",
+			"limit",
+			"topic",
+			"types",
+			"agent",
+			"instance",
+			"level",
+			"wait",
+			...(identity === null ? ["request_actor"] : []),
+		];
 		if (
 			url.search.length > 4096 ||
 			[...params.keys()].some((key) => !allowed.includes(key) || params.getAll(key).length !== 1)
 		)
 			return yield* new EventError({ code: "query_invalid" });
-		const cursorText = params.get("since") ?? (sse ? (request.headers["last-event-id"] ?? null) : null);
+		const cursorText = params.get("since");
 		const since = cursorText === null ? undefined : integer(cursorText, 0, Number.MAX_SAFE_INTEGER);
 		const limit = integer(params.get("limit"), 100, 200);
 		const wait = integer(params.get("wait"), 0, 60);
@@ -36,7 +45,8 @@ export const publicEventResponse = (
 			types = params.get("types"),
 			agent = params.get("agent"),
 			instance = params.get("instance"),
-			level = params.get("level");
+			level = params.get("level"),
+			requestActor = params.get("request_actor");
 		if (
 			since === null ||
 			limit === null ||
@@ -52,14 +62,19 @@ export const publicEventResponse = (
 					types.split(",").some((type) => !/^(?:[a-zA-Z0-9_.-]+\*?|\*)$/.test(type)))) ||
 			(agent !== null && (agent.length > 128 || !/^[a-z0-9][a-z0-9._-]*$/.test(agent))) ||
 			(instance !== null && (instance.length > 128 || !/^[a-zA-Z0-9_-]+$/.test(instance))) ||
-			(level !== null && !["debug", "info", "warn", "error"].includes(level))
+			(level !== null && !["debug", "info", "warn", "error"].includes(level)) ||
+			(requestActor !== null && (requestActor.length > 128 || !/^[a-z0-9][a-z0-9._-]*$/.test(requestActor)))
 		)
 			return yield* new EventError({ code: "query_invalid" });
 		const input = {
 			limit,
 			...(since === undefined ? {} : { since }),
-			...(identity?.kind === "agent" ? { requestActor: identity.agent } : {}),
-			...(!sse && wait > 0 && identity ? { excludeMessageInstance: identity.id } : {}),
+			...(identity?.kind === "agent"
+				? { requestActor: identity.agent }
+				: requestActor === null
+					? {}
+					: { requestActor }),
+			...(wait > 0 && identity ? { excludeMessageInstance: identity.id } : {}),
 			...(topic === null ? {} : { topic }),
 			...(types === null ? {} : { types: types.split(",") }),
 			...(agent === null ? {} : { agent }),
@@ -68,37 +83,10 @@ export const publicEventResponse = (
 		};
 		const first = yield* query(input);
 		const headers = { "cache-control": "no-store", "x-accel-buffering": "no" };
-		if (!sse && (first.items.length > 0 || wait === 0)) return HttpServerResponse.jsonUnsafe(first, { headers });
+		if (first.items.length > 0 || wait === 0) return HttpServerResponse.jsonUnsafe(first, { headers });
 		const encoder = new TextEncoder();
 		const startedAt = yield* Clock.currentTimeMillis;
 		const expiry = identity?.expiresAt;
-		const awaitExpiry = Effect.gen(function* () {
-			if (expiry === undefined) return yield* Effect.never;
-			yield* Effect.sleep(Math.max(0, expiry - (yield* Clock.currentTimeMillis)));
-		});
-		if (sse) {
-			const pages = Stream.unfold(first, (page) =>
-				Effect.gen(function* () {
-					if (page.items.length === 0) yield* changed(page.cursor);
-					const next = yield* query({ ...input, since: page.cursor });
-					return [next.items, next] as const;
-				}),
-			).pipe(Stream.flatMap((items) => Stream.fromIterable(items)));
-			const events = Stream.concat(Stream.fromIterable(first.items), pages).pipe(
-				Stream.map((event) => `id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`),
-				Stream.catchCause(() => Stream.empty),
-			);
-			return HttpServerResponse.stream(
-				Stream.merge(
-					events.pipe(Stream.interruptWhen(awaitExpiry)),
-					Stream.tick("10 seconds").pipe(Stream.map(() => ": heartbeat\n\n")),
-					{
-						haltStrategy: "left",
-					},
-				).pipe(Stream.map((text) => encoder.encode(text))),
-				{ contentType: "text/event-stream", headers },
-			);
-		}
 		let current = first;
 		const deadline = Math.min(startedAt + wait * 1000, expiry ?? Infinity);
 		const expiresFirst = expiry !== undefined && expiry <= startedAt + wait * 1000;

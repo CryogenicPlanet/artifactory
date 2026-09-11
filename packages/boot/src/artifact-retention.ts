@@ -13,6 +13,7 @@ export class ArtifactRetentionRejected extends Schema.TaggedError<ArtifactRetent
 const Generation = Schema.Struct({
 	n: Schema.Int,
 	snapshot_dir: Schema.NullOr(Schema.String),
+	backup_id: Schema.NullOr(Schema.String),
 });
 const Protected = Schema.Struct({ n: Schema.Int });
 const BackupId = Schema.Struct({ id: Schema.String });
@@ -31,14 +32,13 @@ export const artifactRetention = (directory: string) =>
 		const sql = yield* SqlClient.SqlClient;
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
-		const root = yield* fs.realPath(directory);
 		const sync = (name: string) =>
 			Effect.scoped(
 				Effect.gen(function* () {
 					yield* (yield* fs.open(name)).sync;
 				}),
 			);
-		const remove = (relative: string, recursive: boolean) =>
+		const remove = (root: string, relative: string, recursive: boolean) =>
 			Effect.gen(function* () {
 				// Check each ancestor, including a dangling symlink, without traversing contents.
 				let current = root;
@@ -75,6 +75,7 @@ export const artifactRetention = (directory: string) =>
 		return {
 			prune: (volume: StorageVolume, requiredBackupBytes: number, operationGenerations: readonly number[]) =>
 				Effect.gen(function* () {
+					const root = yield* fs.realPath(directory);
 					if (
 						!Number.isSafeInteger(requiredBackupBytes) ||
 						requiredBackupBytes < 0 ||
@@ -86,7 +87,7 @@ export const artifactRetention = (directory: string) =>
 						return yield* new ArtifactRetentionRejected({ code: "invalid_storage_sample" });
 					const catalog = yield* sql.withTransaction(
 						Effect.gen(function* () {
-							const generations = yield* sql`SELECT n,snapshot_dir FROM generations ORDER BY n`.pipe(
+							const generations = yield* sql`SELECT n,snapshot_dir,backup_id FROM generations ORDER BY n`.pipe(
 								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Generation))),
 							);
 							const protectedGenerations = yield* sql`
@@ -95,7 +96,11 @@ export const artifactRetention = (directory: string) =>
 							UNION SELECT generation AS n FROM child_attempts WHERE closed=0
 							UNION SELECT candidate AS n FROM cutover
 							UNION SELECT prior AS n FROM cutover WHERE prior IS NOT NULL
-							UNION SELECT generation AS n FROM db_restore_requests
+							UNION SELECT source_generation AS n FROM db_restore_requests
+ WHERE source_generation IS NOT NULL AND (phase IN ('authorized','restoring','working','rollback') OR lock_id IS NOT NULL)
+ UNION SELECT prior_generation AS n FROM db_restore_requests
+ WHERE prior_generation IS NOT NULL AND (phase IN ('authorized','restoring','working','rollback') OR lock_id IS NOT NULL)
+ UNION SELECT generation AS n FROM db_restore_requests
 							WHERE generation IS NOT NULL AND (phase IN ('authorized','restoring','working','rollback') OR lock_id IS NOT NULL)
 						`.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Protected))));
 							const protectedBackups = yield* sql`
@@ -117,6 +122,10 @@ export const artifactRetention = (directory: string) =>
 						...operationGenerations,
 					]);
 					const protectedBackups = new Set(catalog.protectedBackups.map((item) => item.id));
+					for (const generation of catalog.generations) {
+						if (protectedGenerations.has(generation.n) && generation.backup_id !== null)
+							protectedBackups.add(generation.backup_id);
+					}
 					let removedGenerations = 0;
 					for (const generation of catalog.generations) {
 						if (protectedGenerations.has(generation.n)) continue;
@@ -129,7 +138,7 @@ export const artifactRetention = (directory: string) =>
 							generation.snapshot_dir !== path.join(root, relative, "source")
 						)
 							continue;
-						if (yield* remove(relative, true)) removedGenerations++;
+						if (yield* remove(root, relative, true)) removedGenerations++;
 						// Preserve generation history without advertising a snapshot that no longer exists.
 						yield* sql`UPDATE generations SET snapshot_dir=NULL WHERE n=${generation.n}`;
 					}
@@ -162,7 +171,7 @@ export const artifactRetention = (directory: string) =>
 						if (!/^[A-Za-z0-9_-]+$/.test(backup.id)) continue;
 						const relative = path.join("backups", `${backup.id}.db`);
 						if (backup.path !== path.join(directory, relative) && backup.path !== path.join(root, relative)) continue;
-						yield* remove(relative, false);
+						yield* remove(root, relative, false);
 						yield* sql`DELETE FROM backups WHERE id=${backup.id}`;
 						backupBytes -= backup.bytes;
 						removedBackups++;

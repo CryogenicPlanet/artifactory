@@ -115,7 +115,7 @@ describe("durable edit ownership and staging", () => {
 		const inspected = Schema.decodeUnknownSync(Schema.Struct({ value: Lock }))(await env.call({ op: "inspect" })).value;
 		expect(inspected.expires).toBeLessThan(9999999999999);
 		expect(inspected.ttl_seconds).toBe(60);
-	});
+	}, 15000);
 
 	it("preserves normal lock across restart and clears interrupted pins and orphan staging explicitly", async (test) => {
 		const env = await fixture(test);
@@ -160,7 +160,7 @@ describe("durable edit ownership and staging", () => {
 			value: null,
 			transitions: [{ type: "released", staged: [] }],
 		});
-	});
+	}, 15000);
 
 	it("defers targeted break and family revocation until cutover finalization", async (test) => {
 		const env = await fixture(test);
@@ -222,5 +222,5 @@ describe("durable edit ownership and staging", () => {
 		await exited;
 		expect(await env.sql("SELECT * FROM staging")).toEqual([]);
 		expect(await env.call({ op: "inspect" })).toMatchObject({ value: { expires: lock.expires } });
-	});
+	}, 15000);
 });

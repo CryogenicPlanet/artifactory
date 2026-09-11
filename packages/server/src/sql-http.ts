@@ -1,8 +1,9 @@
+import { errorSchemas } from "./error-contract.ts";
 import { Effect, Layer, Schema } from "effect";
 import { HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi";
 import type { SystemApi } from "./conversation.ts";
-import { failure, identity } from "./conversation-request.ts";
-import { Messages } from "./kernel/messages.ts";
+import { refusal, identity } from "./conversation-request.ts";
+import { Publication } from "./kernel/publication.ts";
 import { readSql, queryShape, SqlInput } from "./kernel/sql-read.ts";
 import { SqlRows } from "./kernel/sql-result.ts";
 import { SqlWriteResult } from "./kernel/sql-write.ts";
@@ -10,6 +11,7 @@ import { RequestValidation, layer as bodyLayer } from "./request-schema.ts";
 
 export const sqlGroup = HttpApiGroup.make("sql").add(
 	HttpApiEndpoint.post("query", "/api/sql", {
+		error: errorSchemas,
 		payload: SqlInput,
 		query: Schema.Record(Schema.String, Schema.Never),
 		success: HttpApiSchema.WithHeaders(Schema.Union([SqlWriteResult, SqlRows]), {
@@ -25,13 +27,13 @@ export const sqlGroup = HttpApiGroup.make("sql").add(
 export const sqlHandlers = (api: typeof SystemApi) =>
 	HttpApiBuilder.group(api, "sql", (handlers) =>
 		handlers.handle("query", ({ payload, request }) =>
-			failure(
+			refusal(
 				Effect.gen(function* () {
 					const read = yield* queryShape(payload);
 					const who = yield* identity(read ? "read" : "fs");
 					const result = read
 						? yield* readSql(payload)
-						: yield* (yield* Messages).writeSql(who, payload, request.headers["idempotency-key"]);
+						: yield* (yield* Publication).writeSql(who, payload, request.headers["idempotency-key"]);
 					return HttpApiSchema.withHeaders({ body: result, headers: { "cache-control": "no-store" as const } });
 				}),
 			),

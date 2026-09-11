@@ -1,3 +1,4 @@
+import { layer as durableEventsLayer } from "../../src/events.ts";
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Clock, Console, Crypto, Effect, Layer, Ref, Schema, Semaphore } from "effect";
@@ -7,10 +8,11 @@ import { SqlClient } from "effect/unstable/sql";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { Auth, layer as authLayer } from "../../src/auth.ts";
 import { authenticate } from "../../src/auth-http.ts";
-import { layer as lockLayer } from "../../src/edit-lock.ts";
+import { layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 import type { Destination } from "../../src/traffic.ts";
 import { eventRoute, type Attempt } from "../../src/event-http.ts";
 
+const lockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const main = Effect.gen(function* () {
 	yield* initializeBootSchema;
 	return yield* Effect.gen(function* () {
@@ -19,10 +21,10 @@ const main = Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const crypto = yield* Crypto.Crypto;
 		const reads = yield* Ref.make(0);
-		const store = yield* Ref.make<Events["Service"] | null>({
+		const store: Events["Service"] = {
 			...events,
 			query: (input) => Ref.update(reads, (n) => n + 1).pipe(Effect.andThen(events.query(input))),
-		});
+		};
 		const server = yield* HttpServer.HttpServer;
 		const host = new URL(HttpServer.formatAddress(server.address)).host;
 		const attempts = yield* Ref.make<readonly Attempt[]>([

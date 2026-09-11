@@ -1,5 +1,7 @@
 # kernel
 
-Effect services for the app store, published message/topic reads and writes, profiles, extension lifecycles, and the guarded boot channel. Start with `database.ts`, `messages.ts`, and `ext.ts`; `server.ts` wires their layers. Boot owns authentication, sequence allocation, and the durable event log.
+The app's writer epoch, mutation receipts, outbox publication, pinned SQL reads and extension lifecycle. Start with `publication.ts`, `mutate.ts` and `ext.ts`; `server.ts` wires one shared Publication instance for domain services, extensions and shutdown. Boot owns authentication, sequence allocation and the durable event log.
 
-All app writes check the current writer epoch. Mutation events publish through the transactional outbox before their HTTP success; readers select the published image. Runtime state belongs to each service instance or scope.
+Product SQL and routes live in `../ext/core/`. The loader receives their capability binding from app composition. It does not instantiate domain services. `extension-api.ts` references their public types to keep extension helpers and mounted handlers checked.
+
+All writes check the writer epoch and publish through the transactional outbox before HTTP success. The reader preserves pending move barriers and refuses unpublished raw SQL or an unhealthy writer. Health invokes the assembled core handlers inside the existing rollback probe; do not replace it with a database ping. Runtime state belongs to the service instance or scope.

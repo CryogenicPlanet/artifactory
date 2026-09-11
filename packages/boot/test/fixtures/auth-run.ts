@@ -1,3 +1,4 @@
+import { layer as durableEventsLayer } from "../../src/events.ts";
 /* oxlint-disable effecttsgo/node-builtin-import */
 import assert from "node:assert/strict";
 import { BunServices } from "@effect/platform-bun";
@@ -7,9 +8,10 @@ import { SqlClient } from "effect/unstable/sql";
 import { Auth, layer } from "../../src/auth.ts";
 import { layer as eventsLayer } from "../../src/events.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
-import { layer as editLockLayer } from "../../src/edit-lock.ts";
+import { layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 import { authenticator } from "./authenticator.ts";
 
+const editLockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const run = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const fs = yield* FileSystem.FileSystem;

@@ -44,6 +44,7 @@ it("keeps writes live through failed preparation and serves an edited UI from a 
 	expect(brokenManifest).not.toBe(originalManifest);
 	expect((await put("package.json", brokenManifest)).status).toBe(200);
 	const failedInstall = app.post("/api/reload", {}, cookie);
+	void failedInstall.catch(() => undefined);
 	await send();
 	expect(await (await failedInstall).json()).toMatchObject({ status: "failed" });
 	expect(await readFile(join(fixture.root, "app/package.json"), "utf8")).toBe(originalManifest);
@@ -51,7 +52,6 @@ it("keeps writes live through failed preparation and serves an edited UI from a 
 	expect((await put("package.json", originalManifest)).status).toBe(200);
 	const entered = join(fixture.root, "build-entered");
 	const release = join(fixture.root, "build-release");
-	test.onTestFinished(() => writeFile(release, "release"));
 	const brokenConfig = `import { existsSync, writeFileSync } from "node:fs";
 writeFileSync(${JSON.stringify(entered)}, "entered");
 while (!existsSync(${JSON.stringify(release)})) await new Promise((resolve) => setTimeout(resolve, 25));
@@ -61,17 +61,24 @@ throw new Error("deliberate UI build failure"); export default {};`;
 	const failedBuild = app.post("/api/reload", {}, cookie).finally(() => {
 		buildSettled = true;
 	});
-	await expect.poll(() => readFile(entered, "utf8").catch(() => ""), { timeout: 20000 }).toBe("entered");
-	await Promise.race([
-		send(),
-		delay(3000).then(() => {
-			throw Error("Message blocked behind preparation");
-		}),
-	]);
-	const status = await (await fetch(`${app.url}/_boot/status`, { headers })).json();
-	expect(status.traffic.frozen).toBe(false);
-	expect(buildSettled).toBe(false);
-	await writeFile(release, "release");
+	// Observe rejection immediately; assertions below still await the original request.
+	void failedBuild.catch(() => undefined);
+	try {
+		// A fresh install (up to 60s) and dependency copy precede entry into the build.
+		await expect.poll(() => readFile(entered, "utf8").catch(() => ""), { timeout: 90000 }).toBe("entered");
+		await Promise.race([
+			send(),
+			delay(3000).then(() => {
+				throw Error("Message blocked behind preparation");
+			}),
+		]);
+		const status = await (await fetch(`${app.url}/_boot/status`, { headers })).json();
+		expect(status.traffic.frozen).toBe(false);
+		expect(buildSettled).toBe(false);
+	} finally {
+		await writeFile(release, "release");
+		await failedBuild.catch(() => undefined);
+	}
 	expect(await (await failedBuild).json()).toMatchObject({ status: "failed" });
 	expect(await readFile(join(fixture.root, "app/ui/vite.config.ts"), "utf8")).toBe(originalConfig);
 

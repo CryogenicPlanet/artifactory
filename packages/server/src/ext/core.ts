@@ -1,7 +1,7 @@
-import { CoreApi, coreHandlers } from "../conversation.ts";
+import { Api as CoreApi, coreHandlers } from "./core/api.ts";
 import type { Api } from "../kernel/extension-api.ts";
 
-/** Removing this extension removes the product routes; later extensions may replace any of them. */
+/** Core owns the product routes; later extensions can replace them through the same API. */
 export default function core(api: Api) {
-	api.mount(CoreApi, coreHandlers);
+	api.mount(CoreApi, coreHandlers(api));
 }

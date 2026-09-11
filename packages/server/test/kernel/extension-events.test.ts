@@ -56,7 +56,7 @@ it("advances exhausted filtered pages through unmatched events after completing 
 			const seen = yield* Ref.make<ReadonlyArray<number>>([]);
 			const queried = yield* Ref.make<ReadonlyArray<number>>([]);
 			yield* runEvents(
-				({ since }) =>
+				({ since = 0 }) =>
 					Ref.update(queried, (items) => [...items, since]).pipe(
 						Effect.as(since === 4 ? page([], 7) : since === 7 ? page([event(8)], 10) : page([], 9)),
 					),

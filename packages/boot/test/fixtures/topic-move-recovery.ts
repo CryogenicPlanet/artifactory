@@ -1,3 +1,4 @@
+import { layer as durableEventsLayer } from "../../src/events.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect, Layer, Schema } from "effect";
@@ -6,11 +7,12 @@ import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../src/app-recovery.ts";
 import { Events, layer as eventsLayer, EventRecord } from "../../src/events.ts";
 import { layer as sourceLayer } from "../../src/source-files.ts";
-import { layer as lockLayer } from "../../src/edit-lock.ts";
+import { layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 import { layer as pagesLayer } from "../../src/topic-page-move.ts";
 import { moveRecovery } from "../../src/topic-move-recovery.ts";
 import { legacyPageMovePreparation } from "./legacy-page-move-preparation.ts";
 
+const lockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const Input = Schema.Struct({
 	op: Schema.Literals(["seed", "recover"]),
 	committed: Schema.optionalKey(Schema.Boolean),

@@ -24,7 +24,33 @@ export const Batch = Schema.Struct({
 	events: Schema.Array(EventRecord),
 });
 export type Batch = typeof Batch.Type;
-export class EventError extends Schema.TaggedError<EventError>()("EventError", { code: Schema.String }) {
+export class EventError extends Schema.TaggedError<EventError>()("EventError", {
+	code: Schema.Literals([
+		"app_evidence_invalid",
+		"app_fence_invalid",
+		"app_store_missing",
+		"batch_conflict",
+		"batch_invalid",
+		"body_invalid",
+		"body_too_large",
+		"candidate_probe_committed",
+		"credential_expired",
+		"credential_invalid",
+		"cursor_ahead",
+		"events_unavailable",
+		"public_path_invalid",
+		"publication_pending",
+		"query_invalid",
+		"reservation_conflict",
+		"reservation_invalid",
+		"reservation_mismatch",
+		"sequence_exhausted",
+		"stale_attempt",
+		"topic_move_invalid",
+		"topic_move_recovery_required",
+		"topic_move_unprepared",
+	]),
+}) {
 	get message() {
 		return this.code;
 	}
@@ -78,7 +104,7 @@ const make = Effect.fn("Events")(function* (
 				if (current > after) return current;
 				yield* Deferred.await(pending);
 			}
-		}).pipe(Effect.mapError(() => new EventError({ code: "events_unavailable" })));
+		});
 	const finish = sql`UPDATE seq SET published_through=next-1,pending_id=NULL,pending_attempt=NULL,pending_from=NULL,pending_to=NULL WHERE singleton=1`;
 	const append = (batch: Batch, attempt: string) =>
 		sql.withTransaction(

@@ -24,7 +24,7 @@ async function fixture(test: TestContext) {
 		`
 const server = Bun.serve({hostname:'127.0.0.1',port:0,fetch(request) {
 if (request.headers.get('x-boot-secret') !== process.env.BOOT_SECRET) return new Response(null,{status:403});
-if (new URL(request.url).pathname === '/_kernel/pages/check') return Response.json({allowed:true});
+if (new URL(request.url).pathname === '/_kernel/pages/check') return new Response(null,{status:500});
 return new Response(process.env.PAGES_DIRECTORY,{headers:{'x-comms-writer-epoch':process.env.WRITER_EPOCH??'','x-comms-kernel-protocol':'2'}});
 }}); console.log('COMMS_CHILD_PORT='+server.port);`,
 	);
@@ -34,7 +34,7 @@ return new Response(process.env.PAGES_DIRECTORY,{headers:{'x-comms-writer-epoch'
 				await execute("bun", [join(import.meta.dirname, "fixtures/store.ts"), join(root, "data/boot.db"), statement])
 			).stdout.trim(),
 		);
-	const start = async () => {
+	const start = async (ready = true) => {
 		const child = spawn("bun", [join(import.meta.dirname, "fixtures/pages-launcher.ts")], {
 			env: { ...process.env, TEST_ROOT: root },
 			stdio: ["ignore", "pipe", "pipe"],
@@ -67,7 +67,7 @@ return new Response(process.env.PAGES_DIRECTORY,{headers:{'x-comms-writer-epoch'
 			.not.toBe("");
 		const session = await seedSession(join(root, "data"));
 		const call = sessionFetch(session.cookie);
-		await expect.poll(async () => (await call(url)).status, { timeout: 5000 }).toBe(200);
+		if (ready) await expect.poll(async () => (await call(url)).status, { timeout: 5000 }).toBe(200);
 		return { url, call, session, stop };
 	};
 	return { root, sql, start };
@@ -161,7 +161,9 @@ it("recovers a page publication with failed history completion, without reseedin
 	await env.sql(
 		"CREATE TRIGGER fail_page_history BEFORE INSERT ON versions BEGIN SELECT RAISE(ABORT,'test history failure'); END",
 	);
-	expect((await app.call(`${app.url}/api/fs/pages/kept.txt`, { method: "PUT", body: "published" })).status).toBe(503);
+	const failed = await app.call(`${app.url}/api/fs/pages/kept.txt`, { method: "PUT", body: "published" });
+	expect(failed.status).toBe(500);
+	expect(await failed.json()).toMatchObject({ error: { code: "handler_failed", retriable: false } });
 	expect(
 		await env.sql(
 			"SELECT state FROM source_batches WHERE id NOT IN (SELECT value FROM settings WHERE key='source.watcher_baseline')",
@@ -187,7 +189,9 @@ it.for([true, false])(
 		await env.sql(
 			"CREATE TRIGGER fail_page_history BEFORE INSERT ON versions BEGIN SELECT RAISE(ABORT,'test history failure'); END",
 		);
-		expect((await app.call(`${app.url}/api/fs/pages/index.md`, { method: "PUT", body: "desired" })).status).toBe(503);
+		const failed = await app.call(`${app.url}/api/fs/pages/index.md`, { method: "PUT", body: "desired" });
+		expect(failed.status).toBe(500);
+		expect(await failed.json()).toMatchObject({ error: { code: "handler_failed", retriable: false } });
 		await app.stop();
 		await writeFile(join(env.root, "data/pages/index.md"), "external conflicting bytes");
 		await env.sql("DROP TRIGGER fail_page_history");
@@ -266,3 +270,150 @@ it("serves fs-scoped directory listings on both aliases with holder overlay and 
 		expect((await app.call(`${app.url}/api/fs/${path}`)).status).toBe(400);
 	expect((await app.call(`${app.url}/api/fs/app/missing/`)).status).toBe(404);
 });
+
+it("keeps raw page repair available with no healthy app after reservation recovery", async (test) => {
+	const env = await fixture(test);
+	await writeFile(join(env.root, "seed/child.ts"), 'throw new Error("broken editable app");');
+	const app = await env.start(false);
+	await expect.poll(async () => (await app.call(`${app.url}/api/fs/pages/`)).status, { timeout: 5000 }).toBe(200);
+
+	for (const prefix of ["/_boot/fs", "/api/fs"])
+		expect((await app.call(`${app.url}${prefix}/pages/repair.md`, { method: "PUT", body: prefix })).status).toBe(200);
+	expect(await readFile(join(env.root, "data/pages/repair.md"), "utf8")).toBe("/api/fs");
+
+	expect(
+		(
+			await app.call(`${app.url}/api/revert`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ path: "pages/repair.md" }),
+			})
+		).status,
+	).toBe(200);
+	expect(await readFile(join(env.root, "data/pages/repair.md"), "utf8")).toBe("/_boot/fs");
+}, 15000);
+
+it("refuses raw page writes and undo while another durable recovery operation owns publication", async (test) => {
+	const env = await fixture(test),
+		app = await env.start();
+	expect((await app.call(`${app.url}/api/fs/pages/repair.md`, { method: "PUT", body: "before" })).status).toBe(200);
+	const before = await env.sql("SELECT * FROM source_batches ORDER BY id");
+	await env.sql(
+		"INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES('fixture','hash','session','backup','restoring',0)",
+	);
+	for (const prefix of ["/_boot/fs", "/api/fs"])
+		expect((await app.call(`${app.url}${prefix}/pages/repair.md`, { method: "PUT", body: "blocked" })).status).toBe(
+			503,
+		);
+	expect(
+		(
+			await app.call(`${app.url}/api/revert`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ path: "pages/repair.md" }),
+			})
+		).status,
+	).toBe(503);
+	expect(await env.sql("SELECT * FROM source_batches ORDER BY id")).toEqual(before);
+	expect(await readFile(join(env.root, "data/pages/repair.md"), "utf8")).toBe("before");
+	await env.sql("DELETE FROM db_restore_requests WHERE proof_id='fixture'");
+	expect((await app.call(`${app.url}/api/fs/pages/repair.md`, { method: "PUT", body: "after" })).status).toBe(200);
+}, 15000);
+
+it.for(["move-first", "undo-first"] as const)(
+	"serializes page undo with app filesystem movement (%s)",
+	{ timeout: 15000 },
+	async (order, test) => {
+		const env = await fixture(test);
+		await writeFile(
+			join(env.root, "seed/child.ts"),
+			`
+import { Effect } from 'effect';
+import { BunServices } from '@effect/platform-bun';
+import { makePageContinuation } from ${JSON.stringify(join(import.meta.dirname, "../../server/src/ext/core/topic-page-continuation.ts"))};
+const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
+ if(request.headers.get('x-boot-secret')!==process.env.BOOT_SECRET) return new Response(null,{status:403});
+ if(new URL(request.url).pathname==='/move') {
+  const channel=(path,body)=>fetch(process.env.BOOT_URL+path,{method:'POST',headers:{'x-boot-secret':process.env.BOOT_SECRET,'content-type':'application/json'},body:JSON.stringify(body)});
+  await Bun.write(process.env.PAGES_DIRECTORY+'/reserve-requested','ready');
+  const reservation=await channel('/_boot/seq/reserve',{transaction:'fixture-page-move',count:1});
+  if(reservation.status!==200) return new Response('reserve failed',{status:500});
+  const range=await reservation.json();
+  const root=process.env.PAGES_DIRECTORY;
+  await Effect.runPromise(Effect.gen(function*(){
+   const pages=yield* makePageContinuation(root);
+   yield* pages.prepare('original','destination','fixture-marker');
+  }).pipe(Effect.scoped,Effect.provide(BunServices.layer)));
+  await Bun.write(root+'/move-held','ready');
+  while(!(await Bun.file(root+'/move-release').exists())) await Bun.sleep(10);
+  await Effect.runPromise(Effect.gen(function*(){
+   const pages=yield* makePageContinuation(root);
+   yield* pages.finish({seq:range.to,from_path:'original',to_path:'destination',marker:'fixture-marker',completed:0});
+  }).pipe(Effect.scoped,Effect.provide(BunServices.layer)));
+  await channel('/_boot/seq/abort',{transaction:'fixture-page-move'});
+  return new Response('moved');
+ }
+ return new Response('ready',{headers:{'x-comms-writer-epoch':process.env.WRITER_EPOCH??'','x-comms-kernel-protocol':'2'}});
+}});console.log('COMMS_CHILD_PORT='+server.port);
+`,
+		);
+		const app = await env.start();
+		const target = `${app.url}/api/fs/pages/original/file.txt`;
+		expect((await app.call(target, { method: "PUT", body: "first image" })).status).toBe(200);
+		expect((await app.call(target, { method: "PUT", body: "before move" })).status).toBe(200);
+		const undo = () =>
+			app.call(`${app.url}/api/revert`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ path: "pages/original/file.txt" }),
+			});
+		if (order === "undo-first") await writeFile(join(env.root, "pause-page"), "hold");
+		const undoing = order === "undo-first" ? undo() : null;
+		if (undoing)
+			await expect
+				.poll(async () => readFile(join(env.root, "page-captured"), "utf8").catch(() => ""), { timeout: 5000 })
+				.toBe("ready");
+		const move = app.call(`${app.url}/move`, { method: "POST", body: "{}" });
+		if (undoing) {
+			await expect
+				.poll(async () => readFile(join(env.root, "data/pages/reserve-requested"), "utf8").catch(() => ""), {
+					timeout: 5000,
+				})
+				.toBe("ready");
+			await delay(50);
+			await expect(readFile(join(env.root, "data/pages/move-held"))).rejects.toMatchObject({ code: "ENOENT" });
+			await rm(join(env.root, "pause-page"));
+			expect((await undoing).status).toBe(200);
+		}
+		const history = await env.sql("SELECT * FROM source_batches ORDER BY id");
+		await expect
+			.poll(async () => readFile(join(env.root, "data/pages/move-held"), "utf8").catch(() => ""), { timeout: 5000 })
+			.toBe("ready");
+		expect((await app.call(target, { method: "PUT", body: "must not race rename" })).status).toBe(503);
+		expect(
+			(
+				await app.call(`${app.url}/api/revert`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ path: "pages/original/file.txt" }),
+				})
+			).status,
+		).toBe(503);
+		expect(await env.sql("SELECT * FROM source_batches ORDER BY id")).toEqual(history);
+		expect(await env.sql("SELECT * FROM source_changes")).toEqual([]);
+		await writeFile(join(env.root, "data/pages/move-release"), "release");
+		expect((await move).status).toBe(200);
+		expect(await readFile(join(env.root, "data/pages/destination/file.txt"), "utf8")).toBe(
+			order === "undo-first" ? "first image" : "before move",
+		);
+		expect(
+			(await app.call(`${app.url}/api/fs/pages/destination/file.txt`, { method: "PUT", body: "after move" })).status,
+		).toBe(200);
+		await app.stop();
+		const restarted = await env.start();
+		expect(await (await restarted.call(`${restarted.url}/api/fs/pages/destination/file.txt`)).text()).toBe(
+			"after move",
+		);
+		expect(await env.sql("SELECT id FROM source_batches WHERE state='publishing'")).toEqual([]);
+	},
+);

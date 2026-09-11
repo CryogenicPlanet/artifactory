@@ -1,3 +1,4 @@
+import { migrateIdempotency } from "../../src/ext/core/legacy-idempotency.ts";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
@@ -5,7 +6,7 @@ import { Clock, Console, Crypto, Effect, Option, Schema, Semaphore } from "effec
 import { SqlClient } from "effect/unstable/sql";
 import { Events, eventsSchema, layer as eventsLayer } from "../../../boot/src/events.ts";
 import { type BootChannel, type EventRecord, KernelError } from "../../src/kernel/boot-channel.ts";
-import { lookupIdempotency, migrateIdempotency } from "../../src/kernel/idempotency.ts";
+import { lookupIdempotency } from "../../src/kernel/idempotency.ts";
 import { makeMutate } from "../../src/kernel/mutate.ts";
 import { makeOutboxRelay } from "../../src/kernel/outbox.ts";
 

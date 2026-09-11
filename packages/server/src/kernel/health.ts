@@ -3,7 +3,7 @@ import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
 import { BootChannel, KernelError } from "./boot-channel.ts";
 import { HealthProbe, layer as probeLayer } from "./health-probe.ts";
-import { Message } from "./messages.ts";
+import { Message } from "../ext/core/messages.ts";
 
 class RolledBack extends Schema.TaggedError<RolledBack>()("HealthRolledBack", {}) {}
 

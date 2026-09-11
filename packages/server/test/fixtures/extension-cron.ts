@@ -1,12 +1,14 @@
+import { extensionCapabilities } from "../../src/ext/core/capabilities.ts";
+import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { BunRuntime, BunServices, BunHttpPlatform } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Config, Console, Effect, Ref, Layer, Schema, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { Etag } from "effect/unstable/http";
-import { layer as topicsLayer } from "../../src/kernel/topics.ts";
-import { layer as pagesLayer } from "../../src/kernel/pages.ts";
+import { layer as topicsLayer } from "../../src/ext/core/topics.ts";
+import { layer as pagesLayer } from "../../src/ext/core/pages.ts";
 import { BootChannel } from "../../src/kernel/boot-channel.ts";
-import { layer as messagesLayer } from "../../src/kernel/messages.ts";
+import { layer as messagesLayer } from "../../src/ext/core/messages.ts";
 import { Lifecycle, layer as lifecycleLayer, type State } from "../../src/kernel/lifecycle.ts";
 import { Extensions, layer as extensionsLayer } from "../../src/kernel/ext.ts";
 
@@ -46,8 +48,13 @@ const run = Effect.gen(function* () {
 		);
 	}).pipe(
 		Effect.provide(
-			extensionsLayer(directory).pipe(
-				Layer.provide(topicsLayer.pipe(Layer.provideMerge(messagesLayer), Layer.provideMerge(pagesLayer(directory)))),
+			Layer.unwrap(Effect.map(extensionCapabilities, (capabilities) => extensionsLayer(directory, capabilities))).pipe(
+				Layer.provide(
+					topicsLayer.pipe(
+						Layer.provideMerge(messagesLayer.pipe(Layer.provideMerge(publicationLayer))),
+						Layer.provideMerge(pagesLayer(directory)),
+					),
+				),
 				Layer.provide(BunHttpPlatform.layer),
 				Layer.provide(Etag.layer),
 			),
@@ -62,7 +69,7 @@ const run = Effect.gen(function* () {
 		backup: Effect.void,
 		changed: () => Effect.never,
 		fence: Effect.succeed({ published_through: 0 }),
-		events: (input) => Effect.succeed({ items: [], cursor: input.since, timed_out: false, drained: false }),
+		events: (input) => Effect.succeed({ items: [], cursor: input.since ?? 0, timed_out: false, drained: false }),
 		reserve: (transaction, count) => Effect.succeed({ transaction, from: 1, to: count }),
 		abort: () => Effect.void,
 		append: () => Effect.succeed({ published_through: 0 }),

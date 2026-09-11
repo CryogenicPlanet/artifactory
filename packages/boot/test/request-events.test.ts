@@ -72,7 +72,7 @@ it("records only the verified child request and redacts query, bodies, credentia
 		expect((await fetch(`${app.url}/echo`, { headers })).status).toBe(401);
 	await app.fetch(`${app.url}/health`);
 	await app.fetch(`${app.url}/_boot/status`);
-	const stream = await app.fetch(`${app.url}/api/stream?since=0&types=http.request`);
+	const stream = await app.fetch(`${app.url}/api/events?since=${logged?.seq ?? 0}&types=http.request&wait=60`);
 	await stream.body?.cancel();
 	await query();
 	await query();

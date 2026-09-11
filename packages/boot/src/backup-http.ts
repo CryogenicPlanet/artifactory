@@ -1,20 +1,21 @@
-import { Cause, Effect, Ref, Schema } from "effect";
+import { PlatformError } from "effect/PlatformError";
+import { isSqlError } from "effect/unstable/sql/SqlError";
+import { isHttpClientError } from "effect/unstable/http/HttpClientError";
+import { ChildError } from "./child-process.ts";
+import { Cause, Effect, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { AuthError, type AuthConfig } from "./auth.ts";
-import { authErrorResponse, authFailure, authenticate, body, humanSession, type AuthStore } from "./auth-http.ts";
+import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
+import { authErrorResponse, authFailure, authenticate, body, humanSession } from "./auth-http.ts";
 import type { DatabaseBackup } from "./database-backup.ts";
 import { StorageRejected } from "./storage-headroom.ts";
 import { ArtifactRetentionRejected } from "./artifact-retention.ts";
 import { BackupCursor, type BackupInventory } from "./backup-inventory.ts";
 
-export type BackupStore = Ref.Ref<BackupInventory | null>;
-export type BackupCaptureStore = Ref.Ref<DatabaseBackup | null>;
-
 /** GET /_boot/db/backups lists retained catalog metadata for a live human session, even without an app. */
 export const backupRoute = (
-	authStore: AuthStore,
-	backupStore: BackupStore,
-	captures: BackupCaptureStore,
+	auth: Auth["Service"],
+	list: BackupInventory,
+	service: DatabaseBackup,
 	config: AuthConfig,
 ) =>
 	Effect.gen(function* () {
@@ -24,8 +25,6 @@ export const backupRoute = (
 		if (!create && (request.method !== "GET" || url.pathname !== "/_boot/db/backups")) return null;
 		return yield* authFailure(
 			Effect.gen(function* () {
-				const auth = yield* Ref.get(authStore);
-				if (!auth) return authErrorResponse("boot_unavailable", 503);
 				if (create) {
 					const authorize = Effect.gen(function* () {
 						const identity = yield* authenticate(auth, request);
@@ -37,12 +36,25 @@ export const backupRoute = (
 					yield* authorize;
 					if (url.search) return yield* new AuthError({ code: "invalid_request" });
 					yield* body(Schema.Record(Schema.String, Schema.Never));
-					const service = yield* Ref.get(captures);
-					if (!service) return authErrorResponse("boot_unavailable", 503);
 					return yield* service.capture({ reason: "manual", authorize }).pipe(
 						Effect.map((record) => HttpServerResponse.jsonUnsafe(record, { headers: { "cache-control": "no-store" } })),
 						Effect.catchCause((cause) => {
 							if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
+							const unexpected = cause.reasons.some(
+								(reason) =>
+									reason._tag !== "Fail" ||
+									!(
+										Schema.is(AuthError)(reason.error) ||
+										Schema.is(StorageRejected)(reason.error) ||
+										Schema.is(ArtifactRetentionRejected)(reason.error) ||
+										Schema.is(ChildError)(reason.error) ||
+										reason.error instanceof PlatformError ||
+										Cause.isTimeoutError(reason.error) ||
+										isHttpClientError(reason.error) ||
+										(isSqlError(reason.error) && reason.error.isRetryable)
+									),
+							);
+							if (unexpected) return Effect.succeed(authErrorResponse("handler_failed"));
 							const error = Cause.findError(cause);
 							if (error._tag === "Success" && Schema.is(AuthError)(error.success)) return Effect.fail(error.success);
 							if (
@@ -83,8 +95,6 @@ export const backupRoute = (
 					);
 				}
 				const session = yield* humanSession(auth, request);
-				const list = yield* Ref.get(backupStore);
-				if (!list) return authErrorResponse("boot_unavailable", 503);
 				const params = url.searchParams;
 				if ([...params.keys()].some((key) => !["limit", "before"].includes(key) || params.getAll(key).length !== 1))
 					return yield* new AuthError({ code: "invalid_request" });

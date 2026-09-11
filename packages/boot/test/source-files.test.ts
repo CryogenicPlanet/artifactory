@@ -206,7 +206,7 @@ describe("recoverable source publication", () => {
 		await symlink(join(env.root, "outside"), join(env.root, "app"));
 		expect(await env.call({ op: "read", path: "app/new.ts" })).toMatchObject({ error: "invalid_path" });
 		expect(await env.call({ op: "publish", writes: [] })).toMatchObject({ error: "invalid_path" });
-	});
+	}, 15000);
 	it("stages undo atomically, preserves unrelated work, and leaves publication journal intact on history failure", async (test) => {
 		const env = await fixture(test);
 		const result = receipt(

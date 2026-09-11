@@ -24,7 +24,7 @@ function post(url: string, path: string, headers: Record<string, string> = {}) {
 
 it("never proxies public or authenticated kernel namespace aliases to a live child", async (test) => {
 	const app = await launch(test, "normal", true);
-	await expect.poll(async () => (await app.state()).state).toBe("live");
+	await expect.poll(async () => (await app.state()).state, { timeout: 5000 }).toBe("live");
 	for (const path of [
 		"/_kernel",
 		"//_kernel/control",

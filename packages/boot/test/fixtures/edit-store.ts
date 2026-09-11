@@ -1,10 +1,12 @@
+import { layer as durableEventsLayer } from "../../src/events.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
-import { EditLock, layer } from "../../src/edit-lock.ts";
+import { EditLock, layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 
+const layer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const Input = Schema.Struct({
 	op: Schema.Literals([
 		"init",
