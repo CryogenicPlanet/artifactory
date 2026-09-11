@@ -1,3 +1,4 @@
+import { HealthProbe } from "./health-probe.ts";
 import { Crypto, Effect, Option, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
@@ -19,7 +20,10 @@ export const extensionData = Effect.gen(function* () {
 			change?: (seq: number) => Effect.Effect<void, E>,
 		) =>
 			Effect.gen(function* () {
-				if (Option.isSome(yield* Effect.serviceOption(sql.transactionService)))
+				if (
+					Option.isSome(yield* Effect.serviceOption(sql.transactionService)) &&
+					Option.isNone(yield* Effect.serviceOption(HealthProbe))
+				)
 					return yield* new KernelError({ code: "input_invalid" });
 				const transaction = Buffer.from(yield* crypto.randomBytes(16)).toString("hex");
 				return yield* publication.recordEvent(

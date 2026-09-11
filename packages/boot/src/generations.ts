@@ -1,3 +1,4 @@
+import type { RehearsalReport } from "./rehearsal-report.ts";
 import { Context, DateTime, Effect, Layer, Schema } from "effect";
 import { Events } from "./events.ts";
 import { SqlClient, type Statement } from "effect/unstable/sql";
@@ -105,7 +106,7 @@ const make = Effect.gen(function* () {
 					),
 				),
 			),
-		rehearsed: (n: number) => sql.withTransaction(record(n, "rehearsed")),
+		rehearsed: (n: number, report: RehearsalReport) => sql.withTransaction(record(n, "rehearsed", report)),
 		healthy: (n: number) =>
 			Effect.gen(function* () {
 				const now = yield* DateTime.nowAsDate;

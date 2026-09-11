@@ -1,4 +1,5 @@
-import { DateTime, Effect, Ref, Schema } from "effect";
+import { HealthProbe } from "./health-probe.ts";
+import { DateTime, Effect, Option, Ref, Schema } from "effect";
 import { type BootChannel, EventRecord, KernelError } from "./boot-channel.ts";
 import { Lifecycle } from "./lifecycle.ts";
 import type { Mutate } from "./mutate.ts";
@@ -41,11 +42,11 @@ export const recordOperationalEvent = <E = never>(
 			payload: input.payload,
 		};
 		return yield* mutate({
-			guard: Ref.get(lifecycle.state).pipe(
-				Effect.flatMap((state) =>
-					state === "live" ? Effect.void : Effect.fail(new KernelError({ code: "generation_not_live" })),
-				),
-			),
+			guard: Effect.gen(function* () {
+				if (Option.isSome(yield* Effect.serviceOption(HealthProbe))) return;
+				if ((yield* Ref.get(lifecycle.state)) !== "live")
+					return yield* new KernelError({ code: "generation_not_live" });
+			}),
 			idempotency: {
 				instance: "",
 				key: input.transaction,

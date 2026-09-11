@@ -52,13 +52,13 @@ export const makeMutate =
 								count !== 0 ||
 								!Number.isSafeInteger(requested) ||
 								requested < 1 ||
-								(probe && (yield* Ref.get(probe.reservation)))
+								(probe && (yield* Ref.get(probe.reservations)).length >= (probe.allowMultiple ? 256 : 1))
 							) {
 								invalidReservation = true;
 								return yield* new KernelError({ code: "input_invalid" });
 							}
 							count = requested;
-							if (probe) yield* Ref.set(probe.reservation, { transaction, count });
+							if (probe) yield* Ref.update(probe.reservations, (items) => [...items, { transaction, count }]);
 							range = yield* boot.reserve(transaction, count);
 							if (range.to - range.from + 1 !== count) return yield* Effect.die("Invalid boot reservation range");
 							if (probe) yield* Ref.set(probe.ceiling, range.to);

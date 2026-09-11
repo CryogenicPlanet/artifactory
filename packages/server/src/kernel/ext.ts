@@ -1,6 +1,7 @@
+import { makeExtensionEffects, type ExtensionEffects } from "./extension-effects.ts";
 import { reserved, requestPath, pattern, validateRoute } from "./extension-routes.ts";
 import { Cause, Context, Crypto, DateTime, Effect, Exit, Layer, Path, Ref, Schema, Scope, Semaphore } from "effect";
-import { FindMyWay, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { FetchHttpClient, FindMyWay, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { HttpMethod } from "effect/unstable/http/HttpMethod";
 import { SqlClient } from "effect/unstable/sql";
 import { document } from "../extension-http.ts";
@@ -85,7 +86,8 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 		const registrations: Registration[] = [];
 		const extensions: Array<{
 			readonly name: string;
-			readonly start: ReadonlyArray<Hook>;
+			readonly start: ReadonlyArray<(reason: "live" | "rehearsal") => Work<void> | void>;
+			readonly effects: ExtensionEffects;
 			readonly jobs: ReadonlyArray<CronJob>;
 			readonly events: ReadonlyArray<{ readonly type: string; readonly handler: EventHandler }>;
 			readonly cursor: Ref.Ref<number>;
@@ -130,7 +132,9 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 			const migrate = yield* makeExtensionMigrate(sql, boot.epoch, name);
 			const jobs: CronJob[] = [];
 			const events: Array<{ readonly type: string; readonly handler: EventHandler }> = [];
-			const starts: Hook[] = [],
+			const activeScope = yield* Ref.make<Scope.Closeable | null>(null);
+			const effects = yield* makeExtensionEffects(name, lifecycle, activeScope);
+			const starts: Array<(reason: "live" | "rehearsal") => Work<void> | void> = [],
 				stops: Hook[] = [];
 			let registering = true;
 			const started = (yield* DateTime.nowAsDate).getTime();
@@ -139,6 +143,7 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 				{ name, status: "loaded", load_ms: 0, error: null } satisfies Status,
 			]);
 			const api: Api = {
+				effects,
 				context: (scope) =>
 					Effect.gen(function* () {
 						const who = yield* identity(scope);
@@ -191,9 +196,9 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 				on: (...args) => {
 					if (!registering) throw new Error("Register hooks only in the extension factory.");
 					if (args[0] === "start")
-						starts.push(() =>
+						starts.push((reason) =>
 							args[1](
-								{ reason: "live" },
+								{ reason },
 								{
 									...data(name),
 									...capabilities(name),
@@ -272,8 +277,9 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 				events,
 				cursor: yield* Ref.make(events.length ? (yield* boot.fence).published_through : 0),
 				start: starts,
+				effects,
 				shutdown: stops,
-				scope: yield* Ref.make<Scope.Closeable | null>(null),
+				scope: activeScope,
 			});
 		}
 		const stop = (extension: (typeof extensions)[number]) =>
@@ -334,7 +340,7 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 						);
 						yield* Effect.forEach(
 							extension.start,
-							(hook) => work(hook).pipe(Effect.provideService(Scope.Scope, scope)),
+							(hook) => work(() => hook("live")).pipe(Effect.provideService(Scope.Scope, scope)),
 							{ discard: true },
 						).pipe(
 							Effect.catchCause((cause) =>
@@ -395,6 +401,35 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 					}
 				}),
 			);
+		// One health attempt owns rehearsal starts; retries return the same bounded report.
+		const rehearse = yield* Effect.cached(
+			Effect.gen(function* () {
+				if ((yield* Ref.get(lifecycle.state)) !== "rehearsal") return;
+				for (const extension of extensions) {
+					if ((yield* Ref.get(statuses)).find((item) => item.name === extension.name)?.status !== "loaded") continue;
+					yield* Effect.scoped(
+						Effect.gen(function* () {
+							yield* Effect.addFinalizer(() =>
+								Effect.forEach(extension.shutdown, (hook) => work(hook), { discard: true }).pipe(Effect.orDie),
+							);
+							for (const job of extension.jobs) yield* extension.effects.recordCron(job.expression);
+							for (const hook of extension.start) yield* work(() => hook("rehearsal"));
+						}),
+					).pipe(Effect.catchCause((cause) => failed(extension.name, cause, "ext.error")));
+				}
+			}),
+		);
+		const rehearsalReport = Effect.gen(function* () {
+			const reports = yield* Effect.forEach(extensions, (extension) => extension.effects.report);
+			const records = reports.flatMap((report) => report.records);
+			return {
+				suppressed: records.slice(0, 64),
+				suppressed_overflow: reports.reduce(
+					(total, report) => total + report.overflow,
+					Math.max(0, records.length - 64),
+				),
+			};
+		});
 		const selected = registrations.filter(
 			(item, index) =>
 				!registrations
@@ -426,6 +461,8 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 				),
 			),
 			changeState,
+			rehearse,
+			rehearsalReport,
 			dispatch: <A, E, R>(fallback: Effect.Effect<A, E, R>) =>
 				Effect.gen(function* () {
 					const request = yield* HttpServerRequest.HttpServerRequest;
@@ -512,4 +549,4 @@ const make = (directory: string, capabilities: Effect.Success<typeof extensionCa
 		};
 	});
 export const layer = (directory: string, capabilities: Effect.Success<typeof extensionCapabilities>) =>
-	Layer.effect(Extensions, make(directory, capabilities));
+	Layer.effect(Extensions, make(directory, capabilities)).pipe(Layer.provide(FetchHttpClient.layer));

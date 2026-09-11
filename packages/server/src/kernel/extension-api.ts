@@ -17,6 +17,7 @@ import type { Publication } from "./publication.ts";
 import type { Identity } from "./identity.ts";
 import type { EventRecord } from "./boot-channel.ts";
 import type { ExtensionData } from "./extension-data.ts";
+import type { ExtensionEffects } from "./extension-effects.ts";
 import type { Work } from "./extension-work.ts";
 
 export interface RequestContext extends Identity, ExtensionData, ExtensionCapabilities {
@@ -58,7 +59,10 @@ export interface EventContext extends ExtensionData, ExtensionCapabilities {
 }
 export type EventHandler = (payload: Schema.Json, context: EventContext) => Work<void> | void;
 type OnArguments =
-	| [event: "start", handler: (event: { readonly reason: "live" }, context: BackgroundContext) => Work<void> | void]
+	| [
+			event: "start",
+			handler: (event: { readonly reason: "live" | "rehearsal" }, context: BackgroundContext) => Work<void> | void,
+	  ]
 	| [event: "shutdown", handler: Hook]
 	| [event: `${string}.${string}` | "*", handler: EventHandler];
 export type ExtensionServices =
@@ -75,6 +79,7 @@ export type ExtensionServices =
 	| HttpPlatform
 	| Etag.Generator;
 export interface Api {
+	readonly effects: ExtensionEffects;
 	readonly context: (scope: "read" | "write" | "fs") => Effect.Effect<RequestContext, KernelError, RequestServices>;
 	readonly mount: <Id extends string, Groups extends HttpApiGroup.Constraint, E>(
 		definition: HttpApi.HttpApi<Id, Groups>,

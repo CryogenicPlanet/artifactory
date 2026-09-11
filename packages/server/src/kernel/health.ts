@@ -2,7 +2,7 @@ import { Cause, Crypto, Effect, Ref, Schema, Stream, type Scope } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
 import { BootChannel, KernelError } from "./boot-channel.ts";
-import { HealthProbe, layer as probeLayer } from "./health-probe.ts";
+import { HealthProbe, layer as probeLayer, rehearsalLayer } from "./health-probe.ts";
 import { Message } from "../ext/core/messages.ts";
 
 class RolledBack extends Schema.TaggedError<RolledBack>()("HealthRolledBack", {}) {}
@@ -14,6 +14,8 @@ export const probeHealth = <E, R>(
 		E,
 		HttpServerRequest.HttpServerRequest | Scope.Scope | R
 	>,
+	before: Effect.Effect<void, E, R | Scope.Scope> = Effect.void,
+	privateRehearsal = false,
 ) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -61,6 +63,7 @@ export const probeHealth = <E, R>(
 		const result = yield* sql
 			.withTransaction(
 				Effect.gen(function* () {
+					yield* before;
 					const created = yield* call(
 						"POST",
 						"/api/messages",
@@ -96,12 +99,11 @@ export const probeHealth = <E, R>(
 		if (result._tag === "Success") return yield* new KernelError({ code: "health_failed" });
 		if (result.cause.reasons.length === 0 || !result.cause.reasons.every(Cause.isFailReason))
 			return yield* Effect.failCause(result.cause);
-		const reservation = yield* Ref.get(probe.reservation);
-		if (reservation) {
+		for (const reservation of yield* Ref.get(probe.reservations)) {
 			yield* boot.reserve(reservation.transaction, reservation.count);
 			yield* boot.abort(reservation.transaction);
 		}
 		if (!result.cause.reasons.some((reason) => Cause.isFailReason(reason) && Schema.is(RolledBack)(reason.error)))
 			return yield* new KernelError({ code: "health_failed" });
 		return { status: "ok" };
-	}).pipe(Effect.provide(probeLayer));
+	}).pipe(Effect.provide(privateRehearsal ? rehearsalLayer : probeLayer));

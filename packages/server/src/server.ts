@@ -129,12 +129,20 @@ const server = Effect.gen(function* () {
 								if (!["starting", "candidate", "rehearsal"].includes(state))
 									return HttpServerResponse.empty({ status: 409 });
 								if (!(yield* Ref.get(lifecycle.healthy))) {
-									yield* probeHealth(actual).pipe(Effect.provideContext(sqlContext));
+									yield* probeHealth(actual, extensions.rehearse, state === "rehearsal").pipe(
+										Effect.provideContext(sqlContext),
+									);
 									yield* Ref.set(lifecycle.healthy, true);
 								}
 								return HttpServerResponse.jsonUnsafe(
-									{ status: "ok" },
-									{ headers: { "x-comms-writer-epoch": boot.epoch, "x-comms-kernel-protocol": "2" } },
+									{ status: "ok", ...(yield* extensions.rehearsalReport) },
+									{
+										headers: {
+											"x-comms-writer-epoch": boot.epoch,
+											"x-comms-kernel-protocol": "2",
+											"x-comms-rehearsal-report": "1",
+										},
+									},
 								);
 							}),
 						)

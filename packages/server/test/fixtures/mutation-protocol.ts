@@ -351,10 +351,10 @@ const program = Effect.gen(function* () {
 							.withTransaction(
 								Effect.gen(function* () {
 									yield* run;
-									const first = yield* Ref.get(probe.reservation);
+									const first = (yield* Ref.get(probe.reservations))[0];
 									assert.ok(first);
 									assert.equal((yield* run.pipe(Effect.result))._tag, "Failure");
-									assert.deepEqual(yield* Ref.get(probe.reservation), first);
+									assert.deepEqual(yield* Ref.get(probe.reservations), [first]);
 									return yield* unavailable();
 								}),
 							)
@@ -364,7 +364,7 @@ const program = Effect.gen(function* () {
 						assert.equal(relays, 0);
 						assert.equal(aborts.length, 0);
 						assert.equal(reservations.length, 1);
-						const first = yield* Ref.get(probe.reservation);
+						const first = (yield* Ref.get(probe.reservations))[0];
 						assert.ok(first);
 						assert.equal((yield* events.state).pending_id, first.transaction);
 						yield* boot.reserve(first.transaction, first.count);

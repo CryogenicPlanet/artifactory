@@ -95,11 +95,7 @@ const make = Effect.gen(function* () {
 	const state = yield* Config.String("STATE").pipe(Config.withDefault("candidate"));
 	if (state === "rehearsal") {
 		const initial = yield* Config.Int("REHEARSAL_SEQUENCE");
-		const pending = yield* Ref.make<{
-			readonly transaction: string;
-			readonly from: number;
-			readonly to: number;
-		} | null>(null);
+		const pending = yield* Ref.make<ReadonlyArray<typeof Range.Type>>([]);
 		const next = yield* Ref.make(initial);
 		return {
 			epoch,
@@ -110,24 +106,24 @@ const make = Effect.gen(function* () {
 			fence: Ref.get(next).pipe(Effect.map((value) => ({ published_through: value - 1 }))),
 			reserve: (transaction: string, count: number) =>
 				Effect.gen(function* () {
-					const previous = yield* Ref.get(pending);
+					const previous = (yield* Ref.get(pending)).find((item) => item.transaction === transaction);
 					if (previous) {
-						if (previous.transaction !== transaction || previous.to - previous.from + 1 !== count)
+						if (previous.to - previous.from + 1 !== count)
 							return yield* new KernelError({ code: "rehearsal_reservation_conflict" });
 						return previous;
 					}
 					const from = yield* Ref.getAndUpdate(next, (value) => value + count);
 					const range = { transaction, from, to: from + count - 1 };
-					yield* Ref.set(pending, range);
+					yield* Ref.update(pending, (items) => [...items, range]);
 					return range;
 				}),
 			events: (_input: EventQuery) => Effect.fail(new KernelError({ code: "rehearsal_events_forbidden" })),
 			append: (_batch: Batch) => Effect.fail(new KernelError({ code: "rehearsal_append_forbidden" })),
 			abort: (transaction: string) =>
 				Effect.gen(function* () {
-					if ((yield* Ref.get(pending))?.transaction !== transaction)
+					if (!(yield* Ref.get(pending)).some((item) => item.transaction === transaction))
 						return yield* new KernelError({ code: "rehearsal_reservation_conflict" });
-					yield* Ref.set(pending, null);
+					yield* Ref.update(pending, (items) => items.filter((item) => item.transaction !== transaction));
 				}),
 		};
 	}

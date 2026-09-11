@@ -56,7 +56,7 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 			// Rehearsal never publishes its private sequence space into boot.
 			const epoch = `restore-rehearsal-${record.proof_id}`;
 			yield* backup.prepareClone(clone, epoch);
-			yield* Effect.acquireUseRelease(
+			const report = yield* Effect.acquireUseRelease(
 				supervisor
 					.launch(generation, clone, "rehearsal", (yield* events.state).next, epoch)
 					.pipe(Effect.provideContext(context)),
@@ -71,6 +71,7 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 					),
 				(rehearsed) => supervisor.retire(rehearsed).pipe(Effect.provideContext(context), Effect.orDie),
 			);
+			yield* generations.rehearsed(generation.n, report);
 		}),
 	);
 	return generation;

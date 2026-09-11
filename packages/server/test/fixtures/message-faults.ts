@@ -140,6 +140,13 @@ const program = Effect.gen(function* () {
 					}
 					const registrations: Array<Parameters<Api["route"]>[2]> = [];
 					standup({
+						effects: {
+							fetch: () => Effect.die("not used"),
+							notify: () => Effect.die("not used"),
+							timer: () => Effect.die("not used"),
+							recordCron: () => Effect.die("not used"),
+							report: Effect.die("not used"),
+						},
 						context: () => Effect.die("not used"),
 						mount: () => {},
 						migrate: () => Effect.die("not used"),

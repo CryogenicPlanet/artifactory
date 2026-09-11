@@ -1,5 +1,6 @@
+import { readRehearsalReport } from "./rehearsal-report.ts";
 import { ChildConfiguration } from "./keeper-configuration.ts";
-import { Deferred, Effect, Exit, FileSystem, Path, Ref, Schema, Scope, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, FileSystem, Path, Ref, Schema, Scope, Stream } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -116,7 +117,13 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch) 
 					response.headers["x-comms-writer-epoch"] === options.env.WRITER_EPOCH &&
 					response.headers["x-comms-kernel-protocol"] === "2"
 				)
-					return;
+					return yield* readRehearsalReport(response).pipe(
+						Effect.catchCause((cause) =>
+							Cause.hasInterruptsOnly(cause)
+								? Effect.interrupt
+								: Effect.fail(new ChildError({ code: "health_failed" })),
+						),
+					);
 				if (response.headers["x-comms-health-ready"] === "1") return yield* new ChildError({ code: "health_failed" });
 				yield* Effect.sleep("20 millis");
 			}

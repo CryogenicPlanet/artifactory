@@ -175,7 +175,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					const rehearsed = yield* supervisor
 						.launch(generation, clone, "rehearsal", sequence, epoch)
 						.pipe(Effect.provideContext(context));
-					yield* rehearsed.process.health.pipe(
+					const report = yield* rehearsed.process.health.pipe(
 						Effect.timeout("30 seconds"),
 						Effect.catchCause((cause) => {
 							const reason = cause.reasons[0];
@@ -196,7 +196,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						}),
 						Effect.ensuring(stop(rehearsed).pipe(Effect.orDie)),
 					);
-					yield* generations.rehearsed(generation.n);
+					yield* generations.rehearsed(generation.n, report);
 					if (options.check) {
 						yield* sources.discard(proposal);
 						return { generation: generation.n, status: "checked" };

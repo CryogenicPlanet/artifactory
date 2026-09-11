@@ -124,7 +124,9 @@ export default (api: Api) =>
 					),
 			),
 		);
-		api.on("start", (_event: { readonly reason: "live" }, ctx: BackgroundContext) =>
-			runDelivery(ctx, makeStore(ctx), gate, client).pipe(Effect.forkScoped, Effect.asVoid),
+		api.on("start", (event: { readonly reason: "live" | "rehearsal" }, ctx: BackgroundContext) =>
+			event.reason === "live"
+				? runDelivery(ctx, makeStore(ctx), gate, client).pipe(Effect.forkScoped, Effect.asVoid)
+				: Effect.void,
 		);
 	});

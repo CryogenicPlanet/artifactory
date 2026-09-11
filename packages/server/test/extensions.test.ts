@@ -117,9 +117,9 @@ it("rejects a broken core override through actual health, but accepts an unrelat
 		.trim()
 		.split("\n")
 		.map((line) => JSON.parse(line));
-	expect(trace.map((event) => event.type)).toEqual(["start", "stop", "start"]);
-	expect(trace[0].generation).toBe(trace[1].generation);
-	expect(trace[2].generation).not.toBe(trace[0].generation);
+	expect(trace.map((event) => event.type)).toEqual(["start", "start", "stop", "start", "stop", "stop", "start"]);
+	expect(trace[0].generation).toBe(trace[5].generation);
+	expect(trace[6].generation).not.toBe(trace[0].generation);
 	const events = await (await fetch(`${app.url}/api/events?since=0&types=ext.*`, { headers: { cookie } })).json();
 	expect(
 		events.items.every(
