@@ -33,8 +33,9 @@ it("repairs never-ending shutdown hooks and scoped finalizers only after keeper 
 	expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 	expect((await (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json()).traffic.frozen).toBe(false);
 	await rm(join(fixture.root, "backups"));
+	// Rehearsal closes its own hook scope before health returns. Exercise the live owner finalizer instead.
 	const fixes = [
-		'import {Effect} from "effect"; export default api => api.on("start", () => Effect.addFinalizer(() => Effect.never));',
+		'import {Effect} from "effect"; export default api => api.on("start", ({reason}) => reason === "live" ? Effect.addFinalizer(() => Effect.never) : Effect.void);',
 		"export default function repaired() {}",
 	];
 	for (const [index, source] of fixes.entries()) {

@@ -128,7 +128,7 @@ it.for(["rehearsal", "published", "accepted"] as const)(
 		const reached = join(fixture.root, "reset-crash-reached");
 		const needle =
 			boundary === "rehearsal"
-				? "yield* rehearsed.process.health.pipe("
+				? "const report = yield* rehearsed.process.health.pipe("
 				: boundary === "published"
 					? "candidate = yield* supervisor"
 					: "const freezeMs = (yield* DateTime.nowAsDate).getTime() - frozenAt;";
@@ -191,7 +191,7 @@ it("releases its synthetic lock when the authorizing session logs out during res
 	const armed = join(fixture.root, "reset-logout-armed");
 	const reached = join(fixture.root, "reset-logout-reached");
 	const released = join(fixture.root, "reset-logout-release");
-	const needle = "yield* rehearsed.process.health.pipe(";
+	const needle = "const report = yield* rehearsed.process.health.pipe(";
 	expect(source.split(needle)).toHaveLength(2);
 	await writeFile(
 		filename,
