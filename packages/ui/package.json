@@ -12,11 +12,13 @@
 	},
 	"dependencies": {
 		"@comms/server": "workspace:*",
+		"@effect/atom-react": "4.0.0-rc.113",
 		"@effect/platform-bun": "4.0.0-rc.113",
 		"effect": "4.0.0-rc.113",
 		"marked": "18.0.12",
 		"react": "19.3.0",
-		"react-dom": "19.3.0"
+		"react-dom": "19.3.0",
+		"scheduler": "0.27.0"
 	},
 	"devDependencies": {
 		"@tailwindcss/vite": "4.3.3",

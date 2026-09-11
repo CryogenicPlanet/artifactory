@@ -1,3 +1,4 @@
+import { Atom } from "effect/unstable/reactivity";
 import { Effect, Schema } from "effect";
 import { HttpClientRequest } from "effect/unstable/http";
 import { BoardError, json } from "./board-api.ts";
@@ -13,10 +14,13 @@ const Me = Schema.Struct({
 export type CurrentAgent = typeof Me.Type;
 const unreadable = () =>
 	Effect.fail(new BoardError({ status: 0, message: "The board returned an unreadable identity. Try refreshing." }));
-export const getMe = Effect.suspend(() =>
-	json(HttpClientRequest.get(new URL("/api/me", window.location.origin).href)).pipe(
-		Effect.flatMap(Schema.decodeUnknownEffect(Me)),
-		Effect.catchTag("SchemaError", unreadable),
+// This immutable atom description shares requests within the mounted RegistryProvider only.
+export const getMe = Atom.make(
+	Effect.suspend(() =>
+		json(HttpClientRequest.get(new URL("/api/me", window.location.origin).href)).pipe(
+			Effect.flatMap(Schema.decodeUnknownEffect(Me)),
+			Effect.catchTag("SchemaError", unreadable),
+		),
 	),
 );
 export const profileHref = (agent: string) => `/@${encodeURIComponent(agent)}`;
