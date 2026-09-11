@@ -13,8 +13,7 @@ export const ExtensionStatus = Schema.Struct({
 	),
 });
 export const extGroup = HttpApiGroup.make("ext").add(
-	HttpApiEndpoint.get("list", "/api/ext", { success: Schema.Array(ExtensionStatus), error: errorSchemas }).annotate(
-		OpenApi.Description,
-		"List loaded extensions, registrations and failures. Requires read.",
-	),
+	HttpApiEndpoint.get("list", "/api/ext", { success: Schema.Array(ExtensionStatus), error: errorSchemas })
+		.annotate(OpenApi.Description, "List loaded extensions, registrations and failures. Requires read.")
+		.annotate(OpenApi.Identifier, "extensions.extensions"),
 );

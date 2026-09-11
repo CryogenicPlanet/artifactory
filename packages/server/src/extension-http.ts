@@ -10,35 +10,33 @@ interface RouteDescription {
 	readonly operation?: OpenApi.OpenAPISpecOperation;
 }
 
-export const description = (extensions: { readonly registrations: ReadonlyArray<RouteDescription> }) =>
-	HttpApiGroup.make("extensions").add(
-		HttpApiEndpoint.get("extensions", "/api/ext", { success: Schema.Unknown }).annotate(
-			OpenApi.Description,
-			"List loaded extensions, registrations and failures. Requires read.",
-		),
-		...extensions.registrations.map((route, index) => {
-			// OpenAPI requires one template per path shape, even when methods name parameters differently.
-			const path =
-				extensions.registrations.find(
-					(other) =>
-						other.path.replace(/:[A-Za-z_]\w*/g, ":parameter") === route.path.replace(/:[A-Za-z_]\w*/g, ":parameter"),
-				)?.path ?? route.path;
-			return HttpApiEndpoint.make(route.method)(`extension${index}`, `/${path.slice(1).replace(/\*$/, "{*}")}`, {
-				params: Schema.Struct(
-					Object.fromEntries(
-						path
-							.split("/")
-							.filter((part) => part.startsWith(":") || part === "*")
-							.map((part) => [part === "*" ? "*" : part.slice(1), Schema.String]),
-					),
+export const description = (extensions: { readonly registrations: ReadonlyArray<RouteDescription> }) => {
+	const endpoints = extensions.registrations.map((route, index) => {
+		// OpenAPI requires one template per path shape, even when methods name parameters differently.
+		const path =
+			extensions.registrations.find(
+				(other) =>
+					other.path.replace(/:[A-Za-z_]\w*/g, ":parameter") === route.path.replace(/:[A-Za-z_]\w*/g, ":parameter"),
+			)?.path ?? route.path;
+		return HttpApiEndpoint.make(route.method)(`extension${index}`, `/${path.slice(1).replace(/\*$/, "{*}")}`, {
+			params: Schema.Struct(
+				Object.fromEntries(
+					path
+						.split("/")
+						.filter((part) => part.startsWith(":") || part === "*")
+						.map((part) => [part === "*" ? "*" : part.slice(1), Schema.String]),
 				),
-				success: Schema.Unknown,
-			}).annotate(
-				OpenApi.Description,
-				`${route.description}${path !== route.path ? ` Runtime pattern: ${route.path}.` : ""}${route.path.endsWith("/*") ? ' The {*} path parameter captures the remaining path (ctx.params["*"]).' : ""} Requires ${route.scope}. Extension: ${route.extension}.`,
-			);
-		}),
-	);
+			),
+			success: Schema.Unknown,
+		}).annotate(
+			OpenApi.Description,
+			`${route.description}${path !== route.path ? ` Runtime pattern: ${route.path}.` : ""}${route.path.endsWith("/*") ? ' The {*} path parameter captures the remaining path (ctx.params["*"]).' : ""} Requires ${route.scope}. Extension: ${route.extension}.`,
+		);
+	});
+	const group = HttpApiGroup.make("extensions");
+	const first = endpoints[0];
+	return first === undefined ? group : group.add(first, ...endpoints.slice(1));
+};
 
 /** Selected runtime ownership chooses the operation schema too; an override cannot leave stale core docs. */
 export const document = (
