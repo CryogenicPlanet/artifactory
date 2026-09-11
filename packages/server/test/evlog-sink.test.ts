@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -65,4 +66,29 @@ export default api => api.route("GET", "/api/trace", { description: "Trace verif
 	for (const row of rows)
 		expect(row).toMatchObject({ timestamp: expect.any(String), level: expect.any(String), seq: expect.any(Number) });
 	expect((await fetch(`${app.url}/api/evlog?since=-1`, { headers: { cookie } })).status).toBe(400);
+	const token = randomBytes(32).toString("base64url");
+	const id = randomBytes(16).toString("hex");
+	const hash = createHash("sha256").update(token).digest("hex");
+	await fixture.sql(
+		`INSERT INTO tokens VALUES ('${id}','${id}','${id}','codex','access','${hash}','test','["read"]',9999999999999,0,NULL,NULL,NULL,NULL)`,
+		"boot.db",
+	);
+	const headers = { authorization: `Bearer ${token}` };
+	expect((await fetch(`${app.url}/api/trace`, { headers })).status).toBe(200);
+	await expect
+		.poll(async () => await (await fetch(`${app.url}/api/evlog?since=0`, { headers })).text())
+		.toContain('"agent":"codex"');
+	const agentResponse = await fetch(`${app.url}/api/evlog?since=0`, { headers });
+	const agentRows = (await agentResponse.text())
+		.trim()
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line));
+	const requestRows = agentRows.filter((row) => row.message === "http.request");
+	expect(requestRows.length).toBeGreaterThan(0);
+	for (const row of requestRows) expect(row.agent).toBe("codex");
+	const agentThrough = agentResponse.headers.get("x-evlog-through");
+	const agentDone = await fetch(`${app.url}/api/evlog?since=${agentThrough}&until=${agentThrough}`, { headers });
+	expect(await agentDone.text()).toBe("");
+	expect(agentDone.headers.get("x-evlog-cursor")).toBe(agentThrough);
 });
