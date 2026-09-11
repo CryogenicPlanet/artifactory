@@ -101,7 +101,7 @@ const server = Effect.gen(function* () {
 					>();
 					yield* Ref.set(initializePublicPages, reconstructPublicPages.pipe(Effect.provideContext(publicPagesContext)));
 					const extensionContext = yield* Layer.build(
-						extensionsLayer(`${import.meta.dirname}/ext`, yield* extensionCapabilities),
+						extensionsLayer(`${import.meta.dirname}/ext`, yield* extensionCapabilities, publication.wake),
 					);
 					const extensions = Context.get(extensionContext, Extensions);
 					yield* Ref.set(extensionState, extensions.changeState);
@@ -203,26 +203,20 @@ const server = Effect.gen(function* () {
 							);
 						}),
 					);
-					yield* Effect.gen(function* () {
-						while (true) {
-							yield* lifecycle.gate.withPermit(
+					yield* publication
+						.runRelay(
+							lifecycle.gate.withPermit(
 								Effect.gen(function* () {
-									if ((yield* Ref.get(lifecycle.state)) === "live") {
-										yield* publication.relay.pipe(Effect.ignore);
-										for (const diagnostic of yield* extensions.diagnostics) {
-											yield* publication
-												.recordEvent(diagnostic)
-												.pipe(
-													Effect.andThen(extensions.acknowledgeDiagnostics([diagnostic.transaction])),
-													Effect.ignore,
-												);
-										}
+									if ((yield* Ref.get(lifecycle.state)) !== "live") return;
+									yield* publication.relay;
+									for (const diagnostic of yield* extensions.diagnostics) {
+										yield* publication.recordEvent(diagnostic);
+										yield* extensions.acknowledgeDiagnostics([diagnostic.transaction]);
 									}
 								}),
-							);
-							yield* Effect.sleep("100 millis");
-						}
-					}).pipe(Effect.forkScoped);
+							),
+						)
+						.pipe(Effect.forkScoped);
 					yield* backupSchedule.pipe(Effect.forkScoped);
 					return yield* Effect.never;
 				}).pipe(

@@ -16,7 +16,11 @@ const Rows = Schema.Array(
 );
 
 /** Caller holds the mutation permit. Publication acknowledgement precedes removal of complete SQL evidence. */
-export const makeOutboxRelay = (sql: SqlClient, boot: BootChannel["Service"]) => {
+export const makeOutboxRelay = (
+	sql: SqlClient,
+	boot: BootChannel["Service"],
+	onRemaining: Effect.Effect<void> = Effect.void,
+) => {
 	const batch = (id: string) =>
 		Effect.gen(function* () {
 			const [record] = yield* sql`SELECT from_seq,to_seq,count FROM mutation_batches WHERE id=${id}`.pipe(
@@ -75,6 +79,7 @@ export const makeOutboxRelay = (sql: SqlClient, boot: BootChannel["Service"]) =>
 			const item = yield* batch(row.transaction_id);
 			if (!item.shipped) return yield* new KernelError({ code: "batch_missing" });
 			yield* remove(item.transaction);
+			if (count === 15) yield* onRemaining;
 		}
 		const now = yield* Clock.currentTimeMillis;
 		// Idle relay passes need no writer lock when there is nothing to expire.
@@ -92,5 +97,6 @@ export const makeOutboxRelay = (sql: SqlClient, boot: BootChannel["Service"]) =>
 		)`;
 			}),
 		);
+		yield* onRemaining;
 	}).pipe(Effect.tapCause(poisonUncertainWriter));
 };

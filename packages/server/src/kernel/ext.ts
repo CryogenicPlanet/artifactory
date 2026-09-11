@@ -69,7 +69,7 @@ const factory = Schema.Struct({
 export class Extensions extends Context.Service<Extensions, Effect.Success<ReturnType<typeof make>>>()(
 	"comms/server/Extensions",
 ) {}
-const make = (directory: string, capabilities: CapabilityFactory) =>
+const make = (directory: string, capabilities: CapabilityFactory, onWork: Effect.Effect<void>) =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path;
 		const sql = yield* SqlClient.SqlClient;
@@ -116,6 +116,7 @@ const make = (directory: string, capabilities: CapabilityFactory) =>
 						payload: { extension: name, ...details, ...(error === null ? {} : { error }) },
 					} satisfies Diagnostic,
 				]);
+				yield* onWork;
 			});
 		const failed = (name: string, cause: Cause.Cause<unknown>, type: "ext.failed" | "ext.error") =>
 			Effect.gen(function* () {
@@ -408,6 +409,7 @@ const make = (directory: string, capabilities: CapabilityFactory) =>
 							).pipe(background(extension, scope));
 						}
 					}
+					if (state === "live") yield* onWork;
 				}),
 			);
 		// One health attempt owns rehearsal starts; retries return the same bounded report.
@@ -561,5 +563,5 @@ const make = (directory: string, capabilities: CapabilityFactory) =>
 				}),
 		};
 	});
-export const layer = (directory: string, capabilities: CapabilityFactory) =>
-	Layer.effect(Extensions, make(directory, capabilities)).pipe(Layer.provide(FetchHttpClient.layer));
+export const layer = (directory: string, capabilities: CapabilityFactory, onWork: Effect.Effect<void> = Effect.void) =>
+	Layer.effect(Extensions, make(directory, capabilities, onWork)).pipe(Layer.provide(FetchHttpClient.layer));

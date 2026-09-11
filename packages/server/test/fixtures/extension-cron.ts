@@ -1,3 +1,4 @@
+import { strict as assert } from "node:assert";
 import { extensionCapabilities } from "../../src/ext/core/capabilities.ts";
 import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { BunRuntime, BunServices, BunHttpPlatform } from "@effect/platform-bun";
@@ -14,6 +15,7 @@ import { Extensions, layer as extensionsLayer } from "../../src/kernel/ext.ts";
 
 const run = Effect.gen(function* () {
 	const directory = yield* Config.String("EXTENSION_DIRECTORY");
+	const wakeups = yield* Ref.make(0);
 	return yield* Effect.gen(function* () {
 		const extensions = yield* Extensions;
 		const lifecycle = yield* Lifecycle;
@@ -35,6 +37,7 @@ const run = Effect.gen(function* () {
 		yield* TestClock.adjust("1 minute");
 		yield* changeState("draining");
 		yield* TestClock.adjust("3 minutes");
+		assert.equal(yield* Ref.get(wakeups), (yield* extensions.diagnostics).length + 3);
 		yield* Console.log(
 			yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))({
 				status: yield* extensions.status,
@@ -48,7 +51,15 @@ const run = Effect.gen(function* () {
 		);
 	}).pipe(
 		Effect.provide(
-			Layer.unwrap(Effect.map(extensionCapabilities, (capabilities) => extensionsLayer(directory, capabilities))).pipe(
+			Layer.unwrap(
+				Effect.map(extensionCapabilities, (capabilities) =>
+					extensionsLayer(
+						directory,
+						capabilities,
+						Ref.update(wakeups, (count) => count + 1),
+					),
+				),
+			).pipe(
 				Layer.provide(
 					topicsLayer.pipe(
 						Layer.provideMerge(messagesLayer.pipe(Layer.provideMerge(publicationLayer))),
