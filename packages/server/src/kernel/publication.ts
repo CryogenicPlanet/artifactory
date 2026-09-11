@@ -27,7 +27,7 @@ const make = Effect.gen(function* () {
 		yield* assertSqlPublished(sql, boot.epoch, value.published_through);
 		return value;
 	});
-	const read = makeReadSnapshot(sql, boot.epoch, mutex, fence, relay);
+	const read = makeReadSnapshot(sql, boot.epoch, mutex, fence, relay, yield* Effect.scope);
 	return {
 		mutate,
 		read,

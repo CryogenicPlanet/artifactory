@@ -31,12 +31,45 @@ const program = Effect.gen(function* () {
 					rollback: "INVALID ROLLBACK",
 				}).pipe(Effect.provide(Reactivity.layer))
 			: sql;
-	const read = makeReadSnapshot(client, "owner", mutex, Effect.succeed({ published_through: 0 }), Effect.void);
+	const read = makeReadSnapshot(
+		client,
+		"owner",
+		mutex,
+		Effect.succeed({ published_through: 0 }),
+		Effect.void,
+		yield* Effect.scope,
+	);
 	const entered = yield* Deferred.make<void>();
 	const cleanupRelease = yield* Deferred.make<void>();
-	if (mode === "queued") {
+	if (mode === "cleanup-overrun" || mode === "cancel-overrun") {
+		const pending = yield* read(() =>
+			Deferred.succeed(entered, undefined).pipe(
+				Effect.andThen(Effect.never),
+				Effect.ensuring(Deferred.await(cleanupRelease)),
+			),
+		).pipe(Effect.forkChild);
+		yield* Deferred.await(entered);
+		if (mode === "cancel-overrun") yield* Fiber.interrupt(pending).pipe(Effect.forkChild);
+		yield* TestClock.adjust("4 seconds");
+		assert.equal(yield* Ref.get(lifecycle.healthy), false);
+		assert.equal(pending.pollUnsafe(), undefined);
+		const nextOwner = yield* mutex.withPermit(Ref.get(lifecycle.healthy)).pipe(Effect.forkChild);
+		yield* Effect.yieldNow;
+		assert.equal(nextOwner.pollUnsafe(), undefined);
+		yield* Deferred.succeed(cleanupRelease, undefined);
+		assert.equal((yield* Fiber.await(pending))._tag, "Failure");
+		assert.equal(yield* Fiber.join(nextOwner), false);
+		assert.equal((yield* assertWriterHealthy.pipe(Effect.result))._tag, "Failure");
+		yield* Console.log("READ_DEADLINE_VERIFIED");
+		return;
+	}
+	if (mode === "queued" || mode === "queued-outer-mask") {
 		yield* mutex.take(1);
-		const pending = yield* read(() => Effect.die("Queued callback must not run")).pipe(Effect.exit, Effect.forkChild);
+		const pending = yield* read(() => Effect.die("Queued callback must not run")).pipe(
+			mode === "queued-outer-mask" ? Effect.uninterruptible : (effect) => effect,
+			Effect.exit,
+			Effect.forkChild,
+		);
 		yield* TestClock.adjust("3 seconds");
 		const result = yield* Fiber.join(pending);
 		assert.equal(result._tag, "Failure");
@@ -70,6 +103,8 @@ const program = Effect.gen(function* () {
 		yield* Deferred.await(entered);
 		yield* TestClock.adjust("3 seconds");
 		if (mode === "cleanup-wait") {
+			yield* TestClock.adjust("500 millis");
+			assert.equal(yield* Ref.get(lifecycle.healthy), true);
 			assert.equal(pending.pollUnsafe(), undefined);
 			const nextOwner = yield* mutex.withPermit(Effect.void).pipe(Effect.forkChild);
 			yield* Effect.yieldNow;
@@ -117,6 +152,8 @@ const program = Effect.gen(function* () {
 			assert.equal(yield* read(() => Effect.succeed("available")), "available");
 		}
 	}
+	yield* TestClock.adjust("2 seconds");
+	assert.equal(yield* Ref.get(lifecycle.healthy), mode !== "rollback-defect");
 	yield* Console.log("READ_DEADLINE_VERIFIED");
 }).pipe(
 	Effect.scoped,

@@ -1,7 +1,7 @@
-import { Cause, Context, Effect, Option, Ref, type Semaphore } from "effect";
+import { Cause, Context, Effect, Fiber, Option, Ref, type Scope, type Semaphore } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { KernelError } from "./boot-channel.ts";
-import { assertWriterHealthy, poisonUncertainWriter } from "./lifecycle.ts";
+import { Lifecycle, assertWriterHealthy, poisonUncertainWriter } from "./lifecycle.ts";
 import { assertSqlPublished } from "./sql-publication.ts";
 import { HealthProbe } from "./health-probe.ts";
 
@@ -15,6 +15,7 @@ export const makeReadSnapshot =
 		mutex: Semaphore.Semaphore,
 		fence: Effect.Effect<{ readonly published_through: number }, FenceError>,
 		relay: Effect.Effect<void, RelayError>,
+		scope: Scope.Scope,
 	) =>
 	<A, E, R>(read: (fence: number) => Effect.Effect<A, E, R>) =>
 		Effect.gen(function* () {
@@ -40,18 +41,42 @@ export const makeReadSnapshot =
 					),
 				);
 			if (Option.isSome(yield* Effect.serviceOption(HealthProbe))) return yield* snapshot;
+			const lifecycle = Option.getOrNull(yield* Effect.serviceOption(Lifecycle));
+			const ownership = yield* Ref.make<"waiting" | "held" | "escalated" | "done">("waiting");
+			const poison = lifecycle ? Ref.set(lifecycle.healthy, false) : Effect.void;
+			// Absolute budget from invocation, including permit wait: three seconds plus one for cleanup.
+			// A service-owned fiber survives caller cancellation without releasing its database ownership.
+			const guard = Effect.sleep("4 seconds").pipe(
+				Effect.andThen(
+					Effect.gen(function* () {
+						const claimed = yield* Ref.modify(
+							ownership,
+							(state) => [state === "held", state === "held" ? "escalated" : state] as const,
+						);
+						if (claimed) yield* poison;
+					}),
+				),
+			);
 			const operation = mutex.withPermit(
 				Effect.gen(function* () {
+					yield* Ref.set(ownership, "held");
 					yield* assertWriterHealthy;
 					// Ordinary versioned rows retain their published image. Path rewrites do not.
 					const moving =
 						yield* sql`SELECT seq FROM outbox WHERE shipped_at IS NULL AND json_extract(event,'$.type') IN ('topic.moved','topic.pages_moved') LIMIT 1`;
 					if (moving.length) yield* relay;
 					return yield* snapshot;
-				}),
+				}).pipe(
+					Effect.onExit(() =>
+						Effect.gen(function* () {
+							// If escalation won, poison before releasing the permit even if its fiber has not resumed yet.
+							if ((yield* Ref.getAndSet(ownership, "done")) === "escalated") yield* poison;
+						}),
+					),
+				),
 			);
 			const interrupted = yield* Ref.make<Cause.Cause<Effect.Error<typeof operation>> | null>(null);
-			return yield* operation.pipe(
+			return yield* Effect.acquireUseRelease(guard.pipe(Effect.forkIn(scope)), () => operation, Fiber.interrupt).pipe(
 				// The timeout race awaits cleanup but discards its exit. Retain defects before returning a timeout.
 				Effect.onExit((exit) => (exit._tag === "Failure" ? Ref.set(interrupted, exit.cause) : Effect.void)),
 				Effect.timeoutOrElse({
@@ -63,5 +88,7 @@ export const makeReadSnapshot =
 							return yield* new KernelError({ code: "read_snapshot_timeout" });
 						}),
 				}),
+				// Admission and its deadline remain cancelable even if the caller masks the whole read.
+				Effect.interruptible,
 			);
 		});
