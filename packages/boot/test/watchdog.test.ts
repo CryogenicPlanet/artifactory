@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -125,9 +125,14 @@ it("fails closed when a live child loses its keeper without closure proof", { ti
 	app.orphans.push(old.pid);
 	const epoch = await app.sql("comms.db", "SELECT epoch FROM kernel_writer");
 	process.kill(old.keeper, "SIGKILL");
-	await expect.poll(async () => (await app.state()).child.error, { timeout: 8000 }).toContain("child_closure_unproven");
+	// A signal exit can reject the keeper exit-code wait before the missing child receipt is read.
+	await expect
+		.poll(async () => (await app.state()).child.error, { timeout: 8000 })
+		.toMatch(/(?:keeper|child)_closure_unproven/);
 	await delay(1500);
 	expect(alive(old.pid)).toBe(true);
+	expect((await app.state()).child.state).toBe("failed");
+	expect(await readdir(join(app.data, "attempts"))).toEqual([]);
 	expect((await app.authenticated(app.url)).status).toBe(503);
 	expect((await app.authenticated(`${app.url}/api/fs/app/server.ts`)).status).toBe(200);
 	expect((await fetch(`${app.url}/_boot`)).status).toBe(200);
