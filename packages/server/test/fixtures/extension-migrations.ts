@@ -15,13 +15,39 @@ const run = Effect.gen(function* () {
 		yield* sql`INSERT INTO kernel_writer VALUES(1,'current')`;
 		const migrate = yield* makeExtensionMigrate(sql, "current", "example");
 		const create = "CREATE TABLE example_data(value TEXT)";
-		yield* migrate("001-create", create);
+		yield* migrate("001-create", create, { protect: true });
 		yield* migrate("001-create", create, { protect: true });
 		assert.deepEqual(yield* sql`SELECT name FROM protected_sql_tables`, [{ name: "example_data" }]);
 		assert.deepEqual(yield* sql`SELECT extension,name,length(checksum) AS size FROM extension_migrations`, [
 			{ extension: "example", name: "001-create", size: 64 },
 		]);
 		const errorCode = (error: unknown) => (Schema.is(KernelError)(error) ? error.code : "unexpected_failure");
+		// A replay cannot adopt an old unprotected table, even when protection is newly requested.
+		const unprotected = "CREATE TABLE legacy_data(value TEXT)";
+		yield* migrate("legacy", unprotected);
+		const receipts = yield* sql`SELECT * FROM extension_migrations ORDER BY name`;
+		yield* migrate("legacy", unprotected, { protect: true });
+		assert.deepEqual(yield* sql`SELECT * FROM extension_migrations ORDER BY name`, receipts);
+		assert.deepEqual(yield* sql`SELECT name FROM protected_sql_tables WHERE name='legacy_data'`, []);
+		yield* sql`INSERT INTO legacy_data VALUES('still writable')`;
+		// SQLite identifiers are case-insensitive. Neither spelling can adopt an existing core table.
+		yield* sql`CREATE TABLE messages(body TEXT)`;
+		yield* sql`INSERT INTO messages VALUES('preserved')`;
+		for (const name of ["messages", "MeSsAgEs"]) {
+			assert.equal(
+				errorCode(
+					yield* migrate(`adopt-${name}`, `CREATE TABLE IF NOT EXISTS ${name}(body TEXT)`, { protect: true }).pipe(
+						Effect.flip,
+					),
+				),
+				"extension_migration_invalid",
+			);
+		}
+		assert.deepEqual(yield* sql`SELECT name FROM protected_sql_tables WHERE name='messages'`, []);
+		assert.deepEqual(yield* sql`SELECT name FROM extension_migrations WHERE name LIKE 'adopt-%'`, []);
+		assert.deepEqual(yield* sql`SELECT body FROM messages`, [{ body: "preserved" }]);
+		yield* migrate("mixed-new", "CREATE TABLE MiXeD_new(value TEXT)", { protect: true });
+		assert.deepEqual(yield* sql`SELECT name FROM protected_sql_tables WHERE name='mixed_new'`, [{ name: "mixed_new" }]);
 		const insert = "INSERT INTO example_data VALUES('once')";
 		yield* Effect.all([migrate("002-insert", insert), migrate("002-insert", insert)], { concurrency: 2 });
 		assert.deepEqual(yield* sql`SELECT value FROM example_data`, [{ value: "once" }]);

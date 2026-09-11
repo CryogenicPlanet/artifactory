@@ -43,9 +43,14 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 						if (previous.length > 0) {
 							if (previous[0]?.checksum !== checksum)
 								return yield* new KernelError({ code: "extension_migration_conflict" });
-							if (table !== undefined) yield* registerProtectedSqlTable(sql, table);
 							return;
 						}
+						// IF NOT EXISTS must not turn a no-op into ownership of another table.
+						if (
+							table !== undefined &&
+							(yield* sql`SELECT name FROM sqlite_schema WHERE name=${table} COLLATE NOCASE`).length
+						)
+							return yield* new KernelError({ code: "extension_migration_invalid" });
 						yield* sql.unsafe(statement);
 						if (table !== undefined) yield* registerProtectedSqlTable(sql, table);
 						yield* sql`INSERT INTO extension_migrations(extension,name,checksum) VALUES(${extension},${name},${checksum})`;
