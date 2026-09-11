@@ -2,6 +2,24 @@
 
 This is the handoff and remaining-work ledger for Codex. Implementation resumed with explicit owner authorization after the review landed. This records integrated changes, active isolated work and remaining requirements; worker reports alone are not completion claims.
 
+## Active takeover — 2026-09-11
+
+Resumed from `51eef7a` on `codex/build-comms-core`. The owner files `SPEC.md`, `docs/tech.md`, `docs/database.md`, and `docs/pr-1/` remain uncommitted and byte-preserved. Historical checkpoint paragraphs below are superseded by this section.
+
+All four frozen handoffs were hash-verified and deliberately composed against newer code: source-only seed reset (schema 16 and borrowed staging preservation), unpaginated account metadata, boot discovery including signed restart/combined restore/reset, and boot/auth request diagnostics. Startup/admission renames were already present and were not reapplied. Shared proof/keeper schemas and an EditLock upsert remove 23 production lines; this is not completion of the boot size target.
+
+Subsequent reviewed fixes: ordinary app descendants must close before the keeper issues a receipt (a real SQLite writer continued after the old receipt); keyed source undo records exact terminal outcomes, atomically with app acceptance or bound to page publication, so replay cannot overwrite later edits or rerun hooks. Legacy selection-only keys refuse unknown outcomes. Receipts remain unpruned. UI read state uses scoped Effect Atom/AsyncResult registries with a shared identity query; generated AtomHttpApi and SSE invalidation remain pending. A real browser smoke passed login, posting, draft preservation, account/extensions and message references. Manual app onboarding routes now self-list.
+
+Local validation uses actual `/Users/cryogenicplanet/.vite-plus/js_runtime/node/22.22.3/bin/node` and two workers. Local Bun revision remains `1.4.0-canary.1+4924862cf`; Linux pins the published release.
+
+- Initial full baseline: **568 passed, 7 failed, 575 tests / 152 files**, 414.62s (`/tmp/comms-takeover-baseline-tests.log`). All seven were reproduced stale assertions and corrected without relaxed deadlines: malformed combined restore, durable lifecycle events and inventory waiting for terminal startup failure.
+- Combined handoffs: **608 passed, 3 failed, 611 tests / 156 files**, 486.79s (`/tmp/comms-takeover-handoffs-full-tests.log`). Page undo hit the known prepublication refusal; the fixture now waits for actual successful publication before lost-response assertions. Deferred lock-break recovery expected the wrong event; a focused correction separately proves interrupted recovery. The first cold-manifest reload returned failed after about 92s, with its error hidden by the assertion; added response diagnostics, without claiming the cause or changing deadlines. That case passes in the undo worker's full generation group.
+- Root frozen install/check/build pass after keeper/UI/undo composition. Earlier root focused runs passed 32/32, 48/48 and the exact request-Scope/onboarding checks. Isolated keeper passed 25/25; undo passed 38 distinct tests / six files; lock fixture passed 23/23. These overlap and are not final root full acceptance.
+- Final combined full suite at `76820b7` is running with verbose immediate errors (`/tmp/comms-takeover-final-full-tests.log`). Do not claim it passed until its final summary is recorded.
+- Checkpoint Linux run [34583134298](https://github.com/CryogenicPlanet/artifactory/actions/runs/34583134298) passed check/build/serial diagnostics but exceeded the 20-minute job limit. Completed reports show **448 passed, 17 failed / 465 cases**, not a full-suite result. Ledger `/tmp/comms-linux-34583134298-ledger.md`. CI now uses two shards, two workers each, unchanged runtime pins and 20-minute limit, with verbose immediate failures; new Linux acceptance remains pending.
+
+Remaining explicit gaps: approximately 7,250-line boot target (baseline 10,029; new retained capabilities add code), physical main-file/WAL event quota, signed settings, genuine rehearsal suppressed-call reporting, Linux UID/build isolation and real reboot acceptance. Ordinary process-group closure excludes escaped sessions/adversarial descendants. Database portability remains a separate PR. Do not claim all review comments are resolved.
+
 ## Agent handoff — owner requested stop and checkpoint
 
 The owner requested a fast wrap-up because usage is low and will transfer remaining work to another agent. **Do not interpret this checkpoint as completion.** This section supersedes older status paragraphs below.
