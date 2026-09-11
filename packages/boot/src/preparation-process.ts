@@ -1,5 +1,5 @@
 import { PreparationConfiguration } from "./keeper-configuration.ts";
-import { Context, Effect, Layer, Path, type PlatformError, Ref, Schema, Stream } from "effect";
+import { Config, Context, Effect, Layer, Path, type PlatformError, Ref, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { ChildError } from "./child-process.ts";
 
@@ -19,6 +19,7 @@ export class PreparationProcess extends Context.Service<
 export const layer = Layer.effect(
 	PreparationProcess,
 	Effect.gen(function* () {
+		const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 		const path = yield* Path.Path;
 		const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
@@ -34,14 +35,29 @@ export const layer = Layer.effect(
 							output,
 						}).pipe(Effect.orDie);
 						const child = yield* spawner.spawn(
-							ChildProcess.make(process.execPath, [entry], {
-								env: { COMMS_PREPARATION_CONFIG: configuration },
-								stdin: "pipe",
-								stdout: "ignore",
-								stderr: "pipe",
-								forceKillAfter: "5 seconds",
-							}),
+							ChildProcess.make(
+								isolated ? "/usr/bin/sudo" : process.execPath,
+								isolated ? ["-n", "/opt/comms/deployment/preparation-keeper"] : [entry],
+								{
+									env: { COMMS_PREPARATION_CONFIG: configuration },
+									stdin: "pipe",
+									stdout: "ignore",
+									stderr: "pipe",
+									forceKillAfter: "5 seconds",
+								},
+							),
 						);
+						if (isolated)
+							yield* Effect.addFinalizer(() =>
+								child.isRunning.pipe(
+									Effect.flatMap((running) =>
+										running
+											? Stream.run(Stream.empty, child.stdin).pipe(Effect.interruptible, Effect.timeout("1 second"))
+											: Effect.void,
+									),
+									Effect.ignore,
+								),
+							);
 						yield* child.stderr.pipe(
 							Stream.decodeText(),
 							Stream.runForEach((chunk) => Ref.update(stderr, (value) => (value + chunk).slice(-8192))),

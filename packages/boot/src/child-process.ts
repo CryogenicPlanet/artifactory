@@ -43,7 +43,7 @@ export class ChildError extends Schema.TaggedError<ChildError>()("ChildError", {
 export type Launch = typeof ChildConfiguration.Type;
 
 /** One keeper-owned process lifetime, with positive exit evidence independent of boot's lifetime. */
-export const launchChild = Effect.fn("launchChild")(function* (options: Launch) {
+export const launchChild = Effect.fn("launchChild")(function* (options: Launch, isolated = false) {
 	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 	const client = yield* HttpClient.HttpClient;
 	const fs = yield* FileSystem.FileSystem;
@@ -56,15 +56,30 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch) 
 		const configuration = yield* Schema.encodeEffect(Schema.fromJsonString(ChildConfiguration))(options);
 		const handle = yield* spawner
 			.spawn(
-				ChildProcess.make(process.execPath, [entry], {
-					env: { COMMS_CHILD_CONFIG: configuration },
-					stdin: "pipe",
-					stdout: "pipe",
-					stderr: "pipe",
-					forceKillAfter: "5 seconds",
-				}),
+				ChildProcess.make(
+					isolated ? "/usr/bin/sudo" : process.execPath,
+					isolated ? ["-n", "/opt/comms/deployment/child-keeper"] : [entry],
+					{
+						env: { COMMS_CHILD_CONFIG: configuration },
+						stdin: "pipe",
+						stdout: "pipe",
+						stderr: "pipe",
+						forceKillAfter: "5 seconds",
+					},
+				),
 			)
 			.pipe(Effect.provideService(Scope.Scope, scope));
+		if (isolated)
+			yield* Effect.addFinalizer(() =>
+				handle.isRunning.pipe(
+					Effect.flatMap((running) =>
+						running
+							? Stream.run(Stream.empty, handle.stdin).pipe(Effect.interruptible, Effect.timeout("1 second"))
+							: Effect.void,
+					),
+					Effect.ignore,
+				),
+			).pipe(Effect.provideService(Scope.Scope, scope));
 		const ready = yield* Deferred.make<number>();
 		const pid = yield* Deferred.make<number>();
 		let pending = "";
@@ -87,6 +102,13 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch) 
 			Stream.runForEach((chunk) => Ref.update(stderr, (text) => (text + chunk).slice(-8192))),
 			Effect.forkIn(scope),
 		);
+		// Ownership preparation copies/seals files before editable code exists. Its
+		// bounded I/O phase must not consume the child's five-second readiness budget.
+		if (isolated)
+			yield* Effect.raceFirst(
+				Deferred.await(pid),
+				handle.exitCode.pipe(Effect.andThen(Effect.fail(new ChildError({ code: "child_exited" })))),
+			).pipe(Effect.timeout("60 seconds"));
 		const port = yield* Effect.raceFirst(
 			Deferred.await(ready),
 			handle.exitCode.pipe(Effect.andThen(Effect.fail(new ChildError({ code: "child_exited" })))),
@@ -145,7 +167,10 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch) 
 		const stop = yield* Effect.cached(
 			Effect.gen(function* () {
 				yield* Scope.close(scope, Exit.void);
-				yield* handle.exitCode.pipe(Effect.exit);
+				yield* handle.exitCode.pipe(
+					Effect.timeout("5 seconds"),
+					Effect.mapError(() => new ChildError({ code: "keeper_closure_unproven" })),
+				);
 				if (yield* handle.isRunning) return yield* new ChildError({ code: "keeper_closure_unproven" });
 				const receipt = yield* fs
 					.readFileString(options.receipt)

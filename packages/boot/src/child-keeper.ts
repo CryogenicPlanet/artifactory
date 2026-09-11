@@ -1,3 +1,4 @@
+import { childIdentity, prepareApp } from "./linux-ownership.ts";
 import { ChildConfiguration } from "./keeper-configuration.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Config, Console, Effect, Exit, FileSystem, Path, Redacted, Schema, Scope, Stdio, Stream } from "effect";
@@ -7,27 +8,60 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 // Parent pipe EOF closes the group even if the child event loop hangs.
 const keeper = Effect.gen(function* () {
 	const encoded = yield* Config.Redacted("COMMS_CHILD_CONFIG");
-	const config = yield* Schema.decodeEffect(Schema.fromJsonString(ChildConfiguration))(Redacted.value(encoded)).pipe(
+	const supplied = yield* Schema.decodeEffect(Schema.fromJsonString(ChildConfiguration))(Redacted.value(encoded)).pipe(
 		Effect.orDie,
 	);
+	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
 	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
+	const receipt = Effect.scoped(
+		Effect.gen(function* () {
+			const temporary = `${supplied.receipt}.tmp`;
+			const handle = yield* fs.open(temporary, { flag: "wx", mode: 0o600 });
+			yield* handle.writeAll(new TextEncoder().encode(supplied.attempt));
+			if (isolated) yield* fs.chown(temporary, 1000, 1000);
+			yield* handle.sync;
+			yield* fs.rename(temporary, supplied.receipt);
+			yield* (yield* fs.open(path.dirname(supplied.receipt))).sync;
+		}),
+	).pipe(Effect.orDie);
+	let spawnAttempted = false;
+	if (isolated) {
+		if (!/^[a-f0-9]{64}$/.test(supplied.attempt) || supplied.receipt !== `/data/attempts/${supplied.attempt}.closed`)
+			return yield* Effect.die("Invalid app receipt");
+		// Preflight failure proves no editable subprocess was attempted. A spawn error does not.
+		yield* Effect.addFinalizer(() =>
+			spawnAttempted
+				? Effect.void
+				: Effect.gen(function* () {
+						if (supplied.env.STATE === "rehearsal")
+							yield* fs.remove(`/data/rehearsals/${supplied.attempt}`, { recursive: true, force: true });
+						yield* receipt;
+					}).pipe(Effect.orDie),
+		);
+	}
+	const config = isolated ? yield* prepareApp(supplied) : supplied;
 	const stdio = yield* Stdio.Stdio;
 	const scope = yield* Scope.make();
 	return yield* Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
+			spawnAttempted = true;
 			const child = yield* spawner
 				.spawn(
-					ChildProcess.make(process.execPath, [config.entry], {
-						cwd: config.cwd,
-						env: config.env,
-						stdin: "ignore",
-						stdout: "pipe",
-						stderr: "pipe",
-						detached: true,
-						forceKillAfter: "2 seconds",
-					}),
+					ChildProcess.make(
+						isolated ? "/usr/bin/setpriv" : process.execPath,
+						isolated ? [...childIdentity, process.execPath, config.entry] : [config.entry],
+						{
+							cwd: config.cwd,
+							env: config.env,
+							stdin: "ignore",
+							stdout: "pipe",
+							stderr: "pipe",
+							detached: true,
+							forceKillAfter: "2 seconds",
+						},
+					),
 				)
 				.pipe(Effect.provideService(Scope.Scope, scope));
 			// Effect exposes leader status, not positive group closure. Only ESRCH
@@ -61,16 +95,9 @@ const keeper = Effect.gen(function* () {
 						yield* Effect.sleep("20 millis");
 					}
 					if (!absent) return yield* Effect.die("Child group closure could not be verified");
-					const temporary = `${config.receipt}.tmp`;
-					yield* Effect.scoped(
-						Effect.gen(function* () {
-							const handle = yield* fs.open(temporary, { flag: "wx", mode: 0o600 });
-							yield* handle.writeAll(new TextEncoder().encode(config.attempt));
-							yield* handle.sync;
-							yield* fs.rename(temporary, config.receipt);
-							yield* (yield* fs.open(path.dirname(config.receipt))).sync;
-						}),
-					).pipe(Effect.orDie);
+					if (isolated && config.env.STATE === "rehearsal")
+						yield* fs.remove(`/data/rehearsals/${config.attempt}`, { recursive: true }).pipe(Effect.orDie);
+					yield* receipt;
 				}).pipe(Effect.ensuring(Scope.close(scope, Exit.void))),
 			);
 			yield* Console.log(`COMMS_CHILD_PID=${child.pid}`);

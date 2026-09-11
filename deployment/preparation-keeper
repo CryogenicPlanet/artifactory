@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+umask 002
+exec /usr/bin/env -i COMMS_ISOLATED=true COMMS_PREPARATION_CONFIG="$COMMS_PREPARATION_CONFIG" /usr/local/bin/bun /opt/comms/packages/boot/dist/preparation-keeper.js

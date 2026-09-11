@@ -1,8 +1,9 @@
+import { migrateAppStore } from "./app-store-layout.ts";
 import { sourceReverts } from "./source-revert.ts";
 import { SourceRejected } from "./source-schema.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Cause, Context, Crypto, Deferred, Effect, FileSystem, Layer, Path, Ref } from "effect";
+import { Cause, Config, Context, Crypto, Deferred, Effect, FileSystem, Layer, Path, Ref } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { HttpRouter } from "effect/unstable/http";
 import { Auth, layer as authLayer, type AuthConfig } from "./auth.ts";
@@ -44,6 +45,8 @@ type Handler = Effect.Effect<
 export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { readonly auth: AuthConfig }) {
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
+	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
+	const appFilename = path.join(options.dataDirectory, isolated ? "store/comms.db" : "comms.db");
 	const phase = yield* Ref.make<RecoveryPhase>({ _tag: "Recovering" });
 	const restart = yield* Deferred.make<void>();
 	const installed = yield* Ref.make<{ readonly handle: Handler; readonly shutdown: Effect.Effect<void> }>({
@@ -52,7 +55,11 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	});
 	const supervisor = yield* supervise(options);
 	const { child, run, fail } = supervisor;
-	const initialized = Layer.effectDiscard(initializeBootSchema).pipe(
+	const initialized = Layer.effectDiscard(
+		initializeBootSchema.pipe(
+			Effect.andThen(isolated ? fs.chmod(path.join(options.dataDirectory, "boot.db"), 0o600) : Effect.void),
+		),
+	).pipe(
 		Layer.provideMerge(
 			SqliteClient.layer({ filename: path.join(options.dataDirectory, "boot.db"), disableWAL: true }).pipe(
 				Layer.provide(
@@ -84,8 +91,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		publicPagesLayer(options.dataDirectory),
 		preparationLayer(options).pipe(Layer.provide(preparationProcessLayer)),
 		attemptsLayer(options.dataDirectory).pipe(Layer.provide(kernelBootLayer)),
-		backupLayer(path.join(options.dataDirectory, "comms.db")),
-		recoveryLayer(path.join(options.dataDirectory, "comms.db"), moveRecovery).pipe(
+		backupLayer(appFilename),
+		recoveryLayer(appFilename, moveRecovery, options.dataDirectory).pipe(
 			Layer.provide(topicPageMoveLayer(options.dataDirectory).pipe(Layer.provide(sourceServices))),
 		),
 	).pipe(Layer.provideMerge(sourceServices));
@@ -145,6 +152,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			// No recovery selects or mutates an authoritative store before this global check.
 			yield* (yield* Generations).recover;
 			yield* (yield* ChildAttempts).recover;
+			if (isolated) yield* migrateAppStore({ dataDirectory: options.dataDirectory, filename: appFilename });
 			if (intents.move) yield* (yield* AppRecovery).prepare(yield* (yield* Crypto.Crypto).randomUUIDv4);
 		}).pipe(Effect.exit);
 		const source = owners._tag === "Failure" ? owners : yield* (yield* SourceFiles).recover.pipe(Effect.exit);
@@ -163,7 +171,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			yield* Ref.update(phase, (current): RecoveryPhase =>
 				current._tag === "Stopping" ? current : { _tag: "Failed", cause: recovered.cause },
 			);
-			yield* Ref.set(child.sourceError, Cause.pretty(recovered.cause).replace(/[a-f0-9]{64}/g, "[redacted]"));
+			yield* Ref.set(child.sourceError, Cause.pretty<unknown>(recovered.cause).replace(/[a-f0-9]{64}/g, "[redacted]"));
 			yield* fail(recovered.cause);
 		} else {
 			yield* Ref.update(phase, (current): RecoveryPhase => (current._tag === "Stopping" ? current : { _tag: "Ready" }));

@@ -1,3 +1,4 @@
+import { buildIdentity, prepareWorkspace } from "./linux-ownership.ts";
 import { PreparationConfiguration } from "./keeper-configuration.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Cause, Config, Console, Effect, Path, Redacted, Schema, Stdio, Stream } from "effect";
@@ -23,20 +24,36 @@ const keeper = Effect.gen(function* () {
 					config.output,
 					"--emptyOutDir",
 				];
+	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
+	let spawnAttempted = false;
+	let groupClosed = false;
+	if (isolated) {
+		if (config.output !== "" && config.output !== `${config.workspace}/board`)
+			return yield* Effect.die("Invalid build output");
+		yield* Effect.addFinalizer(() =>
+			!spawnAttempted || groupClosed ? prepareWorkspace(config.workspace, 1000).pipe(Effect.orDie) : Effect.void,
+		);
+		yield* prepareWorkspace(config.workspace, 1002);
+	}
+	spawnAttempted = true;
 	const child = yield* spawner.spawn(
-		ChildProcess.make(process.execPath, args, {
-			cwd: config.operation === "install" ? config.workspace : path.join(config.workspace, "ui"),
-			env: {
-				PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
-				HOME: config.workspace,
-				BUN_INSTALL_CACHE_DIR: path.join(config.workspace, ".bun-cache"),
+		ChildProcess.make(
+			isolated ? "/usr/bin/setpriv" : process.execPath,
+			isolated ? [...buildIdentity, process.execPath, ...args] : args,
+			{
+				cwd: config.operation === "install" ? config.workspace : path.join(config.workspace, "ui"),
+				env: {
+					PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+					HOME: config.workspace,
+					BUN_INSTALL_CACHE_DIR: path.join(config.workspace, ".bun-cache"),
+				},
+				stdin: "ignore",
+				stdout: "ignore",
+				stderr: "pipe",
+				detached: true,
+				forceKillAfter: "2 seconds",
 			},
-			stdin: "ignore",
-			stdout: "ignore",
-			stderr: "pipe",
-			detached: true,
-			forceKillAfter: "2 seconds",
-		}),
+		),
 	);
 	// Scoped spawner release skips groups whose leader already exited successfully.
 	// Explicit kill is required even on success, before any output can be promoted.
@@ -66,10 +83,14 @@ const keeper = Effect.gen(function* () {
 					);
 			for (let attempt = 0; attempt < 25; attempt++) {
 				const probe = yield* groupRunning.pipe(Effect.result);
-				if (probe._tag === "Success" && !probe.success) return;
+				if (probe._tag === "Success" && !probe.success) {
+					groupClosed = true;
+					return;
+				}
 				yield* Effect.sleep("20 millis");
 			}
 			if (yield* groupRunning) return yield* new ChildError({ code: "preparation_group_closure_unproven" });
+			groupClosed = true;
 		}).pipe(Effect.orDie),
 	);
 	yield* child.stderr.pipe(Stream.run(stdio.stderr()), Effect.forkScoped);

@@ -62,3 +62,17 @@ jobs:
       - name: Boot and server recovery tests
         # Each file launches Bun processes; four workers exceeded measured fixture budgets on this runner.
         run: bun run test packages/boot/test packages/server/test --maxWorkers=2 --shard=${{ matrix.shard }}/2 --reporter=verbose
+
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build isolated runtime image
+        run: docker build --tag comms:acceptance .
+      - name: Linux privileged keeper closure acceptance
+        run: sh scripts/linux-keeper-acceptance.sh comms:acceptance
+      - name: Linux UID and persistence acceptance
+        run: sh scripts/smoke-image.sh comms:acceptance

@@ -1,4 +1,4 @@
-import { Crypto, Effect, FileSystem, Path } from "effect";
+import { Config, Crypto, Effect, FileSystem, Path } from "effect";
 import { sourceTreeIO } from "./source-tree-publication.ts";
 import { SourceRejected, type Image } from "./source-schema.ts";
 
@@ -26,6 +26,7 @@ export const sameImage = (a: Image, b: Image) =>
 
 /** Platform IO bound to one editable data root. Nothing is resolved during construction. */
 export const sourceIO = Effect.fn("sourceIO")(function* (dataDirectory: string) {
+	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false), Effect.orDie);
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const crypto = yield* Crypto.Crypto;
@@ -64,7 +65,7 @@ export const sourceIO = Effect.fn("sourceIO")(function* (dataDirectory: string) 
 					return yield* new SourceRejected({ code: "invalid_path", path: name });
 				if (index === parts.length - 1 || !createParents)
 					return { absolute: path.join(root, name), exists: false, type: null };
-				yield* fs.makeDirectory(entry, { mode: 0o750 });
+				yield* fs.makeDirectory(entry, { mode: isolated && parts[0] === "pages" ? 0o2770 : 0o750 });
 			} else {
 				if (
 					(yield* fs

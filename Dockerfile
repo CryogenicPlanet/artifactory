@@ -1,4 +1,4 @@
-# Local development image. See docs/deployment.md for the isolation gap.
+# Immutable launcher and fixed privileged keepers; editable children use separate UIDs.
 FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS build
 WORKDIR /opt/comms
 COPY package.json bun.lock ./
@@ -26,14 +26,27 @@ RUN sed -i 's|./src/index.ts|./dist/index.js|' packages/boot/package.json \
     && sed -i 's|./src/start.ts|./dist/start.js|' packages/server/package.json
 
 FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS runtime
+USER 0:0
 WORKDIR /opt/comms
 COPY --from=dependencies /opt/comms /opt/comms
 COPY --from=build /opt/comms/packages/boot/dist packages/boot/dist
 COPY --from=build /opt/comms/packages/server/dist packages/server/dist
 COPY --from=build /opt/comms/packages/server/pages packages/server/pages
-RUN mkdir /data && chown 1000:1000 /data && chmod 0700 /data
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 DATA_DIR=/data
-USER 1000:1000
+RUN apt-get update && apt-get install -y --no-install-recommends sudo util-linux tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && usermod --login boot bun \
+    && groupadd --gid 1003 comms \
+    && useradd --uid 1001 --no-create-home --shell /usr/sbin/nologin app \
+    && useradd --uid 1002 --no-create-home --shell /usr/sbin/nologin build \
+    && usermod --append --groups comms boot \
+    && mkdir /data
+COPY deployment /opt/comms/deployment
+RUN chmod 0755 /opt/comms/deployment/entrypoint /opt/comms/deployment/child-keeper /opt/comms/deployment/preparation-keeper \
+    && cp /opt/comms/deployment/sudoers /etc/sudoers.d/comms \
+    && chmod 0440 /etc/sudoers.d/comms \
+    && visudo --check
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 DATA_DIR=/data COMMS_ISOLATED=true
+USER 0:0
 VOLUME ["/data"]
 EXPOSE 8080
-CMD ["bun", "packages/server/dist/main.js"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/comms/deployment/entrypoint"]

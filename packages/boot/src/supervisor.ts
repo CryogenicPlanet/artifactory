@@ -1,4 +1,4 @@
-import { Cause, Crypto, Effect, FileSystem, Path, Ref, Schema, Scope, Semaphore } from "effect";
+import { Cause, Config, Crypto, Effect, FileSystem, Path, Ref, Schema, Scope, Semaphore } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import { prepareGeneration, snapshotEntry, type ApplicationSource } from "./application.ts";
 import { AppRecovery } from "./app-recovery.ts";
@@ -39,6 +39,7 @@ export interface SupervisedChild {
 
 /** Supervisor owns process recovery; the cutover coordinator shares its one operation gate. */
 export const supervise = Effect.fn("supervise")(function* (options: ApplicationSource) {
+	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
 	const crypto = yield* Crypto.Crypto;
 	const path = yield* Path.Path;
 	const fs = yield* FileSystem.FileSystem;
@@ -98,7 +99,6 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		Effect.gen(function* () {
 			yield* assertClosure;
 			const owners = yield* ChildAttempts;
-			const owner = yield* owners.reserve(generation.n);
 			const secret = Buffer.from(yield* crypto.randomBytes(32)).toString("hex");
 			const epoch = epochOverride ?? Buffer.from(yield* crypto.randomBytes(32)).toString("hex");
 			const attempt: Attempt = {
@@ -109,25 +109,38 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 				state: "starting",
 			};
 			const entry = yield* snapshotEntry(generation, options.dataDirectory);
-			const process = yield* launchChild({
-				entry,
-				cwd: generation.snapshot_dir ?? "",
-				attempt: owner.id,
-				receipt: owner.receipt,
-				env: {
-					PORT: "0",
-					BOOT_SECRET: secret,
-					WRITER_EPOCH: epoch,
-					GENERATION: String(generation.n),
-					APP_DATABASE: filename,
-					PAGES_DIRECTORY: path.resolve(options.dataDirectory, "pages"),
-					BOARD_DIRECTORY: (yield* fs.exists(`${generation.snapshot_dir}.board`))
-						? `${generation.snapshot_dir}.board`
-						: path.join(generation.snapshot_dir ?? "", "board"),
-					STATE: mode,
-					...(mode === "rehearsal" ? { REHEARSAL_SEQUENCE: String(rehearsalSequence ?? 1) } : { BOOT_URL: callback }),
+			const board = (yield* fs.exists(`${generation.snapshot_dir}.board`))
+				? `${generation.snapshot_dir}.board`
+				: path.join(generation.snapshot_dir ?? "", "board");
+			const owner = yield* owners.reserve(generation.n);
+			const process = yield* launchChild(
+				{
+					entry,
+					cwd: generation.snapshot_dir ?? "",
+					attempt: owner.id,
+					receipt: owner.receipt,
+					env: {
+						PORT: "0",
+						BOOT_SECRET: secret,
+						WRITER_EPOCH: epoch,
+						GENERATION: String(generation.n),
+						APP_DATABASE: filename,
+						PAGES_DIRECTORY: path.resolve(options.dataDirectory, "pages"),
+						BOARD_DIRECTORY: board,
+						STATE: mode,
+						...(mode === "rehearsal" ? { REHEARSAL_SEQUENCE: String(rehearsalSequence ?? 1) } : { BOOT_URL: callback }),
+					},
 				},
-			}).pipe(Effect.provideService(Scope.Scope, processScope));
+				isolated,
+			).pipe(
+				Effect.provideService(Scope.Scope, processScope),
+				Effect.onError(() =>
+					owners.closed(owner.id, owner.receipt).pipe(
+						Effect.flatMap((closed) => (closed ? Effect.void : Ref.set(closureUnproven, true))),
+						Effect.catchCause(() => Ref.set(closureUnproven, true)),
+					),
+				),
+			);
 			return { process, attempt, generation, ...owner } satisfies ActiveChild;
 		});
 	const recordAttempt = (value: ActiveChild, state: Attempt["state"]) =>
@@ -231,6 +244,8 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			const value = yield* launch(generation, recovery.filename, "candidate");
 			const started = yield* Effect.gen(function* () {
 				yield* recovery.prepare(value.attempt.epoch);
+				if (isolated && ((yield* fs.stat(recovery.filename)).mode & 0o777) !== 0o660)
+					yield* fs.chmod(recovery.filename, 0o660);
 				yield* recordAttempt(value, "starting");
 				yield* (yield* ChildAttempts).opened(value.id);
 				yield* value.process.control("go");
