@@ -15,6 +15,10 @@ import { SourceFiles } from "./source-files.ts";
 import { Snapshots, layer as snapshotsLayer } from "./snapshots.ts";
 import type { ActiveChild, Supervisor } from "./supervisor.ts";
 
+export class FreezeTimeout extends Schema.TaggedError<FreezeTimeout>()("FreezeTimeout", {
+	code: Schema.Literal("freeze_timeout"),
+}) {}
+
 const Record = Schema.Struct({
 	candidate: Schema.Int,
 	prior: Schema.NullOr(Schema.Int),
@@ -169,11 +173,23 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							.pipe(Effect.provideContext(context));
 						yield* supervisor.child.traffic.freeze;
 						const frozenAt = (yield* DateTime.nowAsDate).getTime();
-						const freeze = Effect.gen(function* () {
-							// An uncooperative hook cannot keep the repair path frozen. Only the
-							// keeper's positive closure receipt permits fencing and backup below.
-							if (prior) yield* prior.process.control("frozen").pipe(Effect.catch(() => closePrior));
+						let priorFrozen = false;
+						yield* Effect.gen(function* () {
+							// A slow admitted mutation must finish before an unacknowledged freeze
+							// may retire the old owner. The control deadline alone is not a drain.
+							if (prior) {
+								const frozen = yield* prior.process.control("frozen").pipe(Effect.result);
+								priorFrozen = frozen._tag === "Success";
+							}
 							yield* supervisor.child.traffic.drained;
+						}).pipe(
+							Effect.timeoutOrElse({
+								duration: "10 seconds",
+								orElse: () => Effect.fail(new FreezeTimeout({ code: "freeze_timeout" })),
+							}),
+						);
+						yield* Effect.gen(function* () {
+							if (prior && !priorFrozen) yield* closePrior;
 							yield* recovery.prepare(prior?.attempt.epoch ?? (yield* freshEpoch));
 							const id = yield* crypto.randomUUIDv4;
 							const directory = path.join(optionsSource.dataDirectory, "backups");
@@ -199,26 +215,27 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 									yield* sql`INSERT INTO cutover VALUES(1,${generation?.n ?? 0},${prior?.generation.n ?? null},${id},${owner.id},${owner.family},'working',${candidate?.attempt.epoch ?? null})`;
 								}),
 							);
-
+						}).pipe(Effect.timeout("30 seconds"));
+						yield* Effect.gen(function* () {
 							if (!candidate || !generation) return yield* Effect.die("Missing candidate");
 							yield* recovery.prepare(candidate.attempt.epoch);
 							yield* supervisor.admit(candidate, "starting");
 							yield* owners.opened(candidate.id);
 							yield* candidate.process.control("go");
-							yield* candidate.process.health.pipe(Effect.timeout("5 seconds"));
-							yield* sql.withTransaction(
-								Effect.gen(function* () {
-									if (!generation) return yield* Effect.die("Missing candidate");
-									yield* generations.healthy(generation.n);
-									yield* sql`UPDATE cutover SET phase='accepted' WHERE singleton=1`;
-								}),
-							);
+							yield* candidate.process.health;
+						}).pipe(Effect.timeout("5 seconds"));
+						yield* sql.withTransaction(
+							Effect.gen(function* () {
+								if (!generation) return yield* Effect.die("Missing candidate");
+								yield* generations.healthy(generation.n);
+								yield* sql`UPDATE cutover SET phase='accepted' WHERE singleton=1`;
+							}),
+						);
 
-							yield* activate(candidate, "accepted");
-							yield* supervisor.child.traffic.release;
-							return (yield* DateTime.nowAsDate).getTime() - frozenAt;
-						});
-						const freezeMs = yield* freeze.pipe(Effect.timeout("10 seconds"));
+						if (!candidate) return yield* Effect.die("Missing candidate");
+						yield* activate(candidate, "accepted");
+						yield* supervisor.child.traffic.release;
+						const freezeMs = (yield* DateTime.nowAsDate).getTime() - frozenAt;
 						if (!candidate) return yield* Effect.die("Missing candidate");
 						if (prior && !priorClosed) {
 							yield* prior.process.control("draining").pipe(Effect.ignore);
@@ -295,6 +312,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					yield* supervisor.child.traffic.release;
 					if (failedGeneration) yield* generations.failed(failedGeneration.n, error, stderr);
 					yield* refresh;
+					if (failure._tag === "Success" && Schema.is(FreezeTimeout)(failure.success)) return yield* failure.success;
 					return {
 						generation: failedGeneration?.n ?? null,
 						status: "failed",

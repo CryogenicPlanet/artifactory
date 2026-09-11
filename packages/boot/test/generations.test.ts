@@ -16,6 +16,7 @@ const execute = promisify(execFile);
 const State = Schema.Struct({
 	child: Schema.Struct({
 		state: Schema.String,
+		pid: Schema.NullOr(Schema.Int),
 		generation: Schema.NullOr(Schema.Int),
 		attempt: Schema.Int,
 		error: Schema.NullOr(Schema.String),
@@ -182,21 +183,23 @@ describe("durable boot generations in real Bun and SQLite", () => {
 		expect((await missing.state()).child.generation).toBe(1);
 	});
 
-	it("respawns the same good snapshot after a crash and bounds repeated failures", async (test) => {
+	it("restarts the same good snapshot after every healthy run instead of counting lifetime crashes", async (test) => {
 		const env = await fixture(test);
 		const app = await launch(test, env);
 		await expect.poll(async () => (await app.state()).child.state).toBe("live");
-		for (const attempt of [2, 3]) {
+		for (let crashes = 1; crashes <= 4; crashes++) {
 			await app.fetch(`${app.url}/crash`);
-			await expect.poll(async () => (await app.state()).child).toMatchObject({ state: "live", attempt, generation: 1 });
+			await expect
+				.poll(() => sql(env.data, "SELECT count(*) AS count FROM child_attempts WHERE closed=1"))
+				.toEqual([{ count: crashes }]);
+			await expect
+				.poll(async () => (await app.state()).child)
+				.toMatchObject({ state: "live", attempt: 1, generation: 1 });
 		}
-		await app.fetch(`${app.url}/crash`);
-		await expect.poll(async () => (await app.history()).items[0]).toMatchObject({ status: "failed", good: 1 });
-		await delay(800);
-		expect((await app.state()).child).toMatchObject({ state: "failed", attempt: 3, generation: 1 });
-		expect((await app.fetch(`${app.url}/health`)).status).toBe(200);
-		expect((await app.fetch(app.url)).status).toBe(503);
-		expect((await app.history()).items).toHaveLength(1);
+		expect((await app.history()).items).toMatchObject([{ n: 1, status: "live", good: 1 }]);
+		expect(
+			await sql(env.data, "SELECT event FROM events WHERE json_extract(event, '$.type')='generation.failed'"),
+		).toEqual([]);
 	});
 
 	it("does not resurrect an exited child when health finishes during inherited stderr drain", async (test) => {
@@ -468,6 +471,21 @@ await helper.exited;
 			{ n: 1, good: 1, status: "live" },
 		]);
 		expect(await (await app.fetch(app.url)).json()).toMatchObject({ generation: "1", message: "original" });
+		const previousPid = (await app.state()).child.pid;
+		await app.fetch(`${app.url}/crash`);
+		await expect
+			.poll(async () => {
+				const child = (await app.state()).child;
+				return child.state === "live" && child.pid !== previousPid;
+			})
+			.toBe(true);
+		await expect.poll(async () => (await app.state()).child).toMatchObject({ state: "live", generation: 1 });
+		expect(
+			await sql(
+				env.data,
+				"SELECT json_extract(event, '$.generation') AS generation, json_extract(event, '$.payload.reason') AS reason, json_extract(event, '$.payload.attempts') AS attempts FROM events WHERE json_extract(event, '$.type')='generation.failed'",
+			),
+		).toEqual([{ generation: 2, reason: "startup_failures", attempts: 3 }]);
 	});
 
 	it("refuses a corrupted stored entry instead of executing outside its snapshot", async (test) => {

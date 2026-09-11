@@ -2,7 +2,7 @@ import { Cause, Effect, Ref, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth } from "./auth.ts";
 import { assertionProof, authenticate, body, humanSession } from "./auth-http.ts";
-import type { Cutover } from "./cutover.ts";
+import { FreezeTimeout, type Cutover } from "./cutover.ts";
 import { EditAuthority, EditRejected, type EditLock, type Ownership } from "./edit-lock.ts";
 import type { VerifiedIdentity } from "./enrollment.ts";
 import { BreakLock } from "./lock-break-schema.ts";
@@ -233,6 +233,7 @@ export const editRoute = (store: EditStore, auth: Auth["Service"], identity: Ver
 			);
 		}).pipe(
 			Effect.catch((error) => {
+				if (Schema.is(FreezeTimeout)(error)) return Effect.succeed(errorResponse(error.code, 503));
 				if (Schema.is(EditRejected)(error))
 					return Effect.succeed(
 						errorResponse(error.code, error.code === "authority_expired" ? 401 : 423, error.holder),

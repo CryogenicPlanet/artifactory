@@ -1,4 +1,4 @@
-import { Cause, Crypto, Effect, FileSystem, Path, Ref, Schema, Scope, Semaphore } from "effect";
+import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema, Scope, Semaphore } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import { prepareGeneration, snapshotEntry, type ApplicationSource } from "./application.ts";
 import { AppRecovery } from "./app-recovery.ts";
@@ -6,6 +6,7 @@ import { ChildAttempts } from "./child-attempts.ts";
 import { ChildError, launchChild, type RunningChild } from "./child-process.ts";
 import type { Attempt } from "./event-http.ts";
 import { Generations, type Generation } from "./generations.ts";
+import { Events } from "./events.ts";
 import { traffic, type Traffic } from "./traffic.ts";
 
 export interface ChildStatus {
@@ -156,12 +157,13 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 				state: "live",
 				generation: value.generation.n,
 				snapshot_dir: value.generation.snapshot_dir,
-				attempt: (yield* Ref.get(tried))[value.generation.n] ?? 1,
+				attempt: Math.max(1, (yield* Ref.get(tried))[value.generation.n] ?? 1),
 				pid: value.process.pid,
 				port: value.process.port,
 				error: null,
 				stderr: redact(yield* Ref.get(value.process.stderr)),
 			});
+			yield* Ref.update(tried, (values) => ({ ...values, [value.generation.n]: 0 }));
 			yield* (yield* Generations).list.pipe(Effect.flatMap((rows) => Ref.set(history, rows)));
 		});
 	const start = (generation: Generation) =>
@@ -184,9 +186,11 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 			return value;
 		});
 	const recover = Effect.gen(function* () {
+		const events = yield* Events;
 		const generations = yield* Generations;
 		const choices = yield* prepareGeneration(options);
 		for (const generation of choices) {
+			if (((yield* Ref.get(tried))[generation.n] ?? 0) >= 3) continue;
 			for (let attempt = ((yield* Ref.get(tried))[generation.n] ?? 0) + 1; attempt <= 3; attempt++) {
 				yield* Ref.update(tried, (values) => ({ ...values, [generation.n]: attempt }));
 				yield* generations.starting(generation.n);
@@ -209,6 +213,18 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 				yield* assertClosure;
 				if (attempt < 3) yield* Effect.sleep(attempt === 1 ? "250 millis" : "500 millis");
 			}
+			yield* events.writeBoot({
+				at: (yield* DateTime.nowAsDate).getTime(),
+				type: "generation.failed",
+				level: "error",
+				actor: "boot",
+				instance: null,
+				generation: generation.n,
+				request_id: null,
+				topic: null,
+				message_id: null,
+				payload: { reason: "startup_failures", attempts: 3 },
+			});
 		}
 		yield* generations.list.pipe(Effect.flatMap((rows) => Ref.set(history, rows)));
 		yield* Ref.update(status, (value): ChildStatus => ({ ...value, state: "failed" }));
