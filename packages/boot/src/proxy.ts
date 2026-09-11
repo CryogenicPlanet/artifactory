@@ -87,6 +87,15 @@ export const proxy = (
 		const started = yield* Clock.monotonicTimeNanos;
 		const url = new URL(request.url, "http://localhost");
 		const path = url.pathname;
+		// Reserve the child control namespace before any public or authenticated admission.
+		const controlPath = yield* Effect.try(() => {
+			const incomingPath = request.url.startsWith("/") ? new URL(`http://localhost${request.url}`).pathname : path;
+			return new URL(`http://localhost${decodeURIComponent(incomingPath).replaceAll("\\", "/").replace(/\/+/g, "/")}`)
+				.pathname;
+		}).pipe(Effect.orElseSucceed(() => null));
+		if (controlPath === null) return HttpServerResponse.empty({ status: 400 });
+		if (controlPath === "/_kernel" || controlPath.startsWith("/_kernel/"))
+			return HttpServerResponse.empty({ status: 403 });
 		if (path === "/health" && (request.method === "GET" || request.method === "HEAD")) {
 			return HttpServerResponse.jsonUnsafe({ status: "ok", mode: "local-development" });
 		}

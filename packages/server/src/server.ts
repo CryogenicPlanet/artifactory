@@ -204,6 +204,9 @@ const server = Effect.gen(function* () {
 				)
 					return HttpServerResponse.empty({ status: 403 });
 				if (request.url === "/_kernel/control" && request.method === "POST") {
+					// Boot control calls carry only the attempt secret, never proxied caller metadata.
+					if (Object.keys(request.headers).some((name) => name.startsWith("x-comms-")))
+						return HttpServerResponse.empty({ status: 403 });
 					const body = yield* request.json.pipe(
 						Effect.flatMap(
 							Schema.decodeUnknownEffect(
