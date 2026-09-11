@@ -142,7 +142,7 @@ async function enroll(
 		await (await app.post(`/auth/enroll/${enrollment.id}`, { device_secret: enrollment.device_secret })).json(),
 	);
 }
-it("requires read and write, isolates ownership, and never delivers another agent’s private request events", async (test) => {
+it("requires read and write, isolates ownership, and excludes boot request diagnostics from delivery", async (test) => {
 	const target = await receiver(test),
 		fixture = await conversation(test),
 		app = await fixture.launch();
@@ -158,7 +158,10 @@ it("requires read and write, isolates ownership, and never delivers another agen
 			headers: { authorization: `Bearer ${access}`, "content-type": "application/json" },
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),
 		});
-	const input = { filter: { types: ["http.request"] }, deliver: { kind: "webhook", url: target.url } };
+	const input = {
+		filter: { types: ["http.request", "message.created"] },
+		deliver: { kind: "webhook", url: target.url },
+	};
 	expect((await call("/api/subscriptions", writer.access, "POST", input)).status).toBe(403);
 	const subscription = Schema.decodeUnknownSync(receipt)(
 		await (await call("/api/subscriptions", owner.access, "POST", input)).json(),
@@ -176,9 +179,13 @@ it("requires read and write, isolates ownership, and never delivers another agen
 			),
 		);
 	await expect.poll(async () => (await auditRows()).length).toBe(3);
-	const published = await auditRows();
-	const last = published.at(-1);
-	if (!last) throw Error("Missing published audit records");
+	// A deliverable app event proves the worker progressed past the excluded boot requests.
+	const marker = await call("/api/messages", owner.access, "POST", {
+		topic: "delivery-privacy",
+		body: "application event still delivered",
+	});
+	expect(marker.status).toBe(200);
+	const message = Schema.decodeUnknownSync(Schema.Struct({ seq: Schema.Int }))(await marker.json());
 	await expect
 		.poll(
 			async () =>
@@ -186,11 +193,10 @@ it("requires read and write, isolates ownership, and never delivers another agen
 					await fixture.sql("SELECT cursor FROM webhook_subscriptions"),
 				)[0]?.cursor ?? 0,
 		)
-		.toBeGreaterThanOrEqual(last.seq);
-	expect(target.received.length).toBeGreaterThan(0);
+		.toBeGreaterThanOrEqual(message.seq);
+	expect(target.received.map((item) => item.body.event.seq)).toContain(message.seq);
+	expect(target.received.every((item) => item.body.event.type === "message.created")).toBe(true);
 	expect(target.received.every((item) => item.body.event.actor === "codex")).toBe(true);
-	for (const audit of published.filter((item) => item.actor === "codex"))
-		expect(target.received.map((item) => item.body.event.seq)).toContain(audit.seq);
 	expect(
 		(
 			await fetch(app.url + `/api/subscriptions/${subscription.id}`, {
