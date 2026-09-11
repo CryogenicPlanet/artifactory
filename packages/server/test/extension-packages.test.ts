@@ -55,6 +55,7 @@ export default api=>{
 		"missing",
 		"partial",
 		"standup.ts",
+		"subscriptions",
 		"zz-package",
 	]);
 	for (const name of ["broken", "missing", "partial"])

@@ -17,7 +17,7 @@ for (const stage of ["rehearsal", "candidate"]) {
 		expect((await app.post("/api/messages", { topic: "kept", body: "acknowledged" }, cookie)).status).toBe(200);
 		expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 		const put = (body: string) =>
-			fetch(`${app.url}/api/fs/app/migrations/001_custom.ts`, {
+			fetch(`${app.url}/api/fs/app/migrations/002_custom.ts`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: migration(body),
@@ -28,7 +28,7 @@ for (const stage of ["rehearsal", "candidate"]) {
 		expect(await failed.json()).toMatchObject({ status: "failed" });
 		await app.ready(cookie);
 		expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: "acknowledged" }]);
-		expect(await fixture.sql("SELECT * FROM migrations")).toEqual([]);
+		expect(await fixture.sql("SELECT * FROM migrations WHERE migration_id=2")).toEqual([]);
 		expect(await fixture.sql("SELECT name FROM sqlite_master WHERE name='custom_data'")).toEqual([]);
 		expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 		const fixed = await put(
@@ -36,8 +36,8 @@ for (const stage of ["rehearsal", "candidate"]) {
 		);
 		expect(await fixed.json()).toMatchObject({ status: "live" });
 		expect(await fixture.sql("SELECT value FROM custom_data")).toEqual([{ value: "once" }]);
-		expect(await fixture.sql("SELECT migration_id,name FROM migrations")).toEqual([
-			{ migration_id: 1, name: "custom" },
+		expect(await fixture.sql("SELECT migration_id,name FROM migrations WHERE migration_id=2")).toEqual([
+			{ migration_id: 2, name: "custom" },
 		]);
 		expect(await (await app.post("/api/reload", {}, cookie)).json()).toMatchObject({ status: "live" });
 		expect(await fixture.sql("SELECT value FROM custom_data")).toEqual([{ value: "once" }]);
@@ -52,6 +52,7 @@ it("does not open or migrate the candidate database before the guarded go comman
 	await app.ready(cookie);
 	await app.stop();
 	await fixture.sql("DROP TABLE migrations");
+	await fixture.sql("DROP TABLE webhook_subscriptions");
 	await fixture.sql("UPDATE kernel_writer SET epoch='candidate-test'");
 	const child = spawn("bun", [join(import.meta.dirname, "../src/server.ts")], {
 		env: {

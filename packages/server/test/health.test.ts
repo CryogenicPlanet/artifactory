@@ -18,7 +18,7 @@ it("runs actual message/read/context routes and rolls back every probe row witho
 		.poll(() =>
 			fixture.sql("SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type')='ext.loaded'", "boot.db"),
 		)
-		.toEqual([{ count: 1 }]);
+		.toEqual([{ count: 2 }]);
 	expect(
 		await fixture.sql("SELECT COUNT(*) count FROM outbox WHERE json_extract(event,'$.type')<>'ext.loaded'"),
 	).toEqual([{ count: 0 }]);
@@ -82,7 +82,7 @@ it("rehearses a WAL-inclusive SQLite clone without changing live rows, epoch or 
 		.poll(() =>
 			fixture.sql("SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type')='ext.loaded'", "boot.db"),
 		)
-		.toEqual([{ count: 1 }]);
+		.toEqual([{ count: 2 }]);
 	expect((await app.post("/api/messages", { topic: "wal", body: "committed WAL data" }, cookie)).status).toBe(200);
 	expect((await stat(join(fixture.root, "comms.db-wal"))).size).toBeGreaterThan(32);
 	await cp(join(fixture.root, "comms.db"), join(fixture.root, "main-only.db"));
