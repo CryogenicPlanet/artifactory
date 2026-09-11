@@ -8,69 +8,80 @@ This example treats events as invalidations, not patches. Each cycle reads an au
 
 ```js
 async function watchLatestMessages(render, signal) {
-  const pause = () => new Promise((resolve) => {
-    const finish = () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", finish);
-      resolve();
-    };
-    const timer = setTimeout(finish, 1000);
-    signal.addEventListener("abort", finish, { once: true });
-    if (signal.aborted) finish();
-  });
+	const pause = () =>
+		new Promise((resolve) => {
+			const finish = () => {
+				clearTimeout(timer);
+				signal.removeEventListener("abort", finish);
+				resolve();
+			};
+			const timer = setTimeout(finish, 1000);
+			signal.addEventListener("abort", finish, { once: true });
+			if (signal.aborted) finish();
+		});
 
-  const nextChange = (cursor) => new Promise((resolve, reject) => {
-    // No topic filter: db.restored is a global event with no topic.
-    const query = new URLSearchParams({
-      since: String(cursor), types: "message.*,topic.*,db.restored",
-    });
-    const stream = new EventSource(`/api/stream?${query}`);
-    const finish = (event, error) => {
-      stream.close();
-      signal.removeEventListener("abort", abort);
-      if (error) reject(error);
-      else resolve(event);
-    };
-    const abort = () => finish(null);
-    // Frames have no named SSE event; their JSON contains the event type.
-    stream.onmessage = (frame) => {
-      try {
-        const event = JSON.parse(frame.data);
-        if (!Number.isSafeInteger(event.seq) || event.seq <= cursor ||
-            typeof event.type !== "string") throw new Error("Invalid event");
-        finish(event);
-      } catch (error) { finish(null, error); }
-    };
-    // Close native auto-reconnect: query since takes priority over Last-Event-ID.
-    stream.onerror = () => finish(null);
-    signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted) abort();
-  });
+	const nextChange = (cursor) =>
+		new Promise((resolve, reject) => {
+			// No topic filter: db.restored is a global event with no topic.
+			const query = new URLSearchParams({
+				since: String(cursor),
+				types: "message.*,topic.*,db.restored",
+			});
+			const stream = new EventSource(`/api/stream?${query}`);
+			const finish = (event, error) => {
+				stream.close();
+				signal.removeEventListener("abort", abort);
+				if (error) reject(error);
+				else resolve(event);
+			};
+			const abort = () => finish(null);
+			// Frames have no named SSE event; their JSON contains the event type.
+			stream.onmessage = (frame) => {
+				try {
+					const event = JSON.parse(frame.data);
+					if (!Number.isSafeInteger(event.seq) || event.seq <= cursor || typeof event.type !== "string")
+						throw new Error("Invalid event");
+					finish(event);
+				} catch (error) {
+					finish(null, error);
+				}
+			};
+			// Close native auto-reconnect: query since takes priority over Last-Event-ID.
+			stream.onerror = () => finish(null);
+			signal.addEventListener("abort", abort, { once: true });
+			if (signal.aborted) abort();
+		});
 
-  while (!signal.aborted) {
-    const response = await fetch("/api/messages?newest=1&limit=100&mark=0", {
-      credentials: "same-origin", cache: "no-store", signal,
-    });
-    if (!response.ok) throw new Error(`Snapshot HTTP ${response.status}`);
-    const snapshot = await response.json();
-    if (!Array.isArray(snapshot.items) || snapshot.items.length > 100 ||
-        !Number.isSafeInteger(snapshot.cursor) || snapshot.cursor < 0) {
-      throw new Error("Invalid snapshot");
-    }
-    if (signal.aborted) return;
-    render(snapshot.items);
-    const event = await nextChange(snapshot.cursor);
-    if (signal.aborted) return;
-    if (event?.type === "db.restored") {
-      const restoredTo = event.payload?.restored_to_seq;
-      render([]); // Never retain stale rows while the restored snapshot loads.
-      if (!Number.isSafeInteger(restoredTo) || restoredTo < 0) {
-        throw new Error("Invalid restore event");
-      }
-      // Do not assign restoredTo to the SSE cursor or apply old event payloads.
-    }
-    if (event === null) await pause(); // Connection loss / generation drain.
-  }
+	while (!signal.aborted) {
+		const response = await fetch("/api/messages?newest=1&limit=100&mark=0", {
+			credentials: "same-origin",
+			cache: "no-store",
+			signal,
+		});
+		if (!response.ok) throw new Error(`Snapshot HTTP ${response.status}`);
+		const snapshot = await response.json();
+		if (
+			!Array.isArray(snapshot.items) ||
+			snapshot.items.length > 100 ||
+			!Number.isSafeInteger(snapshot.cursor) ||
+			snapshot.cursor < 0
+		) {
+			throw new Error("Invalid snapshot");
+		}
+		if (signal.aborted) return;
+		render(snapshot.items);
+		const event = await nextChange(snapshot.cursor);
+		if (signal.aborted) return;
+		if (event?.type === "db.restored") {
+			const restoredTo = event.payload?.restored_to_seq;
+			render([]); // Never retain stale rows while the restored snapshot loads.
+			if (!Number.isSafeInteger(restoredTo) || restoredTo < 0) {
+				throw new Error("Invalid restore event");
+			}
+			// Do not assign restoredTo to the SSE cursor or apply old event payloads.
+		}
+		if (event === null) await pause(); // Connection loss / generation drain.
+	}
 }
 ```
 
