@@ -129,6 +129,10 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 	await app.sql("DROP TABLE event_batches");
 	await app.sql("DROP TABLE topic_moves");
 	await app.sql("DROP TABLE topic_page_moves");
+	await app.sql("DROP TABLE db_restore_requests");
+	for (const column of ["before_directory", "desired_directory"])
+		await app.sql(`ALTER TABLE source_changes DROP COLUMN ${column}`);
+	for (const column of ["previous_directory", "directory"]) await app.sql(`ALTER TABLE versions DROP COLUMN ${column}`);
 	await app.sql("DROP TABLE enrollments");
 	await app.sql("DROP TABLE tokens");
 	await app.sql("DROP TABLE mint_receipts");
@@ -312,6 +316,10 @@ it("backfills legacy routing without altering pending state or original event by
 	await app.sql("ALTER TABLE events DROP COLUMN topic");
 	await app.sql("DROP TABLE topic_moves");
 	await app.sql("DROP TABLE topic_page_moves");
+	await app.sql("DROP TABLE db_restore_requests");
+	for (const column of ["before_directory", "desired_directory"])
+		await app.sql(`ALTER TABLE source_changes DROP COLUMN ${column}`);
+	for (const column of ["previous_directory", "directory"]) await app.sql(`ALTER TABLE versions DROP COLUMN ${column}`);
 	await app.sql("PRAGMA user_version=12");
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
 	expect(await app.sql("SELECT topic FROM events")).toEqual([{ topic: "project/thread" }]);

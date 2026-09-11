@@ -114,6 +114,7 @@ it("reauthenticates held page undo bodies and refuses page symlinks before journ
 			})
 		).status,
 	).toBe(200);
+	const versionsBefore = await fixture.sql("SELECT COUNT(*) AS n FROM versions", "boot.db");
 	const upload = request(`${app.url}/api/revert`, {
 		method: "POST",
 		headers: { cookie, origin: "https://comms.test", "content-type": "application/json" },
@@ -142,5 +143,5 @@ it("reauthenticates held page undo bodies and refuses page symlinks before journ
 		error: { code: "invalid_path" },
 	});
 	expect(await fixture.sql("SELECT * FROM source_changes", "boot.db")).toEqual([]);
-	expect(await fixture.sql("SELECT COUNT(*) AS n FROM versions", "boot.db")).toEqual([{ n: 1 }]);
+	expect(await fixture.sql("SELECT COUNT(*) AS n FROM versions", "boot.db")).toEqual(versionsBefore);
 }, 15000);

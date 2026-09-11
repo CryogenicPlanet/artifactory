@@ -96,7 +96,7 @@ it("seeds once, passes an absolute pages root, publishes without an app lock or 
 	expect(await env.sql("SELECT * FROM edit_lock")).toEqual(lockBefore);
 	expect(
 		await env.sql(
-			"SELECT CAST(previous_content AS TEXT) AS before,CAST(content AS TEXT) AS after FROM versions ORDER BY id",
+			"SELECT CAST(previous_content AS TEXT) AS before,CAST(content AS TEXT) AS after FROM versions WHERE path='pages/topic/index.md' ORDER BY id",
 		),
 	).toEqual([
 		{ before: null, after: "first" },
@@ -161,12 +161,20 @@ it("recovers a page publication with failed history completion, without reseedin
 		"CREATE TRIGGER fail_page_history BEFORE INSERT ON versions BEGIN SELECT RAISE(ABORT,'test history failure'); END",
 	);
 	expect((await app.call(`${app.url}/api/fs/pages/kept.txt`, { method: "PUT", body: "published" })).status).toBe(503);
-	expect(await env.sql("SELECT state FROM source_batches")).toEqual([{ state: "publishing" }]);
+	expect(
+		await env.sql(
+			"SELECT state FROM source_batches WHERE id NOT IN (SELECT value FROM settings WHERE key='source.watcher_baseline')",
+		),
+	).toEqual([{ state: "publishing" }]);
 	await app.stop();
 	await env.sql("DROP TRIGGER fail_page_history");
 	const restarted = await env.start();
 	expect(await (await restarted.call(`${restarted.url}/api/fs/pages/kept.txt`)).text()).toBe("published");
-	expect(await env.sql("SELECT state FROM source_batches")).toEqual([{ state: "published" }]);
+	expect(
+		await env.sql(
+			"SELECT state FROM source_batches WHERE id NOT IN (SELECT value FROM settings WHERE key='source.watcher_baseline')",
+		),
+	).toEqual([{ state: "published" }]);
 	expect(await env.sql("SELECT * FROM source_changes")).toEqual([]);
 });
 
@@ -196,6 +204,7 @@ it("discards a prepared page when its session is revoked before journal admissio
 	const env = await fixture(test),
 		app = await env.start();
 	await writeFile(join(env.root, "data/pages/held.md"), "original");
+	const batchesBefore = await env.sql("SELECT * FROM source_batches ORDER BY id");
 	await writeFile(join(env.root, "pause-page"), "hold");
 	const pending = app.call(`${app.url}/api/fs/pages/held.md`, { method: "PUT", body: "must not publish" });
 	await expect
@@ -205,7 +214,7 @@ it("discards a prepared page when its session is revoked before journal admissio
 	await rm(join(env.root, "pause-page"));
 	expect((await pending).status).toBe(401);
 	expect(await readFile(join(env.root, "data/pages/held.md"), "utf8")).toBe("original");
-	expect(await env.sql("SELECT * FROM source_batches")).toEqual([]);
+	expect(await env.sql("SELECT * FROM source_batches ORDER BY id")).toEqual(batchesBefore);
 	const other = sessionFetch((await seedSession(join(env.root, "data"))).cookie);
 	expect((await other(`${app.url}/api/fs/pages/held.md`, { method: "PUT", body: "next editor" })).status).toBe(200);
 	expect(await readFile(join(env.root, "data/pages/held.md"), "utf8")).toBe("next editor");

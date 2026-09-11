@@ -173,7 +173,7 @@ it("includes bounded published activity for the subtree and shared failures with
 	];
 	// Seed deterministic retained log records; all stores and credentials belong to this fixture.
 	await fixture.sql(
-		`INSERT INTO events(seq,transaction_id,event) VALUES ${events.map((event) => `(${event.seq},NULL,'${JSON.stringify(event)}')`).join(",")}`,
+		`INSERT INTO events(seq,transaction_id,event,topic) VALUES ${events.map((event) => `(${event.seq},NULL,'${JSON.stringify(event)}',${event.topic === null ? "NULL" : `'${event.topic}'`})`).join(",")}`,
 		"boot.db",
 	);
 	await fixture.sql("UPDATE seq SET next=100029,published_through=100028", "boot.db");
