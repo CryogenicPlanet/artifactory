@@ -55,9 +55,12 @@ it(
 			]);
 			expect(record.reason).toBe("manual");
 			expect(record.bytes).toBeGreaterThan(0);
-			expect(await fixture.sql("SELECT body FROM messages", join("backups", basename(`${record.id}.db`)))).toEqual([
-				{ body: "preserved" },
-			]);
+			expect(
+				await fixture.sql(
+					"SELECT body FROM messages WHERE topic!='system'",
+					join("backups", basename(`${record.id}.db`)),
+				),
+			).toEqual([{ body: "preserved" }]);
 			expect(await fixture.sql(`SELECT id FROM backups WHERE id='${record.id}'`, "boot.db")).toEqual([
 				{ id: record.id },
 			]);

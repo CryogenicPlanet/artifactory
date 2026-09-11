@@ -31,7 +31,7 @@ for (const stage of ["rehearsal", "candidate"]) {
 		// Terminal migration failures must not consume the 30-second rehearsal readiness budget.
 		expect(performance.now() - failedAt).toBeLessThan(10000);
 		await app.ready(cookie);
-		expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: "acknowledged" }]);
+		expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system'")).toEqual([{ body: "acknowledged" }]);
 		expect(await fixture.sql("SELECT * FROM migrations WHERE migration_id=2")).toEqual([]);
 		expect(await fixture.sql("SELECT name FROM sqlite_master WHERE name='custom_data'")).toEqual([]);
 		expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);

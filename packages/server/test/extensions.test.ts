@@ -106,14 +106,14 @@ it("rejects a broken core override through actual health, but accepts an unrelat
 	const broken =
 		'export default api => api.route("GET","/api/messages",{description:"Broken core override",scope:"read",handler:async()=>Response.json({items:[]})});';
 	expect(await (await put(broken)).json()).toMatchObject({ status: "failed" });
-	expect((await (await fetch(`${app.url}/api/messages?since=0`, { headers: { cookie } })).json()).items).toEqual([
-		expect.objectContaining({ body: "acknowledged" }),
-	]);
+	expect(
+		(await (await fetch(`${app.url}/api/messages?topic=retained&since=0`, { headers: { cookie } })).json()).items,
+	).toEqual([expect.objectContaining({ body: "acknowledged" })]);
 	expect(await (await put("invalid optional TypeScript !")).json()).toMatchObject({ status: "live" });
 	expect(await (await fetch(`${app.url}/api/ext`, { headers: { cookie } })).json()).toEqual(
 		expect.arrayContaining([expect.objectContaining({ name: "zz-override.ts", status: "disabled" })]),
 	);
-	expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: "acknowledged" }]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system'")).toEqual([{ body: "acknowledged" }]);
 	const trace = (await readFile(record, "utf8"))
 		.trim()
 		.split("\n")

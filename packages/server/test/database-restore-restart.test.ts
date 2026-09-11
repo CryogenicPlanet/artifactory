@@ -71,20 +71,20 @@ it.for(["restoring", "working", "restored"] as const)(
 		await resumed.ready(cookie);
 		const expected =
 			phase === "working" ? [{ body: "A before backup" }, { body: "B before restore" }] : [{ body: "A before backup" }];
-		expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual(expected);
+		expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(expected);
 		const receipt: unknown = await (await request(resumed.url)).json();
 		expect(receipt).toMatchObject({ status: phase === "working" ? "failed" : "restored", backup: saved.id });
 		expect((await resumed.post("/api/messages", { topic: "restore", body: "C after recovery" }, cookie)).status).toBe(
 			200,
 		);
-		const fresh = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+		const fresh = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 		expect(await (await request(resumed.url)).json()).toEqual(receipt);
-		expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(fresh);
+		expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(fresh);
 		await resumed.stop("SIGKILL");
 		const again = await fixture.launch();
 		await again.ready(cookie);
 		expect(await (await request(again.url)).json()).toEqual(receipt);
-		expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(fresh);
+		expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(fresh);
 		expect(
 			await fixture.sql(
 				"SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type')='db.restored'",

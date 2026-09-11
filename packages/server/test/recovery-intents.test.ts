@@ -118,6 +118,6 @@ it.for([insertCutover, insertRestore, insertMove, insertSource] as const)(
 		expect(await fixture.sql("SELECT * FROM generations", "boot.db")).toEqual(generations);
 		expect(await fixture.sql("SELECT * FROM source_batches", "boot.db")).toEqual(batches);
 		expect(await fixture.sql("SELECT * FROM child_attempts", "boot.db")).toEqual(ownership);
-		expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: "preserve" }]);
+		expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system'")).toEqual([{ body: "preserve" }]);
 	},
 );

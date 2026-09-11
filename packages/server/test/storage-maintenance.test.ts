@@ -15,13 +15,15 @@ it("captures acknowledged WAL data without changing live ownership and does not 
 	).toBe(200);
 	const owner = await fixture.status(app.url, cookie);
 	const epoch = await fixture.sql("SELECT * FROM kernel_writer");
-	const messages = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const messages = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	await cp(join(fixture.root, "comms.db"), join(fixture.root, "main-only.db"));
 	expect(
-		await fixture.sql("SELECT seq,body FROM messages ORDER BY seq", "main-only.db").catch((error: unknown) => {
-			if (error instanceof Error && error.message.includes("no such table: messages")) return [];
-			throw error;
-		}),
+		await fixture
+			.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq", "main-only.db")
+			.catch((error: unknown) => {
+				if (error instanceof Error && error.message.includes("no such table: messages")) return [];
+				throw error;
+			}),
 	).not.toEqual(messages);
 	await fixture.force("hourly");
 	await expect.poll(async () => (await fixture.backups()).length, { timeout: 10000 }).toBe(1);
@@ -31,7 +33,10 @@ it("captures acknowledged WAL data without changing live ownership and does not 
 	expect(saved.reason).toBe("hourly");
 	expect(saved.generation).toBe(owner.child.generation);
 	expect(
-		await fixture.sql("SELECT seq,body FROM messages ORDER BY seq", join("backups", basename(saved.path))),
+		await fixture.sql(
+			"SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq",
+			join("backups", basename(saved.path)),
+		),
 	).toEqual(messages);
 	expect(
 		await fixture.sql(
@@ -42,10 +47,10 @@ it("captures acknowledged WAL data without changing live ownership and does not 
 	const bytes = await readFile(saved.path);
 	expect((await fixture.status(app.url, cookie)).child).toEqual(owner.child);
 	expect(await fixture.sql("SELECT * FROM kernel_writer")).toEqual(epoch);
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(messages);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(messages);
 	expect(
 		await fixture.sql(
-			"SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type')='message.created'",
+			"SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type')='message.created' AND json_extract(event,'$.topic')='backup'",
 			"boot.db",
 		),
 	).toEqual([{ count: 1 }]);
@@ -109,9 +114,11 @@ it("drains an admitted body before capture while a concurrent source reload wait
 	expect(await (await reload).json()).toMatchObject({ status: "live" });
 	const saved = (await fixture.backups()).find((row) => row.reason === "hourly");
 	if (!saved) throw Error("Missing hourly backup");
-	expect(await fixture.sql("SELECT body FROM messages", join("backups", basename(saved.path)))).toEqual([
+	expect(
+		await fixture.sql("SELECT body FROM messages WHERE topic!='system'", join("backups", basename(saved.path))),
+	).toEqual([{ body: "drained into hourly backup" }]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system'")).toEqual([
 		{ body: "drained into hourly backup" },
 	]);
-	expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: "drained into hourly backup" }]);
 	expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 }, 30000);

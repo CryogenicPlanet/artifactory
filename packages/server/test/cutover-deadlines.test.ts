@@ -80,7 +80,7 @@ for (const expires of [false, true])
 			upload.end('survives timeout"}');
 			expect(await completed).toBe(200);
 			expect((await app.post("/api/messages", { topic: "deadline", body: "after timeout" }, cookie)).status).toBe(200);
-			expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual([
+			expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual([
 				{ body: "survives timeout" },
 				{ body: "after timeout" },
 			]);
@@ -91,6 +91,8 @@ for (const expires of [false, true])
 			const result = await (await reload).json();
 			expect(result).toMatchObject({ status: "live" });
 			expect(result.freeze_ms).toBeGreaterThan(10000);
-			expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: "survives slow drain" }]);
+			expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system'")).toEqual([
+				{ body: "survives slow drain" },
+			]);
 		}
 	}, 30000);

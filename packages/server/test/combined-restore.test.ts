@@ -22,7 +22,9 @@ it("restores the exact pre-flip data and complete source into a new generation, 
 	expect((await fixture.status(state.app.url, state.cookie)).child.generation).toBe(result.generation);
 	await fixture.assertSource(true);
 	await fixture.assertRuntime(state.app.url, state.cookie, true);
-	expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual([{ body: "A before target pre-flip" }]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual([
+		{ body: "A before target pre-flip" },
+	]);
 	expect(await fixture.sql("SELECT * FROM staging", "boot.db")).toEqual(state.staging);
 	expect(
 		await fixture.sql("SELECT id,holder_family,agent,cutover_in_flight,pending_release FROM edit_lock", "boot.db"),
@@ -30,21 +32,24 @@ it("restores the exact pre-flip data and complete source into a new generation, 
 	const safety = (await fixture.backups()).find((row) => row.id === result.safety_backup);
 	if (!safety) throw Error("Missing safety backup");
 	expect(
-		await fixture.sql("SELECT seq,body FROM messages ORDER BY seq", join("backups", basename(safety.path))),
+		await fixture.sql(
+			"SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq",
+			join("backups", basename(safety.path)),
+		),
 	).toEqual(state.beforeMessages);
 	expect(await fixture.sql(`SELECT backup_id FROM generations WHERE n=${result.generation}`, "boot.db")).toEqual([
 		{ backup_id: state.saved.id },
 	]);
 	await state.create("D after accepted restore");
-	const fresh = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const fresh = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	expect(await (await request(state.app.url)).json()).toEqual(result);
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(fresh);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(fresh);
 	await state.app.stop();
 	const resumed = await fixture.launch();
 	await resumed.ready(state.cookie);
 	expect((await fixture.status(resumed.url, state.cookie)).child.generation).toBe(result.generation);
 	expect(await (await request(resumed.url)).json()).toEqual(result);
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(fresh);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(fresh);
 	await fixture.assertSource(true);
 	await fixture.assertRuntime(resumed.url, state.cookie, true);
 	expect(
@@ -100,7 +105,9 @@ it.for(["health failure", "HTTP cancellation"] as const)(
 		expect((await fixture.status(state.app.url, state.cookie)).child.generation).toBe(state.prior);
 		await fixture.assertSource(false);
 		await fixture.assertRuntime(state.app.url, state.cookie, false);
-		expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(state.beforeMessages);
+		expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(
+			state.beforeMessages,
+		);
 		expect(await fixture.sql("SELECT * FROM staging", "boot.db")).toEqual(state.staging);
 		expect(await readFile(join(fixture.root, "attempts", `${candidate}.closed`), "utf8")).toBe(candidate);
 		expect(
@@ -111,12 +118,12 @@ it.for(["health failure", "HTTP cancellation"] as const)(
 		).toEqual([{ count: 0 }]);
 
 		await state.create("D after rejected combined restore");
-		const fresh = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+		const fresh = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 		await state.app.stop();
 		const resumed = await fixture.launch();
 		await resumed.ready(state.cookie);
 		expect(await (await request(resumed.url)).json()).toMatchObject({ status: "failed" });
-		expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(fresh);
+		expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(fresh);
 		await fixture.assertSource(false);
 		await fixture.assertRuntime(resumed.url, state.cookie, false);
 	},
@@ -151,7 +158,9 @@ it("preserves accepted data and the restore pin on source conflict, rejects a co
 	expect(await fixture.sql("SELECT phase,source_batch IS NOT NULL bound FROM db_restore_requests", "boot.db")).toEqual([
 		{ phase: "restored", bound: 1 },
 	]);
-	expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual([{ body: "A before target pre-flip" }]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual([
+		{ body: "A before target pre-flip" },
+	]);
 	expect(await readFile(filename, "utf8")).toBe("external source change");
 	expect(await fixture.sql("SELECT cutover_in_flight FROM edit_lock", "boot.db")).toEqual([{ cutover_in_flight: 1 }]);
 	expect((await fetch(`${state.app.url}/api/messages?since=0`, { headers: { cookie: state.cookie } })).status).toBe(
@@ -181,7 +190,7 @@ it("preserves accepted data and the restore pin on source conflict, rejects a co
 		await fixture.sql("SELECT id,holder_family,agent,cutover_in_flight,pending_release FROM edit_lock", "boot.db"),
 	).toEqual(state.lock);
 	await state.create("D after source publication repair");
-	const fresh = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const fresh = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	expect(await (await request(state.app.url)).json()).toEqual(receipt);
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(fresh);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(fresh);
 }, 60000);

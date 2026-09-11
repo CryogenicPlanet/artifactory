@@ -54,7 +54,9 @@ it("reverts a file, a whole latest batch and a retained version through cutover 
 	expect(await (await app.post("/api/revert", {}, cookie)).json()).toMatchObject({ status: "live" });
 	expect(await root()).toContain("reverted API ready");
 	expect((await fetch(`${app.url}/api/fs/app/extra.txt`, { headers: { cookie } })).status).toBe(200);
-	expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: "keep across source undo" }]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system'")).toEqual([
+		{ body: "keep across source undo" },
+	]);
 	expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 }, 45000);
 

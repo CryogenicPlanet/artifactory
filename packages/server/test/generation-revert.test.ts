@@ -53,7 +53,7 @@ it("restores a retained generation's whole source and manifest through cutover w
 	expect(await readFile(join(fixture.root, "app/retained.sh"), "utf8")).toBe("#!/bin/sh\necho retained\n");
 	expect((await stat(join(fixture.root, "app/retained.sh"))).mode & 0o777).toBe(0o750);
 	expect((await request("app/new-only.txt", "GET")).status).toBe(404);
-	expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual([
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual([
 		{ body: "written after original snapshot" },
 	]);
 	expect(
@@ -261,7 +261,9 @@ it("recreates a missing editable app tree while its saved generation continues s
 	expect(restored.status).toBe(200);
 	expect(await restored.json()).toMatchObject({ status: "live" });
 	expect(await readFile(join(fixture.root, "app/server.ts"), "utf8")).toBe(original);
-	expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual([{ body: "saved child still serves" }]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual([
+		{ body: "saved child still serves" },
+	]);
 	await app.ready(cookie);
 }, 25000);
 
@@ -350,7 +352,7 @@ it("keeps source and live writes intact when generation dependency preparation f
 	expect(await readFile(join(fixture.root, "app/candidate-only.txt"), "utf8")).toBe(
 		"must not publish before preparation",
 	);
-	expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual([
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual([
 		{ body: "before failed preparation" },
 		{ body: "after failed preparation" },
 	]);

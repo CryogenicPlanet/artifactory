@@ -71,7 +71,7 @@ it.for(["restoring", "working", "accepted", "mid-source", "before-activation"] a
 		const successful = boundary !== "working";
 		await fixture.assertSource(successful);
 		await fixture.assertRuntime(resumed.url, state.cookie, successful);
-		expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(
+		expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(
 			successful
 				? Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ seq: Schema.Int, body: Schema.String })))(
 						state.beforeMessages,
@@ -93,13 +93,13 @@ it.for(["restoring", "working", "accepted", "mid-source", "before-activation"] a
 		expect(
 			(await resumed.post("/api/messages", { topic: "combined", body: "D after crash recovery" }, state.cookie)).status,
 		).toBe(200);
-		const fresh = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+		const fresh = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 		expect(await (await request(resumed.url)).json()).toEqual(receipt);
 		await resumed.stop("SIGKILL");
 		const again = await fixture.launch();
 		await again.ready(state.cookie);
 		expect(await (await request(again.url)).json()).toEqual(receipt);
-		expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(fresh);
+		expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(fresh);
 		await fixture.assertSource(successful);
 		await fixture.assertRuntime(again.url, state.cookie, successful);
 		expect(

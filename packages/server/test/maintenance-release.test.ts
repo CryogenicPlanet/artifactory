@@ -79,14 +79,16 @@ it.for(["selection", "lock-release"] as const)(
 		expect(
 			await fixture.sql("SELECT COUNT(*) count FROM child_attempts WHERE opened=1 AND closed=0", "boot.db"),
 		).toEqual([{ count: 0 }]);
-		expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual(
+		expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(
 			boundary === "selection" ? [{ body: "saved" }, { body: "fresh" }] : [{ body: "saved" }],
 		);
 		await rm(armed);
 		await app.stop();
 		const restarted = await fixture.launch();
 		await restarted.ready(cookie);
-		expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual([{ body: "saved" }]);
+		expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual([
+			{ body: "saved" },
+		]);
 		expect((await restarted.post("/api/messages", { topic: "restore", body: "after recovery" }, cookie)).status).toBe(
 			200,
 		);

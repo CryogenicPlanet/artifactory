@@ -57,7 +57,7 @@ it("stages, rehearses and accepts an edit, rejects broken source, and repairs it
 	sending = false;
 	await traffic;
 	expect(receipts.length).toBeGreaterThan(0);
-	const rows = await fixture.sql("SELECT seq FROM messages ORDER BY seq");
+	const rows = await fixture.sql("SELECT seq FROM messages WHERE topic!='system' ORDER BY seq");
 	expect(rows).toEqual(receipts.map((seq) => ({ seq })));
 	expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 }, 45000);
@@ -85,7 +85,7 @@ if (process.env.STATE === "candidate") { yield* sql\`DELETE FROM messages\`; ret
 	});
 	expect(await edited.json()).toMatchObject({ status: "failed", lock: { cutover_in_flight: 0 } });
 	await app.ready(cookie);
-	expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: acknowledged.body }]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system'")).toEqual([{ body: acknowledged.body }]);
 	expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 	expect(await fixture.sql("SELECT good FROM generations ORDER BY n", "boot.db")).toEqual([{ good: 1 }, { good: 0 }]);
 }, 20000);
@@ -131,7 +131,7 @@ for (const accepted of [false, true])
 		const resumed = await fixture.launch();
 		const again = await resumed.login();
 		await resumed.ready(again);
-		const rows = await fixture.sql("SELECT body FROM messages ORDER BY seq");
+		const rows = await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq");
 		expect(rows).toEqual(
 			accepted ? [{ body: "before crash" }, { body: "after acceptance" }] : [{ body: "before crash" }],
 		);
@@ -213,5 +213,7 @@ it("drains admitted slow bodies and reauthenticates queued mutations before forw
 	expect(await completed).toBe(200);
 	expect(await (await reload).json()).toMatchObject({ status: "live" });
 	expect((await queued).status).toBe(401);
-	expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: "acknowledged held body" }]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system'")).toEqual([
+		{ body: "acknowledged held body" },
+	]);
 }, 20000);

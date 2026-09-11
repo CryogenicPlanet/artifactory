@@ -101,7 +101,7 @@ export default (api: Api) => Effect.gen(function* () {
 			"SELECT id,holder_family,agent,cutover_in_flight,pending_release FROM edit_lock",
 			"boot.db",
 		);
-		const beforeMessages = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+		const beforeMessages = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 		// A second live session restores while the first session owns staged source.
 		const restoreCookie = await app.login();
 		const signed = async (key?: string) => {

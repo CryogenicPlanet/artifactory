@@ -53,7 +53,7 @@ it("restores only the selected app data, keeps a fresh safety copy and staging, 
 	await pageGrants(app.url, "public-new", "public-old");
 	const savedBytes = await readFile(saved.path);
 	expect((await create("B before restore")).status).toBe(200);
-	const beforeMessages = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const beforeMessages = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	const beforeEpoch = await fixture.sql("SELECT epoch FROM kernel_writer");
 	const beforeEvents = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ seq: Schema.Int })))(
 		await fixture.sql("SELECT MAX(seq) seq FROM events", "boot.db"),
@@ -108,7 +108,9 @@ it("restores only the selected app data, keeps a fresh safety copy and staging, 
 	expect(result.event_seq).toBeGreaterThan(beforeEvents[0]?.seq ?? 0);
 	await app.ready(cookie);
 	await pageGrants(app.url, "public-old", "public-new");
-	expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual([{ body: "A before backup" }]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual([
+		{ body: "A before backup" },
+	]);
 	expect(
 		await (await fetch(`${app.url}/api/messages?topic=restore&since=0&wait=0`, { headers: { cookie } })).json(),
 	).toMatchObject({
@@ -123,13 +125,16 @@ it("restores only the selected app data, keeps a fresh safety copy and staging, 
 	const safety = (await fixture.backups()).find((row) => row.id === result.safety_backup);
 	if (!safety) throw Error("Missing fresh restore safety backup");
 	expect(
-		await fixture.sql("SELECT seq,body FROM messages ORDER BY seq", join("backups", basename(safety.path))),
+		await fixture.sql(
+			"SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq",
+			join("backups", basename(safety.path)),
+		),
 	).toEqual(beforeMessages);
 	expect(await readFile(saved.path)).toEqual(savedBytes);
 	expect((await create("C after successful restore")).status).toBe(200);
 	await setPublic(app.url, cookie, "public-old", false);
 	await setPublic(app.url, cookie, "public-new", true);
-	const fresh = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const fresh = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	expect(
 		await fixture.sql(
 			`SELECT COUNT(*) count FROM messages WHERE body='C after successful restore' AND seq>${result.event_seq}`,
@@ -137,13 +142,13 @@ it("restores only the selected app data, keeps a fresh safety copy and staging, 
 	).toEqual([{ count: 1 }]);
 	expect(await (await request(app.url)).json()).toEqual(result);
 	await pageGrants(app.url, "public-new", "public-old");
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(fresh);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(fresh);
 	await app.stop();
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
 	expect(await (await request(resumed.url)).json()).toEqual(result);
 	await pageGrants(resumed.url, "public-new", "public-old");
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(fresh);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(fresh);
 	expect(
 		await fixture.sql("SELECT seq FROM events WHERE json_extract(event,'$.type')='db.restored'", "boot.db"),
 	).toEqual([{ seq: result.event_seq }]);
@@ -175,7 +180,7 @@ it("rolls a failed candidate health check back to the fresh safety copy and reco
 	await setPublic(app.url, cookie, "public-new", true);
 	await pageGrants(app.url, "public-new", "public-old");
 	expect((await app.post("/api/messages", { topic: "restore", body: "B before restore" }, cookie)).status).toBe(200);
-	const messages = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const messages = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	const epoch = await fixture.sql("SELECT epoch FROM kernel_writer");
 	const generation = (await fixture.status(app.url, cookie)).child.generation;
 	if (generation === null) throw Error("Missing live generation");
@@ -211,7 +216,7 @@ it("rolls a failed candidate health check back to the fresh safety copy and reco
 	expect(result).toMatchObject({ status: "failed", backup: saved.id });
 	await app.ready(cookie);
 	await pageGrants(app.url, "public-new", "public-old");
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(messages);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(messages);
 	expect(await fixture.sql("SELECT epoch FROM kernel_writer")).not.toEqual(epoch);
 	expect(await fixture.sql("SELECT phase FROM db_restore_requests", "boot.db")).toEqual([{ phase: "failed" }]);
 	expect(
@@ -220,14 +225,14 @@ it("rolls a failed candidate health check back to the fresh safety copy and reco
 	expect((await app.post("/api/messages", { topic: "restore", body: "C after failed restore" }, cookie)).status).toBe(
 		200,
 	);
-	const fresh = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const fresh = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	expect(await (await request()).json()).toEqual(result);
 	await pageGrants(app.url, "public-new", "public-old");
 	await app.stop();
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
 	await pageGrants(resumed.url, "public-new", "public-old");
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(fresh);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(fresh);
 	expect(await fixture.sql("SELECT COUNT(*) count FROM child_attempts WHERE opened=1 AND closed=0", "boot.db")).toEqual(
 		[{ count: 1 }],
 	);
@@ -259,7 +264,7 @@ it("refuses replacement and stays unavailable across restart when the prior owne
 	const [saved] = await fixture.backups();
 	if (!saved) throw Error("Missing selected backup");
 	expect((await app.post("/api/messages", { topic: "restore", body: "B before restore" }, cookie)).status).toBe(200);
-	const messages = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const messages = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	const proof = await app.signedAssertion("db.restore", { backup: saved.id }, cookie);
 	const response = await fetch(`${app.url}/_boot/db/restore`, {
 		method: "POST",
@@ -267,7 +272,7 @@ it("refuses replacement and stays unavailable across restart when the prior owne
 		body: JSON.stringify({ backup: saved.id }),
 	});
 	expect(response.status).toBeGreaterThanOrEqual(400);
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(messages);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(messages);
 	expect(
 		await fixture.sql("SELECT phase,safety_backup IS NOT NULL has_safety FROM db_restore_requests", "boot.db"),
 	).toEqual([{ phase: "authorized", has_safety: 1 }]);
@@ -281,7 +286,7 @@ it("refuses replacement and stays unavailable across restart when the prior owne
 		.toBe("failed");
 	expect((await fetch(`${resumed.url}/api/messages?since=0`, { headers: { cookie } })).status).toBe(503);
 	expect((await fetch(`${resumed.url}/auth/login`)).status).toBe(200);
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(messages);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(messages);
 	expect(await fixture.sql("SELECT opened,closed FROM child_attempts", "boot.db")).toEqual([{ opened: 1, closed: 0 }]);
 	expect(
 		await fixture.sql("SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type')='db.restored'", "boot.db"),
@@ -315,7 +320,7 @@ it("closes the candidate and rolls back to fresh data when the restore HTTP requ
 	const [saved] = await fixture.backups();
 	if (!saved) throw Error("Missing selected backup");
 	expect((await app.post("/api/messages", { topic: "restore", body: "B before restore" }, cookie)).status).toBe(200);
-	const messages = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const messages = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	const proof = await app.signedAssertion("db.restore", { backup: saved.id }, cookie);
 	const controller = new AbortController();
 	test.onTestFinished(() => controller.abort());
@@ -334,7 +339,7 @@ it("closes the candidate and rolls back to fresh data when the restore HTTP requ
 		.poll(() => fixture.sql("SELECT phase FROM db_restore_requests", "boot.db"), { timeout: 10000 })
 		.toEqual([{ phase: "failed" }]);
 	await app.ready(cookie);
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(messages);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(messages);
 	expect(await readFile(join(fixture.root, "attempts", `${candidate}.closed`), "utf8")).toBe(candidate);
 	expect(await fixture.sql(`SELECT opened,closed FROM child_attempts WHERE id='${candidate}'`, "boot.db")).toEqual([
 		{ opened: 1, closed: 1 },

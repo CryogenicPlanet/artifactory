@@ -46,12 +46,12 @@ it("resets the entire source tree while preserving messages, pages, identity, to
 	await writeFile(join(editable, "seed-directory"), "replacement file");
 	await rm(join(editable, "seed-empty"), { recursive: true });
 	await writeFile(join(editable, "later-only.txt"), "remove this");
-	const beforeMessages = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const beforeMessages = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	const reset = await state.request();
 	expect(reset.status).toBe(200);
 	expect(await reset.json()).toMatchObject({ status: "live" });
 	await app.ready(cookie);
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(beforeMessages);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(beforeMessages);
 	const assertData = async () => {
 		await state.assertPreserved();
 		expect(await readFile(join(editable, "reset-version.txt"), "utf8")).toBe("configured seed source");
@@ -75,12 +75,12 @@ it("resets the entire source tree while preserving messages, pages, identity, to
 	};
 	await assertData();
 	expect((await app.post("/api/messages", { topic: "reset", body: "after reset" }, cookie)).status).toBe(200);
-	const messages = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const messages = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	await app.stop("SIGKILL");
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
 	await assertData();
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(messages);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(messages);
 	expect(
 		(
 			await fetch(`${resumed.url}/api/messages?topic=reset&mark=0`, {
@@ -100,7 +100,7 @@ it("refuses an incompatible seed during rehearsal without publishing source or d
 	const needle = "const sql = yield* SqlClient.SqlClient;";
 	expect(health.split(needle)).toHaveLength(2);
 	await writeFile(healthPath, health.replace(needle, `${needle}\n yield* sql\`SELECT legacy FROM reset_compat\`;`));
-	const before = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+	const before = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 	const response = await state.request();
 	expect(response.status).toBe(200);
 	expect(await response.json()).toMatchObject({
@@ -108,7 +108,7 @@ it("refuses an incompatible seed during rehearsal without publishing source or d
 		error: expect.stringMatching(/incompatible_schema[\s\S]*forward source fix/),
 	});
 	expect(await readFile(join(fixture.root, "app/reset-version.txt"), "utf8")).toBe("edited source");
-	expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(before);
+	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(before);
 	expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 	await state.assertPreserved();
 	expect(
@@ -158,14 +158,14 @@ it.for(["rehearsal", "published", "accepted"] as const)(
 			(await state.app.post("/api/messages", { topic: "reset", body: `acknowledged during ${boundary}` }, state.cookie))
 				.status,
 		).toBe(200);
-		const messages = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+		const messages = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 		await state.app.stop("SIGKILL");
 		await pending;
 		await rm(armed);
 		const resumed = await fixture.launch();
 		await resumed.ready(state.cookie);
 		await state.assertPreserved();
-		expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(messages);
+		expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(messages);
 		expect(await readFile(join(fixture.root, "app/reset-version.txt"), "utf8")).toBe(
 			boundary === "rehearsal" ? "edited source" : "configured seed source",
 		);
@@ -176,11 +176,11 @@ it.for(["rehearsal", "published", "accepted"] as const)(
 		expect((await resumed.post("/api/messages", { topic: "reset", body: "after recovery" }, state.cookie)).status).toBe(
 			200,
 		);
-		const after = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+		const after = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 		await resumed.stop("SIGKILL");
 		const again = await fixture.launch();
 		await again.ready(state.cookie);
-		expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(after);
+		expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(after);
 	},
 );
 

@@ -29,7 +29,7 @@ it("repairs never-ending shutdown hooks and scoped finalizers only after keeper 
 		signal: AbortSignal.timeout(25000),
 	});
 	expect(await failed.json()).toMatchObject({ status: "failed", lock: { cutover_in_flight: 0 } });
-	expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual(retained);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(retained);
 	expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 	expect((await (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json()).traffic.frozen).toBe(false);
 	await rm(join(fixture.root, "backups"));
@@ -59,16 +59,16 @@ it("repairs never-ending shutdown hooks and scoped finalizers only after keeper 
 		expect(
 			await fixture.sql("SELECT COUNT(*) AS count FROM child_attempts WHERE opened=1 AND closed=0", "boot.db"),
 		).toEqual([{ count: 1 }]);
-		expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual(retained);
+		expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(retained);
 		expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 	}
 	expect((await app.post("/api/messages", { topic: "hang", body: "acknowledged after repair" }, cookie)).status).toBe(
 		200,
 	);
 	retained.push({ body: "acknowledged after repair" });
-	expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual(retained);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(retained);
 	const events = await (
-		await fetch(`${app.url}/api/events?since=0&types=message.created`, { headers: { cookie } })
+		await fetch(`${app.url}/api/events?since=0&types=message.created&topic=hang`, { headers: { cookie } })
 	).json();
 	expect(events.items.map((event: { payload: { body: string } }) => ({ body: event.payload.body }))).toEqual(retained);
 	expect((await (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json()).traffic.frozen).toBe(false);

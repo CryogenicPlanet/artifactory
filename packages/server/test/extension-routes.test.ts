@@ -163,8 +163,8 @@ it("keeps reserved and static core routes ahead of broad extension patterns", as
 	expect(await (await fetch(`${app.url}/api/ext`, { headers: { cookie } })).json()).toEqual(
 		expect.arrayContaining([expect.objectContaining({ name: "zz-health.ts", status: "loaded" })]),
 	);
-	expect(await fixture.sql("SELECT body FROM messages")).toEqual([{ body: "keep me" }]);
-	expect((await (await fetch(`${app.url}/api/messages?since=0`, { headers: { cookie } })).json()).items).toEqual([
-		expect.objectContaining({ body: "keep me" }),
-	]);
+	expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system'")).toEqual([{ body: "keep me" }]);
+	expect(
+		(await (await fetch(`${app.url}/api/messages?topic=retained&since=0`, { headers: { cookie } })).json()).items,
+	).toEqual([expect.objectContaining({ body: "keep me" })]);
 }, 25000);

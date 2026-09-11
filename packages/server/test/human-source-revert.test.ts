@@ -28,7 +28,7 @@ it.for(["path", "batch", "version", "generation", "latest"] as const)(
 						: selector === "generation"
 							? { generation: 1 }
 							: {};
-		const before = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+		const before = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 		const response = await state.app.post("/api/revert", input, state.resetCookie, "human-undo");
 		expect(response.status).toBe(200);
 		const result = await response.json();
@@ -38,7 +38,7 @@ it.for(["path", "batch", "version", "generation", "latest"] as const)(
 			selector === "version" ? "edited source" : "configured seed source",
 		);
 		await state.assertPreserved();
-		expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(before);
+		expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(before);
 		const generations = await fixture.sql("SELECT n FROM generations", "boot.db");
 		expect(await (await state.app.post("/api/revert", input, state.resetCookie, "human-undo")).json()).toEqual(result);
 		expect(await fixture.sql("SELECT n FROM generations", "boot.db")).toEqual(generations);
@@ -88,14 +88,14 @@ it.for(["published", "working", "accepted"] as const)(
 				(await state.app.post("/api/messages", { topic: "reset", body: `ack during ${boundary}` }, state.cookie))
 					.status,
 			).toBe(200);
-		const before = await fixture.sql("SELECT seq,body FROM messages ORDER BY seq");
+		const before = await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq");
 		await state.app.stop("SIGKILL");
 		await pending;
 		await rm(armed);
 		const resumed = await fixture.launch();
 		await resumed.ready(state.cookie);
 		await state.assertPreserved();
-		expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(before);
+		expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(before);
 		const replay = await resumed.post("/api/revert", input, state.resetCookie, "crashed-human-undo");
 		expect(replay.status).toBe(boundary === "accepted" ? 200 : 409);
 		expect(await replay.json()).toMatchObject(
@@ -106,7 +106,7 @@ it.for(["published", "working", "accepted"] as const)(
 		const again = await fixture.launch();
 		await again.ready(state.cookie);
 		expect(await fixture.sql("SELECT n FROM generations", "boot.db")).toEqual(generations);
-		expect(await fixture.sql("SELECT seq,body FROM messages ORDER BY seq")).toEqual(before);
+		expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(before);
 	},
 );
 
