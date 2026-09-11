@@ -59,6 +59,29 @@ def messages(topic=None):
     return result['rows']
 
 
+def http_failure(error):
+    # Do not echo arbitrary server text: only these fixed storage codes/hints.
+    hints = {
+        'storage_headroom': 'Free space on the data volume before new reservations; recovery evidence is retained.',
+        'storage_measurement_failed': 'Inspect the data volume and failed storage probe before retrying.',
+        'event_storage_unavailable': 'Inspect event storage measurements before allocating more events.',
+        'event_storage_over_budget': 'Expand storage or wait for eligible event pruning; retained recovery evidence cannot be discarded.',
+    }
+    detail = {'status': error.code, 'code': 'unrecognized', 'hint': None}
+    try:
+        raw = error.read(4097)
+        value = json.loads(raw) if len(raw) <= 4096 else None
+        envelope = value.get('error') if isinstance(value, dict) else None
+        code = envelope.get('code') if isinstance(envelope, dict) else None
+        if isinstance(code, str) and code in hints:
+            detail['code'] = code
+            if envelope.get('hint') == hints[code]:
+                detail['hint'] = hints[code]
+    except (ValueError, OSError):
+        pass
+    print('Guest terminal HTTP refusal:', detail, flush=True)
+
+
 def diagnostic():
     # Only structured state and counts: never print cookies, setup codes or raw logs.
     try:
@@ -83,12 +106,31 @@ def diagnostic():
             print('Guest ' + name + ':', rows(statement), flush=True)
         except sqlite3.Error as error:
             print('Guest database diagnostic unavailable:', type(error).__name__, flush=True)
+    try:
+        volume = os.statvfs(DATA)
+        print('Guest storage sample:', {
+            'capacity_bytes': volume.f_frsize * volume.f_blocks,
+            'available_bytes': volume.f_frsize * volume.f_bavail,
+            'available_inodes': volume.f_favail,
+            'boot_db_bytes': {suffix or 'main': (DATA / ('boot.db' + suffix)).stat().st_size
+                              for suffix in ('', '-wal', '-shm') if (DATA / ('boot.db' + suffix)).exists()},
+        }, flush=True)
+        policy_rows = rows("SELECT value FROM settings WHERE key='storage_policy'")
+        policy = json.loads(policy_rows[0]['value']) if policy_rows else {}
+        print('Guest stored storage policy (empty means defaults):', {
+            key: policy[key] for key in ('backup_percent', 'event_percent', 'headroom_percent')
+            if isinstance(policy, dict) and type(policy.get(key)) in (int, float)
+            and 0 <= policy[key] <= 100
+        }, flush=True)
+    except (OSError, sqlite3.Error, ValueError) as error:
+        print('Guest storage diagnostic unavailable:', type(error).__name__, flush=True)
     log = ROOT / 'reboot-runtime.log'
     if log.exists():
         text = log.read_text(errors='replace')
         print('Guest runtime log summary:', {
             'bytes': log.stat().st_size,
             'listener_announced': 'Listening on' in text,
+            'event_maintenance_failed': 'Event page-budget maintenance failed; retrying next minute' in text,
             'error_codes': sorted(set(re.findall(r'code: [\"\']([a-z_]{1,64})[\"\']', text))),
         }, flush=True)
 
@@ -194,4 +236,9 @@ def after():
 
 if __name__ == '__main__':
     require(str(ROOT) == os.getcwd(), 'Run only in the disposable guest checkout')
-    {'before': before, 'inspect': inspect, 'after': after}[sys.argv[1]]()
+    try:
+        {'before': before, 'inspect': inspect, 'after': after}[sys.argv[1]]()
+    except urllib.error.HTTPError as error:
+        http_failure(error)
+        diagnostic()
+        raise
