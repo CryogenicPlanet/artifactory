@@ -9,7 +9,7 @@ import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
 const Message = Schema.Struct({ id: Schema.String, seq: Schema.Int, body: Schema.String });
-const Refusal = Schema.Struct({ error: Schema.Struct({ code: Schema.String }) });
+const Refusal = Schema.Struct({ error: Schema.Struct({ code: Schema.String, retriable: Schema.Boolean }) });
 const Swap = Schema.Struct({
 	status: Schema.String,
 	generation: Schema.Int,
@@ -26,13 +26,14 @@ it.skipIf(process.env.COMMS_CUTOVER_ACCEPTANCE !== "1")(
 		await app.setup();
 		const cookie = await app.login();
 		await app.ready(cookie);
-		const bunVersion = (await promisify(execFile)("bun", ["--version"])).stdout.trim();
+		const bunVersion = (await promisify(execFile)("bun", ["--revision"])).stdout.trim();
 		const records: Array<{
 			phase: string;
 			method: string;
 			status: number | null;
 			ms: number;
 			code?: string;
+			retriable?: boolean;
 			error?: string;
 		}> = [];
 		const accepted: Array<{ key: string; message: typeof Message.Type }> = [];
@@ -67,14 +68,17 @@ it.skipIf(process.env.COMMS_CUTOVER_ACCEPTANCE !== "1")(
 				if (response.status === 200) {
 					if (method === "POST") accepted.push({ key, message: Schema.decodeUnknownSync(Message)(result) });
 					records.push({ phase: current, method, status, ms: performance.now() - started });
-				} else
+				} else {
+					const refusal = Schema.decodeUnknownSync(Refusal)(result).error;
 					records.push({
 						phase: current,
 						method,
 						status,
 						ms: performance.now() - started,
-						code: Schema.decodeUnknownSync(Refusal)(result).error.code,
+						code: refusal.code,
+						retriable: refusal.retriable,
 					});
+				}
 			} catch (error) {
 				records.push({
 					phase: current,
@@ -169,13 +173,19 @@ it.skipIf(process.env.COMMS_CUTOVER_ACCEPTANCE !== "1")(
 		);
 		if (failure !== undefined) throw failure;
 		try {
-			// Every result is retained. A documented SQL-window refusal is not a transport drop, nor a success.
+			// SPEC §7.7 step 6 permits retriable reads during candidate SQL health. Keep every refusal in the report.
 			expect(records.filter((record) => record.error !== undefined)).toEqual([]);
 			expect(
 				records.filter(
 					(record) =>
 						record.status !== 200 &&
-						!(record.method === "GET" && record.status === 503 && record.code === "boot_unavailable"),
+						!(
+							record.method === "GET" &&
+							record.status === 503 &&
+							record.retriable === true &&
+							["healthy", "repair"].includes(record.phase) &&
+							(record.code === "boot_unavailable" || record.code === "stale_writer")
+						),
 				),
 			).toEqual([]);
 			expect(accepted.length).toBeGreaterThan(0);
