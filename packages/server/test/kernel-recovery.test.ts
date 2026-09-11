@@ -102,11 +102,18 @@ it("closes the old child after boot SIGKILL and publishes its previously committ
 	await next.ready(cookie);
 	await expect(fetch(`${orphan}/write`, { method: "POST" })).rejects.toThrow();
 	expect(await fixture.sql("SELECT id FROM orphan_writes")).toEqual([{ id: "admitted" }]);
+	// This recovery child has no editable event-browsing API. Verify the recovered
+	// event exactly once, its original batch receipt, and the public visibility fence.
 	expect(
-		await (await fetch(`${next.url}/api/events?since=0&types=message.created`, { headers: { cookie } })).json(),
-	).toMatchObject({
-		items: [{ payload: { body: "committed by admitted orphan" } }],
-	});
+		await fixture.sql(
+			`SELECT json_extract(e.event,'$.payload') AS payload,
+			 e.seq <= s.published_through AS published, b.state
+			 FROM events e CROSS JOIN seq s LEFT JOIN event_batches b
+			 ON b.id='orphan-admitted' AND e.seq BETWEEN b.from_seq AND b.to_seq
+			 WHERE s.singleton=1 AND json_extract(e.event,'$.type')='message.created'`,
+			"boot.db",
+		),
+	).toEqual([{ payload: JSON.stringify({ body: "committed by admitted orphan" }), published: 1, state: "published" }]);
 }, 20000);
 
 it("rejects wrong and stale channel credentials, including a request body held across attempt rotation", async (test) => {
