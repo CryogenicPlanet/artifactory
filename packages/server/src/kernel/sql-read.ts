@@ -1,23 +1,32 @@
-import { Effect, Path, Schema, Stream, Semaphore } from "effect";
+import { render } from "@comms/storage/store";
+import { Config, Effect, Path, Redacted, Schema, Stream, Semaphore } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { ErrorEnvelope } from "@comms/protocol/errors";
 import { BootChannel, KernelError } from "./boot-channel.ts";
 import { sqlInput, type SqlInput } from "./sql-input.ts";
 import { ReadRequest, ReadResponse } from "./sql-read-wire.ts";
 
-/** A disposable readonly process keeps native SQLite execution off the serving event loop. */
+/** A disposable readonly process owns each query and its registered remote leases. */
 const inspectSql = (input: typeof SqlInput.Type, allowRead: boolean) =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			yield* sqlInput(input);
 			const boot = yield* BootChannel;
-			if (boot.filename === null) return yield* new KernelError({ code: "sql_unsupported" });
+			const environment =
+				boot.store._tag === "file"
+					? {}
+					: {
+							REMOTE_ATTEMPT: yield* Config.String("REMOTE_ATTEMPT"),
+							REMOTE_GUARDIAN_URL: yield* Config.String("REMOTE_GUARDIAN_URL"),
+							REMOTE_GUARDIAN_SECRET: Redacted.value(yield* Config.Redacted("REMOTE_GUARDIAN_SECRET")),
+							DATABASE_TLS: yield* Config.String("DATABASE_TLS"),
+						};
 			const path = yield* Path.Path;
 			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 			const relative = import.meta.url.endsWith(".ts") ? "./sql-read-worker.ts" : "./kernel/sql-read-worker.js";
 			const entry = yield* path.fromFileUrl(new URL(relative, import.meta.url));
 			const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(ReadRequest))({
-				filename: boot.filename,
+				store: Redacted.value(render(boot.store)),
 				allowRead,
 				input,
 			});
@@ -25,7 +34,7 @@ const inspectSql = (input: typeof SqlInput.Type, allowRead: boolean) =>
 				return yield* new KernelError({ code: "input_invalid" });
 			const child = yield* spawner.spawn(
 				ChildProcess.make(process.execPath, [entry], {
-					env: {},
+					env: environment,
 					detached: false,
 					stdin: Stream.make(new TextEncoder().encode(encoded)),
 					stdout: "pipe",

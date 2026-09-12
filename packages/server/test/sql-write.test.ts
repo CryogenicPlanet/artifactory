@@ -56,7 +56,7 @@ it("repairs app rows/schema with fs authority and preserves first SQL outcomes a
 	expect(updated.status).toBe(200);
 	expect(await updated.json()).toMatchObject({ rows: [{ id: 1, value: "new" }], changes: 1 });
 	const readCte = await query("WITH desired(v) AS (SELECT value FROM repair) SELECT v FROM desired");
-	expect(await readCte.json()).toEqual({ rows: [{ v: "new" }], truncated: false });
+	expect(await readCte.json()).toEqual({ rows: [{ v: "new" }], truncated: false, dialect: "sqlite" });
 	const events = await (await fetch(`${app.url}/api/events?since=0&types=sql.write`, { headers: { cookie } })).json();
 	expect(events.items).toHaveLength(3);
 	expect(events.items.find((item: { seq: number }) => item.seq === first.seq)).toMatchObject({

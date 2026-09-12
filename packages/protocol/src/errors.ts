@@ -153,6 +153,11 @@ export const policy = {
 		message: "The readonly SQL query exceeded its execution budget.",
 		hint: "Reduce query cost or add an index before trying again. The isolated reader was stopped; the application remains available.",
 	},
+	placeholder_style: {
+		status: 400,
+		message: "SQL parameters use a different placeholder style on this engine.",
+		hint: "Use $1, $2 and so on on PostgreSQL; use ? on SQLite and MySQL. Read results report the deployment dialect.",
+	},
 	sql_query_invalid: {
 		status: 400,
 		message: "The SQL statement, parameters or returned values are invalid.",

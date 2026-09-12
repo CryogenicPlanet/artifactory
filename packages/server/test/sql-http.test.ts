@@ -48,10 +48,12 @@ it("inspects physical committed rows with scoped read authority and documents th
 	expect(await (await query("SELECT body, updated_seq FROM messages WHERE id=?", [created.id])).json()).toEqual({
 		rows: [{ body: "physical", updated_seq: 9000000 }],
 		truncated: false,
+		dialect: "sqlite",
 	});
 	expect(await (await query("WITH value(v) AS (SELECT ?) SELECT v FROM value", [";--/*\0"])).json()).toEqual({
 		rows: [{ v: ";--/*\0" }],
 		truncated: false,
+		dialect: "sqlite",
 	});
 	const enrolled = await (await app.post("/auth/enroll", { name: "sql", kind: "test", host: "read" })).json();
 	const params = { id: enrolled.id, decision: "approve" as const, scopes: ["read"], long_lived: false };
@@ -102,7 +104,7 @@ it("inspects physical committed rows with scoped read authority and documents th
 	expect(await fixture.sql("SELECT value FROM admission_write")).toEqual([{ value: 7 }]);
 	const result = await query("SELECT 1 AS n");
 	expect(result.headers.get("cache-control")).toBe("no-store");
-	expect(await result.json()).toEqual({ rows: [{ n: 1 }], truncated: false });
+	expect(await result.json()).toEqual({ rows: [{ n: 1 }], truncated: false, dialect: "sqlite" });
 	const discovery = await (await fetch(`${app.url}/api`, { headers: { cookie } })).json();
 	expect(discovery.paths["/api/sql"].post.description).toContain("physical committed");
 }, 30000);
@@ -185,6 +187,7 @@ it("refuses wrapper escapes, unsupported values and oversized output without mod
 	expect(await (await query("SELECT CAST(9223372036854775807 AS TEXT) AS n")).json()).toEqual({
 		rows: [{ n: "9223372036854775807" }],
 		truncated: false,
+		dialect: "sqlite",
 	});
 	expect(await fixture.sql("SELECT * FROM sql_safety")).toEqual([{ value: 1 }]);
 	const many = await (
