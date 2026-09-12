@@ -6,6 +6,7 @@ import { SqlClient } from "effect/unstable/sql/SqlClient";
 import { remoteClientLayer } from "../../src/remote-client.ts";
 import { remoteInspectorLayer, RemoteInspector } from "../../src/remote-inspector.ts";
 import { type RemoteConnection, type RemoteSession, attemptTag } from "../../src/remote-session.ts";
+import { readTransaction } from "../../src/dialect.ts";
 import { open } from "../../src/remote-driver.ts";
 
 const Settings = Schema.Struct({
@@ -108,6 +109,52 @@ async function main() {
 					child,
 				);
 				const sql = Context.get(context, SqlClient);
+				if (mode === "isolation") {
+					assert.equal(connection.engine, "mysql");
+					phase = "default_isolation";
+					assert.deepEqual(yield* readTransaction(sql, sql`SELECT 1 AS accepted`), [{ accepted: 1 }]);
+					phase = "change_all_physical_leases";
+					const leases = yield* Effect.forEach([0, 1, 2, 3], () =>
+						Effect.gen(function* () {
+							const lease = yield* Scope.make();
+							yield* Effect.addFinalizer((exit) => Scope.close(lease, exit));
+							const reserved = yield* Scope.provide(sql.reserve, lease);
+							yield* reserved.executeUnprepared(
+								"SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED",
+								[],
+								undefined,
+							);
+							return lease;
+						}),
+					);
+					assert.equal(new Set((yield* Ref.get(registered)).map((session) => session.connectionId)).size, 4);
+					for (const lease of leases) yield* Scope.close(lease, Exit.void);
+					const registrations = (yield* Ref.get(registered)).length;
+					const entered = yield* Ref.make(false);
+					phase = "reject_changed_isolation";
+					// More attempts than pool slots also prove rejected physical leases are released.
+					for (let index = 0; index < 6; index++) {
+						const denied = yield* readTransaction(sql, Ref.set(entered, true).pipe(Effect.andThen(sql`SELECT 1`))).pipe(
+							Effect.exit,
+						);
+						assert(Exit.isFailure(denied));
+						assert(JSON.stringify(denied).includes("remote_isolation_unsupported"));
+						assert(!JSON.stringify(denied).includes(settings.password));
+					}
+					assert.equal(yield* Ref.get(entered), false);
+					assert.equal((yield* Ref.get(registered)).length, registrations);
+					yield* Scope.close(child, Exit.void);
+					phase = "isolation_pool_closed";
+					let closed = false;
+					for (let index = 0; index < 100; index++) {
+						closed = Exit.isSuccess(yield* inspector.assertNoSessions(Effect.void).pipe(Effect.exit));
+						if (closed) break;
+						yield* Effect.sleep("50 millis");
+					}
+					assert(closed, "Rejected isolation sessions did not disappear");
+					return;
+				}
+
 				phase = "other_attempt";
 				const observer = yield* open(connection, "fixture-observer");
 				const otherTag = yield* attemptTag({ connection, attempt: "b2".repeat(32) });

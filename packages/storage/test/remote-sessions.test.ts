@@ -6,10 +6,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
-for (const mode of ["leases", "reject", "pending", "stream", "restart", "prepared", "missing"])
+for (const mode of ["leases", "reject", "pending", "stream", "restart", "prepared", "missing", "isolation"])
 	it.skipIf(
 		!process.env.COMMS_REMOTE_TEST_CONFIG ||
 			(mode === "prepared" && process.env.COMMS_REMOTE_TEST_ENGINE !== "pg") ||
+			(mode === "isolation" && process.env.COMMS_REMOTE_TEST_ENGINE !== "mysql") ||
 			(mode === "missing") !== (process.env.COMMS_REMOTE_TEST_ATTRIBUTES === "32"),
 	)(
 		`real remote session ${mode}`,
