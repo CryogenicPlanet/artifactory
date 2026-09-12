@@ -1,3 +1,4 @@
+import { initializeRemoteBootSchema } from "./remote-boot-schema.ts";
 import { migrate } from "@comms/storage/migrations";
 import { publicPathsSchema } from "./public-paths.ts";
 import { Effect, Schema } from "effect";
@@ -30,6 +31,8 @@ export class BootIdentityUpgradePending extends Schema.TaggedError<BootIdentityU
 /** Run once before constructing boot stores; opening the adapter must use disableWAL. */
 export const initializeBootSchema = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const remote = sql.onDialectOrElse({ pg: () => "pg" as const, mysql: () => "mysql" as const, orElse: () => null });
+	if (remote !== null) return yield* initializeRemoteBootSchema(sql, remote);
 	const readVersion = sql`PRAGMA user_version`.pipe(
 		Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ user_version: Schema.Int })))),
 	);

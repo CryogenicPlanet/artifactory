@@ -1,3 +1,4 @@
+import { assertNoPendingMigration } from "./migration-intent.ts";
 import { encodeError, policy } from "@comms/protocol/errors";
 import { makeExtensionEffects, type ExtensionEffects } from "./extension-effects.ts";
 import { reserved, requestPath, pattern, templatePattern, validateRoute } from "./extension-routes.ts";
@@ -126,6 +127,7 @@ const make = (directory: string, capabilities: CapabilityFactory, onWork: Effect
 				);
 				yield* diagnostic(name, type, error);
 			});
+		yield* assertNoPendingMigration(sql);
 		for (const entry of yield* discoverExtensions(directory)) {
 			const { name } = entry;
 			const pending: Registration[] = [];
@@ -276,6 +278,7 @@ const make = (directory: string, capabilities: CapabilityFactory, onWork: Effect
 				documents.push(...pendingDocuments);
 				yield* diagnostic(name, "ext.loaded", null, { overrides });
 			}).pipe(Effect.catchCause((cause) => failed(name, cause, "ext.failed")));
+			yield* assertNoPendingMigration(sql);
 			registering = false;
 			const elapsed = (yield* DateTime.nowAsDate).getTime() - started;
 			yield* Ref.update(statuses, (items) =>

@@ -1,4 +1,6 @@
-import { Effect, FileSystem, Path } from "effect";
+import { on } from "@comms/storage/dialect";
+import { assertNoPendingMigration, mysqlMigration } from "./migration-intent.ts";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { Migrator, SqlClient } from "effect/unstable/sql";
 import { writerGate } from "./database.ts";
 
@@ -42,6 +44,25 @@ export const migrate = (directory: string, epoch: string) =>
 					: new Migrator.MigrationError({ kind: "Failed", cause, message: "Cannot read app migrations" }),
 			),
 		);
+		yield* assertNoPendingMigration(sql);
+		if (on(sql, { sqlite: () => false, pg: () => false, mysql: () => true })) {
+			const resolved = yield* loader;
+			if (new Set(resolved.map(([id]) => id)).size !== resolved.length)
+				return yield* new Migrator.MigrationError({ kind: "Duplicates", message: "Duplicate app migration id" });
+			const applied = yield* sql`SELECT migration_id FROM migrations ORDER BY migration_id DESC LIMIT 1`.pipe(
+				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ migration_id: Schema.Int })))),
+			);
+			if (!resolved.some(([id]) => id > (applied[0]?.migration_id ?? 0))) return [];
+			// Migrator may commit receipts before MySQL DDL. The durable intent makes the whole batch untrusted until success.
+			return yield* mysqlMigration(
+				sql,
+				epoch,
+				"editable",
+				"batch",
+				Migrator.make({})({ loader: Effect.succeed(resolved), table: "migrations" }),
+				Effect.void,
+			);
+		}
 		return yield* sql.withTransaction(
 			Effect.gen(function* () {
 				yield* writerGate(sql, epoch);
