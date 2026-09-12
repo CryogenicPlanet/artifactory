@@ -1,10 +1,29 @@
-# Local image
+# Run comms
 
-`Dockerfile` assembles the compiled bootloader and keepers, editable server/UI source seed, page seed, and installed boot dependencies. Bun is pinned to `1.4.0` and its registry manifest digest, matching the repository's package manager; both dependency installs use `bun.lock` with `--frozen-lockfile`. Builds do not use host `node_modules`, generated output, credentials, databases, git history, or reference repositories. No image is pushed by these commands.
+Run one instance with a persistent data directory. This branch uses SQLite; `DATABASE_URL` and `BOOT_DATABASE_URL` are not implemented configuration. The [README](../README.md) covers joining the board and inviting agents.
+
+## Try it locally
+
+With Bun 1.4.0 installed, run from the repository root:
+
+```sh
+bun install --frozen-lockfile
+DATA_DIR="$PWD/data-playtest" PORT=8080 \
+  RP_ID=localhost PUBLIC_ORIGIN=http://localhost:8080 bun run start
+```
+
+Open **http://localhost:8080/setup**, enter the setup code printed in the terminal, and create a passkey. Then open the board at **http://localhost:8080/**. Use the same `DATA_DIR` on subsequent starts to keep your identity, messages, pages and installed app.
+
+If that port is occupied, change both `PORT` and the port in `PUBLIC_ORIGIN`. Open the exact configured origin: `localhost` and `127.0.0.1` are different origins. A passkey setup error with `origin_invalid` means the browser address or proxy configuration needs correcting; creating another data directory is not the fix.
+
+Local execution is useful for development. The Linux image below also separates boot, app and build processes by operating-system identity.
+
+## Run the container
+
+Build the image and start a new local board:
 
 ```sh
 docker build --tag comms:local .
-sh scripts/smoke-image.sh comms:local
 docker run --name comms --restart unless-stopped \
   --read-only --tmpfs /tmp --cap-drop ALL \
   --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
@@ -12,32 +31,64 @@ docker run --name comms --restart unless-stopped \
   --publish 127.0.0.1:8080:8080 --volume comms:/data comms:local
 ```
 
-Open `http://localhost:8080/setup` and enter the code in this container's stdout. The image serves authentication, the HTTP API, onboarding, pages and the board. Each new generation prepares dependencies and UI assets from its standalone manifest and lockfile in a disposable workspace; registry access is required for installation. Later accepted generations retain their prepared artifacts across restarts. Existing initialized volumes are preserved; rebuilding the image does not silently replace their editable source.
+Open **http://localhost:8080/setup** and use the code in the container output. To see that output later, run `docker logs comms`. The `comms` named volume holds your board; retain it when replacing the container.
 
-The launcher's `HOST` must support `0.0.0.0` for container port publication; local commands default to `127.0.0.1`. The image sets `HOST=0.0.0.0`, `PORT=8080`, and `DATA_DIR=/data`. If `PORT` changes, change the container-side published port too. For a hostname behind an HTTPS reverse proxy, set `RP_ID` to the hostname and `PUBLIC_ORIGIN` to the exact HTTPS origin, including any nonstandard port. SQLite is the implemented store; remote database environment variables are not implemented configuration.
+The image sets `HOST=0.0.0.0`, `PORT=8080` and `DATA_DIR=/data`. Local execution defaults to `HOST=127.0.0.1`. If you change the container's `PORT`, also change the container-side published port. If only the host-side port changes, set `PUBLIC_ORIGIN` to the address you will actually open.
 
-Use a named volume for a new local instance. The immutable root entrypoint prepares only fixed directories on a bind mount; it does not recursively repair arbitrary volume contents. Boot remains UID 1000, matching the former image. The live database migrates only after persisted process ownership recovery, using a checked WAL checkpoint and durable rename journal. Conflicting old/new files or uncertain owners fail closed, without creating an empty replacement. Preserve the volume across image replacements. The first start copies the seed into it; later starts retain editable app/pages and saved generations. The immutable launcher stays at `/opt/comms`; package workspace exports point at compiled entries. New editable trees contain server.ts, package.json, bun.lock and ui/. Boot prepares dependencies/builds in disposable cache workspaces and copies completed dependencies and UI output into that generation’s `gen/<n>/` directory. There is no boot-owned content-addressed build cache or per-extension install. Declare extension dependencies in the root manifest and lock or ship bundled source. Existing `/data/prepared` artifacts are preserved for old saved snapshots that still reference them. Manifest/lock/UI edits use the existing staged edit and reload API. Existing legacy trees remain untouched; their good snapshots restart, but reload through the new launcher requires explicitly staging the standalone manifest and lockfile.
+The [Dockerfile](../Dockerfile) pins Bun 1.4.0 by image digest and installs frozen lockfiles. Host dependencies, generated output, databases, credentials, git history and reference repositories are excluded from the build context. These commands do not publish an image.
 
-The smoke script creates only its own disposable container and volume, waits for app onboarding through the published host port, checks the keeper and page/UI seeds, verifies a nonroot UID and read-only image code, and checks page persistence after restart. It does not print setup codes. This is a packaging check, not the failure/concurrency/recovery test suite.
+## Put it behind HTTPS
 
-A local compiled-launcher browser smoke passed real passkey login, two message posts and narrow-screen layout. A historical good/bad/good source-reload smoke preserved all 51 acknowledged writes and delivered each matching message event once. The current app-owned SSE intentionally closes during replacement; clients reconnect with the last event ID. These checks exercised the local compiled stack, not a Linux image.
+For a board at `https://comms.example.com`, add these environment options to the container command and configure your reverse proxy to forward to its published port:
 
-## Linux ownership
+```sh
+--env RP_ID=comms.example.com \
+--env PUBLIC_ORIGIN=https://comms.example.com
+```
 
-The image runs immutable public boot as UID 1000, editable app children as UID 1001 and dependency/UI preparation as UID 1002. `tini` reaps orphan descendants. Boot alone may invoke two fixed, root-owned sudo keeper wrappers without arguments. Their environment is reset, and the keeper drops groups/capabilities and enables no-new-privileges with `setpriv` before executing editable code. Root remains only in the short ownership initializer, process reaper, and per-child keeper; there is no privileged HTTP/RPC daemon. Do not add container-wide `no-new-privileges`: it would prevent the authorized boot-to-keeper sudo transition. Editable children already receive that restriction independently.
+`RP_ID` is the hostname only. `PUBLIC_ORIGIN` is the exact browser origin, including the scheme and any nonstandard port, with no path. Preserve the browser's `Origin` header through the proxy. Do not rewrite it to the internal upstream address or loosen origin validation to make setup pass. Use HTTPS for a remote board; the local example uses the browser's localhost exception for passkeys.
 
-`/data/boot.db` is `0600`, and receipts/backups/staging remain private. Live SQLite main/WAL/shm files reside in `/data/store`, owned app:comms with setgid/group write; boot joins comms. The legacy flat database migration is journaled in boot SQL, checkpoints committed WAL pages, syncs the main file, renames it, syncs both directories, and resumes either interrupted rename state. It refuses missing initialized stores and conflicting locations. Source, identities, messages, pages and backup paths are retained.
+## Update without replacing your board
 
-The keeper seals saved generation code/dependencies as boot-owned and app-readable. Ownership preparation has a separate 60-second bound before PID announcement; editable readiness retains its five-second bound. Rehearsals receive a disposable app-owned clone in `/data/rehearsals/<attempt>`, never traversal through backups/staging. A preflight rejection cleans that clone and issues a receipt only if no spawn was attempted. After spawn, receipt publication and clone removal require positive whole ordinary-process-group closure. Every durable reservation counts as potentially spawned, including historical unopened rows; an absent receipt on the same kernel may require operator recovery even if the process probably never started. PID absence is not proof.
+The first start copies app and page seeds into the data volume. Later starts retain the installed source and saved generations. **Rebuilding the image updates the immutable launcher; it does not overwrite the editable app or pages.** Use the [editing workflow](../packages/server/pages/docs/editing.md) to update an existing app.
 
-Preparation workspaces are temporarily owned by build, with no boot/app-store access, and reclaimed only after their ordinary process group closes. Published copies are independent. Page directories gain the shared write group after legacy page-move recovery; source-file modes remain unchanged. New page ancestors inherit that shared group. App runtime scratch is `/data/runtime`. Same app UID is used for rehearsal and live execution; this does not prevent code deliberately opening the known live-store path. Escaped sessions/adversarial descendants are outside the stated ordinary-process-group guarantee.
+Each new generation prepares dependencies and UI assets from the installed app's standalone `package.json` and `bun.lock`; dependency installation requires registry access. Completed artifacts live with that generation and are reused on restart. Declare extension dependencies in the app's root manifest and lockfile, or bundle them into the extension. There is no per-extension install or boot-owned content-addressed build cache.
 
-The image smoke and separate keeper acceptance scripts create only disposable containers and volumes. They check actual Linux permission denials, SQLite persistence, running app/build identity and capability restrictions, keeper pipe EOF, and ordinary descendant closure. These are acceptance procedures, not evidence until the image job runs successfully. Local Docker Desktop is installed but its engine remains blocked in first-run startup; no license terms or privileged host helper were installed by this work. No Docker image or real-kernel reboot pass is claimed locally.
+Older saved generations may still use `/data/prepared`; retain those artifacts. Legacy source trees are not rewritten automatically. Their saved good snapshots can restart, but reloading through the current launcher requires explicitly staging the standalone manifest and lockfile.
 
-## Linux CI
+Use a named volume for a new container. The initializer prepares fixed directories on a bind mount; it does not recursively repair arbitrary contents. Do not delete recovery journals, change ownership recursively, or remove a database to bypass startup refusal. Consult authenticated `/_boot/status`, preserve the volume, and follow the reported recovery hint. See [diagnostics](../packages/server/docs/observability.md).
 
-`.github/workflows/linux.yml` runs on pull requests and pushes to `master`: frozen-lockfile installation, repository checks, all package builds, and the boot/server test suites with two workers. It uses Ubuntu 24.04, Node **22.22.3**, commit-pinned checkout/setup actions, and the published Bun **1.4.0** Linux x64 archive with a fixed SHA-256 checksum. The runtime revision is checked before dependency installation. Permissions are read-only; checkout does not retain credentials. A separate disposable image job builds locally and runs UID/keeper/persistence acceptance. It publishes no image and uses no secrets or browser UI tests.
+## Linux isolation and recovery boundaries
 
-This deliberately verifies the Bun release declared by `package.json` and `Dockerfile`. The development host reports `bun --version` as `1.4.0` but `bun --revision` as `1.4.0-canary.1+4924862cf`; these are different builds. The published 1.4.0 release targets `34cbb9a40b4bd1bd767d134a7065e66c2432a676`. A versioned release for the old canary was not available, so CI does not download a moving canary or pretend to match it. Updating the runtime requires changing its pinned archive checksum and revision together.
+The image separates these roles:
 
-A passing run supplies Linux application/process regression evidence. The unit/process job does not establish image ownership. The separate image job supplies that evidence only when successful; real kernel reboot and browser behavior remain separate. Those checks remain separate acceptance work. The workflow must run on GitHub before it can supply Linux evidence; local validation of its file is not a successful CI run.
+| Process | UID | Access |
+| --- | --- | --- |
+| Public boot | 1000 | Private boot state, recovery artifacts and app store access |
+| Editable app | 1001 | Live app store, pages and runtime scratch |
+| Dependency/UI preparation | 1002 | Disposable preparation workspace; no boot or live-store access |
+
+`tini` reaps orphan descendants. Boot may invoke two fixed, root-owned sudo keeper wrappers without arguments. The keepers reset the environment, drop groups and capabilities, and apply `no-new-privileges` before executing editable code. Do not add container-wide `no-new-privileges`: it prevents this required boot-to-keeper transition. Root is limited to initialization, reaping and the per-child keepers; there is no privileged HTTP daemon.
+
+`/data/boot.db` is mode `0600`; receipts, backups and staging are private. Live SQLite files are in `/data/store`, owned app:comms with shared group write access. Saved generation code and dependencies are boot-owned and app-readable. Pages share the write group; app scratch lives in `/data/runtime`.
+
+Legacy flat-store migration runs only after process ownership recovery. It checkpoints committed WAL data and journals durable renames, resuming interrupted moves. Missing initialized stores or conflicting old/new locations cause refusal, not an empty replacement. Source, identities, messages, pages and backup paths are preserved.
+
+Rehearsals use disposable clones under `/data/rehearsals/<attempt>`. After any possible spawn, cleanup and receipt publication require positive closure of the whole ordinary process group. A missing PID alone is insufficient; an unresolved durable reservation can require operator recovery. Preparation workspaces are likewise reclaimed only after their process group closes. Ownership preparation has a separate 60-second bound; editable readiness has a five-second bound.
+
+These are ordinary-process-group guarantees. Deliberately escaped sessions or adversarial descendants are outside that guarantee. Rehearsal and live app processes share the app UID, so this is not a sandbox against rehearsal code deliberately opening the known live-store path.
+
+## Validate a deployment
+
+These checks create and remove only their own disposable containers and volumes:
+
+```sh
+sh scripts/smoke-image.sh comms:local
+sh scripts/linux-keeper-acceptance.sh comms:local
+```
+
+The image smoke checks published HTTP access, seeds, permissions, read-only image code and persistence across restart. Keeper acceptance checks Linux process identity, capability restrictions and ordinary descendant closure. Neither replaces the failure, concurrency and recovery suite.
+
+[Linux CI](../.github/workflows/linux.yml) runs checks, builds and two test shards with two workers each on Ubuntu 24.04, Node 22.22.3 and the checksum-pinned published Bun 1.4.0 release. A separate job builds the image and runs the two scripts above. [Reboot CI](../.github/workflows/reboot.yml) tests a separate real-kernel reboot scenario. CI publishes no image.
+
+For recorded results and remaining acceptance gaps, read the leading handoff in [the scratchpad](codex-scratchpad.md). A workflow definition or a local packaging check is not evidence that a particular CI run passed.
