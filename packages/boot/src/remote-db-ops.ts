@@ -6,6 +6,7 @@ import { EventError } from "./events.ts";
 import { remoteAppStoreIdentity, verifyRemoteAppIdentity } from "./app-store-identity.ts";
 import type { BackupRecord } from "./backup-metadata.ts";
 import { remoteDatabaseJournal, RemoteDatabaseError, type RemoteDatabaseRecord } from "./remote-database-journal.ts";
+import type { DbOpsService } from "./db-ops.ts";
 import { mysqlDatabaseProvision } from "./mysql-database-provision.ts";
 import { postgresDatabaseProvision } from "./postgres-database-provision.ts";
 import { storageHeadroom } from "./storage-headroom.ts";
@@ -48,7 +49,7 @@ const safe = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 	Effect.gen(function* () {
 		const configured = yield* safe(options.store);
-		const engine = configured._tag === "postgres" ? "pg" : "mysql";
+		const engine: "pg" | "mysql" = configured._tag === "postgres" ? "pg" : "mysql";
 		const journal = yield* remoteDatabaseJournal(options.bootStore, options.dataDirectory);
 		const mysqlProvision = mysqlDatabaseProvision(journal);
 		const selectedProvision: Effect.Effect<
@@ -255,5 +256,5 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 						return yield* withDatabase(loaded.source, loaded.record.database);
 					}),
 				),
-		};
+		} satisfies DbOpsService;
 	});
