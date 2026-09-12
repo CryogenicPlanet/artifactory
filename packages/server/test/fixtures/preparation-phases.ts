@@ -46,7 +46,10 @@ export async function preparationPhases(root: string) {
 	]);
 	await observe("supervisor.ts", [
 		["prepare_generation", "const choices = yield* prepareGeneration(options);"],
-		["candidate_launch", 'const value = yield* launch(generation, store, "candidate", undefined, epoch);'],
+		[
+			"candidate_launch",
+			'const value = yield* launchSelected(entry, generation, store, "candidate", undefined, epoch);',
+		],
 		["writer_recovery", 'if (store._tag === "file") yield* recovery.prepare(value.attempt.epoch);'],
 		["child_go", 'yield* value.process.control("go");'],
 		["healthy_record", "yield* (yield* Generations).healthy(generation.n);"],
