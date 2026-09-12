@@ -1,28 +1,34 @@
-import { Crypto, Effect, Schema } from "effect";
+import { Crypto, Effect, Schema, Semaphore } from "effect";
+import { transferJsonCanonical } from "./transfer-json.ts";
 
 export type TransferKind = "integer" | "text" | "bytes" | "real" | "json";
 export type TransferValue =
 	| { readonly kind: "null"; readonly value: null }
 	| { readonly kind: "integer"; readonly value: number | bigint }
-	| { readonly kind: "text"; readonly value: string }
+	| { readonly kind: "text" | "json"; readonly value: string }
 	| { readonly kind: "bytes"; readonly value: Uint8Array }
 	| { readonly kind: "real"; readonly value: number };
 
 export class TransferValueError extends Schema.TaggedError<TransferValueError>()("TransferValueError", {
-	code: Schema.Literals(["transfer_value_invalid", "transfer_json_unsupported"]),
+	code: Schema.Literals(["transfer_value_invalid", "transfer_json_invalid", "transfer_json_duplicate_key"]),
 }) {}
 
 /** No coercion of binary/text values or already-rounded numbers. Errors never include row contents.
- * Native JSON is refused until the transfer reader can preserve decimal precision before parsing.
+ * JSON requires a trusted column policy and a raw textual database projection.
  */
 export const decodeTransferValue = (
 	kind: TransferKind,
 	raw: unknown,
 ): Effect.Effect<TransferValue, TransferValueError> =>
 	Effect.gen(function* () {
-		if (kind === "json") return yield* new TransferValueError({ code: "transfer_json_unsupported" });
 		if (raw === null) return { kind: "null", value: null };
 		switch (kind) {
+			case "json":
+				if (typeof raw !== "string") return yield* new TransferValueError({ code: "transfer_json_invalid" });
+				yield* transferJsonCanonical(raw).pipe(
+					Effect.mapError((error) => new TransferValueError({ code: error.code })),
+				);
+				return { kind, value: raw };
 			case "integer":
 				if (typeof raw === "bigint") return { kind, value: raw };
 				if (typeof raw === "number" && Number.isSafeInteger(raw)) return { kind, value: raw === 0 ? 0 : raw };
@@ -57,6 +63,7 @@ const encoded = (value: TransferValue): Uint8Array => {
 			return frame("null", new Uint8Array());
 		case "bytes":
 			return frame("bytes", value.value);
+		case "json":
 		case "text":
 			return frame("text", new TextEncoder().encode(value.value));
 		case "integer":
@@ -75,28 +82,51 @@ const encoded = (value: TransferValue): Uint8Array => {
  * This digest does not sort rows, normalize Unicode, or equate integer and real columns.
  * Bind `TransferValue.value` directly; readers must retain raw bytes and exact integer values.
  */
+export const makeTransferDigest = Effect.gen(function* () {
+	const crypto = yield* Crypto.Crypto;
+	const gate = yield* Semaphore.make(1);
+	let digest = new Uint8Array(yield* crypto.digest("SHA-256", new TextEncoder().encode("comms-transfer-v1")));
+	const step = (current: Uint8Array, bytes: Uint8Array) =>
+		Effect.gen(function* () {
+			const input = new Uint8Array(current.byteLength + bytes.byteLength);
+			input.set(current);
+			input.set(bytes, current.byteLength);
+			return new Uint8Array(yield* crypto.digest("SHA-256", input));
+		});
+	return {
+		append: (row: readonly TransferValue[]) =>
+			gate.withPermit(
+				Effect.gen(function* () {
+					let next = yield* step(digest, frame("row", new TextEncoder().encode(row.length.toString())));
+					for (const value of row) {
+						const checked =
+							value.kind === "null"
+								? yield* decodeTransferValue("text", value.value)
+								: yield* decodeTransferValue(value.kind, value.value);
+						if (checked.kind === "json") {
+							const canonical = yield* transferJsonCanonical(checked.value).pipe(
+								Effect.mapError((error) => new TransferValueError({ code: error.code })),
+							);
+							next = yield* step(next, frame("json", new TextEncoder().encode(canonical)));
+						} else next = yield* step(next, encoded(checked));
+					}
+					// A rejected or interrupted row cannot partially change the chain.
+					digest = next;
+				}),
+			),
+		finish: gate.withPermit(
+			Effect.gen(function* () {
+				const final = yield* step(digest, frame("end", new Uint8Array()));
+				return Array.from(final, (byte) => byte.toString(16).padStart(2, "0")).join("");
+			}),
+		),
+	};
+});
+
+/** Iterable convenience wrapper over the same incremental digest used by bounded row readers. */
 export const digestTransferRows = (rows: Iterable<readonly TransferValue[]>) =>
 	Effect.gen(function* () {
-		const crypto = yield* Crypto.Crypto;
-		let digest = new Uint8Array(yield* crypto.digest("SHA-256", new TextEncoder().encode("comms-transfer-v1")));
-		const append = (bytes: Uint8Array) =>
-			Effect.gen(function* () {
-				const input = new Uint8Array(digest.byteLength + bytes.byteLength);
-				input.set(digest);
-				input.set(bytes, digest.byteLength);
-				digest = new Uint8Array(yield* crypto.digest("SHA-256", input));
-			});
-		for (const row of rows) {
-			yield* append(frame("row", new TextEncoder().encode(row.length.toString())));
-			for (const value of row) {
-				// Revalidate the public structural type before hashing; no unsafe caller can bypass byte checks.
-				const checked =
-					value.kind === "null"
-						? yield* decodeTransferValue("text", value.value)
-						: yield* decodeTransferValue(value.kind, value.value);
-				yield* append(encoded(checked));
-			}
-		}
-		yield* append(frame("end", new Uint8Array()));
-		return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+		const digest = yield* makeTransferDigest;
+		for (const row of rows) yield* digest.append(row);
+		return yield* digest.finish;
 	});

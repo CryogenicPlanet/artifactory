@@ -6,6 +6,7 @@ import { sqliteTransferInventory } from "./transfer-sqlite.ts";
 import {
 	TransferInventoryError,
 	type TransferColumn,
+	type TransferJsonColumn,
 	type TransferDerivedObject,
 	type TransferInventory,
 	type TransferTable,
@@ -30,6 +31,7 @@ const unsupported = (object: string) => new TransferInventoryError({ code: "tran
 export const transferInventory = (
 	sql: SqlClient,
 	derived: ReadonlyArray<TransferDerivedObject> = [],
+	jsonColumns: ReadonlyArray<TransferJsonColumn> = [],
 ): Effect.Effect<TransferInventory, TransferInventoryError> =>
 	Effect.gen(function* () {
 		const engine = on(sql, { sqlite: () => "sqlite", pg: () => "pg", mysql: () => "mysql" });
@@ -101,9 +103,11 @@ export const transferInventory = (
 								? "real"
 								: /^(text|character varying|character|varchar|char|tinytext|mediumtext|longtext)$/.test(type)
 									? "text"
-									: /^(bytea|blob|tinyblob|mediumblob|longblob|binary|varbinary)$/.test(type)
-										? "bytes"
-										: "unsupported";
+									: /^(json|jsonb)$/.test(type)
+										? "json"
+										: /^(bytea|blob|tinyblob|mediumblob|longblob|binary|varbinary)$/.test(type)
+											? "bytes"
+											: "unsupported";
 
 				columns.push({
 					name: column.name,
@@ -159,11 +163,48 @@ export const transferInventory = (
 					return yield* invalid(`${table.name}.${key.name}`);
 			}
 		return { tables: result.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)), derived: [] };
-	}).pipe(Effect.mapError((error) => (Schema.is(TransferInventoryError)(error) ? error : invalid("catalog"))));
+	}).pipe(
+		Effect.flatMap((inventory) =>
+			Effect.gen(function* () {
+				const seen = new Set<string>();
+				for (const selected of jsonColumns) {
+					const key = JSON.stringify([selected.table, selected.column]);
+					const column = inventory.tables
+						.find((table) => table.name === selected.table)
+						?.columns.find((column) => column.name === selected.column);
+					if (
+						seen.has(key) ||
+						!column ||
+						column.generated ||
+						(column.kind !== "json" &&
+							!(on(sql, { sqlite: () => true, pg: () => false, mysql: () => false }) && column.kind === "text"))
+					)
+						return yield* invalid(`${selected.table}.${selected.column}`);
+					seen.add(key);
+				}
+				return {
+					...inventory,
+					tables: inventory.tables.map((table) => ({
+						...table,
+						columns: table.columns.map((column) => ({
+							...column,
+							kind: seen.has(JSON.stringify([table.name, column.name]))
+								? ("json" as const)
+								: column.kind === "json"
+									? ("unsupported" as const)
+									: column.kind,
+						})),
+					})),
+				};
+			}),
+		),
+		Effect.mapError((error) => (Schema.is(TransferInventoryError)(error) ? error : invalid("catalog"))),
+	);
 
 export { TransferInventoryError } from "./transfer-schema.ts";
 export type {
 	TransferColumn,
+	TransferJsonColumn,
 	TransferTable,
 	TransferForeignKey,
 	TransferDerivedObject,

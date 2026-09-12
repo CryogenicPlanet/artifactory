@@ -1,7 +1,12 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto";
 import { Effect } from "effect";
 import { expect, it } from "vitest";
-import { decodeTransferValue, digestTransferRows, type TransferValue } from "../src/transfer-values.ts";
+import {
+	decodeTransferValue,
+	digestTransferRows,
+	makeTransferDigest,
+	type TransferValue,
+} from "../src/transfer-values.ts";
 
 const digest = (rows: Iterable<readonly TransferValue[]>) =>
 	Effect.runPromise(digestTransferRows(rows).pipe(Effect.provide(BunCrypto.layer)));
@@ -36,7 +41,7 @@ it("preserves arbitrary bytes, including zero and invalid UTF-8, without retaini
 	}
 });
 
-it("refuses lossy Unicode and unsupported native JSON without revealing contents", async () => {
+it("refuses lossy Unicode and invalid JSON representations without revealing contents", async () => {
 	for (const value of ["secret\ud800", "\udc00secret", "a\ud800z"]) {
 		const result = await Effect.runPromise(decodeTransferValue("text", value).pipe(Effect.result));
 		expect(result).toMatchObject({ _tag: "Failure", failure: { code: "transfer_value_invalid" } });
@@ -46,10 +51,10 @@ it("refuses lossy Unicode and unsupported native JSON without revealing contents
 		kind: "text",
 		value: "日本語😀\u0000é",
 	});
-	for (const value of ['{"n":9007199254740993}', { n: 9007199254740992 }, null]) {
+	for (const value of ['{"secret":', { n: 9007199254740992 }]) {
 		expect(await Effect.runPromise(decodeTransferValue("json", value).pipe(Effect.result))).toMatchObject({
 			_tag: "Failure",
-			failure: { code: "transfer_json_unsupported" },
+			failure: { code: "transfer_json_invalid" },
 		});
 	}
 });
@@ -89,4 +94,79 @@ it("preserves signed real zero and rejects nonfinite values even when handed a s
 			),
 		).toMatchObject({ _tag: "Failure", failure: { code: "transfer_value_invalid" } });
 	}
+});
+
+it("preserves raw JSON binds while hashing exact semantic numbers and object order", async () => {
+	const hash = async (text: string) => digest([[await Effect.runPromise(decodeTransferValue("json", text))]]);
+	for (const [a, b] of [
+		[' {"b":1.00,"a":"\\u96ea"} ', '{"a":"雪","b":1e0}'],
+		["[9007199254740993, 0.00100, -0]", "[90071992547409930e-1, 1e-3, 0]"],
+		["1e9999999999999999999999", "10e9999999999999999999998"],
+		['{"__proto__": {"x":1}, "a":true}', '{"a":true,"__proto__":{"x":1.0}}'],
+	] as const) {
+		expect(await Effect.runPromise(decodeTransferValue("json", a))).toEqual({ kind: "json", value: a });
+		expect(await hash(a)).toBe(await hash(b));
+	}
+	for (const [a, b] of [
+		["9007199254740993", "9007199254740992"],
+		["[1,2]", "[2,1]"],
+		['"é"', '"é"'],
+		["null", '"null"'],
+	])
+		expect(await hash(a ?? "")).not.toBe(await hash(b ?? ""));
+	expect(await hash("null")).not.toBe(await digest([[await Effect.runPromise(decodeTransferValue("json", null))]]));
+	expect(await hash("1")).not.toBe(await digest([[await Effect.runPromise(decodeTransferValue("text", "1"))]]));
+	expect(await digest([[await Effect.runPromise(decodeTransferValue("text", '{"a":1}'))]])).not.toBe(
+		await digest([[await Effect.runPromise(decodeTransferValue("text", '{ "a":1 }'))]]),
+	);
+});
+
+it("refuses duplicate keys and malformed JSON before verification without leaking contents", async () => {
+	for (const text of ['{"secret":1,"secret":2}', '{"x":1,"\\u0078":2}']) {
+		const result = await Effect.runPromise(decodeTransferValue("json", text).pipe(Effect.result));
+		expect(result).toMatchObject({ _tag: "Failure", failure: { code: "transfer_json_duplicate_key" } });
+		expect(JSON.stringify(result)).not.toContain("secret");
+	}
+	for (const text of [
+		"[1,]",
+		'{"a":1,}',
+		"01",
+		"1e",
+		"true false",
+		'"\\ud800"',
+		"[secret]",
+		"[".repeat(130) + "]".repeat(130),
+	]) {
+		const result = await Effect.runPromise(decodeTransferValue("json", text).pipe(Effect.result));
+		expect(result).toMatchObject({ _tag: "Failure", failure: { code: "transfer_json_invalid" } });
+		expect(JSON.stringify(result)).not.toContain("secret");
+	}
+});
+
+it("incremental digests match whole input, repeat finish and reject rows atomically", async () => {
+	const rows: readonly (readonly TransferValue[])[] = [
+		[{ kind: "json", value: '{"n":1.00}' }],
+		[{ kind: "text", value: "immutable" }],
+	];
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const chain = yield* makeTransferDigest;
+			const other = yield* makeTransferDigest;
+			const empty = yield* chain.finish;
+			for (const row of rows) yield* chain.append(row);
+			const expected = yield* digestTransferRows(rows);
+			expect(yield* chain.finish).toBe(expected);
+			expect(yield* chain.finish).toBe(expected);
+			expect(yield* other.finish).toBe(empty);
+			expect(
+				(yield* chain
+					.append([
+						{ kind: "text", value: "valid" },
+						{ kind: "json", value: '{"bad":' },
+					])
+					.pipe(Effect.result))._tag,
+			).toBe("Failure");
+			expect(yield* chain.finish).toBe(expected);
+		}).pipe(Effect.provide(BunCrypto.layer)),
+	);
 });

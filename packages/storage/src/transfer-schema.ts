@@ -8,7 +8,7 @@ export class TransferInventoryError extends Schema.TaggedError<TransferInventory
 }) {}
 export interface TransferColumn extends ColumnShape {
 	readonly declaration: string;
-	readonly kind: Exclude<TransferKind, "json"> | "unsupported";
+	readonly kind: TransferKind | "unsupported";
 	readonly generated: boolean;
 	readonly identity: boolean;
 }
@@ -33,4 +33,10 @@ export interface TransferDerivedObject {
 export interface TransferInventory {
 	readonly tables: ReadonlyArray<TransferTable>;
 	readonly derived: ReadonlyArray<string>;
+}
+
+/** Trusted semantic JSON columns from reviewed migrations, not inferred from row contents. */
+export interface TransferJsonColumn {
+	readonly table: string;
+	readonly column: string;
 }
