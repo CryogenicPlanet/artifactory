@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 import { Cause, ConfigProvider, Effect } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { remoteOptions } from "../src/kernel/remote-database.ts";
@@ -98,3 +98,10 @@ it.effect("remote channels expose no filename and refuse the legacy database ali
 		}
 	}),
 );
+
+// These tests exercise guardian IPC only; SQLite runtime coverage runs in real Bun children.
+vi.mock("@comms/storage/client", () => ({
+	clientLayer: () => {
+		throw new Error("Unexpected SQLite client construction");
+	},
+}));
