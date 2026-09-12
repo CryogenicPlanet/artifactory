@@ -28,11 +28,8 @@ export const projectPublicPath = (sql: SqlClient, event: typeof EventRecord.Type
 	Effect.gen(function* () {
 		if (event.type === "pages.public") {
 			const value = yield* Schema.decodeUnknownEffect(Snapshot)(event.payload);
-			const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Snapshot))(value);
 			if (
 				event.topic !== null ||
-				value.paths.length > 4096 ||
-				Buffer.byteLength(encoded) > 524288 ||
 				value.paths.some((path) => !pagePath(path)) ||
 				new Set(value.paths).size !== value.paths.length
 			)

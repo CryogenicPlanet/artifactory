@@ -226,7 +226,7 @@ it("atomically replaces complete activation grants, including empty policy, with
 	expect(await app.sql("SELECT published_through FROM seq")).toEqual([{ published_through: 6 }]);
 }, 15000);
 
-it("rejects malformed and oversized activation policies without losing the preceding grants", async (test) => {
+it("rejects malformed activation policies without losing the preceding grants", async (test) => {
 	const app = await store(test);
 	await app.run({ op: "init" });
 	await app.append(1, "topic.meta", "old", { path: "old", meta: { public: true } });
@@ -234,8 +234,6 @@ it("rejects malformed and oversized activation policies without losing the prece
 		{ paths: ["../private"] },
 		{ paths: ["node_modules"] },
 		{ paths: ["duplicate", "duplicate"] },
-		{ paths: Array.from({ length: 4097 }, (_, n) => `p${n}`) },
-		{ paths: ["x".repeat(524288)] },
 		{ paths: [true] },
 	].entries()) {
 		const invalid = await app.append(index + 2, "pages.public", null, payload);
@@ -243,4 +241,22 @@ it("rejects malformed and oversized activation policies without losing the prece
 		expect(await app.sql("SELECT path FROM public_paths")).toEqual([{ path: "old" }]);
 		await app.run({ op: "abort", transaction: invalid.batch.transaction });
 	}
+}, 15000);
+
+it("publishes complete activation policies beyond the former page-count and payload ceilings", async (test) => {
+	const app = await store(test);
+	await app.run({ op: "init" });
+	await app.append(1, "topic.meta", "old", { path: "old", meta: { public: true } });
+	const paths = Array.from({ length: 5000 }, (_, n) => `page-${n}-${"x".repeat(104)}`);
+	const payload = { paths };
+	expect(Buffer.byteLength(JSON.stringify(payload))).toBeGreaterThan(524288);
+	const replacement = await app.append(2, "pages.public", null, payload);
+	expect(Buffer.byteLength(JSON.stringify(replacement.batch))).toBeLessThan(1048576);
+	expect(replacement.result).toMatchObject({ _tag: "Success" });
+	expect(await app.sql("SELECT path FROM public_paths ORDER BY path")).toEqual(
+		paths.toSorted().map((path) => ({ path })),
+	);
+	expect(await app.sql("SELECT published_through,pending_id FROM seq")).toEqual([
+		{ published_through: replacement.batch.to + 1, pending_id: null },
+	]);
 }, 15000);
