@@ -50,11 +50,20 @@ run() {
     "$image" store-transfer --config "${fixture_config:-/data/transfer-config.json}"
 }
 container=$(run --detach)
+failed() {
+  echo "Lifetime fixture failed at $1" >&2
+  # This container runs only the synthetic fixture/config above. Never dump its
+  # environment or an operator's config; retain the actual error before cleanup.
+  docker inspect --format 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$container" >&2 || true
+  docker logs --tail 80 "$container" >&2 || true
+  exit 1
+}
 wait_for() {
   count=0
   until docker logs "$container" 2>/dev/null | grep -q "$1"; do
     count=$((count + 1))
-    [ "$count" -lt 50 ] || { echo 'Lifetime fixture did not reach barrier' >&2; exit 1; }
+    [ "$(docker inspect --format '{{.State.Running}}' "$container")" = true || failed "$1: container exited"
+    [ "$count" -lt 50 ] || failed "$1: barrier not reached"
     sleep 0.1
   done
 }
