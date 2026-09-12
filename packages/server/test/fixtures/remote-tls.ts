@@ -3,11 +3,11 @@ import { appendFile, open, readFile } from "node:fs/promises";
 import { BunServices } from "@effect/platform-bun";
 import { Context, Effect, Exit, Layer, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
-import { remoteClientLayer } from "../../src/remote-client.ts";
-import { remoteInspectorLayer } from "../../src/remote-inspector.ts";
-import { dumpRemote, loadRemote } from "../../src/remote-copy.ts";
-import type { RemoteConnection } from "../../src/remote-session.ts";
-import type { RemoteStore } from "../../src/store.ts";
+import { remoteClientLayer } from "@comms/storage/remote-client";
+import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { dumpRemote, loadRemote } from "@comms/storage/remote-copy";
+import type { RemoteConnection } from "@comms/storage/remote-session";
+import type { RemoteStore } from "@comms/storage/store";
 
 const Settings = Schema.Struct({
 	engine: Schema.Literals(["pg", "mysql"]),

@@ -31,9 +31,9 @@ FROM $board_image
 USER 0:0
 COPY ca.crt /usr/local/share/ca-certificates/comms-fixture.crt
 RUN update-ca-certificates
-COPY remote-tls.ts /opt/comms/packages/storage/test/fixtures/remote-tls.ts
+COPY remote-tls.ts /opt/comms/packages/server/test/fixtures/remote-tls.ts
 DOCKER
-  cp packages/storage/test/fixtures/remote-tls.ts "$private/$ca/remote-tls.ts"
+  cp packages/server/test/fixtures/remote-tls.ts "$private/$ca/remote-tls.ts"
   docker build --quiet --tag "$prefix-$ca" "$private/$ca" >"$private/build-$ca.log" 2>&1 || {
     echo "TLS client image preparation failed ($ca)." >&2; exit 1;
   }
@@ -100,7 +100,7 @@ probe() {
     --mount "type=bind,src=$private/config,dst=/fixture,readonly" \
     --mount "type=bind,src=$private/artifacts,dst=/artifacts" \
     --entrypoint /usr/local/bin/bun "$prefix-$1" \
-    /opt/comms/packages/storage/test/fixtures/remote-tls.ts "$2" "$3"
+    /opt/comms/packages/server/test/fixtures/remote-tls.ts "$2" "$3"
 }
 probe trusted seed database.test
 probe trusted pass database.test
