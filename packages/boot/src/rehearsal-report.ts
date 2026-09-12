@@ -25,6 +25,18 @@ export const RehearsalReport = Schema.Struct({
 		}),
 	).pipe(Schema.check(Schema.isMaxLength(64))),
 	suppressed_overflow: count,
+	warnings: Schema.optionalKey(
+		Schema.Struct({
+			items: Schema.Array(
+				Schema.Struct({
+					code: Schema.Literal("migration.non_portable"),
+					migration: bounded(128),
+					extension: Schema.optionalKey(bounded(128)),
+				}),
+			).pipe(Schema.check(Schema.isMaxLength(64))),
+			overflow: count,
+		}),
+	),
 });
 export type RehearsalReport = typeof RehearsalReport.Type | { readonly report_unavailable: true };
 

@@ -1,3 +1,4 @@
+import { migrationWarnings, observeMigrationDialect } from "./migration-portability.ts";
 import { on } from "@comms/storage/dialect";
 import { assertNoPendingMigration, mysqlMigration } from "./migration-intent.ts";
 import { preserveMigrationState } from "./migration-state.ts";
@@ -9,6 +10,8 @@ import { writerGate } from "./database.ts";
 export const migrate = (directory: string, epoch: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const warnings = yield* migrationWarnings;
+		const unbranched: string[] = [];
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
 		const loader = Effect.gen(function* () {
@@ -46,7 +49,12 @@ export const migrate = (directory: string, epoch: string) =>
 					Effect.map((loaded: unknown) => {
 						const first = exported(loaded) ? loaded.default : loaded;
 						const effect = exported(first) ? first.default : first;
-						return Effect.isEffect(effect) ? preserveMigrationState(sql, effect) : loaded;
+						return Effect.isEffect(effect)
+							? preserveMigrationState(
+									sql,
+									warnings ? observeMigrationDialect(sql, effect, () => unbranched.push(`${id}_${name}`)) : effect,
+								)
+							: loaded;
 					}),
 				),
 			]);
@@ -57,6 +65,9 @@ export const migrate = (directory: string, epoch: string) =>
 					: new Migrator.MigrationError({ kind: "Failed", cause, message: "Cannot read app migrations" }),
 			),
 		);
+		const report = warnings
+			? Effect.suspend(() => Effect.forEach(unbranched, (name) => warnings.record(name), { discard: true }))
+			: Effect.void;
 		yield* assertNoPendingMigration(sql);
 		if (on(sql, { sqlite: () => false, pg: () => false, mysql: () => true })) {
 			const resolved = yield* loader;
@@ -74,12 +85,14 @@ export const migrate = (directory: string, epoch: string) =>
 				"batch",
 				Migrator.make({})({ loader: Effect.succeed(resolved), table: "migrations" }),
 				Effect.void,
-			);
+			).pipe(Effect.tap(() => report));
 		}
-		return yield* sql.withTransaction(
-			Effect.gen(function* () {
-				yield* writerGate(sql, epoch);
-				return yield* Migrator.make({})({ loader, table: "migrations" });
-			}),
-		);
+		return yield* sql
+			.withTransaction(
+				Effect.gen(function* () {
+					yield* writerGate(sql, epoch);
+					return yield* Migrator.make({})({ loader, table: "migrations" });
+				}),
+			)
+			.pipe(Effect.tap(() => report));
 	});

@@ -27,3 +27,16 @@ Migration Effects and `api.migrate` must preserve kernel identity, recovery reco
 Boot creates MySQL's migration-intent table under its independent initialization journal. Missing intent state on an established store fails startup with `migration_recovery_required`; the app never recreates it. Older incomplete initialization journals with a different operation list also refuse adoption. Preserve these stores for recovery rather than deleting the evidence or retrying migrations automatically.
 
 This checks reserved table definitions and rows through the supplied client when control returns; it does not track arbitrary function-body dependencies. Module-import side effects, separate connections, deliberate transaction escape, or deleting uncertainty evidence and crashing are outside the check. MySQL recovery still depends on boot's pre-flip backup and cutover journal; this is not a sandbox for arbitrary migration code.
+
+## Portability advisory
+
+Successful rehearsal records `migration.non_portable` in the `generation.rehearsed`
+event when a newly applied migration never called `sql.onDialect`,
+`sql.onDialectOrElse`, or a shared dialect helper through its supplied SQL client.
+Applied receipts and ordinary startup remain quiet. The report retains at most 64 warning identities with an overflow count.
+
+This is an observation, not a portability verdict: even a branch can contain
+unsupported SQL, and generic SQL can work across engines without branching.
+Separately acquired clients or fragments constructed outside the migration Effect
+are outside the observation. Replay the complete migration ladder against the
+destination engine to establish compatibility before transferring.

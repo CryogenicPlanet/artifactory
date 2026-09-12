@@ -50,10 +50,15 @@ export default api => {
 	await app.ready(cookie);
 	await expect.poll(() => received.length).toBe(3);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const result = await sourcePut(`${app.url}/api/fs/app/rehearsal-marker.ts`, {
+	const result = await sourcePut(`${app.url}/api/fs/app/migrations/002_advisory.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
-		body: "export const marker = 1;",
+		body: `import { Effect } from "effect";
+import { SqlClient } from "effect/unstable/sql";
+export default Effect.gen(function* () {
+ const sql = yield* SqlClient.SqlClient;
+ yield* sql\`CREATE TABLE rehearsal_advisory(value TEXT)\`;
+});`,
 	});
 	const outcome = await result.json();
 	expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: "live" });
@@ -72,6 +77,7 @@ export default api => {
 			{ extension: "effects.ts", kind: "timer", reason: "rehearsal", delay_ms: 10 },
 		],
 		suppressed_overflow: 0,
+		warnings: { items: [{ code: "migration.non_portable", migration: "2_advisory" }], overflow: 0 },
 	});
 	expect(JSON.stringify(events.items[0].payload)).not.toMatch(/private-token|secret|body-secret/);
 }, 45000);
