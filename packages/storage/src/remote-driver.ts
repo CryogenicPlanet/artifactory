@@ -119,7 +119,7 @@ export const assertNoPreparedXa = (connection: Connection) =>
 	sanitized(
 		Effect.gen(function* () {
 			const rows = yield* connection
-				.executeValues("XA RECOVER", [])
+				.executeValuesUnprepared("XA RECOVER", [])
 				.pipe(Effect.interruptible, Effect.timeout("5 seconds"));
 			if (rows.length !== 0) return yield* failure("remote_sessions_open");
 		}),
