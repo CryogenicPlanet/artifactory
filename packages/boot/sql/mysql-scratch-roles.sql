@@ -14,12 +14,16 @@ GRANT SHOW VIEW, TRIGGER, EVENT, EXECUTE ON `comms\_app`.* TO 'comms_boot'@'%';
 -- MySQL GRANT OPTION applies to the whole database privilege level: boot can
 -- delegate ALL source rights it holds, not only SELECT. See README before enabling.
 
+-- Generated targets become future backup sources after restore, so catalog
+-- visibility must match the original source before unsupported objects are checked.
+-- Native dumps contain LOCK TABLES; boot delegates that right to the temporary
+-- loader on its exact target database, not to the persistent app during handoff.
 -- Only generated target families. Backslashes make each underscore literal.
 -- '%' is the sole wildcard. Never grant these patterns to the persistent app login.
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES,
-      CREATE TEMPORARY TABLES
+      CREATE TEMPORARY TABLES, LOCK TABLES, SHOW VIEW, TRIGGER, EVENT, EXECUTE
   ON `comms\_rehearsal\_%`.* TO 'comms_boot'@'%' WITH GRANT OPTION;
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES,
-      CREATE TEMPORARY TABLES
+      CREATE TEMPORARY TABLES, LOCK TABLES, SHOW VIEW, TRIGGER, EVENT, EXECUTE
   ON `comms\_app\_%`.* TO 'comms_boot'@'%' WITH GRANT OPTION;
 -- No SUPER, PROCESS, SET_ANY_DEFINER, or ALLOW_NONEXISTENT_DEFINER.
