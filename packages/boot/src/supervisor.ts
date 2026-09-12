@@ -274,11 +274,15 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 	const start = (generation: Generation, recoverAfterFailure = false) =>
 		Effect.gen(function* () {
 			const recovery = yield* AppRecovery;
-			const value = yield* launch(generation, recovery.store, "candidate");
+			const store = yield* recovery.store;
+			const epoch = store._tag === "file" ? undefined : Buffer.from(yield* crypto.randomBytes(32)).toString("hex");
+			// Remote identity and initial schema must exist before any editable import can connect.
+			if (epoch) yield* recovery.prepare(epoch);
+			const value = yield* launch(generation, store, "candidate", undefined, epoch);
 			const started = yield* Effect.gen(function* () {
-				yield* recovery.prepare(value.attempt.epoch);
-				if (isolated && ((yield* fs.stat(recovery.filename)).mode & 0o777) !== 0o660)
-					yield* fs.chmod(recovery.filename, 0o660);
+				if (store._tag === "file") yield* recovery.prepare(value.attempt.epoch);
+				if (isolated && store._tag === "file" && ((yield* fs.stat(store.filename)).mode & 0o777) !== 0o660)
+					yield* fs.chmod(store.filename, 0o660);
 				yield* recordAttempt(value, "starting");
 				yield* (yield* ChildAttempts).opened(value.id);
 				yield* value.process.control("go");
