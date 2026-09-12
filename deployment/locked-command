@@ -11,6 +11,28 @@ case "$command" in
     entry=/opt/comms/packages/server/dist/main.js
     ;;
   store-transfer)
+    [ "$#" -eq 2 ] && [ "$1" = --config ] || exit 64
+    config=$2
+    # Protect validation/open against replacement by either editable UID. The root
+    # operator already controls this image; writable or symlinked paths are refused.
+    [ "$(realpath -e -- "$config")" = "$config" ] || exit 64
+    directory=$(dirname -- "$config")
+    while :; do
+      [ "$(stat -c %u -- "$directory")" = 0 ] || exit 64
+      mode=0$(stat -c %a -- "$directory")
+      [ "$((mode & 0022))" -eq 0 ] || exit 64
+      [ "$directory" != / ] || break
+      directory=$(dirname -- "$directory")
+    done
+    [ ! -L "$config" ] && [ -f "$config" ] || exit 64
+    [ "$(stat -c '%u:%a' -- "$config")" = 0:600 ] || exit 64
+    identity=$(stat -c '%d:%i' -- "$config")
+    exec 0< "$config"
+    [ "$(stat -Lc '%d:%i' /proc/self/fd/0)" = "$identity" ] || exit 64
+    [ "$(stat -Lc '%u:%a' /proc/self/fd/0)" = 0:600 ] || exit 64
+    [ -f /proc/self/fd/0 ] || exit 64
+    # The immutable CLI consumes and closes stdin before creating any child.
+    set -- --config-stdin
     entry=/opt/comms/packages/server/dist/store-transfer.js
     ;;
   *) exit 64 ;;

@@ -37,6 +37,8 @@ The image sets `HOST=0.0.0.0`, `PORT=8080` and `DATA_DIR=/data`. Local execution
 
 The supported image entrypoint holds an exclusive OS lock on `/data/.comms-lifetime.lock` throughout startup and shutdown. A second image command using that volume exits with status 75. Never remove the lock file: removing its inode can defeat exclusion. Offline transfer integration uses the same locked entrypoint; direct `bun` and development launches do not establish this transfer ownership guarantee. Releasing this local lock does not prove remote SQL closure; the guardian receipts remain mandatory.
 
+The transfer entrypoint accepts credentials only through `store-transfer --config /run/secrets/transfer.json`. The file must be a regular root-owned file with mode `0600`, at a canonical absolute path without symlinks; all parent directories must be root-owned and unwritable by group or others. The root wrapper opens it before dropping privileges, and the immutable CLI consumes and closes the inherited input before starting workers. Do not place password URLs in arguments or make the file readable by the app UID. The command adapters and their acceptance are still being integrated.
+
 The [Dockerfile](../Dockerfile) pins Bun 1.4.0 by image digest and installs frozen lockfiles. Host dependencies, generated output, databases, credentials, git history and reference repositories are excluded from the build context. These commands do not publish an image.
 
 ## Choose a database
@@ -117,6 +119,7 @@ These checks create and remove only their own disposable containers and volumes:
 ```sh
 sh scripts/smoke-image.sh comms:local
 sh scripts/linux-keeper-acceptance.sh comms:local
+sh scripts/lifetime-lock-acceptance.sh comms:local
 ```
 
 The image smoke checks published HTTP access, seeds, permissions, read-only image code and persistence across restart. Keeper acceptance checks Linux process identity, capability restrictions and ordinary descendant closure. Neither replaces the failure, concurrency and recovery suite. Remote image acceptance is separate: run `bash scripts/remote-board-acceptance.sh pg comms:local` or the `mysql` variant against their disposable database containers. The scripts provision private accounts and exercise the public board; a script being present does not mean that acceptance has passed.

@@ -12,16 +12,24 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 cat > "$private/store-transfer.js" <<'JS'
-import { existsSync, readdirSync, readlinkSync } from 'node:fs';
+import { closeSync, existsSync, readFileSync, readdirSync, readlinkSync } from 'node:fs';
 const locks = readdirSync('/proc/self/fd').filter(fd => {
   try { return readlinkSync('/proc/self/fd/' + fd) === '/data/.comms-lifetime.lock'; }
   catch { return false; }
 });
-if (process.argv[2] === 'child') process.exit(locks.length === 0 ? 0 : 1);
+const configs = readdirSync('/proc/self/fd').filter(fd => {
+  try { return readlinkSync('/proc/self/fd/' + fd) === '/data/transfer-config.json'; }
+  catch { return false; }
+});
+if (process.argv[2] === 'child') process.exit(locks.length === 0 && configs.length === 0 ? 0 : 1);
+if (process.argv[2] !== '--config-stdin' || configs.length !== 1 || configs[0] !== '0')
+  throw new Error('Config must arrive only on stdin');
+if (readFileSync(0, 'utf8') !== '{"fixture":true}') throw new Error('Config handoff failed');
+closeSync(0);
 if (locks.length !== 1) throw new Error('Root must own exactly one lifetime lock');
 const child = Bun.spawnSync([process.execPath, import.meta.filename, 'child']);
 if (child.exitCode !== 0) throw new Error('Lifetime lock leaked into a subprocess');
-if (process.argv[2] === 'finish') process.exit(0);
+if (process.env.COMMS_TEST_FINISH === '1') process.exit(0);
 process.on('SIGTERM', () => {
   process.stdout.write('STOPPING\n');
   setInterval(() => { if (existsSync('/tmp/lifetime-release')) process.exit(0); }, 20);
@@ -32,12 +40,14 @@ JS
 chmod 755 "$private"
 chmod 644 "$private/store-transfer.js"
 volume=$(docker volume create)
+docker run --rm --entrypoint /bin/sh --mount "type=volume,src=$volume,dst=/data" "$image" -c \
+  'umask 077; printf %s "{\"fixture\":true}" > /data/transfer-config.json'
 run() {
   docker run "$@" --read-only --tmpfs /tmp --cap-drop ALL \
     --cap-add SETUID --cap-add SETGID --cap-add SETPCAP \
     --mount "type=volume,src=$volume,dst=/data" \
     --mount "type=bind,src=$private/store-transfer.js,dst=/opt/comms/packages/server/dist/store-transfer.js,readonly" \
-    "$image" store-transfer
+    "$image" store-transfer --config "${fixture_config:-/data/transfer-config.json}"
 }
 container=$(run --detach)
 wait_for() {
@@ -67,6 +77,22 @@ docker run --rm --read-only --tmpfs /tmp --cap-drop ALL \
   --cap-add SETUID --cap-add SETGID --cap-add SETPCAP \
   --mount "type=volume,src=$volume,dst=/data" \
   --mount "type=bind,src=$private/store-transfer.js,dst=/opt/comms/packages/server/dist/store-transfer.js,readonly" \
-  "$image" store-transfer finish >/dev/null || code=$?
+  --env COMMS_TEST_FINISH=1 "$image" store-transfer --config /data/transfer-config.json >/dev/null || code=$?
 test "$code" = 0
-printf '%s\n' 'Lifetime lock: root ownership, no child fd leak, delayed shutdown exclusion and reopen passed.'
+prepare() {
+  docker run --rm --entrypoint /bin/sh --mount "type=volume,src=$volume,dst=/data" "$image" -c "$1"
+}
+invalid() {
+  code=0
+  run --rm --env COMMS_TEST_FINISH=1 >/dev/null 2>&1 || code=$?
+  test "$code" = 64
+}
+prepare 'chmod 644 /data/transfer-config.json'
+invalid
+prepare 'chmod 600 /data/transfer-config.json; ln -s transfer-config.json /data/config-link'
+fixture_config=/data/config-link
+invalid
+prepare 'mkdir /data/writable; chmod 777 /data/writable; cp /data/transfer-config.json /data/writable/config; chmod 600 /data/writable/config'
+fixture_config=/data/writable/config
+invalid
+printf '%s\n' 'Lifetime lock and private config handoff: ownership, child exclusion, shutdown, reopen and unsafe path refusal passed.'
