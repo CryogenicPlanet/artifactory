@@ -1,5 +1,7 @@
 import { Effect, Schema } from "effect";
 
+export const transferProtocol = { id: 20, name: "offline_store_transfer" } as const;
+
 const Pair = Schema.Struct({
 	engine: Schema.Literals(["sqlite", "pg", "mysql"]),
 	/** Canonical endpoint without credentials; null for SQLite. */
@@ -44,6 +46,7 @@ export type TransferReceipt = typeof TransferReceipt.Type;
 export class TransferRejected extends Schema.TaggedError<TransferRejected>()("TransferRejected", {
 	code: Schema.Literals([
 		"transfer_binding_invalid",
+		"transfer_protocol_unsupported",
 		"transfer_journal_conflict",
 		"transfer_identity_mismatch",
 		"transfer_source_retired",

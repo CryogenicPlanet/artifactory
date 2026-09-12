@@ -34,6 +34,9 @@ const main = Effect.gen(function* () {
 		manifest: "a".repeat(64),
 	};
 	for (const sql of [sourceBoot, targetBoot]) {
+		yield* sql`CREATE TABLE boot_migrations(migration_id INTEGER PRIMARY KEY,name TEXT)`;
+		yield* sql`INSERT INTO boot_migrations VALUES(20,'offline_store_transfer')`;
+		yield* sql`PRAGMA user_version=20`;
 		yield* sql`CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)`;
 		yield* sql`CREATE TABLE seq(singleton INTEGER PRIMARY KEY,pending_id TEXT)`;
 		yield* sql`INSERT INTO seq VALUES(1,NULL)`;
@@ -69,7 +72,15 @@ const main = Effect.gen(function* () {
 		}),
 	};
 	const run = transferStores(binding, options);
-	if (mode === "pending") {
+	if (mode.endsWith("-ledger19") || mode.endsWith("-mirror19")) {
+		const sql = mode.startsWith("source-") ? sourceBoot : targetBoot;
+		if (mode.endsWith("-ledger19")) yield* sql`DELETE FROM boot_migrations WHERE migration_id=20`;
+		else yield* sql`PRAGMA user_version=19`;
+		assert.equal((yield* run.pipe(Effect.result))._tag, "Failure");
+		assert.equal(copies, 0);
+		assert.deepEqual(yield* sourceBoot`SELECT value FROM settings WHERE key='transferred_to'`, []);
+		assert.deepEqual(yield* targetBoot`SELECT value FROM settings WHERE key='transfer_journal'`, []);
+	} else if (mode === "pending") {
 		yield* sourceBoot`UPDATE seq SET pending_id='uncertain'`;
 		assert.equal((yield* run.pipe(Effect.result))._tag, "Failure");
 		assert.equal(copies, 0);
@@ -102,6 +113,8 @@ const main = Effect.gen(function* () {
 		assert.equal(copies, 1);
 		assert.deepEqual(yield* targetApp`SELECT * FROM messages`, [{ id: 1, body: "retained" }]);
 		const priorVerifies = verifies;
+		yield* targetBoot`INSERT INTO boot_migrations VALUES(21,'future_protocol')`;
+		yield* targetBoot`PRAGMA user_version=21`;
 		yield* targetApp`INSERT INTO messages VALUES(2,'legitimate post-transfer write')`;
 		assert.equal((yield* run).phase, "complete");
 		assert.equal(verifies, priorVerifies);

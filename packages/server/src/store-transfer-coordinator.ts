@@ -3,6 +3,7 @@ import { Effect, Option, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import {
 	bindingText,
+	transferProtocol,
 	TransferJournal,
 	TransferRejected,
 	validateTransferBinding,
@@ -30,6 +31,25 @@ const lockBoot = (sql: SqlClient) =>
 	sql`SELECT singleton FROM seq WHERE singleton=1 ${lockRow(sql)}`.pipe(
 		Effect.flatMap((rows) => (rows.length === 1 ? Effect.void : Effect.fail(reject("transfer_recovery_pending")))),
 	);
+const requireTransferProtocol = (sql: SqlClient) =>
+	Effect.gen(function* () {
+		const applied = yield* sql`SELECT migration_id,name FROM boot_migrations WHERE migration_id=${transferProtocol.id}`;
+		if (applied.length !== 1 || applied[0]?.name !== transferProtocol.name)
+			return yield* reject("transfer_protocol_unsupported");
+		yield* on(sql, {
+			sqlite: () =>
+				sql`PRAGMA user_version`.pipe(
+					Effect.flatMap((rows) =>
+						typeof rows[0]?.user_version === "number" && rows[0].user_version >= transferProtocol.id
+							? Effect.void
+							: Effect.fail(reject("transfer_protocol_unsupported")),
+					),
+				),
+			pg: () => Effect.void,
+			mysql: () => Effect.void,
+		});
+	});
+
 const identity = (sql: SqlClient) =>
 	sql`SELECT store_id,transferred_to FROM store_identity WHERE singleton=1`.pipe(
 		Effect.flatMap(
@@ -78,6 +98,8 @@ export const transferStores = <E, R>(input: TransferBinding, stores: TransferSto
 		for (const sql of [sourceBoot, sourceApp, targetBoot, targetApp])
 			if (Option.isSome(yield* Effect.serviceOption(sql.transactionService)))
 				return yield* reject("transfer_recovery_pending");
+		yield* requireTransferProtocol(sourceBoot);
+		yield* requireTransferProtocol(targetBoot);
 		const checkTargetIdentity = Effect.gen(function* () {
 			const target = yield* identity(targetApp);
 			if (
