@@ -70,6 +70,7 @@ export { makeTransferKernelInitializer } from "./transfer-kernel-initialize.ts";
 export { sqliteTransferSafetyCopy } from "./transfer-safety-copy.ts";
 export { nativeTransferSafetyCopy } from "./transfer-native-safety-copy.ts";
 
+export { failedRemoteRestoreBlocksStartup } from "./remote-restore-selection.ts";
 export { launchRemoteRoot } from "./remote-root-launcher.ts";
 export { launchRemoteTransfer } from "./remote-transfer-launcher.ts";
 export { RemoteTransferConfiguration } from "./remote-transfer-configuration.ts";
