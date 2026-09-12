@@ -2,14 +2,28 @@ import type { RemoteStore } from "@comms/storage/store";
 import { Crypto, Effect, FileSystem, Option, Path, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
+export const MysqlProvisionStage = Schema.Literals([
+	"create_principal",
+	"create_database",
+	"grant_loader",
+	"handoff_app",
+	"revoke_loader",
+	"grant_dump",
+	"revoke_dump",
+	"drop_principal",
+	"drop_database",
+]);
+
 export class RemoteDatabaseError extends Schema.TaggedError<RemoteDatabaseError>()("RemoteDatabaseError", {
 	code: Schema.Literals([
 		"remote_database_invalid",
 		"remote_database_provision_failed",
+		"mysql_ddl_in_transaction",
 		"remote_database_cleanup_required",
 		"scratch_limit",
 		"mysql_clone_objects_unsupported",
 	]),
+	stage: Schema.optionalKey(MysqlProvisionStage),
 }) {}
 const Record = Schema.Struct({
 	id: Schema.String,

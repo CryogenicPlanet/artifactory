@@ -1,5 +1,6 @@
 import { Effect, Exit, Redacted, Stream } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
+import { SqlError, UnknownError } from "effect/unstable/sql/SqlError";
 import { SqlClient, Statement } from "effect/unstable/sql";
 import { expect, it } from "vitest";
 import { mysqlDatabaseProvision } from "../src/mysql-database-provision.ts";
@@ -13,13 +14,19 @@ const record = (kind: RemoteDatabaseRecord["kind"] = "rehearsal"): RemoteDatabas
 	principal: "comms_t_0123456789ab4cde81234567",
 	phase: "allocated",
 });
-const fixture = (rows: (statement: string) => readonly object[] = () => []) =>
+const fixture = (rows: (statement: string) => readonly object[] = () => [], fail?: string) =>
 	Effect.gen(function* () {
 		const commands: string[] = [];
 		const execute = (statement: string) =>
-			Effect.sync(() => {
-				commands.push(statement);
-				return rows(statement);
+			Effect.suspend(() => {
+				if (fail && statement.startsWith("CREATE USER"))
+					return Effect.fail(
+						new SqlError({ reason: new UnknownError({ cause: fail, message: fail, operation: "test" }) }),
+					);
+				return Effect.sync(() => {
+					commands.push(statement);
+					return rows(statement);
+				});
 			});
 		const sql = yield* SqlClient.make({
 			acquirer: Effect.succeed({
@@ -231,5 +238,62 @@ it("retries dump cleanup after its schema grants have already been revoked", asy
 			expect(commands.some((text) => text.startsWith("REVOKE"))).toBe(false);
 			yield* provision.dropPrincipal(resource);
 			expect(commands.some((text) => text.startsWith("DROP USER"))).toBe(true);
+		}),
+	));
+
+it("reports a static provisioning stage without retaining driver credentials", async () =>
+	run(
+		Effect.gen(function* () {
+			const secret = "mysql://private:credential@private-host/database";
+			const { sql } = yield* fixture(() => [], secret);
+			const provision = yield* mysqlDatabaseProvision({
+				created: () => Effect.void,
+				owns: () => Effect.succeed(false),
+			}).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+			const resource = record();
+			const result = yield* provision
+				.createPrincipal(resource, {
+					_tag: "mysql",
+					database: resource.database,
+					url: Redacted.make(`mysql://${resource.principal}:${"a".repeat(64)}@localhost/${resource.database}`),
+				})
+				.pipe(Effect.result);
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure._tag).toBe("RemoteDatabaseError");
+				if (result.failure._tag !== "RemoteDatabaseError") throw new Error("Expected provisioning failure");
+				expect(result.failure.code).toBe("remote_database_provision_failed");
+				expect(result.failure.stage).toBe("create_principal");
+				expect(JSON.stringify(result.failure)).not.toContain(secret);
+			}
+		}),
+	));
+
+it("distinguishes transaction admission from a failed provisioning query", async () =>
+	run(
+		Effect.gen(function* () {
+			const { sql, commands } = yield* fixture();
+			const provision = yield* mysqlDatabaseProvision({
+				created: () => Effect.void,
+				owns: () => Effect.succeed(false),
+			}).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+			const resource = record();
+			const result = yield* sql
+				.withTransaction(
+					provision.createPrincipal(resource, {
+						_tag: "mysql",
+						database: resource.database,
+						url: Redacted.make(`mysql://${resource.principal}:${"a".repeat(64)}@localhost/${resource.database}`),
+					}),
+				)
+				.pipe(Effect.result);
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure._tag).toBe("RemoteDatabaseError");
+				if (result.failure._tag !== "RemoteDatabaseError") throw new Error("Expected transaction refusal");
+				expect(result.failure.code).toBe("mysql_ddl_in_transaction");
+				expect(result.failure.stage).toBe("create_principal");
+			}
+			expect(commands.some((statement) => statement.startsWith("CREATE USER"))).toBe(false);
 		}),
 	));

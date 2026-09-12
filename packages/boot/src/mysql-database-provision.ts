@@ -1,7 +1,7 @@
 import type { RemoteStore } from "@comms/storage/store";
 import { Effect, Option, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { RemoteDatabaseError, type RemoteDatabaseRecord } from "./remote-database-journal.ts";
+import { RemoteDatabaseError, type MysqlProvisionStage, type RemoteDatabaseRecord } from "./remote-database-journal.ts";
 
 const invalid = () => new RemoteDatabaseError({ code: "remote_database_invalid" });
 const identifier = (value: string) => `\`${value.replaceAll("`", "``")}\``;
@@ -20,16 +20,23 @@ export interface MysqlDatabaseReceipts<E, R> {
 export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, R>) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		const execute = (statement: string) =>
+		const execute = (stage: typeof MysqlProvisionStage.Type, statement: string) =>
 			Effect.scoped(
 				Effect.gen(function* () {
 					// MySQL DDL commits implicitly; never escape an enclosing boot transaction.
-					if (Option.isSome(yield* Effect.serviceOption(sql.transactionService))) return yield* invalid();
+					if (Option.isSome(yield* Effect.serviceOption(sql.transactionService)))
+						return yield* new RemoteDatabaseError({ code: "mysql_ddl_in_transaction", stage });
 					const connection = yield* sql.reserve;
 					// Password-bearing CREATE USER must not enter Effect SQL statement traces.
 					yield* connection.executeUnprepared(statement, [], undefined);
 				}),
-			).pipe(Effect.mapError(() => new RemoteDatabaseError({ code: "remote_database_provision_failed" })));
+			).pipe(
+				Effect.mapError((error) =>
+					Schema.is(RemoteDatabaseError)(error)
+						? error
+						: new RemoteDatabaseError({ code: "remote_database_provision_failed", stage }),
+				),
+			);
 		const validate = (record: RemoteDatabaseRecord) => {
 			const compact = record.id.replaceAll("-", "");
 			return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(record.id) &&
@@ -85,6 +92,7 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 				// MySQL's session_account_connect_attrs uses pfs_readonly_world_acl and filters rows by account.
 				// It needs no delegated SELECT grant: mysql-server/mysql-8.4.11 table_session_account_connect_attrs.cc.
 				yield* execute(
+					"create_principal",
 					`CREATE USER ${account(record.principal)} IDENTIFIED BY '${password}' ATTRIBUTE '{"comms_resource":"${record.id}"}'`,
 				);
 			});
@@ -94,12 +102,14 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 				if (record.kind === "dump" || record.phase !== "allocated" || !(yield* provePrincipal(record)))
 					return yield* invalid();
 				yield* execute(
+					"create_database",
 					`CREATE DATABASE ${identifier(record.database)} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs`,
 				);
 				// An uncertain receipt leaves an orphan, never permission to delete an existing database.
 				yield* receipts.created(record, "database");
 				// Existing native dumps contain LOCK TABLES; only the disposable loader needs this privilege.
 				yield* execute(
+					"grant_loader",
 					`GRANT ${permissions}, LOCK TABLES ON ${grantDatabase(record.database)}.* TO ${account(record.principal)}`,
 				);
 			});
@@ -121,8 +131,12 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 				yield* selected(record);
 				if (!(yield* provePrincipal(record)) || !(yield* receipts.owns(record, "database"))) return yield* invalid();
 				yield* protectKernel(record);
-				yield* execute(`GRANT ${permissions} ON ${grantDatabase(record.database)}.* TO ${account(appRole)}`);
 				yield* execute(
+					"handoff_app",
+					`GRANT ${permissions} ON ${grantDatabase(record.database)}.* TO ${account(appRole)}`,
+				);
+				yield* execute(
+					"revoke_loader",
 					`REVOKE ALL PRIVILEGES ON ${grantDatabase(record.database)}.* FROM ${account(record.principal)}`,
 				);
 			});
@@ -172,7 +186,10 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 				if (record.kind !== "dump" || record.phase !== "allocated") return yield* invalid();
 				yield* assertSupported(record);
 				if (!(yield* provePrincipal(record))) return yield* invalid();
-				yield* execute(`GRANT SELECT ON ${grantDatabase(record.database)}.* TO ${account(record.principal)}`);
+				yield* execute(
+					"grant_dump",
+					`GRANT SELECT ON ${grantDatabase(record.database)}.* TO ${account(record.principal)}`,
+				);
 			});
 		const revokeDump = (record: RemoteDatabaseRecord) =>
 			Effect.gen(function* () {
@@ -183,13 +200,14 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 					yield* sql`SELECT PRIVILEGE_TYPE FROM information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE=${`'${record.principal}'@'%'`} AND TABLE_SCHEMA=${record.database.replace(/[_%]/g, "\\$&")}`;
 				if (grants.length > 0)
 					yield* execute(
+						"revoke_dump",
 						`REVOKE ALL PRIVILEGES ON ${grantDatabase(record.database)}.* FROM ${account(record.principal)}`,
 					);
 			});
 		const dropPrincipal = (record: RemoteDatabaseRecord) =>
 			Effect.gen(function* () {
 				if (record.phase !== "closed") return yield* invalid();
-				if (yield* provePrincipal(record)) yield* execute(`DROP USER ${account(record.principal)}`);
+				if (yield* provePrincipal(record)) yield* execute("drop_principal", `DROP USER ${account(record.principal)}`);
 			});
 		const dropRehearsal = (record: RemoteDatabaseRecord) =>
 			Effect.gen(function* () {
@@ -201,7 +219,7 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 				const rows =
 					yield* sql`SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=${record.database}`;
 				if (rows.length > 1) return yield* invalid();
-				if (rows.length === 1) yield* execute(`DROP DATABASE ${identifier(record.database)}`);
+				if (rows.length === 1) yield* execute("drop_database", `DROP DATABASE ${identifier(record.database)}`);
 				yield* dropPrincipal(record);
 			});
 		return {
