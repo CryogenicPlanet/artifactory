@@ -1,7 +1,7 @@
 import { SqlError, UniqueViolation, DeadlockError, SerializationError } from "effect/unstable/sql/SqlError";
 import { Cause, Effect, Exit, Redacted } from "effect";
 import { expect, it } from "vitest";
-import { attemptTag, sanitized } from "../src/remote-session.ts";
+import { attemptTag, sanitized, failure } from "../src/remote-session.ts";
 
 it("encodes the full attempt below the PostgreSQL handshake limit", async () => {
 	const connection = {
@@ -44,4 +44,15 @@ it("keeps safe conflict categories but removes secret-bearing SQL metadata", asy
 		expect(JSON.stringify(result)).toContain(reason._tag);
 		expect(JSON.stringify(result)).not.toContain("private-password");
 	}
+});
+
+it("retains only the static unsupported-isolation refusal through admission sanitization", async () => {
+	const denied = await Effect.runPromiseExit(
+		sanitized(
+			sanitized(Effect.fail(failure("remote_isolation_unsupported")), "remote_inspection_failed"),
+			"remote_registration_failed",
+		),
+	);
+	expect(Exit.isFailure(denied)).toBe(true);
+	expect(JSON.stringify(denied)).toContain("remote_isolation_unsupported");
 });

@@ -20,17 +20,16 @@ await Effect.runPromise(
 				const extensions = yield* sql`SELECT * FROM extension_migrations`;
 				const tables = yield* sql`SELECT name FROM sqlite_master WHERE name=${ledger}`;
 				const receipts = tables.length
-					? yield* sql`SELECT migration_id,name FROM ${sql(ledger)} ORDER BY migration_id`
+					? yield* sql`SELECT migration_id,name FROM ${sql(ledger)} ORDER BY migration_id`.pipe(
+							Effect.orElseSucceed(() => []),
+						)
 					: [];
 				return { schema, version, data, editable, extensions, receipts };
 			});
-		const initialize = (failure = false, pause = false) =>
+		const initialize = (failure = false, pause = false, future = false) =>
 			sql.withTransaction(
 				Effect.gen(function* () {
-					const version = yield* sql`PRAGMA user_version`.pipe(
-						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ user_version: Schema.Int })))),
-					);
-					yield* migrate(sql, ledger, version[0]?.user_version ?? -1, [
+					yield* migrate(sql, ledger, [
 						{ id: 1, name: "preserved", run: Effect.die("Legacy migration must never rerun") },
 						{
 							id: 2,
@@ -48,8 +47,10 @@ await Effect.runPromise(
 								if (failure) return yield* Effect.fail(new Error("injected migration failure"));
 							}),
 						},
+						...(future
+							? [{ id: 4, name: "future", run: sql`CREATE TABLE future(value TEXT)`.pipe(Effect.asVoid) }]
+							: []),
 					]);
-					yield* sql`PRAGMA user_version=3`;
 					if (pause) {
 						yield* Effect.sync(() => process.stdout.write("READY\n"));
 						return yield* Effect.never;
@@ -71,6 +72,28 @@ await Effect.runPromise(
 			process.stdout.write(JSON.stringify(yield* snapshot()));
 		} else if (mode === "crash") {
 			yield* initialize(false, true);
+		} else if (mode === "ahead" || mode === "future") {
+			yield* initialize();
+			const before = yield* snapshot();
+			yield* sql`PRAGMA user_version=1`;
+			yield* initialize();
+			assert.deepEqual(yield* snapshot(), before);
+			if (mode === "future") {
+				yield* initialize(false, false, true);
+				assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 4 }]);
+				assert.deepEqual(yield* sql`SELECT migration_id,name FROM ${sql(ledger)} WHERE migration_id=4`, [
+					{ migration_id: 4, name: "future" },
+				]);
+				const after = yield* snapshot();
+				yield* initialize(false, false, true);
+				assert.deepEqual(yield* snapshot(), after);
+			}
+		} else if (mode === "steps") {
+			const before = yield* snapshot();
+			const result = yield* migrate(sql, ledger, [{ id: 2, name: "bad", run: Effect.void }]).pipe(Effect.result);
+			assert.equal(result._tag, "Failure");
+			if (result._tag === "Failure") assert.match(String(result.failure), /migration_steps_invalid at 1/);
+			assert.deepEqual(yield* snapshot(), before);
 		} else if (mode === "success" || mode === "failure") {
 			const before = yield* snapshot();
 			if (mode === "failure") {
@@ -96,11 +119,15 @@ await Effect.runPromise(
 			yield* initialize();
 			assert.deepEqual(yield* snapshot(), after);
 		} else {
-			if (mode === "newer-version") yield* sql`PRAGMA user_version=4`;
+			if (mode === "invalid-mirror") yield* sql`PRAGMA user_version=-1`;
+			else if (mode === "newer-version") yield* sql`PRAGMA user_version=4`;
+			else if (mode === "object")
+				yield* sql`CREATE VIEW ${sql(ledger)} AS SELECT 1 AS migration_id,'preserved' AS name`;
+			else if (mode === "shape") yield* sql`CREATE TABLE ${sql(ledger)}(wrong_column TEXT)`;
 			else {
 				yield* sql`CREATE TABLE ${sql(ledger)}(migration_id INTEGER PRIMARY KEY,name TEXT)`;
 				if (mode === "gap") yield* sql`INSERT INTO ${sql(ledger)} VALUES(2,'addition')`;
-				else if (mode === "wrong-name") yield* sql`INSERT INTO ${sql(ledger)} VALUES(1,'foreign')`;
+				else if (mode === "wrong-name") yield* sql`INSERT INTO ${sql(ledger)} VALUES(1,'DO_NOT_LOG_LEDGER_NAME')`;
 				else if (mode === "mirror") {
 					yield* sql`INSERT INTO ${sql(ledger)} VALUES(1,'preserved')`;
 					yield* sql`PRAGMA user_version=2`;
@@ -110,7 +137,22 @@ await Effect.runPromise(
 			const before = yield* snapshot();
 			const failed = yield* Effect.exit(initialize());
 			assert(Exit.isFailure(failed));
-			assert.match(Cause.pretty(failed.cause), /migration_ledger_(invalid|too_new)/);
+			const expected =
+				mode === "invalid-mirror"
+					? "migration_mirror_invalid"
+					: mode === "gap"
+						? "migration_ledger_id_invalid"
+						: mode === "wrong-name"
+							? "migration_ledger_name_mismatch"
+							: mode === "mirror" || mode === "empty"
+								? "migration_mirror_ahead"
+								: mode === "object"
+									? "migration_ledger_object_invalid"
+									: mode === "shape"
+										? "migration_ledger_shape_invalid"
+										: "migration_ledger_too_new";
+			assert.match(Cause.pretty(failed.cause), new RegExp(expected));
+			assert(!Cause.pretty(failed.cause).includes("DO_NOT_LOG_LEDGER_NAME"));
 			assert.deepEqual(yield* snapshot(), before);
 		}
 	}).pipe(Effect.provide(clientLayer({ _tag: "file", filename }))),

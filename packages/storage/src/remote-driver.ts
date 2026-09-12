@@ -35,8 +35,9 @@ export const open = (options: RemoteConnection, tag: string) => {
 export const compiler = (engine: RemoteConnection["engine"]) =>
 	engine === "pg" ? PgClient.makeCompiler() : MysqlClient.makeCompiler();
 
+const identityFields = [Schema.String, Schema.String, Schema.String, Schema.String, Schema.String] as const;
 const Metadata = Schema.Array(
-	Schema.Tuple([Schema.String, Schema.String, Schema.String, Schema.String, Schema.String]),
+	Schema.Union([Schema.Tuple(identityFields), Schema.Tuple([...identityFields, Schema.String])]),
 );
 /** Bootstrap metadata only; application SQL cannot run until its lease is registered. */
 export const identify = (connection: Connection, options: RemoteConnection, tag: string) =>
@@ -45,11 +46,13 @@ export const identify = (connection: Connection, options: RemoteConnection, tag:
 			const query =
 				options.engine === "pg"
 					? "SELECT pg_catalog.pg_postmaster_start_time()::text, pg_catalog.current_database()::text, current_user::text, pg_catalog.pg_backend_pid()::text, pg_catalog.current_setting('application_name') WHERE pg_catalog.current_setting('max_prepared_transactions')='0'"
-					: "SELECT @@server_uuid, DATABASE(), CURRENT_USER(), CAST(CONNECTION_ID() AS CHAR), (SELECT ATTR_VALUE FROM performance_schema.session_account_connect_attrs WHERE PROCESSLIST_ID=CONNECTION_ID() AND ATTR_NAME='comms_attempt')";
+					: "SELECT @@server_uuid, DATABASE(), CURRENT_USER(), CAST(CONNECTION_ID() AS CHAR), (SELECT ATTR_VALUE FROM performance_schema.session_account_connect_attrs WHERE PROCESSLIST_ID=CONNECTION_ID() AND ATTR_NAME='comms_attempt'), @@SESSION.transaction_isolation";
 			const rows = yield* connection
 				.executeValues(query, [])
 				.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Metadata)), Effect.interruptible, Effect.timeout("5 seconds"));
 			const row = rows[0];
+			if (options.engine === "mysql" && (row?.length !== 6 || row[5] !== "REPEATABLE-READ"))
+				return yield* failure("remote_isolation_unsupported");
 			if (
 				rows.length !== 1 ||
 				!row ||

@@ -27,6 +27,7 @@ export default api => Effect.gen(function*(){
 	await fixture.sql("INSERT INTO repair_parent VALUES(1)");
 	await fixture.sql("INSERT INTO extension_evidence VALUES(1,'retained')");
 	const check = async (running: typeof app) => {
+		const editableHistory = await fixture.sql("SELECT * FROM migrations ORDER BY migration_id");
 		for (const sql of [
 			"DELETE FROM extension_evidence",
 			"DROP TABLE extension_evidence",
@@ -35,11 +36,15 @@ export default api => Effect.gen(function*(){
 			"DROP TABLE protected_sql_tables",
 			"DELETE FROM extension_migrations",
 			"DELETE FROM core_migrations",
+			"DELETE FROM migrations",
+			"DROP TABLE migrations",
+			"UPDATE migrations SET name='changed'",
 			"DROP TABLE core_migrations",
 			"UPDATE webhook_subscriptions SET cursor=999",
 			"DELETE FROM topic_page_continuations",
 		])
 			expect((await running.post("/api/sql", { sql }, cookie)).status, sql).toBe(501);
+		expect(await fixture.sql("SELECT * FROM migrations ORDER BY migration_id")).toEqual(editableHistory);
 		await fixture.sql(
 			"CREATE TRIGGER evidence_guard AFTER UPDATE ON repair_parent BEGIN DELETE FROM extension_evidence; END",
 		);

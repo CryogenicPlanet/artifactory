@@ -1,3 +1,4 @@
+import { jsonText, readTransaction } from "@comms/storage/dialect";
 import { Cause, Context, Effect, Fiber, Option, Ref, type Scope, type Semaphore } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { KernelError } from "./boot-channel.ts";
@@ -26,20 +27,19 @@ export const makeReadSnapshot =
 				Option.isNone(yield* Effect.serviceOption(HealthProbe))
 			)
 				return yield* new KernelError({ code: "input_invalid" });
-			const snapshot = sql
-				.withTransaction(
-					Effect.gen(function* () {
-						yield* sql`SELECT epoch FROM kernel_writer`;
-						const ceiling = (yield* fence).published_through;
-						if (Option.isNone(yield* Effect.serviceOption(HealthProbe))) yield* assertSqlPublished(sql, epoch, ceiling);
-						return yield* read(ceiling).pipe(Effect.provideService(ReadFence, ceiling));
-					}),
-				)
-				.pipe(
-					Effect.onExit((exit) =>
-						exit._tag === "Failure" && Cause.hasDies(exit.cause) ? poisonUncertainWriter(exit.cause) : Effect.void,
-					),
-				);
+			const snapshot = readTransaction(
+				sql,
+				Effect.gen(function* () {
+					yield* sql`SELECT epoch FROM kernel_writer`;
+					const ceiling = (yield* fence).published_through;
+					if (Option.isNone(yield* Effect.serviceOption(HealthProbe))) yield* assertSqlPublished(sql, epoch, ceiling);
+					return yield* read(ceiling).pipe(Effect.provideService(ReadFence, ceiling));
+				}),
+			).pipe(
+				Effect.onExit((exit) =>
+					exit._tag === "Failure" && Cause.hasDies(exit.cause) ? poisonUncertainWriter(exit.cause) : Effect.void,
+				),
+			);
 			if (Option.isSome(yield* Effect.serviceOption(HealthProbe))) return yield* snapshot;
 			const lifecycle = Option.getOrNull(yield* Effect.serviceOption(Lifecycle));
 			const ownership = yield* Ref.make<"waiting" | "held" | "escalated" | "done">("waiting");
@@ -63,7 +63,7 @@ export const makeReadSnapshot =
 					yield* assertWriterHealthy;
 					// Ordinary versioned rows retain their published image. Path rewrites do not.
 					const moving =
-						yield* sql`SELECT seq FROM outbox WHERE shipped_at IS NULL AND json_extract(event,'$.type') IN ('topic.moved','topic.pages_moved') LIMIT 1`;
+						yield* sql`SELECT seq FROM outbox WHERE shipped_at IS NULL AND ${jsonText(sql, sql("event"), "type")} IN ('topic.moved','topic.pages_moved') LIMIT 1`;
 					if (moving.length) yield* relay;
 					return yield* snapshot;
 				}).pipe(
