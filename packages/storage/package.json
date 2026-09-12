@@ -12,7 +12,8 @@
 		"./remote-inspector": "./src/remote-inspector.ts",
 		"./remote-session": "./src/remote-session.ts",
 		"./migrations": "./src/migrations.ts",
-		"./remote-migrations": "./src/remote-migrations.ts"
+		"./remote-migrations": "./src/remote-migrations.ts",
+		"./remote-copy": "./src/remote-copy.ts"
 	},
 	"scripts": {
 		"check": "tsc --noEmit"
@@ -22,5 +23,8 @@
 		"@effect/sql-pg": "4.0.0-rc.113",
 		"@effect/sql-sqlite-bun": "4.0.0-rc.113",
 		"effect": "4.0.0-rc.113"
+	},
+	"devDependencies": {
+		"@effect/platform-bun": "4.0.0-rc.113"
 	}
 }
