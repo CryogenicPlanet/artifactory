@@ -117,7 +117,17 @@ const keeper = Effect.gen(function* () {
 			yield* Console.log(`COMMS_CHILD_PID=${child.pid}`);
 			yield* child.stdout.pipe(Stream.run(stdio.stdout()), Effect.forkScoped);
 			yield* child.stderr.pipe(Stream.run(stdio.stderr()), Effect.forkScoped);
-			yield* restore(Effect.raceFirst(child.exitCode.pipe(Effect.exit), stdio.stdin.pipe(Stream.runDrain)));
+			const completion = yield* restore(
+				Effect.raceFirst(
+					child.exitCode.pipe(
+						Effect.exit,
+						Effect.map((exit) => (exit._tag === "Success" ? Number(exit.value) : undefined)),
+					),
+					stdio.stdin.pipe(Stream.runDrain, Effect.as(undefined)),
+				),
+			);
+			if (config.env.STATE === "transfer" && completion !== 0)
+				return yield* Effect.die("Offline app task did not exit successfully");
 		}),
 	);
 }).pipe(Effect.scoped, Effect.provide(BunServices.layer));

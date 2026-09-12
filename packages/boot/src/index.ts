@@ -60,6 +60,7 @@ import { makeRemoteAppInitializer } from "./app-kernel-initialize.ts";
 import { StoreError } from "@comms/storage/store";
 import { failure as remoteFailure } from "@comms/storage/remote-session";
 
+export { runTransferApp, preflightTransferAppSource } from "./transfer-app-launcher.ts";
 export { launchRemoteRoot } from "./remote-root-launcher.ts";
 export { launchRemoteTransfer } from "./remote-transfer-launcher.ts";
 export { RemoteTransferConfiguration } from "./remote-transfer-configuration.ts";
