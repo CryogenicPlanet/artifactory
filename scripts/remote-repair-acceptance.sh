@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Seven repair and two shutdown scenarios per engine, each with an independent operator-provisioned pair.
+# Native repair, shutdown and foreign-backup rejection with independent operator-provisioned pairs.
 set -euo pipefail
 umask 077
 engine=${1:?pg or mysql}
@@ -53,7 +53,7 @@ operator=pathlib.Path('packages/boot/sql')
 vendor='postgres' if engine=='pg' else 'mysql'
 baseline=(operator/(vendor+'-roles.sql')).read_text()
 scratch=(operator/(vendor+'-scratch-roles.sql')).read_text()
-for scenario in ['missing','foreign','candidate','beforeallocation','afterselection','pending','password','shutdownnormal','shutdownforce']:
+for scenario in ['missing','foreign','candidate','beforeallocation','afterselection','pending','password','shutdownnormal','shutdownforce','foreigndonor','foreignrecipient']:
     boot,app=secrets.token_hex(32),secrets.token_hex(32)
     databases={kind:f'comms_repair_{scenario}_{kind}' for kind in ['boot','app']}
     users={kind:databases[kind] if engine=='pg' else f'cr_{scenario}_{kind[0]}' for kind in databases}
@@ -101,7 +101,7 @@ for attempt in $(seq 1 120); do
   fi
   sleep 1
 done
-for scenario in missing foreign candidate beforeallocation afterselection pending password shutdownnormal shutdownforce; do
+for scenario in missing foreign candidate beforeallocation afterselection pending password shutdownnormal shutdownforce foreigndonor foreignrecipient; do
   if [ "$engine" = pg ]; then
     docker exec --env-file "$private/$scenario.env" -i "$server" psql -X -U postgres -v ON_ERROR_STOP=1 \
       < "$private/$scenario.sql" >/dev/null 2>>"$private/provision.log"
@@ -124,6 +124,6 @@ docker run --rm --name "$runner" --init --user "$(id -u):$(id -g)" --network "$n
     set -euo pipefail
     test "$(node --version)" = v22.22.3
     test "$(bun --version)" = 1.4.0
-    node node_modules/vitest/vitest.mjs run packages/server/test/remote-selected-store-repair.test.ts packages/server/test/remote-publication-shutdown.test.ts --maxWorkers=1 --reporter=verbose
+    node node_modules/vitest/vitest.mjs run packages/server/test/remote-selected-store-repair.test.ts packages/server/test/remote-publication-shutdown.test.ts packages/boot/test/remote-foreign-backup-native.test.ts --maxWorkers=1 --reporter=verbose
   ' > "$private/tests.log" 2>&1
-echo "All seven $engine repair and both publication shutdown scenarios passed."
+echo "All seven $engine repair, both publication shutdown and foreign-backup rejection scenarios passed."
