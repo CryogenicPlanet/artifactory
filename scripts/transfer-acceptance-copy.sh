@@ -6,7 +6,7 @@ chmod 0444 "$private/copy-crash.js" "$private/copy-inspect.js"
 run_transfer transfer copy-crash
 transfer_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["transfer_id"])' "$private/transfer.json")
 inspect_partial() {
-  docker run --rm --network none --read-only --user 0:0 --entrypoint /usr/local/bin/bun \
+  docker run --rm --network none --read-only --tmpfs /tmp --user 0:0 --entrypoint /usr/local/bin/bun \
     --mount "type=volume,src=$volume,dst=/data,readonly" \
     --mount "type=bind,src=$private/copy-inspect.js,dst=/opt/comms/packages/server/dist/copy-inspect.js,readonly" "$board_image" \
     /opt/comms/packages/server/dist/copy-inspect.js "$transfer_id"
@@ -16,6 +16,7 @@ if [ "$target_engine" = pg ]; then
 else
   partial_sql() { docker exec -i "$prefix-target-database" mysql --defaults-extra-file=/run/secrets/admin.cnf --database="$1" --batch --skip-column-names 2>"$private/copy-sql-private"; }
 fi
+echo "Copy crash observation: before normal resume"
 source_rows=$(inspect_partial)
 target_rows=$(printf '%s\n' 'SELECT COUNT(*) FROM messages' | partial_sql comms_app)
 [ "$target_rows" = "$source_rows" ] && [ "$target_rows" -gt 0 ]
@@ -24,6 +25,7 @@ state=$(printf '%s\n' 'SELECT value FROM settings WHERE `key`='"'transfer_state'
 [ "$state" = in_progress ]
 # Try exact same-ID normal resume before any source restart/write changes its manifest.
 run_transfer transfer refused
+echo "Copy crash observation: after refused normal resume"
 [ "$(inspect_partial)" = "$source_rows" ]
 [ "$(printf '%s\n' 'SELECT COUNT(*) FROM messages' | partial_sql comms_app)" = "$target_rows" ]
 launch_board "$target_board" target

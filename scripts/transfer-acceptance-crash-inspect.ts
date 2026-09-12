@@ -1,7 +1,7 @@
 // Test-only, read-only proof after the instrumented outer process has died.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { Database } from "bun:sqlite";
+import { inspectSqliteSnapshot } from "./transfer-acceptance-sqlite-snapshot.ts";
 import { Schema } from "effect";
 import { TransferFileJournal } from "../packages/storage/src/store-transfer-schema.ts";
 
@@ -23,12 +23,9 @@ for (const [filename, query] of [
 	[journal.binding.source.app, "SELECT transferred_to AS marker FROM store_identity WHERE singleton=1"],
 ]) {
 	assert(filename && query);
-	const database = new Database(filename, { readonly: true });
-	try {
+	inspectSqliteSnapshot(filename, (database) => {
 		const row = Schema.decodeUnknownSync(Schema.Struct({ marker: Schema.String }))(database.query(query).get());
 		assert.deepEqual(JSON.parse(row.marker), journal.binding, "Source retirement binding differs");
-	} finally {
-		database.close();
-	}
+	});
 }
 console.log("Instrumented activation crash retained SQL retirement and incomplete filesystem authority");

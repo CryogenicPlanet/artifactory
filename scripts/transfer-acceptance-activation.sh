@@ -8,7 +8,7 @@ chmod 0444 "$private/activation-crash.js" "$private/activation-inspect.js"
 run_transfer transfer crash
 transfer_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["transfer_id"])' "$private/transfer.json")
 inspect_activation() {
-  docker run --rm --network none --read-only --user 0:0 --entrypoint /usr/local/bin/bun \
+  docker run --rm --network none --read-only --tmpfs /tmp --user 0:0 --entrypoint /usr/local/bin/bun \
     --mount "type=volume,src=$volume,dst=/data,readonly" \
     --mount "type=bind,src=$private/activation-inspect.js,dst=/opt/comms/packages/server/dist/activation-inspect.js,readonly" "$board_image" \
     /opt/comms/packages/server/dist/activation-inspect.js "$transfer_id"

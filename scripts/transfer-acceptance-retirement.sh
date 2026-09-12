@@ -5,7 +5,7 @@ bun build scripts/transfer-acceptance-retirement-inspect.ts --target=bun --packa
 chmod 0444 "$private/retirement-crash.js" "$private/retirement-inspect.js"
 run_transfer transfer retirement-crash
 transfer_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["transfer_id"])' "$private/transfer.json")
-docker run --rm --network none --read-only --user 0:0 --entrypoint /usr/local/bin/bun \
+docker run --rm --network none --read-only --tmpfs /tmp --user 0:0 --entrypoint /usr/local/bin/bun \
   --mount "type=volume,src=$volume,dst=/data,readonly" \
   --mount "type=bind,src=$private/retirement-inspect.js,dst=/opt/comms/packages/server/dist/retirement-inspect.js,readonly" "$board_image" \
   /opt/comms/packages/server/dist/retirement-inspect.js "$transfer_id"

@@ -1,5 +1,5 @@
 // Read-only observer for the disposable SQLite check target, outside the application runtime.
-import { Database } from "bun:sqlite";
+import { inspectSqliteSnapshot } from "./transfer-acceptance-sqlite-snapshot.ts";
 import { Schema } from "effect";
 
 const [boot, app] = process.argv.slice(2);
@@ -7,8 +7,7 @@ const selected = boot?.match(/^\/data\/transfers\/([a-f0-9-]{36})\/scratch\/boot
 if (!boot || !selected || app !== `/data/rehearsals/transfer-check-${selected[1]}/comms.db`)
 	throw new Error("Invalid disposable check paths");
 const inspect = (filename: string, tables: readonly string[], marker: boolean) => {
-	const database = new Database(filename, { readonly: true });
-	try {
+	inspectSqliteSnapshot(filename, (database) => {
 		for (const table of tables) {
 			const row = Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Int }))(
 				database.query(`SELECT COUNT(*) AS count FROM "${table}"`).get(),
@@ -21,9 +20,7 @@ const inspect = (filename: string, tables: readonly string[], marker: boolean) =
 			);
 			if (row.value !== "in_progress") throw new Error("Check target became eligible for startup");
 		}
-	} finally {
-		database.close();
-	}
+	});
 };
 inspect(app, ["messages"], false);
 inspect(boot, ["passkeys", "generations"], true);
