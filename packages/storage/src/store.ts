@@ -54,7 +54,7 @@ export const parse = (raw: string) =>
 /** Rendering cannot produce a descriptor the parser rejects, including malformed Unicode. */
 export const render = (store: Store) =>
 	store._tag !== "file"
-		? Effect.succeed(store.url)
+		? parseDescriptor(Redacted.value(store.url)).pipe(Effect.as(store.url))
 		: Effect.try({
 				try: () => `file:${store.filename.split("/").map(encodeURIComponent).join("/")}`,
 				catch: () => new StoreError({ code: "store_descriptor_invalid" }),
