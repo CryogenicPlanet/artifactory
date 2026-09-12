@@ -38,7 +38,20 @@ export const backupRoute = (
 					if (url.search) return yield* new AuthError({ code: "invalid_request" });
 					yield* body(Schema.Record(Schema.String, Schema.Never));
 					return yield* service.capture({ reason: "manual", authorize }).pipe(
-						Effect.map((record) => HttpServerResponse.jsonUnsafe(record, { headers: { "cache-control": "no-store" } })),
+						Effect.map((record) =>
+							HttpServerResponse.jsonUnsafe(
+								{
+									id: record.id,
+									engine: record.engine,
+									reason: record.reason,
+									bytes: record.bytes,
+									taken_at: record.taken_at,
+									published_through: record.published_through,
+									generation: record.generation,
+								},
+								{ headers: { "cache-control": "no-store" } },
+							),
+						),
 						Effect.catchCause((cause) => {
 							if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
 							const unexpected =
