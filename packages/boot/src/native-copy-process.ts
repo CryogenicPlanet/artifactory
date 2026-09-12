@@ -61,13 +61,14 @@ export const nativeCopyRunner = Effect.gen(function* () {
 							),
 						)
 						.pipe(Effect.provideService(Scope.Scope, scope));
-					const finish = Stream.run(Stream.empty, handle.stdin).pipe(
+					const interrupted = Stream.run(Stream.empty, handle.stdin).pipe(
 						Effect.ignore,
 						Effect.andThen(handle.exitCode),
 						Effect.ensuring(Scope.close(scope, Exit.void)),
 					);
-					const code = yield* restore(handle.exitCode).pipe(Effect.onInterrupt(() => finish.pipe(Effect.orDie)));
-					yield* finish;
+					const code = yield* restore(handle.exitCode).pipe(Effect.onInterrupt(() => interrupted.pipe(Effect.orDie)));
+					// Exit already proves the keeper finished; draining its closed stdin can wait forever.
+					yield* Scope.close(scope, Exit.void);
 					if (code !== 0) return yield* new NativeCopyRejected({ code: "native_copy_failed" });
 					const result = yield* fs
 						.readFileString(path.join(remote.dataDirectory, "remote-owners", `${operation.id}.json`))
