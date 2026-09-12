@@ -62,6 +62,12 @@ import { StoreError } from "@comms/storage/store";
 import { failure as remoteFailure } from "@comms/storage/remote-session";
 
 export { runTransferApp, preflightTransferAppSource } from "./transfer-app-launcher.ts";
+export { assertTransferActivation } from "./store-transfer-activation.ts";
+export { makeTransferBootstrap } from "./transfer-bootstrap.ts";
+export { makeTransferKernelInitializer } from "./transfer-kernel-initialize.ts";
+export { sqliteTransferSafetyCopy } from "./transfer-safety-copy.ts";
+export { nativeTransferSafetyCopy } from "./transfer-native-safety-copy.ts";
+
 export { launchRemoteRoot } from "./remote-root-launcher.ts";
 export { launchRemoteTransfer } from "./remote-transfer-launcher.ts";
 export { RemoteTransferConfiguration } from "./remote-transfer-configuration.ts";
