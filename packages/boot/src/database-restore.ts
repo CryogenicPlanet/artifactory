@@ -4,10 +4,10 @@ import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "
 import { SqlClient } from "effect/unstable/sql";
 import { artifactRetention, ArtifactRetentionRejected } from "./artifact-retention.ts";
 import { storageHeadroom, StorageRejected } from "./storage-headroom.ts";
-import { AppBackup } from "./app-backup.ts";
+import { DbOps } from "./db-ops.ts";
 import { AppRecovery } from "./app-recovery.ts";
 import { Auth } from "./auth.ts";
-import { BackupRecord } from "./backup-metadata.ts";
+import { BackupRecord, backupPath } from "./backup-metadata.ts";
 import { ChildAttempts } from "./child-attempts.ts";
 import { ChildError } from "./child-process.ts";
 import { DatabaseRestoreRequest, type RestoreSelection } from "./database-restore-schema.ts";
@@ -24,7 +24,7 @@ import type { ActiveChild, Supervisor } from "./supervisor.ts";
 export const databaseRestore = Effect.fn("databaseRestore")(function* (supervisor: Supervisor) {
 	const sql = yield* SqlClient.SqlClient;
 	const auth = yield* Auth;
-	const backup = yield* AppBackup;
+	const backup = yield* DbOps;
 	const recovery = yield* AppRecovery;
 	const owners = yield* ChildAttempts;
 	const generations = yield* Generations;
@@ -53,14 +53,13 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BackupRecord))),
 			);
 			const row = rows[0];
-			const directory = path.join(recovery.dataDirectory, "backups");
+			if (row && row.engine !== "sqlite") return yield* new ChildError({ code: "backup_engine_mismatch" });
 			if (
 				!row ||
 				row.published_through === null ||
 				row.published_through < 0 ||
-				row.path !== path.join(directory, `${id}.db`) ||
-				(yield* fs.realPath(row.path)) !==
-					path.join(yield* fs.realPath(recovery.dataDirectory), "backups", `${id}.db`) ||
+				row.path !== backupPath(path, recovery.dataDirectory, id) ||
+				(yield* fs.realPath(row.path)) !== backupPath(path, yield* fs.realPath(recovery.dataDirectory), id) ||
 				(yield* fs.stat(row.path)).type !== "File"
 			)
 				return yield* new ChildError({ code: "restore_backup_invalid" });
@@ -123,7 +122,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 			}
 			// The replacement app must republish its grants before activation can expose its pages.
 			yield* sql`DELETE FROM public_paths`;
-			yield* backup.restore(yield* saved(record.safety_backup));
+			yield* backup.restoreInto(yield* saved(record.safety_backup));
 			yield* recovery.prepare(yield* freshEpoch);
 			yield* sql`UPDATE db_restore_requests SET phase='failed',failure='restore_not_accepted' WHERE proof_id=${record.proof_id}`;
 			yield* releaseLock(record);
@@ -137,7 +136,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					return yield* new ChildError({ code: "restore_backup_changed" });
 				// The replacement app must republish its grants before activation can expose its pages.
 				yield* sql`DELETE FROM public_paths`;
-				yield* backup.restore(target);
+				yield* backup.restoreInto(target);
 				const epoch = yield* freshEpoch;
 				yield* recovery.prepare(epoch);
 				// From here, candidate effects belong to the working store. A crash must reconcile it before rollback.
@@ -325,12 +324,12 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					const id = yield* crypto.randomUUIDv4;
 					const directory = path.join(recovery.dataDirectory, "backups");
 					yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
-					const filename = path.join(directory, `${id}.db`);
+					const filename = backupPath(path, recovery.dataDirectory, id);
 					const fence = (yield* events.state).published_through;
 					const frozenEstimate = yield* backup.estimatedBytes;
 					yield* retention.prune(yield* headroom.sample, frozenEstimate, [generation.n]);
 					yield* headroom.check(frozenEstimate + target.bytes);
-					const bytes = Number(yield* backup.clone(filename));
+					const bytes = Number(yield* backup.clone({ _tag: "file", filename: filename }));
 					const at = (yield* DateTime.nowAsDate).getTime();
 					yield* sql.withTransaction(
 						Effect.gen(function* () {
@@ -369,7 +368,9 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 						const cause = Cause.findError(prepared.cause);
 						const failure =
 							cause._tag === "Success" &&
-							(Schema.is(StorageRejected)(cause.success) || Schema.is(ArtifactRetentionRejected)(cause.success))
+							((Schema.is(ChildError)(cause.success) && cause.success.code === "backup_engine_mismatch") ||
+								Schema.is(StorageRejected)(cause.success) ||
+								Schema.is(ArtifactRetentionRejected)(cause.success))
 								? cause.success.code
 								: "restore_preparation_failed";
 						yield* sql`UPDATE db_restore_requests SET phase='failed',failure=${failure} WHERE proof_id=${record.proof_id}`;

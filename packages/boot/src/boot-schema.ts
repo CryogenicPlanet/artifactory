@@ -34,7 +34,7 @@ export const initializeBootSchema = Effect.gen(function* () {
 	);
 	const version = versions[0]?.user_version;
 	if (version === undefined) return yield* Effect.die("Missing boot schema version");
-	if (version > 17) return yield* new BootSchemaTooNew({ found: version, supported: 17 });
+	if (version > 18) return yield* new BootSchemaTooNew({ found: version, supported: 18 });
 	// Refuse before schema or journal-mode changes so the previous image can finish recovery.
 	if (version >= 9 && version < 17) {
 		const cutovers = yield* sql`SELECT singleton FROM cutover WHERE phase!='accepted' LIMIT 1`;
@@ -48,7 +48,7 @@ export const initializeBootSchema = Effect.gen(function* () {
 	if (version === 0) yield* sql`PRAGMA auto_vacuum = INCREMENTAL`;
 	yield* sql`PRAGMA journal_mode = WAL`;
 	yield* sql`PRAGMA synchronous = FULL`;
-	if (version === 17) return;
+	if (version === 18) return;
 	yield* sql.withTransaction(
 		Effect.gen(function* () {
 			if (version === 0)
@@ -135,7 +135,9 @@ export const initializeBootSchema = Effect.gen(function* () {
 			if (version < 16)
 				yield* sql`ALTER TABLE edit_lock ADD COLUMN reset_pin INTEGER NOT NULL DEFAULT 0 CHECK(reset_pin IN (0,1,2))`;
 			if (version < 17) yield* sql`ALTER TABLE backups ADD COLUMN legacy_store_id TEXT`;
-			yield* sql`PRAGMA user_version = 17`;
+			if (version < 18)
+				yield* sql`ALTER TABLE backups ADD COLUMN engine TEXT NOT NULL DEFAULT 'sqlite' CHECK(engine IN ('sqlite','pg','mysql'))`;
+			yield* sql`PRAGMA user_version = 18`;
 		}),
 	);
 });

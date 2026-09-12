@@ -1,6 +1,6 @@
 import { Effect, FileSystem, Path, Ref } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { AppBackup } from "./app-backup.ts";
+import { DbOps } from "./db-ops.ts";
 import { AppRecovery } from "./app-recovery.ts";
 import type { ChildAttempts } from "./child-attempts.ts";
 import { ChildError } from "./child-process.ts";
@@ -23,7 +23,7 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 	const sql = yield* SqlClient.SqlClient;
 	const generations = yield* Generations;
 	const recovery = yield* AppRecovery;
-	const backup = yield* AppBackup;
+	const backup = yield* DbOps;
 	const events = yield* Events;
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
@@ -55,7 +55,7 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 			yield* fs.copyFile(backupPath, clone);
 			// Rehearsal never publishes its private sequence space into boot.
 			const epoch = `restore-rehearsal-${record.proof_id}`;
-			yield* backup.prepareClone(clone, epoch);
+			yield* backup.prepareClone({ _tag: "file", filename: clone }, epoch);
 			const report = yield* Effect.acquireUseRelease(
 				supervisor
 					.launch(generation, { _tag: "file", filename: clone }, "rehearsal", (yield* events.state).next, epoch)

@@ -4,7 +4,7 @@ import { HttpClient } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
 import { artifactRetention } from "./artifact-retention.ts";
 import { storageHeadroom } from "./storage-headroom.ts";
-import { AppBackup } from "./app-backup.ts";
+import { DbOps } from "./db-ops.ts";
 import { AppRecovery } from "./app-recovery.ts";
 import type { ChildAttempts } from "./child-attempts.ts";
 import { ChildError } from "./child-process.ts";
@@ -17,7 +17,7 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 	const sql = yield* SqlClient.SqlClient;
 	const client = yield* HttpClient.HttpClient;
 	const recovery = yield* AppRecovery;
-	const backup = yield* AppBackup;
+	const backup = yield* DbOps;
 	const events = yield* Events;
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
@@ -77,7 +77,7 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 					const saved = path.join(directory, `${id}.db`);
 					created = saved;
 					yield* retention.prune(yield* headroom.sample, yield* backup.estimatedBytes, [active.generation.n]);
-					const bytes = Number(yield* backup.clone(saved));
+					const bytes = Number(yield* backup.clone({ _tag: "file", filename: saved }));
 					const taken = (yield* DateTime.nowAsDate).getTime();
 					const record = {
 						id,

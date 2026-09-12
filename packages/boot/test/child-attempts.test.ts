@@ -131,7 +131,7 @@ describe("durable child ownership across kernel lifetimes", () => {
 		await execute(root, { op: "legacy", bootId: firstBoot });
 		expect(await execute(root, { op: "recover", bootId: nextBoot })).toMatchObject({
 			result: "Failure",
-			version: [{ user_version: 17 }],
+			version: [{ user_version: 18 }],
 			rows: [{ id: "legacy", boot_id: null, closed: 0 }],
 		});
 		await mkdir(join(root, "attempts"), { recursive: true });

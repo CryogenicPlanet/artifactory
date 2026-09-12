@@ -5,7 +5,8 @@
 	"type": "module",
 	"exports": {
 		"./store": "./src/store.ts",
-		"./client": "./src/client.ts"
+		"./client": "./src/client.ts",
+		"./descendant": "./src/descendant.ts"
 	},
 	"scripts": {
 		"check": "tsc --noEmit"

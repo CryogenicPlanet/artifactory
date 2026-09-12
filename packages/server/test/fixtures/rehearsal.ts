@@ -6,7 +6,7 @@ import { Config, Console, Deferred, Effect, FileSystem, Layer, Path, Schema, Str
 import { SqlClient } from "effect/unstable/sql";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
-import { AppBackup, layer as backupLayer } from "../../../boot/src/app-backup.ts";
+import { DbOps, layer as backupLayer } from "../../../boot/src/db-ops.ts";
 
 const run = Effect.gen(function* () {
 	const filename = yield* Config.String("LIVE_DATABASE");
@@ -18,9 +18,9 @@ const run = Effect.gen(function* () {
 		const clone = path.join(temporary, "clone.db");
 		const pages = path.join(temporary, "pages");
 		yield* fs.makeDirectory(pages);
-		const backup = yield* AppBackup;
-		yield* backup.clone(clone);
-		yield* backup.prepareClone(clone, "rehearsal-test");
+		const backup = yield* DbOps;
+		yield* backup.clone({ _tag: "file", filename: clone });
+		yield* backup.prepareClone({ _tag: "file", filename: clone }, "rehearsal-test");
 		const initial = yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql`SELECT next FROM seq WHERE singleton=1`.pipe(
@@ -96,7 +96,7 @@ const run = Effect.gen(function* () {
 		);
 	}).pipe(
 		Effect.provide(
-			backupLayer(filename).pipe(
+			backupLayer({ _tag: "file", filename }, filename.slice(0, filename.lastIndexOf("/"))).pipe(
 				Layer.provide(SqliteClient.layer({ filename: filename.replace(/[^/]+$/, "boot.db"), disableWAL: true })),
 			),
 		),

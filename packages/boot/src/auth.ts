@@ -54,6 +54,7 @@ export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
 		"auth_configuration_invalid",
 		"authentication_failed",
 		"authentication_invalid",
+		"backup_engine_mismatch",
 		"backup_not_found",
 		"backup_not_restorable",
 		"challenge_invalid",

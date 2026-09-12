@@ -28,6 +28,7 @@ export class ChildError extends Schema.TaggedError<ChildError>()("ChildError", {
 		"preparation_install_timeout",
 		"restore_backup_changed",
 		"restore_backup_invalid",
+		"backup_engine_mismatch",
 		"restore_record_missing",
 		"restore_recovery_required",
 		"restore_rehearsal_failed",

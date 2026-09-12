@@ -44,6 +44,7 @@ const program = Effect.gen(function* () {
 			yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 			yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
 			yield* sql`ALTER TABLE backups DROP COLUMN legacy_store_id`;
+			yield* sql`ALTER TABLE backups DROP COLUMN engine`;
 			yield* sql`PRAGMA user_version=11`;
 			yield* sql`INSERT INTO child_attempts(id,generation,receipt,opened) VALUES('legacy',1,${`${directory}/attempts/legacy.closed`},1)`;
 			return { result: "legacy" };

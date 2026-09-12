@@ -323,3 +323,15 @@ it("keeps invalid copy sizes, capacity and persisted backup sizes distinct from 
 	expect(await readFile(join(app.root, "backups/invalid.db"), "utf8")).toBe("retained-data");
 	expect(await app.sql("SELECT bytes FROM backups WHERE id='invalid'")).toEqual([{ bytes: -1 }]);
 });
+
+for (const engine of ["pg", "mysql"]) {
+	it(`retains ${engine} artifacts and catalog provenance under SQLite budget pressure`, async (test) => {
+		const app = await store(test);
+		await app.backup("foreign");
+		await app.sql(`UPDATE backups SET engine='${engine}' WHERE id='foreign'`);
+		const before = await app.sql("SELECT * FROM backups");
+		expect(await app.prune({ capacity: 100 })).toMatchObject({ failure: { code: "backup_budget" } });
+		expect(await app.sql("SELECT * FROM backups")).toEqual(before);
+		expect(await readFile(join(app.root, "backups/foreign.db"), "utf8")).toBe("retained-data");
+	});
+}

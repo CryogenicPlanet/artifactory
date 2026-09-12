@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import type { TestContext } from "vitest";
 
-async function run(test: TestContext, operation: "restore" | "bootstrap") {
+async function run(test: TestContext, operation: "restore" | "bootstrap" | "foreign") {
 	const root = await mkdtemp(join(tmpdir(), "comms-backup-"));
 	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
 	const result = await promisify(execFile)("bun", [
@@ -19,6 +19,9 @@ async function run(test: TestContext, operation: "restore" | "bootstrap") {
 }
 
 describe("app database backup", () => {
+	it("refuses foreign-engine artifacts before reading files or changing the live identity", async (test) => {
+		expect(await run(test, "foreign")).toEqual(["backup_engine_mismatch", "backup_engine_mismatch"]);
+	});
 	it("restores the saved data after every old SQLite handle has closed", async (test) => {
 		expect(await run(test, "restore")).toEqual([{ value: "before backup" }]);
 	});
