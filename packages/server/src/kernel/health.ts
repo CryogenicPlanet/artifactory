@@ -47,6 +47,6 @@ export const probeHealth = <E = never, R = never>(
 			yield* boot.abort(reservation.transaction);
 		}
 		if (!result.cause.reasons.some((reason) => Cause.isFailReason(reason) && Schema.is(RolledBack)(reason.error)))
-			return yield* new KernelError({ code: "health_failed" });
+			return yield* Effect.failCause(result.cause);
 		return { status: "ok" };
 	}).pipe(Effect.provide(privateRehearsal ? rehearsalLayer : probeLayer));

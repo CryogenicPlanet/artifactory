@@ -38,6 +38,7 @@ import { migrate } from "./kernel/migrations.ts";
 import { type Topics, layer as topicsLayer } from "./ext/core/topics.ts";
 import { type Messages, layer as messagesLayer } from "./ext/core/messages.ts";
 import { probeHealth } from "./kernel/health.ts";
+import { healthFailure } from "./kernel/health-failure.ts";
 import { Lifecycle, RequestMutation, layer as lifecycleLayer } from "./kernel/lifecycle.ts";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
@@ -160,11 +161,13 @@ const server = Effect.gen(function* () {
 							}),
 						)
 						.pipe(
-							Effect.catchCause(() =>
-								Effect.succeed(
-									HttpServerResponse.jsonUnsafe(
-										{ status: "failed" },
-										{ status: 503, headers: { "x-comms-health-ready": "1" } },
+							Effect.catchCause((cause) =>
+								Console.error(healthFailure("probe", cause)).pipe(
+									Effect.as(
+										HttpServerResponse.jsonUnsafe(
+											{ status: "failed" },
+											{ status: 503, headers: { "x-comms-health-ready": "1" } },
+										),
 									),
 								),
 							),
@@ -254,7 +257,7 @@ const server = Effect.gen(function* () {
 								: HttpServerResponse.empty({ status: 503 });
 						}),
 					);
-					yield* Effect.logError(cause);
+					yield* Console.error(healthFailure("initialize", cause));
 				}),
 			),
 			Effect.forkScoped,
