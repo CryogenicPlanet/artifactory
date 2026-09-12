@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { expect, it } from "vitest";
 const root = process.env.COMMS_REMOTE_COPY_CONFIG_ROOT;
 it.skipIf(!root)(
-	"MySQL DbOps provisions the account used by the real root guardian and native copy keeper",
+	"MySQL DbOps restores a locked native dump through the real keeper and hands it to the app",
 	async (test) => {
 		const data = await mkdtemp(join(tmpdir(), "comms-guarded-dbops-"));
 		// Failure retains evidence/credentials for explicit recovery.
