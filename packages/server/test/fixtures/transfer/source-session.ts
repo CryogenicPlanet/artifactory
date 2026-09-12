@@ -41,7 +41,7 @@ const main = Effect.gen(function* () {
 				"CREATE TABLE source_changes(batch TEXT)",
 				"CREATE TABLE edit_lock(id TEXT)",
 				"CREATE TABLE staging(path TEXT)",
-				"CREATE TABLE child_attempts(closed INTEGER)",
+				"CREATE TABLE child_attempts(id TEXT PRIMARY KEY,receipt TEXT,closed INTEGER)",
 				"CREATE TABLE event_batches(state TEXT)",
 				"CREATE TABLE outbox(seq INTEGER,shipped_at INTEGER)",
 				"CREATE TABLE topic_page_continuations(completed INTEGER)",
@@ -136,7 +136,7 @@ const main = Effect.gen(function* () {
 	yield* Effect.scoped(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			yield* sql`INSERT INTO child_attempts VALUES(0)`;
+			yield* sql`INSERT INTO child_attempts VALUES('pending',${`${directory}/attempts/pending.closed`},0)`;
 		}).pipe(Effect.provide(SqliteClient.layer({ filename: bootfile, disableWAL: true }))),
 	);
 	const fresh = { ...options, selection: { ...selection, transfer_id: "56789012-1234-4234-8234-123456789abc" } };
