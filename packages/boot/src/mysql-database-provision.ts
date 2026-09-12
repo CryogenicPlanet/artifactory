@@ -82,11 +82,10 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 				const existing = yield* sql`SELECT HOST FROM information_schema.USER_ATTRIBUTES WHERE USER=${record.principal}`;
 				if (existing.length !== 0) return yield* invalid();
 				// No IF NOT EXISTS: a colliding account is never adopted. ATTRIBUTE commits with creation.
+				// MySQL's session_account_connect_attrs uses pfs_readonly_world_acl and filters rows by account.
+				// It needs no delegated SELECT grant: mysql-server/mysql-8.4.11 table_session_account_connect_attrs.cc.
 				yield* execute(
 					`CREATE USER ${account(record.principal)} IDENTIFIED BY '${password}' ATTRIBUTE '{"comms_resource":"${record.id}"}'`,
-				);
-				yield* execute(
-					`GRANT SELECT ON performance_schema.session_account_connect_attrs TO ${account(record.principal)}`,
 				);
 			});
 		const createDatabase = (record: RemoteDatabaseRecord) =>
