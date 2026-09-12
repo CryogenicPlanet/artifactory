@@ -1,17 +1,8 @@
 import { closeSync } from "node:fs";
-import { databaseConfiguration } from "@comms/boot";
-import { ConfigProvider, Effect, Schema, Stdio, Stream } from "effect";
+import { decodeTransferConfiguration } from "./transfer/configuration.ts";
+import { Effect, Stdio, Stream } from "effect";
 import { TransferRejected } from "@comms/storage/store-transfer-schema";
 
-const Descriptors = Schema.Struct({ boot: Schema.String, app: Schema.String });
-const Input = Schema.Struct({
-	version: Schema.Literal(1),
-	transfer_id: Schema.String,
-	mode: Schema.Literals(["check", "transfer"]),
-	source: Descriptors,
-	target: Descriptors,
-	tls: Schema.Boolean,
-});
 const invalid = () => new TransferRejected({ code: "transfer_binding_invalid" });
 
 // Stdio owns reads but exposes no close operation. This narrow native lifecycle bridge
@@ -68,25 +59,5 @@ export const readTransferConfiguration = Effect.gen(function* () {
 			return yield* Effect.try({ try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes), catch: invalid });
 		}),
 	);
-	const input = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Input))(encoded).pipe(Effect.mapError(invalid));
-	if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\s\S])/.test(input.transfer_id))
-		return yield* invalid();
-	const pair = (descriptors: typeof Descriptors.Type) =>
-		databaseConfiguration("/unselected/boot.db", "/unselected/app.db").pipe(
-			Effect.provideService(
-				ConfigProvider.ConfigProvider,
-				ConfigProvider.fromUnknown({
-					DATABASE_URL: descriptors.app,
-					BOOT_DATABASE_URL: descriptors.boot,
-					DATABASE_TLS: input.tls,
-				}),
-			),
-			Effect.mapError(invalid),
-		);
-	const source = yield* pair(input.source);
-	const target = yield* pair(input.target);
-	const engine = (configuration: typeof source) =>
-		configuration._tag === "file" ? "sqlite" : configuration.bootConnection.engine;
-	if (engine(source) === engine(target)) return yield* invalid();
-	return { transferId: input.transfer_id, mode: input.mode, source, target };
+	return yield* decodeTransferConfiguration(encoded);
 });
