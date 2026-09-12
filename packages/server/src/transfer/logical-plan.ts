@@ -1,4 +1,5 @@
 import type { TransferColumn, TransferInventory, TransferTable } from "@comms/storage/transfer-inventory";
+import { searchFunctionNames } from "./search-capability.ts";
 import { emptyJournalNames, emptyJournalPlan, withoutEmptyJournals } from "./empty-journals.ts";
 import { sameTransferDefault } from "./column-default.ts";
 import type { TransferKind } from "@comms/storage/transfer-values";
@@ -39,7 +40,7 @@ const generatedNames = [
 	"previous_body",
 ] as const;
 
-const logicalTable = (store: TransferStore, engine: TransferEngine, table: TransferTable) =>
+const logicalTable = (store: TransferStore, engine: TransferEngine, table: TransferTable, folded = false) =>
 	Effect.gen(function* () {
 		const synthetic = syntheticKey(store, table.name);
 		const columns: TransferColumn[] = [];
@@ -63,7 +64,16 @@ const logicalTable = (store: TransferStore, engine: TransferEngine, table: Trans
 					)
 						return yield* unsupported(object);
 				} else {
-					const expected = derivedExpression(store, engine, table.name, column.name);
+					let expected = derivedExpression(store, engine, table.name, column.name);
+					if (
+						folded &&
+						store === "app" &&
+						engine === "pg" &&
+						table.name === "messages" &&
+						["body_tsv", "previous_body_tsv"].includes(column.name) &&
+						expected
+					)
+						expected = expected.replace("COALESCE(", "comms_unaccent(COALESCE(").replace(/\)$/, "))");
 					if (
 						!expected ||
 						typeof column.expression !== "string" ||
@@ -194,7 +204,13 @@ export const logicalTransferPlan = (options: {
 					: [];
 			const bootIndexes =
 				store === "boot" && side.engine === "sqlite" ? bootDerivedObjects.map((object) => object.name) : [];
-			const allowed = [...expected, ...internal, ...shadows, ...bootIndexes];
+			const allowed = [
+				...expected,
+				...internal,
+				...shadows,
+				...bootIndexes,
+				...(store === "app" && side.engine === "pg" ? searchFunctionNames : []),
+			];
 			if (
 				new Set(side.inventory.derived).size !== side.inventory.derived.length ||
 				expected.some((name) => !side.inventory.derived.includes(name)) ||
@@ -230,8 +246,18 @@ export const logicalTransferPlan = (options: {
 				ledgers.push(to);
 				continue;
 			}
-			const from = yield* logicalTable(store, source.engine, sourceTable);
-			const to = yield* logicalTable(store, target.engine, targetTable);
+			const from = yield* logicalTable(
+				store,
+				source.engine,
+				sourceTable,
+				source.inventory.derived.includes(searchFunctionNames[1]),
+			);
+			const to = yield* logicalTable(
+				store,
+				target.engine,
+				targetTable,
+				target.inventory.derived.includes(searchFunctionNames[1]),
+			);
 			if (
 				!same(from.columns.map((column) => column.name).sort(), to.columns.map((column) => column.name).sort()) ||
 				!same(from.key, to.key)
@@ -264,7 +290,7 @@ export const logicalTransferPlan = (options: {
 					return yield* unsupported(`${name}.foreign_keys`);
 				const targetLogical = yield* ledgerNames(store).includes(referenced.name)
 					? ledgerPlan(referenced)
-					: logicalTable(store, source.engine, referenced);
+					: logicalTable(store, source.engine, referenced, source.inventory.derived.includes(searchFunctionNames[1]));
 				if (!constraint.targets.every((column) => targetLogical.columns.some((entry) => entry.name === column)))
 					return yield* unsupported(`${name}.foreign_keys`);
 			}

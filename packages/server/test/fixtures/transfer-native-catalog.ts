@@ -1,3 +1,4 @@
+import { postgresSearchDeclarations } from "../../src/transfer/search-capability.ts";
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
 import { Effect, Layer, Redacted, Schema } from "effect";
@@ -67,10 +68,16 @@ for (const [store, settings] of [
 					yield* sql`INSERT INTO kernel_writer(singleton,epoch) VALUES (1,'catalog')`;
 				yield* initializeRemoteKernelSchema(sql, "catalog");
 				yield* initializeRemoteCore(sql, "catalog");
-				assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 11);
+				assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 12);
 			}
 			stage = "inventory";
-			const inventory = yield* sql.withTransaction(transferInventory(sql, [], store === "app" ? coreJsonColumns : []));
+			const inventory = yield* sql.withTransaction(
+				transferInventory(
+					sql,
+					settings.engine === "pg" && store === "app" ? yield* postgresSearchDeclarations(sql) : [],
+					store === "app" ? coreJsonColumns : [],
+				),
+			);
 			for (const name of store === "boot"
 				? ["boot_migrations", "settings", "seq", "events", "backups", "source_batches", "versions"]
 				: [

@@ -1,3 +1,4 @@
+import { postgresSearchDeclarations } from "../../src/transfer/search-capability.ts";
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
 import { BunServices } from "@effect/platform-bun";
@@ -82,12 +83,16 @@ async function main() {
 					if (!(yield* sql`SELECT singleton FROM store_identity`).length)
 						yield* sql`INSERT INTO store_identity VALUES(1,'12345678-1234-4123-8123-123456789abc',1,NULL)`;
 					const ledgers = yield* initializeTransferApp(sql, epoch, frozenSource);
-					assert.equal(ledgers.core.length, 11);
-					assert.equal(ledgers.core.at(-1)?.name, "domain_json");
+					assert.equal(ledgers.core.length, 12);
+					assert.equal(ledgers.core.at(-1)?.name, "search_diacritics");
 					assert(ledgers.extensions.length > 0);
 					stage = `${engine}:inventory`;
 					const inventory = yield* sql.withTransaction(
-						transferInventory(sql, engine === "sqlite" ? coreSearchObjects : [], coreJsonColumns),
+						transferInventory(
+							sql,
+							engine === "sqlite" ? coreSearchObjects : engine === "pg" ? yield* postgresSearchDeclarations(sql) : [],
+							coreJsonColumns,
+						),
 					);
 					if (engine === "mysql") {
 						stage = "mysql:altered-subscription-hash";

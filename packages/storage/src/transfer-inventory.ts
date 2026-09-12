@@ -39,10 +39,32 @@ export const transferInventory = (
 	Effect.gen(function* () {
 		const engine = on(sql, { sqlite: () => "sqlite", pg: () => "pg", mysql: () => "mysql" });
 		if (engine === "sqlite") return yield* sqliteTransferInventory(sql, derived);
-		if (derived.length !== 0) return yield* unsupported(derived[0]?.name ?? "derived");
+		if (
+			derived.some((item) => engine !== "pg" || item.kind !== "function") ||
+			new Set(derived.map((item) => item.name)).size !== derived.length
+		)
+			return yield* unsupported("derived");
+		const functions =
+			engine !== "pg"
+				? []
+				: yield* sql`SELECT (n.nspname||'.'||p.proname||'('||pg_catalog.oidvectortypes(p.proargtypes)||')') AS name, json_build_array(l.lanname,p.prosrc,p.probin,p.provolatile,p.proisstrict,p.proparallel,p.prosecdef,p.proretset,p.pronargdefaults,pg_catalog.format_type(p.prorettype,NULL),p.proconfig)::text AS definition FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace JOIN pg_catalog.pg_language l ON l.oid=p.prolang WHERE left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema' ORDER BY name`.pipe(
+						Effect.flatMap(
+							Schema.decodeUnknownEffect(
+								Schema.Array(Schema.Struct({ name: Schema.String, definition: Schema.String })),
+							),
+						),
+					);
+		for (const item of functions) {
+			const declaration = derived.find((d) => d.name === item.name);
+			const definition = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.Json)))(
+				item.definition,
+			);
+			if (!declaration || JSON.stringify(definition) !== declaration.definition) return yield* unsupported(item.name);
+		}
+		if (derived.some((item) => !functions.some((fn) => fn.name === item.name))) return yield* invalid("derived");
 		const executable = yield* on(sql, {
 			sqlite: () => sql`SELECT 1 WHERE 0`,
-			pg: () => sql`SELECT p.proname AS name FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema'
+			pg: () => sql`SELECT '' AS name WHERE false
  UNION ALL SELECT t.tgname AS name FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE NOT t.tgisinternal AND left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema'
  UNION ALL SELECT pol.polname AS name FROM pg_catalog.pg_policy pol JOIN pg_catalog.pg_class c ON c.oid=pol.polrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema'
  UNION ALL SELECT evtname AS name FROM pg_catalog.pg_event_trigger
@@ -183,7 +205,10 @@ export const transferInventory = (
 				if (!target || !key.targets.every((name) => target.columns.some((column) => column.name === name)))
 					return yield* invalid(`${table.name}.${key.name}`);
 			}
-		return { tables: result.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)), derived: [] };
+		return {
+			tables: result.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
+			derived: derived.map((item) => item.name).sort(),
+		};
 	}).pipe(
 		Effect.flatMap((inventory) =>
 			Effect.gen(function* () {

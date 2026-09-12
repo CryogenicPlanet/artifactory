@@ -26,6 +26,7 @@ import { MigrationProof, readMigrationProof, writeMigrationProof } from "./migra
 import { prepareTransfer } from "./prepare.ts";
 import { clearTransferSeeds } from "./clear-seeds.ts";
 import { transferStores } from "../store-transfer-coordinator.ts";
+import { postgresSearchDeclarations } from "./search-capability.ts";
 import { bootDerivedObjects, coreJsonColumns, coreSearchObjects } from "./derived-schema.ts";
 
 const invalid = () => new TransferRejected({ code: "transfer_journal_conflict" });
@@ -245,11 +246,19 @@ export const runStoreTransferWorker = (configuration: Configuration, owners: typ
 						Effect.gen(function* () {
 							const targetApp = yield* SqlClient.SqlClient;
 							const inventory = (sql: SqlClient.SqlClient, engine: "sqlite" | "pg" | "mysql", store: "boot" | "app") =>
-								transferInventory(
-									sql,
-									engine === "sqlite" ? (store === "boot" ? bootDerivedObjects : coreSearchObjects) : [],
-									store === "app" ? coreJsonColumns : [],
-								).pipe(transferStage(`catalog_${store}`));
+								Effect.gen(function* () {
+									return yield* transferInventory(
+										sql,
+										engine === "sqlite"
+											? store === "boot"
+												? bootDerivedObjects
+												: coreSearchObjects
+											: engine === "pg" && store === "app"
+												? yield* postgresSearchDeclarations(sql)
+												: [],
+										store === "app" ? coreJsonColumns : [],
+									);
+								}).pipe(transferStage(`catalog_${store}`));
 							const inputs = {
 								selection,
 								mode: configuration.mode,
