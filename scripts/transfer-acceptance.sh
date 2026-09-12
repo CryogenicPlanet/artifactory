@@ -141,6 +141,18 @@ wait_for_board() {
   echo 'Board readiness deadline exceeded.' >&2
   return 1
 }
+# Effect's default teardown returns 130 after a SIGTERM interruption and completed finalizers.
+# A stopped container is not remote closure proof; the transfer command still verifies its receipts.
+stop_board() {
+  local container=$1 phase=$2 state
+  echo "Transfer stopping board: phase=$phase"
+  docker stop --time 30 "$container" >/dev/null
+  state=$(docker inspect --format '{{.State.Running}}:{{.State.OOMKilled}}:{{.State.ExitCode}}' "$container")
+  case "$state" in
+    false:false:0|false:false:130) echo "Transfer stopped board: phase=$phase state=$state" ;;
+    *) echo "Transfer stop failed: phase=$phase state=$state" >&2; return 1 ;;
+  esac
+}
 launch_board "$board" source
 wait_for_board "$board"
 docker logs "$board" > "$private/setup-output" 2>&1
@@ -156,8 +168,7 @@ export COMMS_SETUP_CODE_FILE="$private/setup-code"
 export COMMS_TEST_DIAGNOSTICS_FILE="$private/http-diagnostics"
 bun scripts/remote-board-http.ts prepare http://localhost:8080 "$private/state.json"
 bun scripts/transfer-acceptance-http.ts seed-source http://localhost:8080 "$private/state.json"
-docker stop --time 30 "$board" >/dev/null
-[ "$(docker inspect --format '{{.State.ExitCode}}' "$board")" = 0 ]
+stop_board "$board" source-seeded
 # The real wrapper requires a root-owned, non-writable ancestor chain. Host runner UID
 # ownership is not enough; copy each private config into a root-owned disposable volume.
 run_transfer() {
@@ -211,8 +222,7 @@ fi
 docker start "$board" >/dev/null
 wait_for_board "$board"
 bun scripts/transfer-acceptance-http.ts verify-checked-source http://localhost:8080 "$private/state.json"
-docker stop --time 30 "$board" >/dev/null
-[ "$(docker inspect --format '{{.State.ExitCode}}' "$board")" = 0 ]
+stop_board "$board" source-checked
 run_transfer transfer
 launch_board "$refused_board" source
 for attempt in $(seq 1 60); do
@@ -238,6 +248,5 @@ bun scripts/transfer-acceptance-http.ts verify-target http://localhost:8080 "$pr
 docker restart --time 30 "$target_board" >/dev/null
 wait_for_board "$target_board"
 bun scripts/transfer-acceptance-http.ts verify-restarted http://localhost:8080 "$private/state.json"
-docker stop --time 30 "$target_board" >/dev/null
-[ "$(docker inspect --format '{{.State.ExitCode}}' "$target_board")" = 0 ]
+stop_board "$target_board" target-restarted
 echo "Actual image transfer $source_engine -> $target_engine passed persisted board and restart checks."
