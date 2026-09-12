@@ -1,4 +1,4 @@
-import { Cause, Effect, Encoding, Redacted, Result } from "effect";
+import { Cause, Effect, Encoding, Redacted, Result, Schema } from "effect";
 import {
 	SqlError,
 	UnknownError,
@@ -7,6 +7,19 @@ import {
 	SerializationError,
 	isSqlError,
 } from "effect/unstable/sql/SqlError";
+
+/** Only a first physical inspector login may emit this; no driver detail survives. */
+export class RemoteAuthenticationRejected extends Schema.TaggedError<RemoteAuthenticationRejected>()(
+	"RemoteAuthenticationRejected",
+	{
+		engine: Schema.Literals(["pg", "mysql"]),
+		code: Schema.Literals(["28P01", "1045"]),
+	},
+) {
+	get message() {
+		return "remote_authentication_rejected";
+	}
+}
 
 /** Explicit fields prevent driver URL parameters from overriding identity or handshake tags. */
 export interface RemoteConnection {

@@ -1,7 +1,15 @@
 import { Context, Effect, Layer, Ref, Semaphore } from "effect";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { accountSessions, assertNoPreparedXa, connectionIds, identify, open, sessions } from "./remote-driver.ts";
+import {
+	accountSessions,
+	assertNoPreparedXa,
+	connectionIds,
+	identify,
+	open,
+	openInspector,
+	sessions,
+} from "./remote-driver.ts";
 import {
 	type RemoteConnection,
 	type RemoteAttempt,
@@ -41,10 +49,10 @@ const inspect = (options: RemoteInspectorOptions) =>
 	Effect.gen(function* () {
 		const tag = yield* attemptTag(options);
 		const inspectorTag = `inspect:${tag.slice(6)}`;
-		const raw = yield* open(options.connection, inspectorTag);
+		const raw = yield* openInspector(options.connection, inspectorTag);
 		// One pinned physical connection for the entire inspector lifetime. A server
 		// restart breaks it; no pooled reacquisition can turn a new empty server into proof.
-		const connection = yield* raw.reserve;
+		const connection = yield* sanitized(raw.reserve, "remote_connection_failed");
 		const server = yield* identify(connection, options.connection, inspectorTag);
 		const privileged = options.mysqlBootConnection;
 		if (
@@ -210,7 +218,12 @@ const inspect = (options: RemoteInspectorOptions) =>
 		} satisfies RemoteInspection;
 	});
 export const remoteInspectorLayer = (options: RemoteInspectorOptions) =>
-	Layer.effect(RemoteInspector, inspect(options)).pipe(Layer.provide(Reactivity.layer));
+	Layer.effect(
+		RemoteInspector,
+		inspect(options).pipe(
+			Effect.catchTag("RemoteAuthenticationRejected", () => Effect.fail(failure("remote_connection_failed"))),
+		),
+	).pipe(Layer.provide(Reactivity.layer));
 
 /** Production owner proof: missing privileged MySQL visibility refuses before any app lease. */
 export const remoteOwnerInspectorLayer = (options: RemoteInspectorOptions) =>
