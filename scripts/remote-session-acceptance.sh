@@ -32,6 +32,8 @@ CREATE DATABASE comms_snapshot_boot OWNER comms_app;
 CREATE DATABASE comms_snapshot_app OWNER comms_app;
 CREATE DATABASE comms_schema_core OWNER comms_app;
 CREATE DATABASE comms_schema_json_crash OWNER comms_app;
+CREATE DATABASE comms_concurrency_app OWNER comms_app;
+CREATE DATABASE comms_concurrency_boot OWNER comms_app;
 REVOKE CONNECT ON DATABASE comms_boot FROM PUBLIC;
 REVOKE CONNECT ON DATABASE comms_app FROM PUBLIC;
 GRANT CONNECT ON DATABASE comms_app TO comms_app,comms_boot;
@@ -44,6 +46,8 @@ CREATE DATABASE comms_app CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
 CREATE DATABASE comms_schema_guard CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 CREATE DATABASE comms_schema_core CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 CREATE DATABASE comms_schema_json_crash CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
+CREATE DATABASE comms_concurrency_app CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
+CREATE DATABASE comms_concurrency_boot CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 GRANT ALL ON comms_boot.* TO 'comms_boot'@'%';
 CREATE DATABASE comms_shared_store CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
 GRANT ALL ON comms_shared_store.* TO 'comms_app'@'%';
@@ -55,6 +59,10 @@ GRANT ALL ON comms_app.* TO 'comms_app'@'%';
 GRANT ALL ON comms_schema_guard.* TO 'comms_app'@'%';
 GRANT ALL ON comms_schema_core.* TO 'comms_app'@'%';
 GRANT ALL ON comms_schema_json_crash.* TO 'comms_app'@'%';
+GRANT ALL ON comms_concurrency_app.* TO 'comms_app'@'%';
+GRANT ALL ON comms_concurrency_boot.* TO 'comms_app'@'%';
+GRANT SELECT ON performance_schema.data_lock_waits TO 'comms_app'@'%';
+GRANT SELECT ON performance_schema.threads TO 'comms_app'@'%';
 GRANT SELECT ON performance_schema.session_account_connect_attrs TO 'comms_app'@'%';
 """
 (root/'roles.sql').write_text(sql)
@@ -107,11 +115,13 @@ published=$(docker port "$container" "$port/tcp")
 python3 - "$private/client.json" "${published##*:}" <<'PY'
 import json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()); d['port']=int(sys.argv[2]); p.write_text(json.dumps(d))
-for database,name in [('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect'),('comms_snapshot_boot','snapshot-boot'),('comms_snapshot_app','snapshot-app')]:
+for database,name in [('comms_concurrency_app','concurrency-app'),('comms_concurrency_boot','concurrency-boot'),('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect'),('comms_snapshot_boot','snapshot-boot'),('comms_snapshot_app','snapshot-app')]:
  d['database']=database; (p.parent/(name+'.json')).write_text(json.dumps(d))
 PY
 # The intentionally truncated session-attribute case refuses before SQL admission.
 if [ "$attributes" != 32 ]; then
+  COMMS_CONCURRENCY_APP_CONFIG="$private/concurrency-app.json" COMMS_CONCURRENCY_BOOT_CONFIG="$private/concurrency-boot.json" \
+    node node_modules/vitest/vitest.mjs run packages/server/test/kernel/native-concurrency.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_REMOTE_CORE_TEST_CONFIG="$private/core.json" \
   COMMS_REMOTE_CORE_JSON_CRASH_CONFIG="$private/json-crash.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/remote-core-schema.test.ts packages/server/test/remote-core-json-crash.test.ts --maxWorkers=1 --reporter=verbose
