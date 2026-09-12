@@ -14,8 +14,8 @@ import {
 	TransferRejected,
 	type TransferPreparation,
 } from "@comms/storage/store-transfer-schema";
-import { Config, Crypto, Effect, FileSystem, Option, Path, Schema } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { Cause, Console, Config, Crypto, Effect, FileSystem, Option, Path, Schema } from "effect";
+import { SqlClient, SqlError } from "effect/unstable/sql";
 import type { RemoteTransferConfiguration } from "@comms/boot";
 import type { decodeTransferConfiguration } from "./configuration.ts";
 import { transferEndpoint } from "./endpoint.ts";
@@ -28,6 +28,36 @@ import { transferStores } from "../store-transfer-coordinator.ts";
 import { bootDerivedObjects, coreJsonColumns, coreSearchObjects } from "./derived-schema.ts";
 
 const invalid = () => new TransferRejected({ code: "transfer_journal_conflict" });
+// Only fixed phase names and schema-validated protocol codes leave this immutable worker.
+// Driver messages, SQL, descriptors and arbitrary error payloads never enter diagnostics.
+export const transferStage = (stage: string) =>
+	Effect.onError((cause: Cause.Cause<unknown>) => {
+		const failure = Cause.findErrorOption(cause);
+		const error = Option.isSome(failure) ? failure.value : undefined;
+		const code = Schema.is(TransferRejected)(error) ? error.code : "transfer_operation_failed";
+		if (Schema.is(SqlError.SqlError)(error)) {
+			const driver = error.reason.cause;
+			const state =
+				typeof driver === "object" && driver !== null && "sqlState" in driver
+					? driver.sqlState
+					: typeof driver === "object" && driver !== null && "code" in driver
+						? driver.code
+						: undefined;
+			const errno = typeof driver === "object" && driver !== null && "errno" in driver ? driver.errno : undefined;
+			return Console.error(
+				JSON.stringify({
+					event: "store_transfer_failure",
+					stage,
+					code: "sql_error",
+					reason: error.reason._tag,
+					...(typeof state === "string" && /^[0-9A-Z]{5}(?![\s\S])/.test(state) ? { sqlstate: state } : {}),
+					...(typeof errno === "number" && Number.isSafeInteger(errno) && errno > 0 && errno < 100000 ? { errno } : {}),
+				}),
+			);
+		}
+		return Console.error(JSON.stringify({ event: "store_transfer_failure", stage, code }));
+	});
+
 type Configuration = Effect.Success<ReturnType<typeof decodeTransferConfiguration>>;
 
 /** Existing ancestors and files are checked before opening SQLite. Creating only these
@@ -103,7 +133,7 @@ export const runStoreTransferWorker = (configuration: Configuration, owners: typ
 				owner: owners.source,
 				dataDirectory,
 				...(resumeBinding ? { resumeBinding } : {}),
-			});
+			}).pipe(transferStage("source_inspection"));
 			const selection = yield* transferSelection({
 				transferId: configuration.transferId,
 				storeId: sourceEvidence.proof.store_id,
@@ -119,8 +149,10 @@ export const runStoreTransferWorker = (configuration: Configuration, owners: typ
 			)
 				return yield* invalid();
 			const generation = sourceEvidence.proof.generation;
-			yield* snapshotStoreEntry(generation, dataDirectory, configuration.target.app);
-			yield* preflightTransferAppSource(generation.snapshot_dir);
+			yield* snapshotStoreEntry(generation, dataDirectory, configuration.target.app).pipe(
+				transferStage("source_capability"),
+			);
+			yield* preflightTransferAppSource(generation.snapshot_dir).pipe(transferStage("migration_capability"));
 			let proof: MigrationProof | undefined = yield* readMigrationProof(selection);
 			if (resumeBinding && !proof) return yield* invalid();
 			const preparation: TransferPreparation =
@@ -139,7 +171,7 @@ export const runStoreTransferWorker = (configuration: Configuration, owners: typ
 			const safetyReceipt = yield* ensureSourceSafety({
 				...safetyOptions,
 				requireExisting: resumeBinding !== undefined || proof !== undefined,
-			});
+			}).pipe(transferStage("source_safety_copy"));
 			if (
 				proof &&
 				(proof.epoch !== preparation.epoch ||
@@ -150,24 +182,30 @@ export const runStoreTransferWorker = (configuration: Configuration, owners: typ
 					proof.safetyReceipt !== safetyReceipt)
 			)
 				return yield* invalid();
-			yield* targetDirectories(preparation);
-			const target = yield* transferEndpoint(configuration.target, owners.target);
+			yield* targetDirectories(preparation).pipe(transferStage("target_paths"));
+			const target = yield* transferEndpoint(configuration.target, owners.target).pipe(
+				transferStage("target_connection"),
+			);
 			if (!proof) {
 				const stores = { bootStore: configuration.target.boot, appStore: configuration.target.app };
 				const bootstrap = yield* makeTransferBootstrap(stores).pipe(
 					Effect.provideService(SqlClient.SqlClient, target.boot),
 				);
-				yield* target.withApp(
-					configuration.target.app,
-					bootstrap(preparation, writeTransferReceipt({ ...preparation, sentinel: "ready" })),
-				);
+				yield* target
+					.withApp(
+						configuration.target.app,
+						bootstrap(preparation, writeTransferReceipt({ ...preparation, sentinel: "ready" })),
+					)
+					.pipe(transferStage("target_bootstrap"));
 				const initialize = yield* makeTransferKernelInitializer(stores).pipe(
 					Effect.provideService(SqlClient.SqlClient, target.boot),
 				);
-				yield* target.withApp(
-					configuration.target.app,
-					initialize(selection, { initialized_at: preparation.initialized_at, epoch: preparation.epoch }),
-				);
+				yield* target
+					.withApp(
+						configuration.target.app,
+						initialize(selection, { initialized_at: preparation.initialized_at, epoch: preparation.epoch }),
+					)
+					.pipe(transferStage("target_kernel"));
 				const attempt = Buffer.from(yield* crypto.randomBytes(32)).toString("hex");
 				const remote =
 					target.runtime && configuration.target.app._tag !== "file"
@@ -183,7 +221,7 @@ export const runStoreTransferWorker = (configuration: Configuration, owners: typ
 					attempt,
 					...(remote ? { remote } : {}),
 					isolated: true,
-				});
+				}).pipe(transferStage("app_migrations"));
 				const result = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(MigrationProof.fields.result))(encoded);
 				proof = {
 					selection,
@@ -210,7 +248,7 @@ export const runStoreTransferWorker = (configuration: Configuration, owners: typ
 									sql,
 									engine === "sqlite" ? (store === "boot" ? bootDerivedObjects : coreSearchObjects) : [],
 									store === "app" ? coreJsonColumns : [],
-								);
+								).pipe(transferStage(`catalog_${store}`));
 							const inputs = {
 								selection,
 								mode: configuration.mode,
@@ -232,14 +270,14 @@ export const runStoreTransferWorker = (configuration: Configuration, owners: typ
 									appInventory: yield* inventory(targetApp, selection.target.engine, "app"),
 								},
 							};
-							const prepared = yield* prepareTransfer(inputs);
+							const prepared = yield* prepareTransfer(inputs).pipe(transferStage("logical_preflight"));
 							if (resumeBinding && bindingText(resumeBinding) !== bindingText(prepared.binding))
 								return yield* invalid();
 							if (!resumeBinding) {
 								yield* clearTransferSeeds(target.boot, targetApp, selection, {
 									store: "app",
 									tables: prepared.appTables,
-								});
+								}).pipe(transferStage("target_seed_cleanup"));
 								yield* writeTransferReceipt({ binding: prepared.binding, phase: "in_progress" });
 							}
 							if (prepared.kind === "check") return;
@@ -257,7 +295,7 @@ export const runStoreTransferWorker = (configuration: Configuration, owners: typ
 								assertExclusive,
 								copyAndVerify: prepared.copyAndVerify,
 								reverify: prepared.reverify,
-							});
+							}).pipe(transferStage("authority_handoff"));
 							// SQL complete alone is insufficient, including a restart after SQL commit. This
 							// final live comparison must succeed before the worker can authorize outer closure.
 							if ((yield* prepared.reverify) !== prepared.binding.manifest) return yield* invalid();
@@ -265,6 +303,6 @@ export const runStoreTransferWorker = (configuration: Configuration, owners: typ
 					);
 				}),
 			);
-			yield* recoverSourceSafety(safetyOptions);
+			yield* recoverSourceSafety(safetyOptions).pipe(transferStage("source_resource_cleanup"));
 		}),
 	);

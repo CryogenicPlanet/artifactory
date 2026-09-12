@@ -2,7 +2,7 @@ import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { runTransfer } from "./transfer/outer.ts";
 import { closeSync } from "node:fs";
 import { decodeTransferConfiguration } from "./transfer/configuration.ts";
-import { Console, Effect, Stdio, Stream } from "effect";
+import { Console, Effect, Logger, Stdio, Stream } from "effect";
 import { TransferRejected } from "@comms/storage/store-transfer-schema";
 
 const invalid = () => new TransferRejected({ code: "transfer_binding_invalid" });
@@ -69,6 +69,7 @@ if (import.meta.main) {
 		Effect.flatMap(runTransfer),
 		Effect.flatMap((result) => Console.log(JSON.stringify(result))),
 		Effect.provide(BunServices.layer),
+		Effect.provide(Logger.layer([Logger.withConsoleError(Logger.formatSimple)])),
 		Effect.catchCause(() =>
 			Console.error("Store transfer failed; preserve transfer journals and inspect the protected configuration.").pipe(
 				Effect.andThen(Effect.fail(invalid())),

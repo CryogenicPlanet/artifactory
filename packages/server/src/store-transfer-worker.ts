@@ -1,6 +1,6 @@
 import { BunCrypto, BunRuntime, BunServices } from "@effect/platform-bun";
 import { RemoteTransferConfiguration } from "@comms/boot";
-import { Config, Console, Effect, Layer, Redacted, Schema } from "effect";
+import { Config, Console, Effect, Logger, Layer, Redacted, Schema } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { decodeTransferConfiguration } from "./transfer/configuration.ts";
 import { runStoreTransferWorker } from "./transfer/worker.ts";
@@ -14,6 +14,7 @@ const main = Effect.gen(function* () {
 	yield* runStoreTransferWorker(configuration, ownership);
 }).pipe(
 	Effect.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
+	Effect.provide(Logger.layer([Logger.withConsoleError(Logger.formatSimple)])),
 	Effect.onError(() => Console.error("Offline transfer worker failed; target remains ineligible.")),
 );
 if (import.meta.main) BunRuntime.runMain(main, { disableErrorReporting: true });
