@@ -2,6 +2,7 @@ import { spawn, execFile } from "node:child_process";
 import { once } from "node:events";
 import { chmod, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -25,6 +26,55 @@ it("never prints invalid private keeper configuration", async () => {
 	const [code] = await once(child, "exit");
 	expect(code).not.toBe(0);
 	expect(output).toBe("");
+});
+
+it("refused root admission opens no owner journal", async (test) => {
+	const root = await realpath(await mkdtemp(join(tmpdir(), "comms-native-admission-")));
+	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
+	let requested = false;
+	const server = createHttpServer((_request, response) => {
+		requested = true;
+		response.writeHead(403).end();
+	});
+	server.listen(0, "127.0.0.1");
+	await once(server, "listening");
+	test.onTestFinished(() => {
+		server.closeAllConnections();
+		server.close();
+	});
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("Missing fixture admission address");
+	const configuration = {
+		id: "a".repeat(64),
+		store: "postgres://native:DO_NOT_PRINT_NATIVE_SECRET@127.0.0.1:1/native",
+		remote: {
+			root: "b".repeat(64),
+			dataDirectory: root,
+			bootStore: "postgres://boot:DO_NOT_PRINT_NATIVE_SECRET@127.0.0.1:1/boot",
+			tls: false,
+			guardian: { url: `http://127.0.0.1:${address.port}`, secret: "c".repeat(64), attempt: "b".repeat(64) },
+		},
+		operation: "dump",
+		path: join(root, "backup"),
+		engine: "pg",
+		budgetMs: 1000,
+		ownership: "preserve",
+	};
+	const child = spawn("bun", [entry], {
+		env: { PATH: process.env.PATH, COMMS_NATIVE_COPY_CONFIG: JSON.stringify(configuration) },
+	});
+	let output = "";
+	child.stdout.on("data", (chunk) => {
+		output += String(chunk);
+	});
+	child.stderr.on("data", (chunk) => {
+		output += String(chunk);
+	});
+	const [code] = await once(child, "exit");
+	expect(code).not.toBe(0);
+	expect(output).toBe("");
+	expect(requested).toBe(true);
+	await expect(readFile(join(root, "remote-owners", `${configuration.id}.intent`))).rejects.toThrow();
 });
 
 it.skipIf(!pgBin).for(["success", "descendant", "parent-eof", "late-backend"] as const)(
@@ -88,6 +138,28 @@ it.skipIf(!pgBin).for(["success", "descendant", "parent-eof", "late-backend"] as
 				mode: 0o700,
 			});
 		}
+		let admitted = false;
+		const admission = createHttpServer((request, response) => {
+			let body = "";
+			request.on("data", (chunk) => {
+				body += String(chunk);
+			});
+			request.on("end", () => {
+				admitted =
+					request.url === "/root" &&
+					request.headers["x-comms-guardian-secret"] === "c".repeat(64) &&
+					body === JSON.stringify({ action: "admit-owner", attempt: id });
+				response.writeHead(admitted ? 204 : 403).end();
+			});
+		});
+		admission.listen(0, "127.0.0.1");
+		await once(admission, "listening");
+		test.onTestFinished(() => {
+			admission.closeAllConnections();
+			admission.close();
+		});
+		const admissionAddress = admission.address();
+		if (!admissionAddress || typeof admissionAddress === "string") throw new Error("Missing fixture guardian address");
 		const configuration = {
 			id,
 			store: `postgres://native_owner:fixture-only@127.0.0.1:${port}/native_source`,
@@ -96,6 +168,7 @@ it.skipIf(!pgBin).for(["success", "descendant", "parent-eof", "late-backend"] as
 				dataDirectory: artifacts,
 				bootStore: `postgres://postgres:fixture-only@127.0.0.1:${port}/native_boot`,
 				tls: false,
+				guardian: { url: `http://127.0.0.1:${admissionAddress.port}`, secret: "c".repeat(64), attempt: "b".repeat(64) },
 			},
 			operation: "dump",
 			path: join(artifacts, "backup"),
@@ -137,6 +210,7 @@ it.skipIf(!pgBin).for(["success", "descendant", "parent-eof", "late-backend"] as
 		}
 		const [code] = await exited;
 		expect(output).toBe("");
+		expect(admitted).toBe(true);
 		if (mode === "success" || mode === "descendant") {
 			expect(code).toBe(0);
 		} else {

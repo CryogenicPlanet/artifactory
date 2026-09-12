@@ -5,6 +5,8 @@ import { asBoot, connectionOf, parseDescriptor } from "@comms/storage/store";
 import { Config, Context, Effect, Exit, FileSystem, Layer, Path, Redacted, Schema, Scope, Stdio, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { NativeCopyConfiguration, NativeCopyRejected } from "./native-copy-configuration.ts";
+import { FetchHttpClient } from "effect/unstable/http";
+import { admitRemoteOwner } from "./remote-root-protocol.ts";
 import { remoteOwner } from "./remote-owner.ts";
 
 const rejected = () => new NativeCopyRejected({ code: "native_copy_invalid" });
@@ -30,6 +32,7 @@ const keeper = Effect.gen(function* () {
 	yield* asBoot(store, boot);
 	const connection = yield* connectionOf(store, config.remote.tls);
 	const bootConnection = yield* connectionOf(boot, config.remote.tls);
+	yield* admitRemoteOwner(config.remote, config.id);
 	const owner = yield* remoteOwner(
 		config.remote.dataDirectory,
 		{
@@ -129,12 +132,16 @@ const keeper = Effect.gen(function* () {
 	);
 	const operation =
 		config.operation === "dump"
-			? dumpRemote({ store, path: config.path, budget: config.budgetMs }).pipe(Effect.map((artifact) => artifact.bytes))
-			: loadRemote({ store, artifact: { path: config.path, engine: config.engine }, budget: config.budgetMs }).pipe(
-					Effect.as(0),
-				);
-	// The ownership mode is deliberately refused until its native helper implementation is composed.
-	if (config.operation === "load" && config.ownership !== "preserve") return yield* rejected();
+			? dumpRemote({ store, path: config.path, budget: config.budgetMs, tls: config.remote.tls }).pipe(
+					Effect.map((artifact) => artifact.bytes),
+				)
+			: loadRemote({
+					store,
+					artifact: { path: config.path, engine: config.engine },
+					budget: config.budgetMs,
+					tls: config.remote.tls,
+					ownership: config.ownership,
+				}).pipe(Effect.as(0));
 	const stdio = yield* Stdio.Stdio;
 	yield* Effect.raceFirst(
 		operation.pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, tracked)),
@@ -148,7 +155,7 @@ const keeper = Effect.gen(function* () {
 		yield* fs.chown(config.path, 1000, 1000);
 		yield* Effect.scoped(fs.open(config.path).pipe(Effect.flatMap((file) => file.sync)));
 	}
-}).pipe(Effect.scoped, Effect.provide(BunServices.layer));
+}).pipe(Effect.scoped, Effect.provide(Layer.merge(BunServices.layer, FetchHttpClient.layer)));
 
 // Decoder, filesystem and native driver failures may contain private configuration. No cause crosses this boundary.
 keeper.pipe(
