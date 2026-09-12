@@ -309,6 +309,12 @@ export const supervise = Effect.fn("supervise")(function* (
 					yield* withdraw;
 					yield* release;
 				}
+				const reason = started.cause.reasons.length === 1 ? started.cause.reasons[0] : undefined;
+				if (reason && Cause.isFailReason(reason) && Schema.is(ChildError)(reason.error))
+					return yield* new ChildError({
+						code: reason.error.code,
+						stderr: redact(yield* Ref.get(value.process.stderr)),
+					});
 				return yield* Effect.failCause(started.cause);
 			}
 			return value;
