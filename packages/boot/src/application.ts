@@ -17,7 +17,10 @@ export interface ApplicationSource {
 	readonly dependenciesDirectory?: string;
 }
 
-export const snapshotEntry = Effect.fn("snapshotEntry")(function* (generation: Generation, dataDirectory: string) {
+export const snapshotEntry = Effect.fn("snapshotEntry")(function* (
+	generation: Pick<Generation, "n" | "snapshot_dir" | "entry_file">,
+	dataDirectory: string,
+) {
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const source = generation.snapshot_dir;
@@ -40,7 +43,7 @@ export const snapshotEntry = Effect.fn("snapshotEntry")(function* (generation: G
 
 /** Capabilities belong to this frozen source, never the current image or editable tree. */
 export const snapshotStoreEntry = Effect.fn("snapshotStoreEntry")(function* (
-	generation: Generation,
+	generation: Pick<Generation, "n" | "snapshot_dir" | "entry_file">,
 	dataDirectory: string,
 	store: Store,
 ) {

@@ -67,6 +67,7 @@ export const prepareTransferData = (options: {
 		});
 		return {
 			ledgers: plan.ledgers,
+			tables: plan.tables,
 			manifest: { store, tables: tables.map(({ table, manifest }) => ({ table, ...manifest })) },
 			copy,
 			verify,

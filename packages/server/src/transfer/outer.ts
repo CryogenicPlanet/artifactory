@@ -96,6 +96,7 @@ export const runTransfer = (configuration: TransferConfiguration) =>
 		});
 		const prior = yield* read;
 		if (prior?.phase === "complete") {
+			if (configuration.mode !== "transfer") return yield* invalid();
 			yield* writeTransferReceipt(prior);
 			return report(prior.binding, "complete");
 		}

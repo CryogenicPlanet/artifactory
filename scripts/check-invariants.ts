@@ -50,6 +50,8 @@ function checkInvariants() {
 						dependency === "boot" &&
 						(label === `packages${sep}server${sep}src${sep}start.ts` ||
 							label === `packages${sep}server${sep}src${sep}store-transfer.ts` ||
+							label === `packages${sep}server${sep}src${sep}store-transfer-worker.ts` ||
+							label === `packages${sep}server${sep}src${sep}transfer${sep}worker.ts` ||
 							label === `packages${sep}server${sep}src${sep}transfer${sep}configuration.ts` ||
 							label === `packages${sep}server${sep}src${sep}transfer${sep}outer.ts` ||
 							label === `packages${sep}server${sep}src${sep}transfer${sep}endpoint.ts` ||
