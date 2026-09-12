@@ -1,12 +1,15 @@
 import { strict as assert } from "node:assert";
 import { guardianClientLayer } from "@comms/storage/remote-client";
 import { connectionOf, parseDescriptor } from "@comms/storage/store";
-import { Effect } from "effect";
+import { BunHttpServer } from "@effect/platform-bun";
+import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http";
+import { Context, Effect, Layer } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
 const program = Effect.gen(function* () {
 	for (const name of [
 		"COMMS_CHILD_CONFIG",
+		"COMMS_REMOTE_ROOT_CONFIG",
 		"BOOT_DATABASE_URL",
 		"COMMS_REMOTE_BOOT_TEST_CONFIG",
 		"COMMS_REMOTE_TEST_CONFIG",
@@ -51,6 +54,19 @@ const program = Effect.gen(function* () {
 			connection.engine === "pg" ? "SELECT current_user AS name" : "SELECT CURRENT_USER() AS name",
 		);
 		assert(identity[0]?.name === connection.username || identity[0]?.name.startsWith(`${connection.username}@`));
+		if (process.env.MODE === "root-crash") {
+			process.on("SIGTERM", () => {});
+			const server = Context.get(
+				yield* Layer.build(
+					HttpRouter.serve(HttpRouter.add("GET", "/", Effect.succeed(HttpServerResponse.empty()))).pipe(
+						Layer.provideMerge(BunHttpServer.layer({ hostname: "127.0.0.1", port: 0 })),
+					),
+				),
+				HttpServer.HttpServer,
+			);
+			assert(server.address._tag !== "UnixPathAddress");
+			console.log(`COMMS_CHILD_PORT=${server.address.port}`);
+		}
 		console.log("REMOTE_CHILD_READY");
 		return yield* Effect.never;
 	}).pipe(Effect.provide(layer));

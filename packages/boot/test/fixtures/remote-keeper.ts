@@ -2,9 +2,12 @@ import { strict as assert } from "node:assert";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
+import { FetchHttpClient } from "effect/unstable/http";
+import { launchRemoteRoot } from "../../src/remote-root-launcher.ts";
 import { join } from "node:path";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Effect, FileSystem, Redacted, Schema } from "effect";
+import { Effect, FileSystem, Layer, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { render } from "@comms/storage/store";
 import { remoteRuntime } from "../../src/remote-runtime.ts";
@@ -13,9 +16,22 @@ import { configuration } from "./remote-keeper-config.ts";
 
 const program = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem;
-	const root = yield* fs.realPath(process.argv[2] ?? "");
-	const mode = process.argv[3] ?? "eof";
+	const root = yield* fs.realPath(process.env.GUARDIAN_TEST_ROOT ?? process.argv[2] ?? "");
+	const mode = process.env.GUARDIAN_TEST_MODE ?? process.argv[3] ?? "eof";
 	const config = yield* configuration;
+	if (!process.env.COMMS_REMOTE_ROOT_CONFIG) {
+		const exit = yield* Effect.scoped(
+			launchRemoteRoot(config, {
+				dataDirectory: root,
+				entry: fileURLToPath(import.meta.url),
+				env: { GUARDIAN_TEST_ROOT: root, GUARDIAN_TEST_MODE: mode },
+			}),
+		);
+		assert.equal(Number(exit), 0, "Boot keeper fixture did not finish");
+		yield* Effect.scoped(remoteOwnerInventory(root));
+		console.log("REMOTE_KEEPER_VERIFIED");
+		return;
+	}
 	const attempt = "e7".repeat(32);
 	yield* Effect.scoped(
 		Effect.gen(function* () {
@@ -40,6 +56,7 @@ const program = Effect.gen(function* () {
 							}),
 						},
 						stdio: ["pipe", "pipe", "pipe"],
+						detached: true,
 					}),
 				),
 				(child) =>
@@ -134,9 +151,7 @@ const program = Effect.gen(function* () {
 			verified = true;
 		}),
 	);
-	yield* Effect.scoped(remoteOwnerInventory(root));
-	console.log("REMOTE_KEEPER_VERIFIED");
-}).pipe(Effect.scoped, Effect.provide(BunServices.layer));
+}).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(BunServices.layer, FetchHttpClient.layer)));
 program.pipe(
 	Effect.catchCause(() => Effect.die("Remote keeper acceptance failed")),
 	BunRuntime.runMain,
