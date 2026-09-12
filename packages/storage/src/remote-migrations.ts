@@ -27,6 +27,7 @@ export interface RemoteStep<E = never, R = never> {
 const rows = Schema.Array(Schema.Struct({ migration_id: Schema.Int, name: Schema.String }));
 const intentRows = Schema.Array(
 	Schema.Struct({
+		singleton: Schema.Int,
 		migration_id: Schema.Int,
 		name: Schema.String,
 		operation: Schema.Int,
@@ -124,23 +125,37 @@ export const remoteMigrate = <E, R, E2 = never, R2 = never>(
 			const connection = yield* sql.reserve;
 			const intent = `${ledger}_intent`;
 			const work = Effect.gen(function* () {
-				const locked = yield* sql`SELECT GET_LOCK(SHA2(CONCAT(DATABASE(),':',${ledger}),256),30) AS acquired`.pipe(
-					Effect.flatMap(
-						Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ acquired: Schema.NullOr(Schema.Int) }))),
+				const locked = yield* Effect.acquireRelease(
+					sql`SELECT GET_LOCK(SHA2(CONCAT(DATABASE(),':',${ledger}),256),30) AS acquired`.pipe(
+						Effect.flatMap(
+							Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ acquired: Schema.NullOr(Schema.Int) }))),
+						),
 					),
+					() => sql`SELECT RELEASE_LOCK(SHA2(CONCAT(DATABASE(),':',${ledger}),256))`.pipe(Effect.orDie),
 				);
 				if (locked[0]?.acquired !== 1)
 					return yield* new RemoteMigrationError({ code: "migration_lock_unavailable", ledger });
-				yield* Effect.addFinalizer(() =>
-					sql`SELECT RELEASE_LOCK(SHA2(CONCAT(DATABASE(),':',${ledger}),256))`.pipe(Effect.orDie),
-				);
+
 				yield* beforeOperation;
 				const applied = yield* initialize;
 				yield* sql`CREATE TABLE IF NOT EXISTS ${sql(intent)} (singleton integer PRIMARY KEY CHECK(singleton=1),migration_id integer NOT NULL,name varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,operation integer NOT NULL,active varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin) ENGINE=InnoDB`;
-				const pending =
-					yield* sql`SELECT migration_id,name,operation,active FROM ${sql(intent)} WHERE singleton=1`.pipe(
-						Effect.flatMap(Schema.decodeUnknownEffect(intentRows)),
-					);
+				yield* tableShape(
+					sql,
+					intent,
+					[
+						{ name: "singleton", type: "int", nullable: false },
+						{ name: "migration_id", type: "int", nullable: false },
+						{ name: "name", type: "varchar", nullable: false, length: 255, collation: "utf8mb4_bin" },
+						{ name: "operation", type: "int", nullable: false },
+						{ name: "active", type: "varchar", nullable: true, length: 255, collation: "utf8mb4_bin" },
+					],
+					["singleton"],
+					{ checks: ["(`singleton` = 1)"] },
+				);
+				const pending = yield* sql`SELECT singleton,migration_id,name,operation,active FROM ${sql(intent)}`.pipe(
+					Effect.flatMap(Schema.decodeUnknownEffect(intentRows)),
+				);
+				if (pending.length > 1 || pending.some((row) => row.singleton !== 1)) return yield* invalid();
 				let current = pending[0];
 				if (current) {
 					const step = steps[current.migration_id - 1];
@@ -163,7 +178,7 @@ export const remoteMigrate = <E, R, E2 = never, R2 = never>(
 				for (const step of steps.slice(applied)) {
 					if (!current) {
 						yield* sql`INSERT INTO ${sql(intent)} (singleton,migration_id,name,operation,active) VALUES (1,${step.id},${step.name},0,NULL)`;
-						current = { migration_id: step.id, name: step.name, operation: 0, active: null };
+						current = { singleton: 1, migration_id: step.id, name: step.name, operation: 0, active: null };
 					}
 					for (let index = current.operation; index < step.operations.length; index++) {
 						const operation = step.operations[index];

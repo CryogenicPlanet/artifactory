@@ -6,7 +6,7 @@ export interface ColumnShape {
 	readonly type: string;
 	readonly nullable: boolean;
 	readonly length?: number;
-	readonly expression?: string;
+	readonly expression?: string | null;
 	readonly default?: string | null;
 	readonly collation?: string | null;
 }
@@ -24,7 +24,16 @@ const columnRows = Schema.Array(
 		collation: Schema.NullOr(Schema.String),
 	}),
 );
-const indexRows = Schema.Array(Schema.Struct({ name: Schema.String, unique: Schema.Finite, method: Schema.String }));
+const indexRows = Schema.Array(
+	Schema.Struct({
+		name: Schema.String,
+		unique: Schema.Finite,
+		method: Schema.String,
+		valid: Schema.Int,
+		partial: Schema.Int,
+		prefix: Schema.NullOr(Schema.Int),
+	}),
+);
 /** Catalog checks never adopt unknown pre-existing objects; migration intent establishes ownership. */
 export const tableShape = (
 	sql: SqlClient,
@@ -153,16 +162,21 @@ export const indexShape = (
 				throw new Error("Remote schema check requires PostgreSQL or MySQL");
 			},
 			pg: () =>
-				sql`SELECT a.attname AS name,CASE WHEN i.indisunique THEN 1 ELSE 0 END AS unique,m.amname AS method FROM pg_catalog.pg_class t JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace JOIN pg_catalog.pg_index i ON i.indrelid=t.oid JOIN pg_catalog.pg_class x ON x.oid=i.indexrelid JOIN pg_catalog.pg_am m ON m.oid=x.relam JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum,position) ON true JOIN pg_catalog.pg_attribute a ON a.attrelid=t.oid AND a.attnum=k.attnum WHERE n.nspname='public' AND t.relname=${table} AND x.relname=${index} ORDER BY k.position`,
+				sql`SELECT a.attname AS name,CASE WHEN i.indisunique THEN 1 ELSE 0 END AS unique,m.amname AS method,CASE WHEN i.indisvalid AND i.indisready THEN 1 ELSE 0 END AS valid,CASE WHEN i.indpred IS NULL THEN 0 ELSE 1 END AS partial,NULL::integer AS prefix FROM pg_catalog.pg_class t JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace JOIN pg_catalog.pg_index i ON i.indrelid=t.oid JOIN pg_catalog.pg_class x ON x.oid=i.indexrelid JOIN pg_catalog.pg_am m ON m.oid=x.relam JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum,position) ON true JOIN pg_catalog.pg_attribute a ON a.attrelid=t.oid AND a.attnum=k.attnum WHERE n.nspname='public' AND t.relname=${table} AND x.relname=${index} ORDER BY k.position`,
 			mysql: () =>
-				sql`SELECT COLUMN_NAME AS name,(1-NON_UNIQUE) AS ${sql("unique")},INDEX_TYPE AS method FROM information_schema.statistics WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=${table} AND INDEX_NAME=${index} ORDER BY SEQ_IN_INDEX`,
+				sql`SELECT COLUMN_NAME AS name,(1-NON_UNIQUE) AS ${sql("unique")},INDEX_TYPE AS method,1 AS valid,0 AS partial,SUB_PART AS prefix FROM information_schema.statistics WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=${table} AND INDEX_NAME=${index} ORDER BY SEQ_IN_INDEX`,
 		}).pipe(Effect.flatMap(Schema.decodeUnknownEffect(indexRows)));
 		if (existing.length === 0) return false;
 		if (
 			existing.length !== columns.length ||
 			existing.some(
 				(row, i) =>
-					row.name !== columns[i] || (row.unique === 1) !== unique || (method !== undefined && row.method !== method),
+					row.name !== columns[i] ||
+					(row.unique === 1) !== unique ||
+					row.method !== (method ?? on(sql, { sqlite: () => "btree", pg: () => "btree", mysql: () => "BTREE" })) ||
+					row.valid !== 1 ||
+					row.partial !== 0 ||
+					row.prefix !== null,
 			)
 		)
 			return yield* new SchemaShapeError({ object: index });
