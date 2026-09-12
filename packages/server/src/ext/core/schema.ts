@@ -127,7 +127,7 @@ export const initialize = Effect.gen(function* () {
 					}),
 				},
 			]);
-			yield* sql`PRAGMA user_version = 10`;
+			if (version !== 10) yield* sql`PRAGMA user_version = 10`;
 			yield* registerProtectedSqlTable(sql, "topic_page_continuations");
 			yield* sql`SELECT deleted_at FROM topics LIMIT 1`;
 			yield* sql`SELECT ns,key,value,updated_seq,previous FROM kv LIMIT 1`;
