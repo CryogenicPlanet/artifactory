@@ -1,7 +1,15 @@
-# kernel
+# Application kernel
 
-The app's writer epoch, mutation receipts, outbox publication, pinned SQL reads and extension lifecycle. Start with `publication.ts`, `mutate.ts` and `ext.ts`; `server.ts` wires one shared Publication instance for domain services, extensions and shutdown. Boot owns authentication, sequence allocation and the durable event log.
+The kernel gives editable code a shared write and recovery boundary. It owns writer-epoch checks, mutation receipts, transactional outbox publication, publication-aware reads and extension lifecycles. Boot owns authentication, sequence allocation and the durable event log.
 
-Product SQL and routes live in `../ext/core/`. The loader receives their capability binding from app composition. It does not instantiate domain services. `extension-capabilities.ts` defines the public, protocol-backed contract implemented by core; `extension-api.ts` depends on that contract rather than core service types. Core provides its own page service when mounting handlers.
+Start with:
 
-All writes check the writer epoch and publish through the transactional outbox before HTTP success. The reader preserves pending move barriers and refuses unpublished raw SQL or an unhealthy writer. Health invokes the assembled core handlers inside the existing rollback probe; do not replace it with a database ping. Runtime state belongs to the service instance or scope.
+- [publication.ts](publication.ts): shared mutation/read coordination and outbox relay.
+- [mutate.ts](mutate.ts): the durable mutation protocol.
+- [ext.ts](ext.ts): extension loading and scoped lifecycle.
+- [extension-api.ts](extension-api.ts): the extension authoring API.
+- [health.ts](health.ts): a kernel KV mutation/read probe with verified rollback.
+
+[server.ts](../server.ts) wires one shared Publication instance. Product routes and domain SQL live in [ext/core](../ext/core/); the kernel consumes their [capability contract](extension-capabilities.ts), without constructing domain services.
+
+Preserve the writer epoch, atomic mutation evidence and publication boundary when changing this code. Readiness verifies the kernel protocol, not every product handler. Own runtime state in a service instance or scope, and keep network work outside SQL read snapshots.

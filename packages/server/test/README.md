@@ -1,26 +1,15 @@
-# server tests
+# Server tests
 
-Run `bun run --filter @comms/server test`, or from the root `bun run test packages/server/test`.
+These tests exercise the message board through real HTTP, Bun child processes and SQLite stores, with focused kernel tests for transactions, publication and recovery.
 
-Vitest runs on Node and starts real Bun launchers/SQLite stores. Conversation tests create signed WebAuthn credentials through actual setup/login HTTP; they verify distinct instances, message/topic/event agreement, idempotent replay/conflict, subtree boundaries, limited cursors, own-instance wait exclusion, Markdown context, restart persistence, and authentication when the initialized app store disappears.
+From the repository root, with Node **22.22.3** and Bun on `PATH`:
 
-Kernel recovery tests inject faults through a test-owned BootChannel adapter around real stores and the production Messages service. SIGKILL before commit, after commit and after boot append verifies rollback/reconciliation/replay. A lost reserve response exercises confirmed rollback and idempotent reserve-then-abort. The child fixture commits without shipping its outbox, then boot SIGKILL triggers keeper closure; replacement boot publishes the committed evidence and the old listener is gone. Guarded HTTP tests reject wrong/stale secrets and forwarded/incorrect Host, including a request whose body finishes after attempt rotation.
+```sh
+node node_modules/vitest/vitest.mjs run packages/server/test --maxWorkers=2
+# Or focus on the area you changed:
+node node_modules/vitest/vitest.mjs run packages/server/test/pages-http.test.ts --maxWorkers=2
+```
 
-These fixtures deliberately expose test controls and may import boot internals for cross-store integration; production routes have no fault hooks or authentication bypass. Test resources belong to each test lifecycle. No UI suite is added. Machine power loss, physical disk faults and Linux ownership remain separate acceptance work.
+For write-path changes, check authorization, idempotent retries, publication visibility and restart persistence. Recovery changes need real-process cutover or restore tests that verify acknowledged data survives. Kernel readiness tests exercise mutation, publication-aware reads and rollback; readiness alone does not validate every product route.
 
-Operational event tests use the same production mutation permit and real boot event store. A lost reservation response followed by rollback and a lost append response both retry one stable extension diagnostic without duplicate publication. Non-live generations and stale writers cannot record diagnostics. Retained outbox batches provide the retry receipt; future retention must preserve that evidence while a diagnostic may still be retried.
-
-Enrollment integration uses actual signed approval without a session, public printable/SVG QR responses, device-secret polling, simultaneous one-time collection, access-versus-refresh type admission, invalid bearer precedence, session-only logout, per-agent attribution, read/write/fs scopes and restricted boot diagnostics. Two enrolled families converse and wait across the real proxy; request-event actor filtering happens before LIMIT and preserves empty cursors. Restart preserves access/collection state, and fresh approval remains possible with a missing initialized app store. SQL inserts of synthetic request events test query authorization without claiming request-event production emission exists.
-
-Health tests probe actual assembled HTTP routes in a rollback transaction, reject broken create/read/context handlers (including a context response containing only the topic heading), and verify online cloning against data present only in the live WAL. Cutover tests send messages continuously through good/bad/good edits, restore after a candidate-only destructive initialization, SIGKILL boot on both sides of durable acceptance, repair a first bad seed with no working app, and check admitted slow-body completion plus queued credential revalidation after logout. No broad UI test suite is added.
-
-The compiled-board HTTP smoke uses a real bundled child and boot authentication. It checks GET/HEAD, MIME types, narrow SPA fallback, path/symlink containment, generation snapshot isolation from editable assets, and recovery output when the board build is absent. Visual browser smoke stays outside the test suite.
-
-Topic management tests cover metadata replacement and empty ancestors, archive/unarchive rollups and write refusal, idempotent replay/conflict, scope and input checks, restart preservation, and actual public-page opt-in/revocation. Real-store fault cases cover lost reserve/append responses, pre-append failure, SQL rollback, stale writers, and snapshot-before-fence races; pending metadata, archives and new empty topics remain unpublished.
-Source-revert HTTP tests cover path, batch, latest batch and exact retained version selection through real cutovers; acknowledged messages survive all source-only restores. Missing locks, invalid selectors, omitted large-file history and nonempty staging are refused, while held bodies verify logout and replaced-acquisition fencing before undo staging. The boot source-store suite independently exercises first-edit modes, atomic multi-file staging failures and interrupted publication recovery.
-
-Lost-response undo tests discard the successful HTTP outcome, restart boot, and repeat the same family/key for both implicit latest and path selection. They verify the file stays undone and a changed selector conflicts, rather than undoing the undo. This tests durable target selection, not exact outcome replay.
-
-Extension cron and event-hook tests exercise next-tick scheduling, skipped overlaps, canceled-freeze resume, Promise draining, callback cursor validation and replay, live admission before each callback, and sibling failure isolation. Real-process subscriptions verify published payloads and reload without exposing candidate health messages. Resource-cleanup defects disable only the failing extension while healthy scopes continue closing.
-
-Database restore tests exercise signed HTTP restore, a fresh WAL-inclusive safety backup, preserved source staging, new writer epochs and increasing sequence allocation, exact lost-response replay after later writes and restart, real candidate health failure and rollback, SIGKILL in restoring/working/restored phases, and missing keeper closure receipts. Restarts verify exactly one live database owner; these are process-crash tests, not machine power-loss or Linux ownership validation.
+Fixtures may import boot internals to test the cross-store boundary. Keep fault injection and synthetic credentials in fixtures, own resources within each test lifecycle, and clean up child processes. See [boot tests](../../boot/test/README.md) for the complementary authentication and recovery suites.

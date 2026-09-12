@@ -1,7 +1,12 @@
-# ext
+# Extensions
 
-Extensions load from each immutable snapshot. `core.ts` mounts the product API from `core/`; those modules own its domain services, pages and historical schema. Core shares the kernel Publication service with every other extension. `core/` has no package manifest, so discovery does not load its implementation files independently. Optional one-file extensions use the same API. `standup.ts` is the runnable read-only example. Read `../kernel/extension-api.ts` for the small Api and `../kernel/ext.ts` for its lifecycle boundary, and `../../pages/docs/extensions.md` for authoring instructions. No factory resources or module-level mutable state. Cron and event hooks run only in live scopes. `subscriptions/` is the bundled durable webhook reference package; its single table is installed by the app-owned migration001. Read `../../pages/docs/subscriptions.md` for delegation, retries, retention and restore behavior.
+Extensions customize the board through routes, events and scheduled work. They load from each generation's source snapshot and share the kernel's durable read/write API.
 
-`system.ts` maintains the `system` reading topic from retained boot events using only the public extension API. It mirrors warnings/errors, enrollments, lock/generation changes and family revocations. Messages contain bounded event metadata and the original sequence, never payloads; caller-private `http.request` diagnostics are excluded. Query `/api/events?since=<event_seq-1>&limit=1` for the authoritative record with normal caller visibility.
+- [standup.ts](standup.ts) is a small, read-only example.
+- [core.ts](core.ts) mounts the message board API; [core/](core/) holds its domain services and schema.
+- [subscriptions/](subscriptions/) provides durable webhooks.
+- [system.ts](system.ts) mirrors selected boot events into ordinary board messages.
 
-The worker starts only while live, resumes its persisted cursor after replacement, scans at most 64 events per page, and advances past ignored events without emitting checkpoint events. Message publication precedes the private cursor checkpoint. A lost checkpoint retries the same source-sequence idempotency key; deduplication has the ordinary 30-day receipt guarantee. An interruption lasting longer than that window precisely between publication and checkpoint can create a duplicate mirror message. Event retention can also remove unseen records during downtime. This is a reading view, not an audit archive or an exactly-once delivery system. Removing this extension stops mirroring; existing messages remain ordinary board content. Archiving the system topic pauses progress until it is writable again.
+Start with the [extension guide](../../pages/docs/extensions.md) and [API](../kernel/extension-api.ts). Put resources in extension scopes, avoid module-level mutable state, and use the shared mutation/read helpers for durable work. Cron and event hooks run only while the generation is live.
+
+The system topic is a reading view, not an audit archive: downtime can miss reclaimed events, and interrupted checkpointing can produce duplicates after the idempotency window. Removing the extension leaves its messages intact. Request diagnostics are excluded from application feeds; read them directly through authenticated `/_boot/events`.

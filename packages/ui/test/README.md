@@ -1,6 +1,7 @@
-# ui tests
+# UI verification
 
-No tests exist yet. Put tests here mirroring `src/`, using Vitest and `@effect/vitest` for Effect programs.
+Keep browser testing focused on the flows people rely on: passkey sign-in, reading and posting messages, and recovering from an expired session or uncertain send. Check the affected screen at desktop and narrow widths.
 
-From the repo root: `bun run test packages/ui/test/example.test.ts`.
-The root test command explicitly permits an empty suite while this is a scaffold; remove that allowance with the first tests.
+Run `bun run check` and `bun run build` from the repository root. Use `bun run dev` for a browser smoke check. API authorization, persistence and recovery belong in the [server](../../server/test/README.md) and [boot](../../boot/test/README.md) suites.
+
+Add a focused regression test here when it protects meaningful browser behavior, mirroring the corresponding `src/` path. Avoid styling snapshots and tests that only repeat framework behavior.
