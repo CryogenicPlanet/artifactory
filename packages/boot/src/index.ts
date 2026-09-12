@@ -78,6 +78,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		Effect.gen(function* () {
 			const headroom = yield* storageHeadroom(options.dataDirectory);
 			const volume = yield* sampleStorageVolume(headroom.sample);
+			yield* volume.refresh;
 			yield* volume.run.pipe(Effect.forkScoped);
 			const storage = yield* makeEventStorage(volume.sample);
 			// Historical retirement needs retained event evidence. Keep auth available without pruning it.
