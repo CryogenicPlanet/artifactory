@@ -34,7 +34,7 @@ const main = Effect.gen(function* () {
 		yield* sql`SELECT proof_id,proof_hash,session_id,idempotency_key,backup,phase,generation,restored_to_seq,event_seq FROM db_restore_requests`;
 	const backups = yield* sql`SELECT * FROM backups ORDER BY id`;
 	yield* initializeBootSchema;
-	assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
+	assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 20 }]);
 	assert.deepEqual(yield* sql`SELECT n,backup_id FROM generations ORDER BY n`, [
 		{ n: 1, backup_id: "unique" },
 		{ n: 2, backup_id: null },

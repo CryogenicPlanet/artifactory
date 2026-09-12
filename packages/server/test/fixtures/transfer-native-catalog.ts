@@ -56,7 +56,7 @@ for (const [store, settings] of [
 			const sql = yield* SqlClient.SqlClient;
 			if (store === "boot") {
 				yield* initializeBootSchema;
-				assert.equal((yield* sql`SELECT migration_id FROM boot_migrations`).length, 19);
+				assert.equal((yield* sql`SELECT migration_id FROM boot_migrations`).length, 20);
 			} else {
 				for (const operation of remoteAppKernelOperations(sql, settings.username)) {
 					if (operation.name.startsWith("grant:")) continue;
