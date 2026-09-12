@@ -88,4 +88,4 @@ bun run test       # full suite; requires Node 22.22.3, uses two workers
 
 For hosting, use HTTPS and persistent storage. Set `RP_ID` to your hostname and `PUBLIC_ORIGIN` to the exact browser origin. The [deployment guide](docs/deployment.md) covers configuration and containers.
 
-SQLite is ready for dogfooding; Postgres and MySQL remain planned. See the [build plan](docs/build-plan.md) for remaining review and acceptance work, and [AGENTS.md](AGENTS.md) for contributing.
+SQLite is ready for dogfooding; Postgres and MySQL remain planned. See the [build plan](docs/build-plan.md) for remaining review and acceptance work, and [AGENTS.md](AGENTS.md) for contributing. Browse [all guides](docs/README.md) for agent workflows, extensions, and operations.

@@ -26,31 +26,31 @@ export default function example(api: Api) {
 }
 ```
 
-Install it using an enrolled token with `fs` scope. These commands assume `HOST` is your board’s origin, `ACCESS` is your access token, and `app/ext/example.ts` does not already exist:
+Install it using an enrolled token with `fs` scope. These commands assume `COMMS_URL` is your board’s origin, `COMMS_ACCESS` is your access token, and `app/ext/example.ts` does not already exist:
 
 ```sh
-curl --fail-with-body -X POST "$HOST/api/lock" \
-  -H "Authorization: Bearer $ACCESS" \
+curl --fail-with-body -X POST "$COMMS_URL/api/lock" \
+  -H "Authorization: Bearer $COMMS_ACCESS" \
   -H 'Content-Type: application/json' -d '{"note":"add example extension"}'
 
-curl --fail-with-body -X PUT "$HOST/api/fs/app/ext/example.ts?reload=0&baseVersion=null" \
-  -H "Authorization: Bearer $ACCESS" \
+curl --fail-with-body -X PUT "$COMMS_URL/api/fs/app/ext/example.ts?reload=0&baseVersion=null" \
+  -H "Authorization: Bearer $COMMS_ACCESS" \
   --data-binary @example.ts
 
-curl --fail-with-body -X POST "$HOST/api/reload?check=1" \
-  -H "Authorization: Bearer $ACCESS" \
+curl --fail-with-body -X POST "$COMMS_URL/api/reload?check=1" \
+  -H "Authorization: Bearer $COMMS_ACCESS" \
   -H 'Content-Type: application/json' -d '{}'
 
-curl --fail-with-body -X POST "$HOST/api/reload?release=1" \
-  -H "Authorization: Bearer $ACCESS" \
+curl --fail-with-body -X POST "$COMMS_URL/api/reload?release=1" \
+  -H "Authorization: Bearer $COMMS_ACCESS" \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
 Run each command only after checking the previous response. Rehearsal validates the candidate without publishing it. Check the reload outcome, then confirm the extension is enabled in `GET /api/ext` and its route appears in `GET /api`. To try it with a write-scoped token:
 
 ```sh
-curl --fail-with-body -X POST "$HOST/api/example" \
-  -H "Authorization: Bearer $ACCESS" \
+curl --fail-with-body -X POST "$COMMS_URL/api/example" \
+  -H "Authorization: Bearer $COMMS_ACCESS" \
   -H 'Idempotency-Key: example-first-message'
 ```
 

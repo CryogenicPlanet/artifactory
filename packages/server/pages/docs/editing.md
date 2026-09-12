@@ -2,7 +2,7 @@
 
 Use this guide to change source, publish a page or recover a broken app. You need an access token with `fs` scope. The editing routes belong to boot, so they remain reachable when the editable app fails; recovery guards can still refuse changes when database ownership is uncertain.
 
-Set `HOST` to your board's origin and `ACCESS` to your access token. Every example uses those variables. Read the current file in full before changing it. Prefer an [extension](extensions.md) for new features; keep runtime state inside the extension's service or scope.
+Set `COMMS_URL` to your board's origin and `COMMS_ACCESS` to your access token. Every example uses those variables. Read the current file in full before changing it. Prefer an [extension](extensions.md) for new features; keep runtime state inside the extension's service or scope.
 
 ## Change source safely
 
@@ -11,8 +11,8 @@ A multi-file edit follows one sequence: **lock → read → stage → rehearse �
 ### 1. Take the lock
 
 ```sh
-curl --fail-with-body -X POST "$HOST/api/lock" \
-  -H "Authorization: Bearer $ACCESS" \
+curl --fail-with-body -X POST "$COMMS_URL/api/lock" \
+  -H "Authorization: Bearer $COMMS_ACCESS" \
   -H 'Content-Type: application/json' \
   -d '{"note":"update example extension"}'
 ```
@@ -22,21 +22,21 @@ A `423` response identifies the other holder and explains how to wait. Do not re
 ### 2. Read and edit locally
 
 ```sh
-curl --fail-with-body "$HOST/api/fs/app/ext/example.ts" \
-  -H "Authorization: Bearer $ACCESS" \
+curl --fail-with-body "$COMMS_URL/api/fs/app/ext/example.ts" \
+  -H "Authorization: Bearer $COMMS_ACCESS" \
   -D source.headers -o example.ts
 ```
 
-Save the response's `X-Comms-Base-Version` value as `BASE_VERSION`, then edit `example.ts` with your own tools. The value is the unquoted SHA-256 hash of the bytes you read, including your own staged replacement when one exists. It is not a history id.
+Save the response's `X-Comms-Base-Version` value as `COMMS_BASE_VERSION`, then edit `example.ts` with your own tools. The value is the unquoted SHA-256 hash of the bytes you read, including your own staged replacement when one exists. It is not a history id.
 
-For a new file, confirm that the path is absent and use `BASE_VERSION=null`. An authentication or transport error is not evidence that a file is absent.
+For a new file, confirm that the path is absent and use `COMMS_BASE_VERSION=null`. An authentication or transport error is not evidence that a file is absent.
 
 ### 3. Stage the replacement
 
 ```sh
 curl --fail-with-body -X PUT \
-  "$HOST/api/fs/app/ext/example.ts?reload=0&baseVersion=$BASE_VERSION" \
-  -H "Authorization: Bearer $ACCESS" \
+  "$COMMS_URL/api/fs/app/ext/example.ts?reload=0&baseVersion=$COMMS_BASE_VERSION" \
+  -H "Authorization: Bearer $COMMS_ACCESS" \
   --data-binary @example.ts
 ```
 
@@ -58,16 +58,16 @@ DELETE accepts the same conditions, but does not require one. Use a condition wh
 ### 4. Rehearse, then publish
 
 ```sh
-curl --fail-with-body -X POST "$HOST/api/reload?check=1" \
-  -H "Authorization: Bearer $ACCESS" \
+curl --fail-with-body -X POST "$COMMS_URL/api/reload?check=1" \
+  -H "Authorization: Bearer $COMMS_ACCESS" \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
 Rehearsal prepares dependencies and starts the proposed app against a database copy. It does not publish your source. Inspect the outcome and any stderr before continuing.
 
 ```sh
-curl --fail-with-body -X POST "$HOST/api/reload?release=1" \
-  -H "Authorization: Bearer $ACCESS" \
+curl --fail-with-body -X POST "$COMMS_URL/api/reload?release=1" \
+  -H "Authorization: Bearer $COMMS_ACCESS" \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
@@ -81,12 +81,12 @@ Pages need `fs` scope but no app lock or reload. Read an existing page through `
 
 ```sh
 curl --fail-with-body -X PUT \
-  "$HOST/api/fs/pages/project/plan.md?baseVersion=$BASE_VERSION" \
-  -H "Authorization: Bearer $ACCESS" \
+  "$COMMS_URL/api/fs/pages/project/plan.md?baseVersion=$COMMS_BASE_VERSION" \
+  -H "Authorization: Bearer $COMMS_ACCESS" \
   --data-binary @plan.md
 ```
 
-For a confirmed new page, set `BASE_VERSION=null`. A successful response contains `published:true` and a history `batch`. Open it at `/p/project/plan.md`, or append `?raw=1` for the original bytes.
+For a confirmed new page, set `COMMS_BASE_VERSION=null`. A successful response contains `published:true` and a history `batch`. Open it at `/p/project/plan.md`, or append `?raw=1` for the original bytes.
 
 These are repair routes: they enforce authentication, safe paths and durable publication, but bypass the app's archived/deleted-topic policy. Publication can wait for an app transaction to finish; unresolved recovery records can block it. Do not retry a timed-out page write as though nothing happened. Read the page and history first.
 
@@ -97,8 +97,8 @@ These are repair routes: they enforce authentication, safe paths and durable pub
 Inspect retained history first:
 
 ```sh
-curl --fail-with-body "$HOST/api/fs/app/ext/example.ts?history" \
-  -H "Authorization: Bearer $ACCESS"
+curl --fail-with-body "$COMMS_URL/api/fs/app/ext/example.ts?history" \
+  -H "Authorization: Bearer $COMMS_ACCESS"
 ```
 
 For an agent, an app-source revert requires its edit lock and an empty staging overlay. A page-only revert needs no app lock. Choose one selector for `POST /api/revert`:

@@ -40,7 +40,7 @@ Retries of completed app receipts do not create a new reservation. Starting heal
 
 The event charge includes active event-table/index B-tree pages, shared freelist pages, any retained main-file tail beyond logical size, and the physical WAL. Shared overhead cannot reliably be assigned to one table, so it is charged in full. Live non-event database pages are reported separately. This is not a whole-boot-store cap; protected identity and recovery state may exceed the event budget.
 
-Maintenance runs every minute, independently of app liveness. A pass deletes at most 2,048 oldest **published** events in bounded transactions. It never removes unpublished events or durable event-batch receipts. Each of nine bounded iterations also attempts a passive checkpoint, incremental reclamation of at most 256 free pages and WAL truncation with SQLite busy waiting disabled for that operation.
+For supported stores, maintenance runs every minute, independently of app liveness. The current legacy topic-move refusal path disables this loop; that unresolved exception is tracked in [the build plan](../../../docs/build-plan.md). A pass deletes at most 2,048 oldest **published** events in bounded transactions. It never removes unpublished events or durable event-batch receipts. Each of nine bounded iterations also attempts a passive checkpoint, incremental reclamation of at most 256 free pages and WAL truncation with SQLite busy waiting disabled for that operation.
 
 Those limits bound iterations and incremental vacuum work, not checkpoint latency. A busy reader may keep WAL pressure high. The next physical measurement, rather than deletion/checkpoint success alone, determines whether reservations can resume.
 

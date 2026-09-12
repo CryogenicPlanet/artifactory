@@ -9,7 +9,7 @@
 - Use subagents for bounded build, discovery, and review work. Parallelize independent work with explicit file ownership; use isolated worktrees for concurrent writers. In one checkout, use one writer at a time and parallel read-only scouts/reviewers.
 - The lead agent owns integration and acceptance. Keep shared interfaces small, review meaningful changes with a fresh agent, and remove unnecessary complexity before calling a slice done. Track build groups and dependencies in docs/build-plan.md.
 - Read SPEC.md and docs/tech.md; read each file in full before editing and the package docs/README.md before package work.
-- This is a base scaffold. Do not infer implemented behavior from planned documentation.
+- Distinguish implemented behavior from planned documentation. Check the current code and build plan before claiming a feature is available.
 - Run `bun run check` after code changes. Tests are separate; run relevant tests when adding behavior.
 - Keep direct dependencies exact; use Bun workspaces, never Turbo.
 - Use Effect v4 and its platform services for runtime I/O. Wire layers in main.ts or server.ts.
