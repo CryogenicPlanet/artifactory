@@ -300,3 +300,38 @@ it("distinguishes transaction admission from a failed provisioning query", async
 			expect(commands.some((statement) => statement.startsWith("CREATE USER"))).toBe(false);
 		}),
 	));
+
+it("revokes only delegated loader grants and safely repeats a completed handoff", async () =>
+	run(
+		Effect.gen(function* () {
+			const resource = { ...record("restore"), phase: "ready" as const };
+			let revoked = false;
+			const { sql, commands } = yield* fixture((statement) => {
+				if (statement.startsWith("REVOKE")) {
+					revoked = true;
+					return [];
+				}
+				if (statement.includes("DATABASE()")) return [{ name: resource.database }];
+				if (statement.includes("USER_ATTRIBUTES")) return [{ host: "%", stamp: resource.id }];
+				if (statement.includes("information_schema.TABLES"))
+					return ["kernel_writer", "outbox", "mutation_batches", "store_identity"].map((name) => ({ name }));
+				if (statement.includes("SCHEMA_PRIVILEGES"))
+					return revoked ? [] : [{ privilege: "SELECT" }, { privilege: "LOCK TABLES" }];
+				return [];
+			});
+			const provision = yield* mysqlDatabaseProvision({
+				created: () => Effect.void,
+				owns: () => Effect.succeed(true),
+			}).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+			yield* provision.handoff(resource, "app");
+			yield* provision.handoff(resource, "app");
+			const revokes = commands.filter((statement) => statement.startsWith("REVOKE"));
+			expect(revokes).toHaveLength(1);
+			expect(revokes[0]).toContain("REVOKE SELECT, LOCK TABLES ON");
+			expect(
+				commands
+					.filter((statement) => statement.startsWith("GRANT"))
+					.every((statement) => !statement.includes("LOCK TABLES")),
+			).toBe(true);
+		}),
+	));

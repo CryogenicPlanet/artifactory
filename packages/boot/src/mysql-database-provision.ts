@@ -9,6 +9,7 @@ const identifier = (value: string) => `\`${value.replaceAll("`", "``")}\``;
 const grantDatabase = (value: string) => identifier(value.replace(/[_%]/g, "\\$&"));
 const account = (name: string) => `${identifier(name)}@'%'`;
 const permissions = "SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES, CREATE TEMPORARY TABLES";
+const loaderPermissions = `${permissions}, LOCK TABLES`;
 
 /** Receipts live in the boot database and commit independently after exclusive CREATE succeeds. */
 export interface MysqlDatabaseReceipts<E, R> {
@@ -110,7 +111,7 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 				// Existing native dumps contain LOCK TABLES; only the disposable loader needs this privilege.
 				yield* execute(
 					"grant_loader",
-					`GRANT ${permissions}, LOCK TABLES ON ${grantDatabase(record.database)}.* TO ${account(record.principal)}`,
+					`GRANT ${loaderPermissions} ON ${grantDatabase(record.database)}.* TO ${account(record.principal)}`,
 				);
 			});
 		const grantSchema = selected;
@@ -124,6 +125,21 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 					);
 				if (new Set(rows.map((row) => row.name)).size !== 4) return yield* invalid();
 			});
+		const revoke = (record: RemoteDatabaseRecord, stage: "revoke_loader" | "revoke_dump", allowed: string) =>
+			Effect.gen(function* () {
+				const rows =
+					yield* sql`SELECT PRIVILEGE_TYPE AS privilege FROM information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE=${`'${record.principal}'@'%'`} AND TABLE_SCHEMA=${record.database.replace(/[_%]/g, "\\$&")}`.pipe(
+						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ privilege: Schema.String })))),
+					);
+				// A previous atomic REVOKE may have committed before the journal phase advanced.
+				if (rows.length === 0) return;
+				const permitted = allowed.split(", ");
+				if (rows.some((row) => !permitted.includes(row.privilege))) return yield* invalid();
+				yield* execute(
+					stage,
+					`REVOKE ${rows.map((row) => row.privilege).join(", ")} ON ${grantDatabase(record.database)}.* FROM ${account(record.principal)}`,
+				);
+			});
 		const handoff = (record: RemoteDatabaseRecord, appRole: string) =>
 			Effect.gen(function* () {
 				if (record.kind !== "restore" || record.phase !== "ready" || !appRole || /[\\\x00-\x1f\x7f]/.test(appRole))
@@ -135,10 +151,7 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 					"handoff_app",
 					`GRANT ${permissions} ON ${grantDatabase(record.database)}.* TO ${account(appRole)}`,
 				);
-				yield* execute(
-					"revoke_loader",
-					`REVOKE ALL PRIVILEGES ON ${grantDatabase(record.database)}.* FROM ${account(record.principal)}`,
-				);
+				yield* revoke(record, "revoke_loader", loaderPermissions);
 			});
 		const catalogVisible = (record: RemoteDatabaseRecord) =>
 			Effect.gen(function* () {
@@ -196,13 +209,7 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 				if (record.kind !== "dump" || record.phase !== "closed") return yield* invalid();
 				yield* selected(record);
 				if (!(yield* provePrincipal(record))) return;
-				const grants =
-					yield* sql`SELECT PRIVILEGE_TYPE FROM information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE=${`'${record.principal}'@'%'`} AND TABLE_SCHEMA=${record.database.replace(/[_%]/g, "\\$&")}`;
-				if (grants.length > 0)
-					yield* execute(
-						"revoke_dump",
-						`REVOKE ALL PRIVILEGES ON ${grantDatabase(record.database)}.* FROM ${account(record.principal)}`,
-					);
+				yield* revoke(record, "revoke_dump", "SELECT");
 			});
 		const dropPrincipal = (record: RemoteDatabaseRecord) =>
 			Effect.gen(function* () {
