@@ -9,7 +9,7 @@ export function serve(mode: string) {
 	let received = 0;
 	let cancelled = 0;
 	let releaseStream: (() => void) | null = null;
-	if (mode === "stderr") process.stderr.write("x".repeat(100_000) + "stderr-tail\n");
+	if (mode === "stderr") process.stderr.write("x".repeat(100_000) + "\nstderr-tail\n");
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
 		port: 0,

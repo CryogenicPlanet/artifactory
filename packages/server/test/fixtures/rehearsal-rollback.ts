@@ -142,7 +142,9 @@ const program = Effect.gen(function* () {
 			assert.ok(
 				result.cause.reasons.every(
 					(reason) =>
-						Cause.isFailReason(reason) && Schema.is(KernelError)(reason.error) && reason.error.code === "health_failed",
+						Cause.isFailReason(reason) &&
+						Schema.is(KernelError)(reason.error) &&
+						reason.error.code === "health_read_invalid",
 				),
 			);
 			yield* empty;

@@ -185,6 +185,7 @@ describe("real Bun boot proxy", () => {
 		const state = await app.state();
 		if (typeof state.stderr !== "string") throw new Error("Expected stderr text");
 		expect(state.stderr.length).toBeLessThanOrEqual(8192);
+		expect(state.stderr).toContain("[diagnostic line too long]");
 		expect(state.stderr).toContain("stderr-tail");
 	});
 
