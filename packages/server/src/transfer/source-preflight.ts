@@ -217,7 +217,25 @@ export const inspectTransferSource = (
 			state.pending_from !== null ||
 			state.pending_to !== null
 		)
-			return yield* pending("sequence_pending");
+			return yield* Console.error(
+				JSON.stringify({
+					event: "store_transfer_sequence_refused",
+					rows: seq.length,
+					singleton_valid: state?.singleton === 1,
+					next_type: typeof state?.next,
+					published_type: typeof state?.published_through,
+					next_valid: Number.isSafeInteger(state?.next),
+					published_valid: Number.isSafeInteger(state?.published_through),
+					gap:
+						typeof state?.next === "number" && typeof state.published_through === "number"
+							? state.next - state.published_through
+							: null,
+					pending_id: state?.pending_id !== null,
+					pending_attempt: state?.pending_attempt !== null,
+					pending_from: state?.pending_from !== null,
+					pending_to: state?.pending_to !== null,
+				}),
+			).pipe(Effect.andThen(pending("sequence_pending")));
 		for (const [reason, query] of [
 			["cutover_pending", boot`SELECT 1 FROM cutover LIMIT 1`],
 			[

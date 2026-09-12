@@ -15,6 +15,23 @@ it("selects durable source identity and refuses unfinished publication, ownershi
 	]) {
 		expect(stderr).toContain(JSON.stringify({ event: "store_transfer_source_refused", reason }));
 	}
+	expect(stderr).toContain(
+		JSON.stringify({
+			event: "store_transfer_sequence_refused",
+			rows: 1,
+			singleton_valid: true,
+			next_type: "number",
+			published_type: "number",
+			next_valid: true,
+			published_valid: true,
+			gap: 1,
+			pending_id: false,
+			pending_attempt: true,
+			pending_from: false,
+			pending_to: false,
+		}),
+	);
+	expect(stderr).not.toContain("orphan");
 	expect(stderr).not.toContain("secret");
 	expect(stderr).not.toContain("12345678-1234-4234-8234-123456789abc");
 });
