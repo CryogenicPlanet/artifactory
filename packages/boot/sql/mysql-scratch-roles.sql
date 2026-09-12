@@ -7,9 +7,6 @@ EXECUTE comms_check_grants;
 DEALLOCATE PREPARE comms_check_grants;
 
 GRANT CREATE USER ON *.* TO 'comms_boot'@'%';
--- Ephemeral logins register their own physical sessions before SQL admission.
-GRANT SELECT ON performance_schema.session_account_connect_attrs
-  TO 'comms_boot'@'%' WITH GRANT OPTION;
 -- Source metadata preflight must see unsupported definers before any copy begins.
 -- SELECT can be delegated to an ephemeral dump login; app credentials stay unchanged.
 GRANT SELECT ON `comms\_app`.* TO 'comms_boot'@'%' WITH GRANT OPTION;
