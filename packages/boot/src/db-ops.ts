@@ -31,6 +31,7 @@ const make = (store: FileStore, dataDirectory: string) =>
 		);
 		const sync = (name: string) => Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
 		return {
+			dialect: "sqlite" as const,
 			recoverStaging: fs.remove(`${filename}.restore-staging`, { recursive: true, force: true }),
 			estimatedBytes,
 			clone: (destination: FileStore) =>

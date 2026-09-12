@@ -34,7 +34,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 	const crypto = yield* Crypto.Crypto;
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
-	const retention = yield* artifactRetention(recovery.dataDirectory);
+	const retention = yield* artifactRetention(recovery.dataDirectory, backup.dialect);
 	const headroom = yield* storageHeadroom(recovery.dataDirectory);
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const preparationContext = yield* Effect.context<Effect.Services<ReturnType<typeof prepareRestoreGeneration>>>();
@@ -53,13 +53,14 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BackupRecord))),
 			);
 			const row = rows[0];
-			if (row && row.engine !== "sqlite") return yield* new ChildError({ code: "backup_engine_mismatch" });
+			if (row && row.engine !== backup.dialect) return yield* new ChildError({ code: "backup_engine_mismatch" });
 			if (
 				!row ||
 				row.published_through === null ||
 				row.published_through < 0 ||
-				row.path !== backupPath(path, recovery.dataDirectory, id) ||
-				(yield* fs.realPath(row.path)) !== backupPath(path, yield* fs.realPath(recovery.dataDirectory), id) ||
+				row.path !== backupPath(path, recovery.dataDirectory, id, backup.dialect) ||
+				(yield* fs.realPath(row.path)) !==
+					backupPath(path, yield* fs.realPath(recovery.dataDirectory), id, row.engine) ||
 				(yield* fs.stat(row.path)).type !== "File"
 			)
 				return yield* new ChildError({ code: "restore_backup_invalid" });
@@ -324,7 +325,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					const id = yield* crypto.randomUUIDv4;
 					const directory = path.join(recovery.dataDirectory, "backups");
 					yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
-					const filename = backupPath(path, recovery.dataDirectory, id);
+					const filename = backupPath(path, recovery.dataDirectory, id, backup.dialect);
 					const fence = (yield* events.state).published_through;
 					const frozenEstimate = yield* backup.estimatedBytes;
 					yield* retention.prune(yield* headroom.sample, frozenEstimate, [generation.n]);
@@ -333,8 +334,8 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					const at = (yield* DateTime.nowAsDate).getTime();
 					yield* sql.withTransaction(
 						Effect.gen(function* () {
-							yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation)
-						VALUES(${id},${filename},'pre-restore',${bytes},${at},${fence},${generation.n})`;
+							yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation,engine)
+						VALUES(${id},${filename},'pre-restore',${bytes},${at},${fence},${generation.n},${backup.dialect})`;
 							yield* events.writeBoot({
 								at,
 								type: "backup.taken",

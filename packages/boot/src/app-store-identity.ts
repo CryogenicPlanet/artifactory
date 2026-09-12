@@ -58,7 +58,7 @@ export const appStoreIdentity = (filename: string, dataDirectory?: string) =>
 			const directory = path.join(dataDirectory ?? path.dirname(filename), "backups");
 			if (
 				row.engine !== "sqlite" ||
-				row.path !== backupPath(path, dataDirectory ?? path.dirname(filename), row.id) ||
+				row.path !== backupPath(path, dataDirectory ?? path.dirname(filename), row.id, "sqlite") ||
 				!(yield* fs.exists(row.path))
 			)
 				return false;
