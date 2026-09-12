@@ -41,12 +41,17 @@ Preserve verified attribution, writer fencing and atomic mutation/outbox/retry r
 
 ## Offline transfer source compatibility
 
-Offline engine transfer requires the selected frozen generation to export
+Offline engine transfer requires the selected frozen generation to include
+`transfer-app-worker.ts` and export
 `initializeTransferApp(sql, epoch, sourceDirectory)` from
 `kernel/transfer-app-initialize.ts`, with core `initializeForEpoch(epoch)` in
 `ext/core/schema.ts`. Older installed source must first be updated through the
 normal source editing and reload workflow. Transfer never substitutes the image's
 newer core schema or rewrites installed source.
+
+The immutable launcher runs this entry as a finite keeper-owned app process and
+accepts its migration report only after successful exit and positive keeper closure.
+Proof reports are limited to 1 MiB; this does not limit transferred business rows.
 
 The transfer worker replays that source's core, editable and extension migrations
 using only the target app credential and its admitted writer epoch. It does not
