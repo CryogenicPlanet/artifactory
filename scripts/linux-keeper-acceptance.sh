@@ -87,6 +87,7 @@ function identity(uid) {
 identity(1001);
 if (process.env.PROBE_DESCENDANT === "1") {
   const db = new Database(process.env.APP_DATABASE);
+  db.exec("PRAGMA busy_timeout=1000");
   db.exec("CREATE TABLE IF NOT EXISTS keeper_probe(value INTEGER NOT NULL); INSERT INTO keeper_probe SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM keeper_probe)");
   let writes = 0;
   setInterval(() => {
