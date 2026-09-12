@@ -77,6 +77,11 @@ const main = Effect.gen(function* () {
 	else if (mode === "newer-version") yield* sql`PRAGMA user_version=20`;
 	else return yield* Effect.die("Unknown fixture mode");
 	const before = yield* snapshot;
+	if (mode === "mirror") {
+		yield* initializeBootSchema;
+		assert.deepEqual(yield* snapshot, { ...before, version: [{ user_version: 19 }] });
+		return yield* Console.log("repaired derived mirror without replaying migrations");
+	}
 	const result = yield* initializeBootSchema.pipe(Effect.result);
 	assert.equal(result._tag, "Failure");
 	if (result._tag === "Failure") {
@@ -85,7 +90,11 @@ const main = Effect.gen(function* () {
 				? "BootSchemaTooNew"
 				: mode === "newer-ledger"
 					? "migration_ledger_too_new"
-					: "migration_ledger_invalid";
+					: mode === "name"
+						? "migration_ledger_name_mismatch"
+						: mode === "gap"
+							? "migration_ledger_id_invalid"
+							: "migration_mirror_ahead";
 		assert.ok(JSON.stringify(result.failure).includes(expected), JSON.stringify(result.failure));
 	}
 	assert.deepEqual(yield* snapshot, before);
