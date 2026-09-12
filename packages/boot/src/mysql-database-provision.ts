@@ -123,15 +123,16 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 			});
 		const catalogVisible = (record: RemoteDatabaseRecord) =>
 			Effect.gen(function* () {
-				const accounts = yield* sql`SELECT CURRENT_USER() AS account, @@GLOBAL.partial_revokes AS partial_revokes`.pipe(
-					Effect.flatMap(
-						Schema.decodeUnknownEffect(
-							Schema.Array(Schema.Struct({ account: Schema.String, partial_revokes: Schema.Number })),
+				const accounts =
+					yield* sql`SELECT CURRENT_USER() AS account, CAST(@@GLOBAL.partial_revokes AS CHAR) AS partial_revokes`.pipe(
+						Effect.flatMap(
+							Schema.decodeUnknownEffect(
+								Schema.Array(Schema.Struct({ account: Schema.String, partial_revokes: Schema.String })),
+							),
 						),
-					),
-				);
+					);
 				const current = accounts[0];
-				if (accounts.length !== 1 || !current || current.partial_revokes !== 0) return yield* invalid();
+				if (accounts.length !== 1 || !current || current.partial_revokes !== "0") return yield* invalid();
 				const split = current.account.lastIndexOf("@");
 				if (split < 1) return yield* invalid();
 				const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;

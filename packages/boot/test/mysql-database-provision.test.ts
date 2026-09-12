@@ -110,7 +110,7 @@ it("refuses advanced objects before giving a dump principal source access", asyn
 				statement.includes("DATABASE()")
 					? [{ name: resource.database }]
 					: statement.includes("CURRENT_USER()")
-						? [{ account: "boot@%", partial_revokes: 0 }]
+						? [{ account: "boot@%", partial_revokes: "0" }]
 						: statement.includes("SCHEMA_PRIVILEGES")
 							? ["SELECT", "SHOW VIEW", "TRIGGER", "EVENT", "EXECUTE"].map((privilege) => ({
 									pattern: resource.database,
@@ -150,7 +150,7 @@ it("refuses incomplete catalog visibility before inspecting objects or granting 
 				statement.includes("DATABASE()")
 					? [{ name: resource.database }]
 					: statement.includes("CURRENT_USER()")
-						? [{ account: "boot@%", partial_revokes: 0 }]
+						? [{ account: "boot@%", partial_revokes: "0" }]
 						: [{ pattern: resource.database, privilege: "SELECT" }],
 			);
 			const provision = yield* mysqlDatabaseProvision({
@@ -195,7 +195,7 @@ it("does not combine catalog privileges from competing MySQL wildcard grants", a
 				statement.includes("DATABASE()")
 					? [{ name: resource.database }]
 					: statement.includes("CURRENT_USER()")
-						? [{ account: "boot@%", partial_revokes: 0 }]
+						? [{ account: "boot@%", partial_revokes: "0" }]
 						: ["SELECT", "SHOW VIEW", "TRIGGER", "EVENT", "EXECUTE"].map((privilege, index) => ({
 								pattern: index === 0 ? "comms_%" : "comms_rehearsal_%",
 								privilege,
