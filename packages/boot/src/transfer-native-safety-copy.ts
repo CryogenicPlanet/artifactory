@@ -9,6 +9,7 @@ import { remoteNativeCopy } from "./remote-native-copy.ts";
 import type { RemoteRuntime } from "./remote-runtime.ts";
 import { transferDumpJournal } from "./transfer-dump-journal.ts";
 import { TransferSafetyError } from "./transfer-safety-copy.ts";
+import { transferFileDigest } from "./transfer-file-digest.ts";
 
 const Receipt = Schema.Struct({
 	version: Schema.Literal(1),
@@ -80,16 +81,13 @@ export const nativeTransferSafetyCopy = (options: {
 		const recover = Effect.gen(function* () {
 			for (const record of yield* journal.list) yield* finish(record);
 		}).pipe(Effect.mapError(invalid));
-		const hash = (bytes: Uint8Array) =>
-			crypto.digest("SHA-256", bytes).pipe(Effect.map((value) => Buffer.from(value).toString("hex")));
 		const artifact = (id: string) =>
 			Effect.gen(function* () {
 				const filename = yield* journal.pathFor(id);
 				const stat = yield* fs.stat(filename);
 				if (stat.type !== "File" || (yield* fs.realPath(filename)) !== filename || (stat.mode & 0o077) !== 0)
 					return yield* invalid();
-				const bytes = yield* fs.readFile(filename);
-				return { bytes: bytes.byteLength, hash: yield* hash(bytes) };
+				return yield* transferFileDigest(filename);
 			});
 		const directory = path.join(options.selection.data_directory, "transfers", options.selection.transfer_id, "safety");
 		const sync = (filename: string) => Effect.scoped(fs.open(filename).pipe(Effect.flatMap((file) => file.sync)));

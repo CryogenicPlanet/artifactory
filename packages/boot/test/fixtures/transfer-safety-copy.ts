@@ -25,32 +25,40 @@ await Effect.runPromise(
 		const refused = yield* sqliteTransferSafetyCopy({ ...options, assertAllClosed: Effect.fail("still-open") });
 		assert.equal((yield* refused.capture.pipe(Effect.result))._tag, "Failure");
 		assert.equal(yield* fs.exists(`${root}/transfers`), false);
-		// Opaque sidecar bytes are deliberately invalid: capture must not open SQLite to 'repair' them.
-		yield* fs.writeFile(`${root}/boot.db-wal`, new Uint8Array([255, 0, 7]));
+		// More than one stream chunk, deliberately invalid: never open SQLite to 'repair' these bytes.
+		const opaqueWal = new Uint8Array(256 * 1024 + 7).fill(171);
+		opaqueWal.set([255, 0, 7]);
+		yield* fs.writeFile(`${root}/boot.db-wal`, opaqueWal);
+		const streamingFs = { ...fs, readFile: () => Effect.die("Safety copies must stream database files") };
 		let checks = 0;
 		const backup = yield* sqliteTransferSafetyCopy({
 			...options,
 			assertAllClosed: Effect.sync(() => {
 				checks++;
 			}),
-		});
-		const first = yield* backup.capture;
+		}).pipe(Effect.provideService(FileSystem.FileSystem, streamingFs));
+		const capture = backup.capture.pipe(Effect.provideService(FileSystem.FileSystem, streamingFs));
+		const verify = (filename: string) =>
+			backup.verify(filename).pipe(Effect.provideService(FileSystem.FileSystem, streamingFs));
+		const first = yield* capture;
 		assert.equal(checks, 2);
 		assert.equal(first.receipt.files.length, 3);
 		assert.equal((yield* fs.stat(first.path)).mode & 0o777, 0o600);
-		assert.deepEqual(yield* backup.verify(first.path), first.receipt);
+		assert.deepEqual(yield* verify(first.path), first.receipt);
 		const copied = first.path.replace(/receipt.json$/, "boot.db-wal");
-		assert.deepEqual(yield* fs.readFile(copied), new Uint8Array([255, 0, 7]));
+		assert.deepEqual(yield* fs.readFile(copied), opaqueWal);
 		const appCopy = first.path.replace(/receipt.json$/, "app.db");
 		const restored = new Database(appCopy, { readonly: true });
 		assert.deepEqual(restored.query("SELECT value FROM evidence").get(), { value: new Uint8Array([0, 255, 128, 42]) });
 		restored.close();
-		yield* fs.writeFile(copied, new Uint8Array([1, 2, 3]));
-		assert.equal((yield* backup.verify(first.path).pipe(Effect.result))._tag, "Failure");
-		const second = yield* backup.capture;
+		const tampered = opaqueWal.slice();
+		tampered[0] = 1;
+		yield* fs.writeFile(copied, tampered);
+		assert.equal((yield* verify(first.path).pipe(Effect.result))._tag, "Failure");
+		const second = yield* capture;
 		assert.notEqual(second.path, first.path);
 		assert.equal(yield* fs.exists(first.path), true, "Failed/tampered artifacts are retained");
-		assert.deepEqual(yield* fs.readFile(`${root}/boot.db-wal`), new Uint8Array([255, 0, 7]));
+		assert.deepEqual(yield* fs.readFile(`${root}/boot.db-wal`), opaqueWal);
 		const foreign = yield* sqliteTransferSafetyCopy({
 			...options,
 			storeId: "33333333-3333-4333-8333-333333333333",

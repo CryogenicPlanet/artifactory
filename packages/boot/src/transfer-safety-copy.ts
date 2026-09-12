@@ -1,5 +1,6 @@
-import { Crypto, Effect, FileSystem, Path, Schema } from "effect";
+import { Crypto, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import type { FileStore } from "@comms/storage/store";
+import { transferFileDigest } from "./transfer-file-digest.ts";
 
 const Suffix = Schema.Literals(["", "-wal", "-shm", "-journal"]);
 const Receipt = Schema.Struct({
@@ -63,8 +64,6 @@ export const sqliteTransferSafetyCopy = <E, R>(options: {
 		}
 		const directory = path.join(root, "transfers", options.transferId, "safety");
 		const sync = (filename: string) => Effect.scoped(fs.open(filename).pipe(Effect.flatMap((file) => file.sync)));
-		const hash = (bytes: Uint8Array) =>
-			crypto.digest("SHA-256", bytes).pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
 		const regular = (filename: string) =>
 			Effect.gen(function* () {
 				const entries = yield* fs.readDirectory(path.dirname(filename));
@@ -111,8 +110,8 @@ export const sqliteTransferSafetyCopy = <E, R>(options: {
 					names.add(name);
 					const filename = path.join(path.dirname(receiptPath), name);
 					if (!(yield* regular(filename))) return yield* invalid();
-					const bytes = yield* fs.readFile(filename);
-					if (bytes.byteLength !== file.bytes || (yield* hash(bytes)) !== file.hash) return yield* invalid();
+					const actual = yield* transferFileDigest(filename);
+					if (actual.bytes !== file.bytes || actual.hash !== file.hash) return yield* invalid();
 				}
 				if (!names.has("boot.db") || !names.has("app.db")) return yield* invalid();
 				const entries = yield* fs.readDirectory(path.dirname(receiptPath));
@@ -140,11 +139,18 @@ export const sqliteTransferSafetyCopy = <E, R>(options: {
 						if (suffix === "") return yield* invalid();
 						continue;
 					}
-					const bytes = yield* fs.readFile(filename);
+					const original = yield* transferFileDigest(filename);
 					const output = path.join(destination, `${store}.db${suffix}`);
-					yield* fs.writeFile(output, bytes, { flag: "wx", mode: 0o600 });
-					yield* sync(output);
-					files.push({ store, suffix, bytes: bytes.byteLength, hash: yield* hash(bytes) });
+					yield* Effect.scoped(
+						Effect.gen(function* () {
+							const copied = yield* fs.open(output, { flag: "wx", mode: 0o600 });
+							yield* fs.stream(filename).pipe(Stream.runForEach((chunk) => copied.writeAll(chunk)));
+							yield* copied.sync;
+						}),
+					);
+					const copied = yield* transferFileDigest(output);
+					if (copied.bytes !== original.bytes || copied.hash !== original.hash) return yield* invalid();
+					files.push({ store, suffix, ...original });
 				}
 			yield* options.assertAllClosed;
 			const receipt: TransferSafetyReceipt = {
