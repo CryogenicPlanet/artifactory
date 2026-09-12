@@ -110,16 +110,9 @@ for (const scenario of scenarios)
 					`yield* fs.writeFileString(${JSON.stringify(draining)}, "draining"); ${drainAnchor}`,
 				),
 			);
-			const operatorSource = await readFile(join(import.meta.dirname, "fixtures/remote-repair-operator.ts"), "utf8");
-			const operatorAnchor =
-				"console.log(JSON.stringify({ selected, settings, evidence, original, pending, restores }));";
-			expect(operatorSource.split(operatorAnchor)).toHaveLength(2);
-			await writeFile(
+			await cp(
+				join(import.meta.dirname, "fixtures/remote-repair-operator.ts"),
 				join(fixtureRoot, "remote-repair-operator.ts"),
-				operatorSource.replace(
-					operatorAnchor,
-					"console.log(JSON.stringify({ selected, settings, evidence, original, pending, restores, sequence: yield* sql`SELECT next,published_through FROM seq`, children: yield* sql`SELECT closed FROM child_attempts` }));",
-				),
 			);
 
 			const env = {
