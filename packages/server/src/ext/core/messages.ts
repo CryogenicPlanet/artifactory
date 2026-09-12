@@ -1,3 +1,4 @@
+import { isDescendant, jsonArrayHas, nullable } from "@comms/storage/dialect";
 import { Message, MessageInput } from "@comms/protocol/messages";
 import { Publication } from "../../kernel/publication.ts";
 import type { Identity } from "../../kernel/identity.ts";
@@ -65,10 +66,10 @@ export const makeMessages = (
 						if (new TextEncoder().encode(encoded).byteLength > 131072)
 							return yield* new KernelError({ code: "input_invalid" });
 						const deleted =
-							yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${input.topic} OR substr(${input.topic},1,length(path)+1)=path||'/') LIMIT 1`;
+							yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${input.topic} OR ${isDescendant(sql, input.topic, sql("path"))}) LIMIT 1`;
 						if (deleted.length > 0) return yield* new KernelError({ code: "topic_not_found" });
 						const archived =
-							yield* sql`SELECT path FROM topics WHERE archived_at IS NOT NULL AND (path=${input.topic} OR substr(${input.topic},1,length(path)+1)=path||'/') LIMIT 1`;
+							yield* sql`SELECT path FROM topics WHERE archived_at IS NOT NULL AND (path=${input.topic} OR ${isDescendant(sql, input.topic, sql("path"))}) LIMIT 1`;
 						if (archived.length > 0) return yield* new KernelError({ code: "topic_archived" });
 						const parts = input.topic.split("/");
 						const missing: Array<{ path: string; parent: string | null; name: string }> = [];
@@ -162,9 +163,13 @@ export const makeMessages = (
 				const targets = input.mentions ?? [];
 				if (targets.length > 32 || targets.some((target) => !target.startsWith("@") || !validTopic(target)))
 					return yield* new KernelError({ code: "query_invalid" });
-				const topicMatch = sql`(topic=${input.topic ?? null} OR ${input.recursive ? 1 : 0}=1 AND substr(topic,1,length(${input.topic ?? ""})+1)=${(input.topic ?? "") + "/"})`;
-				const mentionMatch = sql`EXISTS (SELECT 1 FROM messages mention_source, json_each(CASE WHEN mention_source.updated_seq>${ceiling} THEN mention_source.previous_mentions ELSE mention_source.mentions END) mention WHERE mention_source.id=visible_messages.id AND mention.value IN (SELECT value FROM json_each(${JSON.stringify(targets)})))`;
-				let bodyMatch = sql`1`;
+				const topicMatch = sql`(topic=${input.topic ?? null} OR ${input.recursive ? 1 : 0}=1 AND ${isDescendant(sql, sql("topic"), input.topic ?? "")})`;
+				const mentions = sql`CASE WHEN mention_source.updated_seq>${ceiling} THEN mention_source.previous_mentions ELSE mention_source.mentions END`;
+				const mentionMatch =
+					targets.length === 0
+						? sql`1=0`
+						: sql`EXISTS (SELECT 1 FROM messages mention_source WHERE mention_source.id=visible_messages.id AND ${sql.or(targets.map((target) => jsonArrayHas(sql, mentions, target)))})`;
+				let bodyMatch = sql`1=1`;
 				if (input.q !== undefined) {
 					// Quote every term: caller text must never become SQL or FTS syntax.
 					const parts = input.q.trim().match(/"[^"]*"|[^\s"]+/gu) ?? [];
@@ -190,9 +195,9 @@ export const makeMessages = (
 				const items =
 					yield* sql`WITH visible_messages AS (${publishedMessages(sql, ceiling)}) SELECT * FROM visible_messages WHERE deleted_at IS NULL AND seq>${since} AND seq<=${ceiling}
    AND ((${input.topic === undefined && targets.length === 0 ? 1 : 0}=1) OR ${topicMatch} OR ${mentionMatch})
-   AND (${input.exclude ?? null} IS NULL OR instance<>${input.exclude ?? null})
-   AND (${input.agent ?? null} IS NULL OR agent=${input.agent ?? null})
-   AND (${input.tag ?? null} IS NULL OR EXISTS (SELECT 1 FROM json_each(visible_messages.tags) WHERE value=${input.tag ?? null}))
+   AND (${nullable(sql, input.exclude ?? null)} IS NULL OR instance<>${input.exclude ?? null})
+   AND (${nullable(sql, input.agent ?? null)} IS NULL OR agent=${input.agent ?? null})
+   AND (${nullable(sql, input.tag ?? null)} IS NULL OR ${jsonArrayHas(sql, sql("visible_messages.tags"), input.tag ?? null)})
    AND ${bodyMatch}
    ORDER BY CASE WHEN ${input.newest ? 1 : 0}=1 THEN -seq ELSE seq END LIMIT ${input.limit + 1}`.pipe(
 						Effect.flatMap(messageRows),

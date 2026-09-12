@@ -76,6 +76,9 @@ const program = Effect.gen(function* () {
 				["guide", "{}", null],
 				["guide/private", "{}", null],
 				["guide/string", '{"public":"true"}', null],
+				["guide/number", '{"public":1}', null],
+				["guide/false", '{"public":false}', null],
+				["guide/null", '{"public":null}', null],
 				["guide/node_modules/hidden", '{"public":true}', null],
 				["guide/../escape", '{"public":true}', null],
 				["gone", '{"public":true}', 1],
@@ -115,6 +118,9 @@ const program = Effect.gen(function* () {
 		}
 		yield* Effect.gen(function* () {
 			const pages = yield* Pages;
+			assert.equal(yield* pages.publicTopic("guide/public-001", ceiling), true);
+			for (const path of ["guide/private", "guide/string", "guide/number", "guide/false", "guide/null"])
+				assert.equal(yield* pages.publicTopic(path, ceiling), false, "only JSON boolean true grants public access");
 			assert.deepEqual(
 				(yield* pages.entries("guide", true)).map((entry) => entry.name),
 				["public-001"],

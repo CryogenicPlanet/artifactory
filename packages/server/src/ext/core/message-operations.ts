@@ -1,3 +1,4 @@
+import { isDescendant } from "@comms/storage/dialect";
 import type { MessagePatch } from "@comms/protocol/message-patch";
 import { DateTime, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
@@ -61,7 +62,7 @@ export const mutateMessage = (
 						return yield* new KernelError({ code: "author_required" });
 
 					const deleted =
-						yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${previous.topic} OR substr(${previous.topic},1,length(path)+1)=path||'/') LIMIT 1`;
+						yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${previous.topic} OR ${isDescendant(sql, previous.topic, sql("path"))}) LIMIT 1`;
 					if (deleted.length > 0) return yield* new KernelError({ code: "topic_not_found" });
 					if (previous.deleted_at !== null) {
 						if (input === null) {
@@ -70,7 +71,7 @@ export const mutateMessage = (
 						return yield* new KernelError({ code: "message_not_found" });
 					}
 					const archived =
-						yield* sql`SELECT path FROM topics WHERE archived_at IS NOT NULL AND (path=${previous.topic} OR substr(${previous.topic},1,length(path)+1)=path||'/') LIMIT 1`;
+						yield* sql`SELECT path FROM topics WHERE archived_at IS NOT NULL AND (path=${previous.topic} OR ${isDescendant(sql, previous.topic, sql("path"))}) LIMIT 1`;
 					if (archived.length > 0) return yield* new KernelError({ code: "topic_archived" });
 					const message = input === null ? { ...previous, deleted_at: now } : { ...previous, ...input, edited_at: now };
 					if (input !== null) {

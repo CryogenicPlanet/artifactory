@@ -1,3 +1,4 @@
+import { isDescendant } from "@comms/storage/dialect";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { KernelError } from "../../kernel/boot-channel.ts";
@@ -14,8 +15,8 @@ export const pendingPageMove = (
 	sql: SqlClient,
 	name: string,
 ) => sql`SELECT seq FROM topic_page_continuations WHERE completed=0 AND
- (from_path=${name} OR to_path=${name} OR substr(${name},1,length(from_path)+1)=from_path||'/' OR substr(${name},1,length(to_path)+1)=to_path||'/'
- OR substr(from_path,1,length(${name})+1)=${name}||'/' OR substr(to_path,1,length(${name})+1)=${name}||'/') LIMIT 1`;
+ (from_path=${name} OR to_path=${name} OR ${isDescendant(sql, name, sql("from_path"))} OR ${isDescendant(sql, name, sql("to_path"))}
+ OR ${isDescendant(sql, sql("from_path"), name)} OR ${isDescendant(sql, sql("to_path"), name)}) LIMIT 1`;
 
 /** Only called while a shared mutation reservation excludes boot's page journal. */
 export const makePageContinuation = (directory: string) =>
