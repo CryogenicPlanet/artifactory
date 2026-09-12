@@ -41,22 +41,35 @@ for (const engine of ["pg", "mysql"]) {
 			expect(source.split(needle)).toHaveLength(2);
 			await writeFile(
 				initializer,
-				source.replace(needle, `if (index === 0) process.kill(process.pid, "SIGKILL");\n${needle}`),
+				source.replace(
+					needle,
+					`if (index === ${engine === "mysql" ? 6 : 0}) process.kill(process.pid, "SIGKILL");\n${needle}`,
+				),
 			);
 			await expect(run("initialize", copy)).rejects.toMatchObject({ signal: "SIGKILL" });
 			const interrupted = Schema.decodeUnknownSync(Snapshot)(await run("snapshot"));
-			expect(interrupted.tables).toEqual(["kernel_writer"]);
+			expect(interrupted.tables).toEqual(
+				engine === "mysql"
+					? ["kernel_migration_intent", "kernel_writer", "mutation_batches", "outbox", "store_identity"]
+					: ["kernel_writer"],
+			);
 			expect(Schema.decodeSync(Schema.fromJsonString(Progress))(interrupted.progress ?? "")).toEqual({
 				store_id: interrupted.storeId,
-				next: 0,
-				active: "table:kernel_writer",
+				next: engine === "mysql" ? 6 : 0,
+				active: engine === "mysql" ? "table:kernel_migration_intent" : "table:kernel_writer",
 			});
 			const complete = Schema.decodeUnknownSync(Snapshot)(await run("initialize"));
 			expect(complete.storeId).toBe(interrupted.storeId);
-			expect(complete.tables).toEqual(["kernel_writer", "mutation_batches", "outbox", "store_identity"]);
+			expect(complete.tables).toEqual([
+				...(engine === "mysql" ? ["kernel_migration_intent"] : []),
+				"kernel_writer",
+				"mutation_batches",
+				"outbox",
+				"store_identity",
+			]);
 			expect(Schema.decodeSync(Schema.fromJsonString(Progress))(complete.progress ?? "")).toEqual({
 				store_id: interrupted.storeId,
-				next: engine === "pg" ? 8 : 6,
+				next: engine === "pg" ? 8 : 7,
 				active: null,
 			});
 			const permissions = Schema.decodeUnknownSync(Snapshot)(await run("permissions"));
@@ -83,21 +96,29 @@ for (const engine of ["pg", "mysql"]) {
 				"wrong-adoption",
 				"ready",
 				"missing-completed",
-				...(engine === "pg" ? ["foreign-active"] : []),
+				...(engine === "pg" ? ["foreign-active"] : ["old-ladder"]),
 			]) {
 				await run("reset");
 				const refused = Schema.decodeUnknownSync(Snapshot)(await run(mode));
 				expect(refused.code).toBe("app_store_identity_invalid");
 				expect(refused.tables).toEqual(
-					mode === "foreign-active"
-						? ["kernel_writer"]
-						: mode === "foreign"
-							? ["intruder"]
-							: mode === "missing-completed"
-								? ["kernel_writer", "mutation_batches", "store_identity"]
-								: [],
+					mode === "old-ladder"
+						? ["kernel_writer", "mutation_batches", "outbox", "store_identity"]
+						: mode === "foreign-active"
+							? ["kernel_writer"]
+							: mode === "foreign"
+								? ["intruder"]
+								: mode === "missing-completed"
+									? [
+											...(engine === "mysql" ? ["kernel_migration_intent"] : []),
+											"kernel_writer",
+											"mutation_batches",
+											"store_identity",
+										]
+									: [],
 				);
-				if (mode !== "missing-completed" && mode !== "foreign-active") expect(refused.progress).toBeUndefined();
+				if (mode !== "missing-completed" && mode !== "foreign-active" && mode !== "old-ladder")
+					expect(refused.progress).toBeUndefined();
 				if (mode === "foreign-active") expect(refused.untouched).toBe("preserved");
 			}
 		},

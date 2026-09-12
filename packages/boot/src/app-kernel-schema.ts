@@ -178,7 +178,20 @@ export const remoteAppKernelOperations = (sql: SqlClient.SqlClient, appRole: str
 		...tables,
 		...indexes,
 		...(engine === "mysql"
-			? []
+			? [
+					table(
+						"kernel_migration_intent",
+						sql`CREATE TABLE kernel_migration_intent(singleton INTEGER PRIMARY KEY CHECK(singleton=1),scope VARCHAR(255) NOT NULL,name VARCHAR(255) NOT NULL,epoch VARCHAR(128) NOT NULL) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`,
+						[
+							numeric("singleton", "int"),
+							text("scope", false, "varchar", 255),
+							text("name", false, "varchar", 255),
+							text("epoch", false, "varchar", 128),
+						],
+						"singleton",
+						true,
+					),
+				]
 			: [
 					grant(
 						"kernel_dml",

@@ -26,6 +26,7 @@ CREATE ROLE comms_app LOGIN PASSWORD '{app}' NOSUPERUSER NOCREATEDB NOCREATEROLE
 GRANT comms_app TO comms_boot;
 CREATE DATABASE comms_boot OWNER comms_boot;
 CREATE DATABASE comms_app OWNER comms_app;
+CREATE DATABASE comms_schema_guard OWNER comms_app;
 REVOKE CONNECT ON DATABASE comms_boot FROM PUBLIC;
 REVOKE CONNECT ON DATABASE comms_app FROM PUBLIC;
 GRANT CONNECT ON DATABASE comms_app TO comms_app,comms_boot;
@@ -35,8 +36,10 @@ else:
 CREATE USER 'comms_app'@'%' IDENTIFIED BY '{app}';
 CREATE DATABASE comms_boot;
 CREATE DATABASE comms_app CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+CREATE DATABASE comms_schema_guard CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 GRANT ALL ON comms_boot.* TO 'comms_boot'@'%';
 GRANT ALL ON comms_app.* TO 'comms_app'@'%';
+GRANT ALL ON comms_schema_guard.* TO 'comms_app'@'%';
 GRANT SELECT ON performance_schema.session_account_connect_attrs TO 'comms_app'@'%';
 """
 (root/'roles.sql').write_text(sql)
@@ -53,7 +56,7 @@ else
   docker run --detach --name "$container" --publish "127.0.0.1::$port" \
     --mount "type=bind,src=$private,dst=/run/secrets,readonly" \
     --env MYSQL_ROOT_PASSWORD_FILE=/run/secrets/admin-password --env MYSQL_ROOT_HOST=127.0.0.1 \
-    "$image" --performance-schema-session-connect-attrs-size="$attributes" >/dev/null
+    "$image" --performance-schema-session-connect-attrs-size="$attributes" --log-bin-trust-function-creators=ON >/dev/null
   ready() { docker exec "$container" mysql --defaults-extra-file=/run/secrets/admin.cnf --host=127.0.0.1 -e 'SELECT 1' >/dev/null 2>"$private/readiness-errors"; }
 fi
 diagnose_readiness() {
@@ -88,7 +91,14 @@ published=$(docker port "$container" "$port/tcp")
 python3 - "$private/client.json" "${published##*:}" <<'PY'
 import json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()); d['port']=int(sys.argv[2]); p.write_text(json.dumps(d))
+d['database']='comms_schema_guard'; (p.parent/'guard.json').write_text(json.dumps(d))
 PY
+# The intentionally truncated session-attribute case refuses before SQL admission.
+if [ "$attributes" != 32 ]; then
+  COMMS_MIGRATION_GUARD_CONFIG="$private/guard.json" \
+    node node_modules/vitest/vitest.mjs run packages/server/test/kernel/migration-state-remote.test.ts --maxWorkers=1 --reporter=verbose
+fi
+
 COMMS_REMOTE_TEST_CONFIG="$private/client.json" COMMS_REMOTE_TEST_CONTAINER="$container" \
   COMMS_REMOTE_TEST_ENGINE="$engine" COMMS_REMOTE_TEST_ATTRIBUTES="$attributes" \
   node node_modules/vitest/vitest.mjs run packages/storage/test/remote-sessions.test.ts --maxWorkers=2 --reporter=verbose

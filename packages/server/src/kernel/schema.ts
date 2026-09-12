@@ -2,7 +2,7 @@ import { tableShape, type ColumnShape } from "@comms/storage/remote-migrations";
 import { on } from "@comms/storage/dialect";
 import { Effect } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
-import { assertNoPendingMigration, migrationIntentShape } from "./migration-intent.ts";
+import { assertNoPendingMigration } from "./migration-intent.ts";
 import { KernelError } from "./boot-channel.ts";
 import { writerGate } from "./database.ts";
 
@@ -23,8 +23,7 @@ export const initializeRemoteKernelSchema = (sql: SqlClient.SqlClient, epoch: st
 		mysql: () =>
 			Effect.gen(function* () {
 				yield* sql.withTransaction(writerGate(sql, epoch));
-				yield* migrationIntentShape(sql);
-				yield* sql`CREATE TABLE IF NOT EXISTS kernel_migration_intent(singleton INTEGER PRIMARY KEY CHECK(singleton=1),scope VARCHAR(255) NOT NULL,name VARCHAR(255) NOT NULL,epoch VARCHAR(128) NOT NULL) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`;
+				// Boot creates this under its independent initialization journal. Missing evidence is never fresh state.
 				yield* assertNoPendingMigration(sql);
 				const text = (name: string, length: number): ColumnShape => ({
 					name,

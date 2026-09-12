@@ -79,7 +79,14 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 				});
 				if (mysql) {
 					if (yield* prior) return;
-					return yield* mysqlMigration(sql, epoch, extension, name, sql.unsafe(statement).pipe(Effect.asVoid), receipt);
+					return yield* mysqlMigration(
+						sql,
+						epoch,
+						extension,
+						name,
+						sql.withTransaction(preserveMigrationState(sql, sql.unsafe(statement))).pipe(Effect.asVoid),
+						receipt,
+					);
 				}
 				yield* sql.withTransaction(
 					Effect.gen(function* () {

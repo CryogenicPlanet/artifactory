@@ -135,6 +135,7 @@ await Effect.runPromise(
 			yield* sql`INSERT INTO kernel_writer(singleton,epoch) VALUES(1,'current')`;
 			if (settings.engine === "mysql") {
 				phase = "malformed-intent";
+				yield* sql`DROP TABLE kernel_migration_intent`;
 				yield* sql`CREATE TABLE kernel_migration_intent(singleton INTEGER,scope TEXT,name TEXT,epoch TEXT) ENGINE=MyISAM`;
 				assert.equal((yield* initializeRemoteKernelSchema(sql, "current").pipe(Effect.result))._tag, "Failure");
 				assert.deepEqual(
@@ -142,6 +143,9 @@ await Effect.runPromise(
 					[],
 				);
 				yield* sql`DROP TABLE kernel_migration_intent`;
+				assert.equal((yield* initializeRemoteKernelSchema(sql, "current").pipe(Effect.result))._tag, "Failure");
+				// Explicit disposable fixture reset, never a production repair.
+				for (const statement of remoteAppKernelSchema(sql, settings.username)) yield* statement;
 			}
 			phase = "initialize";
 			yield* initializeRemoteKernelSchema(sql, "current");

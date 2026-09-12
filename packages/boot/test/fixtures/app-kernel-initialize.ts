@@ -77,6 +77,7 @@ const main = Effect.gen(function* () {
 	if (seq.length === 0) yield* boot`INSERT INTO seq VALUES(1)`;
 	if (mode === "reset") {
 		for (const table of [
+			"kernel_migration_intent",
 			"intruder",
 			"owned_extension",
 			"outbox",
@@ -122,6 +123,19 @@ const main = Effect.gen(function* () {
 		);
 		yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))({ ...progress, next: 0, active: "table:kernel_writer" })} WHERE ${boot("key")}='app_store_schema'`;
 	}
+	if (mode === "old-ladder") {
+		yield* run();
+		yield* app`DROP TABLE kernel_migration_intent`;
+		const rows = yield* boot`SELECT value FROM settings WHERE ${boot("key")}='app_store_schema'`;
+		const progress = yield* Schema.decodeUnknownEffect(Schema.Struct({ value: Schema.String }))(rows[0]);
+		const saved = yield* Schema.decodeEffect(
+			Schema.fromJsonString(Schema.Struct({ operations: Schema.Array(Schema.String), next: Schema.Int })),
+		)(progress.value);
+		const original = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(
+			progress.value,
+		);
+		yield* boot`UPDATE settings SET value=${JSON.stringify({ ...original, operations: saved.operations.slice(0, -1), next: saved.next - 1 })} WHERE ${boot("key")}='app_store_schema'`;
+	}
 	if (mode === "missing-completed") {
 		yield* run();
 		yield* app`DROP TABLE outbox`;
@@ -129,7 +143,7 @@ const main = Effect.gen(function* () {
 	const result = yield* run(
 		mode === "wrong-adoption" ? { ...adoption, store_id: "00000000-0000-4000-8000-000000000000" } : adoption,
 	).pipe(Effect.result);
-	if (["foreign", "foreign-active", "ready", "missing-completed", "wrong-adoption"].includes(mode)) {
+	if (["foreign", "foreign-active", "ready", "missing-completed", "wrong-adoption", "old-ladder"].includes(mode)) {
 		if (result._tag !== "Failure" || !Schema.is(EventError)(result.failure))
 			return yield* Effect.die(
 				`Expected an identity refusal: ${result._tag === "Failure" ? result.failure._tag : "success"}`,
