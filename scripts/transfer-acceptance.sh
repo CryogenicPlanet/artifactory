@@ -7,7 +7,7 @@ target_engine=${2:?target engine}
 board_image=${3:-comms:transfer-acceptance}
 acceptance=${4:-normal}
 case "$acceptance:$source_engine:$target_engine" in
-  normal:*|activation-crash:sqlite:pg|activation-crash:sqlite:mysql|copy-crash:sqlite:pg|copy-crash:sqlite:mysql) ;;
+  normal:*|activation-crash:sqlite:pg|activation-crash:sqlite:mysql|copy-crash:sqlite:pg|copy-crash:sqlite:mysql|retirement-crash:sqlite:pg|retirement-crash:sqlite:mysql) ;;
   *) echo "Unsupported transfer acceptance mode." >&2; exit 2 ;;
 esac
 case "$source_engine:$target_engine" in
@@ -183,6 +183,8 @@ run_transfer() {
     mount_wrapper=(--mount "type=bind,src=$private/activation-crash.js,dst=/opt/comms/packages/server/dist/store-transfer.js,readonly")
   elif [ "$expectation" = copy-crash ]; then
     mount_wrapper=(--mount "type=bind,src=$private/copy-crash.js,dst=/opt/comms/packages/server/dist/store-transfer-worker.js,readonly")
+  elif [ "$expectation" = retirement-crash ]; then
+    mount_wrapper=(--mount "type=bind,src=$private/retirement-crash.js,dst=/opt/comms/packages/server/dist/store-transfer-worker.js,readonly")
   fi
   docker run --rm --network none --read-only --user 0:0 --entrypoint /bin/sh \
     --mount "type=bind,src=$private,dst=/input,readonly" \
@@ -200,6 +202,10 @@ run_transfer() {
     elif [ "$expectation" = copy-crash ]; then
       [ "$exit_code" = 1 ]
       grep -q '^Instrumented worker checkpoint: messages table committed$' "$private/$mode.errors"
+      [ ! -s "$private/$mode-output" ]
+    elif [ "$expectation" = retirement-crash ]; then
+      [ "$exit_code" = 1 ]
+      grep -q '^Instrumented worker checkpoint: source boot retired, app unretired$' "$private/$mode.errors"
       [ ! -s "$private/$mode-output" ]
     else
       [ "$exit_code" = 1 ]
@@ -253,6 +259,9 @@ stop_board "$board" source-checked
 if [ "$acceptance" = copy-crash ]; then
   source scripts/transfer-acceptance-copy.sh
   exit 0
+fi
+if [ "$acceptance" = retirement-crash ]; then
+  source scripts/transfer-acceptance-retirement.sh
 fi
 if [ "$acceptance" = activation-crash ]; then
   # This deliberately instruments only the outer activation boundary; normal resume uses the real CLI.
