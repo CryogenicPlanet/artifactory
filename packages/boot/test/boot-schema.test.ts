@@ -18,7 +18,7 @@ async function fixture(test: TestContext) {
 		).stdout;
 }
 
-it("persists all nineteen named boot receipts and preserves them across process restart", async (test) => {
+it("persists all twenty named boot receipts and preserves them across process restart", async (test) => {
 	const run = await fixture(test);
 	const fresh = await run("fresh");
 	expect(JSON.parse(await run("fresh"))).toEqual(JSON.parse(fresh));

@@ -58,9 +58,9 @@ const main = Effect.gen(function* () {
 				const receipts = yield* sql`SELECT migration_id FROM boot_migrations ORDER BY migration_id`;
 				assert.deepEqual(
 					receipts.map((row) => row.migration_id),
-					Array.from({ length: 19 }, (_, n) => n + 1),
+					Array.from({ length: 20 }, (_, n) => n + 1),
 				);
-				assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
+				assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 20 }]);
 				assert.deepEqual(yield* sql`SELECT id,legacy_store_id,engine FROM backups`, [
 					{ id: "historical-backup", legacy_store_id: null, engine: "sqlite" },
 				]);

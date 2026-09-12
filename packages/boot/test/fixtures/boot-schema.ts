@@ -30,6 +30,7 @@ const main = Effect.gen(function* () {
 		"store_identity",
 		"backup_engine",
 		"sqlite_copy_ownership",
+		"offline_store_transfer",
 	];
 	const receipts = sql`SELECT migration_id,name FROM boot_migrations ORDER BY migration_id`;
 	const snapshot = Effect.gen(function* () {
@@ -46,7 +47,7 @@ const main = Effect.gen(function* () {
 		yield* sql`INSERT INTO settings VALUES('retained','not JSON: unchanged')`;
 		yield* sql`INSERT INTO sessions(id,hash,created_at,expires_at,last_seen_at) VALUES('session','credential',123,9000000000000,456)`;
 		if (mode === "legacy") yield* sql`DROP TABLE boot_migrations`;
-		else yield* sql`DELETE FROM boot_migrations WHERE migration_id=19`;
+		else yield* sql`DELETE FROM boot_migrations WHERE migration_id>18`;
 		yield* sql`PRAGMA user_version=18`;
 		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 18 }]);
 		return yield* Console.log("legacy fixture persisted");
@@ -57,7 +58,7 @@ const main = Effect.gen(function* () {
 			yield* receipts,
 			names.map((name, index) => ({ migration_id: index + 1, name })),
 		);
-		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 20 }]);
 		if (mode === "adopt") {
 			assert.deepEqual(yield* sql`SELECT * FROM settings WHERE key='retained'`, [
 				{ key: "retained", value: "not JSON: unchanged" },
@@ -73,13 +74,13 @@ const main = Effect.gen(function* () {
 	else if (mode === "gap") yield* sql`DELETE FROM boot_migrations WHERE migration_id=9`;
 	else if (mode === "name") yield* sql`UPDATE boot_migrations SET name='wrong_name' WHERE migration_id=9`;
 	else if (mode === "mirror") yield* sql`PRAGMA user_version=17`;
-	else if (mode === "newer-ledger") yield* sql`INSERT INTO boot_migrations(migration_id,name) VALUES(20,'future')`;
-	else if (mode === "newer-version") yield* sql`PRAGMA user_version=20`;
+	else if (mode === "newer-ledger") yield* sql`INSERT INTO boot_migrations(migration_id,name) VALUES(21,'future')`;
+	else if (mode === "newer-version") yield* sql`PRAGMA user_version=21`;
 	else return yield* Effect.die("Unknown fixture mode");
 	const before = yield* snapshot;
 	if (mode === "mirror") {
 		yield* initializeBootSchema;
-		assert.deepEqual(yield* snapshot, { ...before, version: [{ user_version: 19 }] });
+		assert.deepEqual(yield* snapshot, { ...before, version: [{ user_version: 20 }] });
 		return yield* Console.log("repaired derived mirror without replaying migrations");
 	}
 	const result = yield* initializeBootSchema.pipe(Effect.result);

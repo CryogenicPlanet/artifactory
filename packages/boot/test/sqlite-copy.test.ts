@@ -153,15 +153,21 @@ it("waits for keeper closure when the calling Effect is interrupted", async (tes
 	expect(() => process.kill(worker, 0)).toThrow();
 });
 
-it("stamps copy recovery as version19 so an image supporting18 refuses before opening the app", async (test) => {
-	const app = await fixture(test, true);
-	expect(await app.run("recover")).toMatchObject({ result: "Success" });
-	const schema = join(app.root, "packages/boot/src/boot-schema.ts");
-	const source = await readFile(schema, "utf8");
-	const newest = '{ id: 19, name: "sqlite_copy_ownership", run: Effect.void },';
-	expect(source.split(newest)).toHaveLength(2);
-	await writeFile(schema, source.replace(newest, ""));
-	const before = await readFile(join(app.root, "app.db"));
-	expect(await app.run("schema")).toMatchObject({ result: "Failure", error: { _tag: "BootSchemaTooNew" } });
-	expect(await readFile(join(app.root, "app.db"))).toEqual(before);
-});
+it.for([18, 19])(
+	"stamps protocol20 so an image supporting%s refuses before opening the app",
+	async (supported, test) => {
+		const app = await fixture(test, true);
+		expect(await app.run("recover")).toMatchObject({ result: "Success" });
+		const schema = join(app.root, "packages/boot/src/boot-schema.ts");
+		let source = await readFile(schema, "utf8");
+		const transfer = '{ id: 20, name: "offline_store_transfer", run: Effect.void },';
+		expect(source.split(transfer)).toHaveLength(2);
+		source = source.replace(transfer, "");
+		const newest = '{ id: 19, name: "sqlite_copy_ownership", run: Effect.void },';
+		expect(source.split(newest)).toHaveLength(2);
+		await writeFile(schema, supported === 18 ? source.replace(newest, "") : source);
+		const before = await readFile(join(app.root, "app.db"));
+		expect(await app.run("schema")).toMatchObject({ result: "Failure", error: { _tag: "BootSchemaTooNew" } });
+		expect(await readFile(join(app.root, "app.db"))).toEqual(before);
+	},
+);

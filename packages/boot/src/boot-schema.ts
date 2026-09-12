@@ -201,6 +201,8 @@ export const initializeBootSchema = Effect.gen(function* () {
 			}),
 		},
 		{ id: 19, name: "sqlite_copy_ownership", run: Effect.void },
+		// Older images must refuse stores participating in the offline transfer protocol.
+		{ id: 20, name: "offline_store_transfer", run: Effect.void },
 	];
 	const supported = steps.length;
 	const readVersion = sql`PRAGMA user_version`.pipe(
