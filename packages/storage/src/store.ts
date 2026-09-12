@@ -1,3 +1,4 @@
+import type { RemoteConnection } from "./remote-session.ts";
 import { Effect, Redacted, Schema } from "effect";
 
 /** A selected SQLite file, not a database identity or permission to create it. */
@@ -121,4 +122,25 @@ export const asBoot = (app: RemoteStore, boot: RemoteStore): Effect.Effect<Remot
 		});
 		if (!matches) return yield* new StoreError({ code: "store_engine_mismatch" });
 		return yield* withDatabase(boot, app.database);
+	});
+
+/** Explicit driver fields; URL query options cannot override credentials, database or TLS. */
+export const connectionOf = (store: RemoteStore, tls: boolean) =>
+	Effect.try({
+		try: (): RemoteConnection => {
+			const url = new URL(Redacted.value(store.url));
+			const username = decodeURIComponent(url.username);
+			const password = decodeURIComponent(url.password);
+			if (!username || !password) throw new Error();
+			return {
+				engine: store._tag === "postgres" ? "pg" : "mysql",
+				host: url.hostname.replace(/^\[|\]$/g, ""),
+				port: Number(url.port || (store._tag === "postgres" ? 5432 : 3306)),
+				database: store.database,
+				username,
+				password: Redacted.make(password),
+				tls,
+			};
+		},
+		catch: () => new StoreError({ code: "store_descriptor_invalid" }),
 	});
