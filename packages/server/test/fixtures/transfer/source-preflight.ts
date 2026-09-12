@@ -87,6 +87,11 @@ const main = Effect.gen(function* () {
 	);
 	yield* refuse(inspect, "transfer_recovery_pending");
 	yield* sql`DELETE FROM settings WHERE key='app_store_schema'`;
+	yield* set("remote_database:retained", JSON.stringify({ phase: "ready" }));
+	yield* refuse(inspect, "transfer_recovery_pending");
+	yield* set("remote_database:retained", JSON.stringify({ phase: "closed" }));
+	yield* inspect;
+	yield* sql`DELETE FROM settings WHERE key='remote_database:retained'`;
 	yield* sql`DELETE FROM kernel_writer`;
 	yield* refuse(inspect, "transfer_recovery_pending");
 	yield* sql`INSERT INTO kernel_writer VALUES(1,'prior-epoch')`;

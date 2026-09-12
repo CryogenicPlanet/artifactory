@@ -6,11 +6,15 @@ import {
 	TransferRejected,
 	type TransferBinding,
 } from "@comms/storage/store-transfer-schema";
-import { Effect, FileSystem, Path, Schema } from "effect";
+import { Console, Effect, FileSystem, Path, Schema } from "effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 
 const rejected = (code: TransferRejected["code"] = "transfer_recovery_pending") => new TransferRejected({ code });
+const pending = (reason: string) =>
+	Console.error(JSON.stringify({ event: "store_transfer_source_refused", reason })).pipe(
+		Effect.andThen(Effect.fail(rejected())),
+	);
 const Identity = Schema.Struct({ store_id: Schema.String, initialized_at: Schema.Int });
 const Adoption = Schema.Struct({
 	...Identity.fields,
@@ -51,7 +55,8 @@ const read = (boot: SqlClient, resumeBinding?: TransferBinding) =>
 		const retired = value("transferred_to");
 		if (retired !== undefined && (!resumeBinding || retired !== bindingText(resumeBinding)))
 			return yield* rejected("transfer_source_retired");
-		if (value("transfer_state") !== undefined && value("transfer_state") !== "complete") return yield* rejected();
+		if (value("transfer_state") !== undefined && value("transfer_state") !== "complete")
+			return yield* pending("transfer_incomplete");
 		const adoption = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Adoption))(
 			value("app_store_adoption"),
 		).pipe(Effect.mapError(() => rejected("transfer_identity_mismatch")));
@@ -82,7 +87,7 @@ export const resolveTransferSource = (
 		if ((yield* boot`SELECT 1 FROM child_attempts WHERE closed<>1 LIMIT 1`).length) return yield* rejected();
 		// Bound by the caller to the actual boot descriptor and held volume; SQL complete alone is insufficient.
 		if (value("transfer_state") !== undefined || value("transfer_journal") !== undefined) {
-			if (!config.assertActivated) return yield* rejected();
+			if (!config.assertActivated) return yield* pending("activation_unverified");
 			yield* config.assertActivated;
 		}
 		if (config.app._tag !== "file") {
@@ -133,7 +138,7 @@ export const inspectTransferSource = (
 				Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ singleton: Schema.Literal(1), epoch: Schema.String }))),
 			),
 		);
-		if (writers.length !== 1 || !writers[0]?.epoch) return yield* rejected();
+		if (writers.length !== 1 || !writers[0]?.epoch) return yield* pending("writer_identity");
 		const progress = value("app_store_schema");
 		if (progress !== undefined) {
 			const saved = yield* Schema.decodeUnknownEffect(
@@ -146,14 +151,19 @@ export const inspectTransferSource = (
 						active: Schema.NullOr(Schema.String),
 					}),
 				),
-			)(progress).pipe(Effect.mapError(() => rejected()));
+			)(progress).pipe(
+				Effect.tapError(() =>
+					Console.error(JSON.stringify({ event: "store_transfer_source_refused", reason: "app_schema_shape" })),
+				),
+				Effect.mapError(() => rejected()),
+			);
 			if (
 				saved.store_id !== adoption.store_id ||
 				saved.initialized_at !== adoption.initialized_at ||
 				saved.active !== null ||
 				saved.next !== saved.operations.length
 			)
-				return yield* rejected();
+				return yield* pending("app_schema_incomplete");
 		}
 		const identities = yield* app`SELECT singleton,store_id,initialized_at,transferred_to FROM store_identity`.pipe(
 			Effect.flatMap(
@@ -201,21 +211,25 @@ export const inspectTransferSource = (
 			state.pending_from !== null ||
 			state.pending_to !== null
 		)
-			return yield* rejected();
-		for (const query of [
-			boot`SELECT 1 FROM cutover LIMIT 1`,
-			boot`SELECT 1 FROM db_restore_requests WHERE phase NOT IN ('restored','failed') OR lock_id IS NOT NULL LIMIT 1`,
-			boot`SELECT 1 FROM source_batches WHERE state<>'published' LIMIT 1`,
-			boot`SELECT 1 FROM source_changes LIMIT 1`,
-			boot`SELECT 1 FROM edit_lock LIMIT 1`,
-			boot`SELECT 1 FROM staging LIMIT 1`,
-			boot`SELECT 1 FROM child_attempts WHERE closed<>1 LIMIT 1`,
-			boot`SELECT 1 FROM event_batches WHERE state NOT IN ('published','aborted') LIMIT 1`,
-			app`SELECT 1 FROM outbox WHERE shipped_at IS NULL OR seq>${state.published_through} LIMIT 1`,
-			app`SELECT 1 FROM topic_page_continuations WHERE completed<>1 LIMIT 1`,
-		])
-			if ((yield* query).length) return yield* rejected();
-		if (value("sqlite_copy") !== undefined || value("app_store_layout") === "moving") return yield* rejected();
+			return yield* pending("sequence_pending");
+		for (const [reason, query] of [
+			["cutover_pending", boot`SELECT 1 FROM cutover LIMIT 1`],
+			[
+				"restore_pending",
+				boot`SELECT 1 FROM db_restore_requests WHERE phase NOT IN ('restored','failed') OR lock_id IS NOT NULL LIMIT 1`,
+			],
+			["source_batch_pending", boot`SELECT 1 FROM source_batches WHERE state<>'published' LIMIT 1`],
+			["source_changes_pending", boot`SELECT 1 FROM source_changes LIMIT 1`],
+			["edit_lock_pending", boot`SELECT 1 FROM edit_lock LIMIT 1`],
+			["staging_pending", boot`SELECT 1 FROM staging LIMIT 1`],
+			["child_closure_pending", boot`SELECT 1 FROM child_attempts WHERE closed<>1 LIMIT 1`],
+			["event_batch_pending", boot`SELECT 1 FROM event_batches WHERE state NOT IN ('published','aborted') LIMIT 1`],
+			["outbox_pending", app`SELECT 1 FROM outbox WHERE shipped_at IS NULL OR seq>${state.published_through} LIMIT 1`],
+			["topic_continuation_pending", app`SELECT 1 FROM topic_page_continuations WHERE completed<>1 LIMIT 1`],
+		] as const)
+			if ((yield* query).length) return yield* pending(reason);
+		if (value("sqlite_copy") !== undefined || value("app_store_layout") === "moving")
+			return yield* pending("file_recovery_pending");
 		for (const row of rows) {
 			if (row.key.startsWith("source-revert-result:")) {
 				const receipt = yield* Schema.decodeUnknownEffect(
@@ -223,13 +237,20 @@ export const inspectTransferSource = (
 						Schema.Struct({ outcome: Schema.NullOr(Schema.Struct({ status: Schema.Int, body: Schema.Json })) }),
 					),
 				)(row.value).pipe(Effect.mapError(() => rejected()));
-				if (receipt.outcome === null) return yield* rejected();
+				if (receipt.outcome === null) return yield* pending("source_revert_pending");
 			}
 			if (row.key.startsWith("remote_database:")) {
 				const record = yield* Schema.decodeUnknownEffect(
 					Schema.fromJsonString(Schema.Struct({ phase: Schema.Literal("closed") })),
-				)(row.value).pipe(Effect.mapError(() => rejected()));
-				if (record.phase !== "closed") return yield* rejected();
+				)(row.value).pipe(
+					Effect.tapError(() =>
+						Console.error(
+							JSON.stringify({ event: "store_transfer_source_refused", reason: "remote_resource_not_closed" }),
+						),
+					),
+					Effect.mapError(() => rejected()),
+				);
+				if (record.phase !== "closed") return yield* pending("remote_resource_not_closed");
 			}
 		}
 		yield* on<Effect.Effect<void, SqlError | TransferRejected>>(boot, {
@@ -237,7 +258,8 @@ export const inspectTransferSource = (
 			pg: () => Effect.void,
 			mysql: () =>
 				Effect.gen(function* () {
-					if ((yield* boot`SELECT 1 FROM boot_migrations_intent LIMIT 1`).length) return yield* rejected();
+					if ((yield* boot`SELECT 1 FROM boot_migrations_intent LIMIT 1`).length)
+						return yield* pending("boot_migration_pending");
 				}),
 		});
 		yield* on<Effect.Effect<void, SqlError | TransferRejected>>(app, {
@@ -249,7 +271,7 @@ export const inspectTransferSource = (
 						(yield* app`SELECT 1 FROM kernel_migration_intent LIMIT 1`).length ||
 						(yield* app`SELECT 1 FROM core_migrations_intent LIMIT 1`).length
 					)
-						return yield* rejected();
+						return yield* pending("app_migration_pending");
 				}),
 		});
 		const generations =
@@ -261,6 +283,6 @@ export const inspectTransferSource = (
 				),
 			);
 		const generation = generations[0];
-		if (!generation || generation.n < 1) return yield* rejected();
+		if (!generation || generation.n < 1) return yield* pending("frozen_generation_missing");
 		return { store_id: identity.store_id, initialized_at: identity.initialized_at, generation };
 	});
