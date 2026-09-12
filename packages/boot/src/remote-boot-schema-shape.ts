@@ -16,6 +16,8 @@ export const bootTableShape = (
 		columns.map((column) => ({
 			...column,
 			default: column.default ?? null,
+			identity: column.identity ?? false,
+			identityGeneration: column.identity ? (engine === "pg" ? "BY DEFAULT" : "AUTO_INCREMENT") : null,
 			expression: column.expression ?? (engine === "pg" ? null : ""),
 			collation:
 				engine === "mysql" && (column.type === "varchar" || column.type === "longtext") ? "utf8mb4_0900_bin" : null,

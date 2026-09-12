@@ -117,7 +117,7 @@ export const remoteBootEvent = (sql: SqlClient, engine: "pg" | "mysql") =>
 				"event_batches",
 				engine === "pg"
 					? [
-							{ name: "row_id", type: "bigint", nullable: false },
+							{ name: "row_id", type: "bigint", nullable: false, identity: true },
 							{ name: "id", type: "text", nullable: false },
 							{ name: "attempt", type: "text", nullable: false },
 							{ name: "from_seq", type: "bigint", nullable: false },
@@ -132,7 +132,7 @@ export const remoteBootEvent = (sql: SqlClient, engine: "pg" | "mysql") =>
 							},
 						]
 					: [
-							{ name: "row_id", type: "bigint", nullable: false },
+							{ name: "row_id", type: "bigint", nullable: false, identity: true },
 							{ name: "id", type: "longtext", nullable: false },
 							{ name: "attempt", type: "varchar", nullable: false, length: 128 },
 							{ name: "from_seq", type: "bigint", nullable: false },

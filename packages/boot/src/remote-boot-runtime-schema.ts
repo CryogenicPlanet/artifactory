@@ -19,7 +19,7 @@ export const remoteBootRuntime = (sql: SqlClient, engine: "pg" | "mysql") =>
 				"generations",
 				engine === "pg"
 					? [
-							{ name: "n", type: "bigint", nullable: false },
+							{ name: "n", type: "bigint", nullable: false, identity: true },
 							{ name: "snapshot_dir", type: "text", nullable: true },
 							{ name: "entry_file", type: "text", nullable: false },
 							{ name: "status", type: "text", nullable: false },
@@ -32,7 +32,7 @@ export const remoteBootRuntime = (sql: SqlClient, engine: "pg" | "mysql") =>
 							{ name: "backup_id", type: "text", nullable: true },
 						]
 					: [
-							{ name: "n", type: "bigint", nullable: false },
+							{ name: "n", type: "bigint", nullable: false, identity: true },
 							{ name: "snapshot_dir", type: "longtext", nullable: true },
 							{ name: "entry_file", type: "longtext", nullable: false },
 							{ name: "status", type: "varchar", nullable: false, length: 16 },
@@ -303,7 +303,7 @@ export const remoteBootRuntime = (sql: SqlClient, engine: "pg" | "mysql") =>
 				"public_paths",
 				engine === "pg"
 					? [
-							{ name: "row_id", type: "bigint", nullable: false },
+							{ name: "row_id", type: "bigint", nullable: false, identity: true },
 							{ name: "path", type: "text", nullable: false },
 							{
 								name: "path_hash",
@@ -314,7 +314,7 @@ export const remoteBootRuntime = (sql: SqlClient, engine: "pg" | "mysql") =>
 							},
 						]
 					: [
-							{ name: "row_id", type: "bigint", nullable: false },
+							{ name: "row_id", type: "bigint", nullable: false, identity: true },
 							{ name: "path", type: "longtext", nullable: false },
 							{ name: "path_hash", type: "varchar", nullable: true, length: 64, expression: "sha2(`path`,256)" },
 						],

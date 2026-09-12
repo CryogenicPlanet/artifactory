@@ -19,7 +19,7 @@ export const remoteBootAuth = (sql: SqlClient, engine: "pg" | "mysql") =>
 				"passkeys",
 				engine === "pg"
 					? [
-							{ name: "row_id", type: "bigint", nullable: false },
+							{ name: "row_id", type: "bigint", nullable: false, identity: true },
 							{ name: "id", type: "text", nullable: false },
 							{ name: "public_key", type: "text", nullable: false },
 							{ name: "counter", type: "bigint", nullable: false },
@@ -35,7 +35,7 @@ export const remoteBootAuth = (sql: SqlClient, engine: "pg" | "mysql") =>
 							},
 						]
 					: [
-							{ name: "row_id", type: "bigint", nullable: false },
+							{ name: "row_id", type: "bigint", nullable: false, identity: true },
 							{ name: "id", type: "longtext", nullable: false },
 							{ name: "public_key", type: "longtext", nullable: false },
 							{ name: "counter", type: "bigint", nullable: false },

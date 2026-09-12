@@ -81,7 +81,7 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 				"staging",
 				engine === "pg"
 					? [
-							{ name: "row_id", type: "bigint", nullable: false },
+							{ name: "row_id", type: "bigint", nullable: false, identity: true },
 							{ name: "lock_id", type: "text", nullable: false },
 							{ name: "path", type: "text", nullable: false },
 							{ name: "content", type: "bytea", nullable: true },
@@ -97,7 +97,7 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 							},
 						]
 					: [
-							{ name: "row_id", type: "bigint", nullable: false },
+							{ name: "row_id", type: "bigint", nullable: false, identity: true },
 							{ name: "lock_id", type: "varchar", nullable: false, length: 128 },
 							{ name: "path", type: "longtext", nullable: false },
 							{ name: "content", type: "longblob", nullable: true },
@@ -179,7 +179,7 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 				"source_changes",
 				engine === "pg"
 					? [
-							{ name: "row_id", type: "bigint", nullable: false },
+							{ name: "row_id", type: "bigint", nullable: false, identity: true },
 							{ name: "batch", type: "text", nullable: false },
 							{ name: "path", type: "text", nullable: false },
 							{ name: "before", type: "bytea", nullable: true },
@@ -199,7 +199,7 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 							},
 						]
 					: [
-							{ name: "row_id", type: "bigint", nullable: false },
+							{ name: "row_id", type: "bigint", nullable: false, identity: true },
 							{ name: "batch", type: "varchar", nullable: false, length: 128 },
 							{ name: "path", type: "longtext", nullable: false },
 							{ name: "before", type: "longblob", nullable: true },
@@ -251,7 +251,7 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 				"versions",
 				engine === "pg"
 					? [
-							{ name: "id", type: "bigint", nullable: false },
+							{ name: "id", type: "bigint", nullable: false, identity: true },
 							{ name: "batch", type: "text", nullable: false },
 							{ name: "path", type: "text", nullable: false },
 							{ name: "agent", type: "text", nullable: false },
@@ -275,7 +275,7 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 							},
 						]
 					: [
-							{ name: "id", type: "bigint", nullable: false },
+							{ name: "id", type: "bigint", nullable: false, identity: true },
 							{ name: "batch", type: "varchar", nullable: false, length: 128 },
 							{ name: "path", type: "longtext", nullable: false },
 							{ name: "agent", type: "varchar", nullable: false, length: 64 },
