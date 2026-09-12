@@ -1,6 +1,6 @@
 # Database stack review status
 
-Read this alongside the [build plan](build-plan.md). This is a triage checkpoint, not a claim that reviewers have resolved their comments. Earlier accepted checkpoints include #7 `ddf0c67`, #8 `1739ee7` and runtime #9 `a6db9c5`. Current pushed runtime `c811211` and transfer `0dd418b` have the incomplete acceptance boundaries recorded below. Earlier #2–4 named fixes remain checkpoint-scoped. No new reviews were found at this acceptance checkpoint. Earlier #2–4 statuses below remain scoped to their named fixes. Subsequent worker commits require integration and verification before changing a status here. No tests were run for this audit.
+Read this alongside the [build plan](build-plan.md). This is a triage checkpoint, not a claim that reviewers have resolved their comments. Earlier accepted checkpoints include #7 `ddf0c67`, #8 `1739ee7` and runtime #9 `a6db9c5`. Current runtime `1b883b6` and transfer `f1cdb6e` have separate acceptance boundaries below; local `0ae1a98` is unpublished. Earlier #2–4 named fixes remain checkpoint-scoped. No new reviews were found at this acceptance checkpoint. Earlier #2–4 statuses below remain scoped to their named fixes. Subsequent worker commits require integration and verification before changing a status here. No tests were run for this audit.
 
 **Statuses:** **pending** needs a fix, decision, evidence or disclosure; **already fixed** has evidence in the named pushed layer; **runtime-only** has implementation in the separate runtime checkout but does not resolve the lower PR; **disagreement** identifies a review premise that needs clarification rather than silently changing behavior.
 
@@ -43,7 +43,7 @@ All rows refer to the [PR #3 review](https://github.com/CryogenicPlanet/artifact
 | Finding | Status and next action |
 | --- | --- |
 | Ready adoption pins absolute path and breaks supported layout migration | **Already fixed** in `2ebc95e`: pending adoption remains path-bound; ready adoption uses UUID, with authenticated selected/recorded-location diagnostics and relocation coverage. |
-| Identity refusal prevents journal recovery and disarms restore | **SQLite repair integrated; remote repair proof remains separate.** Reservation follows journal recovery, and opaque before-image preservation supports offline rollback. `c4e4bd2` corrects terminal startup-refusal observation. Do not extend this acceptance to remote missing/foreign-store repair without its own proof. |
+| Identity refusal prevents journal recovery and disarms restore | **Runtime repair accepted** at `1b883b6`: remote repair groups pass six cases per engine, alongside retained SQLite repair. This does not establish a later transfer checkpoint’s complete acceptance. |
 | Abandoned `.restore-*` copies and early legacy stamps | **Already fixed** in #3: deterministic staging reclamation and completed-adoption-only, NULL-guarded legacy provenance. Legacy fixed-path residue was a distinct finding, fixed separately below. |
 | Legacy `<store>.restore` residue remains forever | **Already fixed** in `2ebc95e`: known legacy staging and sidecars reclaimed after positive closure. |
 | Foreign identity reported as missing; identity absent from diagnostics | **Runtime diagnostics fixed** in `50122ca`: authenticated diagnostics include safe observed/expected UUID and selection/adoption details. Modern backup catalogue UUID provenance is explicitly `not_recorded`; do not populate legacy provenance to simulate it. |
@@ -85,7 +85,7 @@ All rows refer to the [PR #4 review](https://github.com/CryogenicPlanet/artifact
 | `api.migrate` destroys bookkeeping | **Already fixed** in lower and runtime through migration-state preservation, with the documented trusted-code limits. |
 | Raw SQL can delete editable `migrations` receipts | **Integrated in lower and runtime** through `579be1e`, composed in `c30178a`. |
 | Opaque corruption errors | **Integrated** in `c30178a`: coded safe corruption reasons and numeric expected/found diagnostics. |
-| Successful no-op initialization lacks physical-byte test | **Tests integrated** in `c30178a` for historical boot adoption and both ledgers; the current combined suite passes. |
+| Successful no-op initialization lacks physical-byte test | **Tests integrated** in `c30178a` for historical boot adoption and both ledgers; the earlier `50122ca` combined suite passed; current transfer acceptance remains separate. |
 | Stable migration names / portability of ledger invariants | **Disagreement resolved by review itself.** Both allegations were explicitly refuted; no change required. |
 
 ## PR #8: complete dialect/remote-foundation review
@@ -106,28 +106,32 @@ All rows refer to the [PR #4 review](https://github.com/CryogenicPlanet/artifact
 | KV/system upserts invalid on MySQL | **Runtime-only named callers fixed.** Direct dialect branches suffice; do not invent a generic helper merely to match a proposed name. |
 | MySQL REPEATABLE READ not asserted | **Integrated** in `ac3fada` through `b5fb0f7`: lease admission asserts isolation. The supplied three-case native run does not separately establish negative-isolation coverage. |
 | URL redaction before persisted stderr | **Runtime-only fixed** at reviewed child/supervisor boundaries with scoped redaction and adversarial coverage. |
-| TLS/private CA configuration | **PostgreSQL private-CA CI passed; MySQL correctness fix active.** Actual MySQL wrong-hostname acceptance exposed a defect; correction is not accepted here. Per-connection client certificates/servername remain unsupported. |
+| TLS/private CA configuration | **Runtime verified** at `1b883b6`: actual private-CA TLS acceptance passes, including correction of the observed MySQL hostname defect. Unsupported client-certificate/servername configuration remains separate. |
 | Lease/registration latency absent from budget | **Pending measurement.** Cost is per acquisition; transaction statements share a connection. Measure actual cutover before weakening ownership checks. |
 | Historical red CI omitted | **Disclosure improved; historical causes not all proved.** Keep exact failed checkpoints separate from newer passes. |
 | PostgreSQL 18.6 versus pinned 17.11 | **Corrected documentation/evidence scope.** Native and pinned-image runs are separately identified; neither proves the other version. |
 
 ## Runtime and transfer checkpoint
 
-Runtime `c811211` and transfer `0dd418b` are pushed. The CLI is wired, and full image check, transfer and restart have passed for SQLite→PostgreSQL and SQLite→MySQL. This is two directions, not acceptance of all six or the whole database build plan. Four remote-source directions currently refuse during source inspection with `transfer_recovery_pending`; the new `0dd418b` diagnostic CI is pending and must establish the exact unfinished invariant.
+Runtime `1b883b6` passes full Linux CI, actual-board checks, private-CA TLS checks and remote repair acceptance (six repair cases on each remote engine). These results supersede the earlier unintegrated-repair and active MySQL hostname-fix status. They do not establish acceptance of the newer combined transfer tree.
+
+Transfer `9cc2aba` finished its image matrix with **two passed and six failed jobs**: three `seq_pending` refusals, one normal MySQL→SQLite observer-import failure and two activation-observer import failures. Its Linux shard 1 passed and shard 2 was cancelled, so there is no full Linux result for that head. Pushed `f1cdb6e` includes observer fixes and safer sequence-state diagnostics; the exact sequence refusals still need resolution and acceptance. Local `0ae1a98` adds a source-boot-retirement crash scenario and is not yet published at this checkpoint. A test's presence is not a passing crash-recovery result.
 
 | Work | Current evidence / remaining boundary |
 | --- | --- |
-| Runtime review additions | Shared engine fixture and migration portability warnings are integrated. Native two-publication snapshot and two-process epoch/allocator/edit-lock contention groups pass on both engines. This is shared focused behavior, not a full suite under every engine. |
-| TLS | Actual PostgreSQL private-CA CI passes. MySQL wrong-hostname acceptance exposed a confirmed defect; its fix is active, not accepted here. |
-| Remote damaged-store repair | The prepared repair commits remain frozen and unintegrated. Native acceptance currently fails at initial startup before damage is introduced; no damaged/foreign-store repair pass is claimed. Three unit/metadata passes are separate evidence. |
-| Transfer acceptance | SQLite-source image flows pass. Four remote-source directions, actual CLI crash boundaries, final combined suite and operator-guide reconciliation remain required. |
-| Boot ownership | The latest boot ownership audit is clear. This does not close unrelated review/spec obligations. |
+| Shared engine tests | Shared fixtures, migration portability warnings and native publication/contention checks are integrated. Default SQLite/PGlite behavior passes two cases. This is not the full suite under every engine. |
+| Scoped leases / nested transactions | Driver lease and nested-transaction groups pass six cases on each remote engine and 18 on SQLite. These prerequisites do not by themselves remove the ordinary read gate. |
+| Transfer crash coverage | Copy-crash and retirement-crash scenarios are added; complete exact-head crash acceptance, all six normal directions and a final combined full suite remain required. |
+| Active isolated work | Read-gate changes are prepared with ten SQLite and nine cases on each remote engine passing, plus focused rollback reruns; fresh review is pending and the changes remain unintegrated. PostgreSQL unaccent, realistic benchmarks and expanded tests are also active outside this tree. |
+| User scope decisions | Broader direct DDL and MySQL views/triggers remain unanswered. Current refusal/subset behavior is not owner approval of those restrictions. |
 
-The latest local full suite at `a53de28` used actual Node 22.22.3 and two workers: **1,207 passed, six failed and 88 skipped (1,301 tests)**; **265 passed files, two failed and 36 skipped (303 files)**, **750.64s**. The six failures were filesystem fault-fixture expectations. The integrated correction passes a separate ten-case diagnostic/WAL/fault group in **31.50s**. The generation aggregate fixture correction separately passes one case in **21.57s**. These focused passes are not a corrected full-suite result.
+Newer remote CI after the connection-discard change fails two MySQL session-fixture modes. Investigation is active; stale pool-reuse assumptions are a hypothesis, not an established cause or accepted fix. These failures are separate from `1b883b6` runtime acceptance.
 
-Historical Linux `a7f4e6d` completed **1,201 passed, eight failed and 88 skipped**: six filesystem fixtures, one Buffer-versus-Uint8Array comparison, and one six-revert aggregate deadline. The last case reached a known phase at **62.466s** against its 60-second aggregate limit; the underlying slowdown cause is not established. Corrections are integrated, but final full-suite and exact-head CI acceptance remain necessary.
+The latest local full suite remains historical `a53de28`, actual Node 22.22.3 with two workers: **1,207 passed, six failed and 88 skipped (1,301 tests)**; **265 passed files, two failed and 36 skipped (303 files)**, **750.64s**. Its six filesystem fault-fixture failures have integrated corrections with a separate ten-case diagnostic/WAL/fault pass in **31.50s**; the generation aggregate correction separately passed one case in **21.57s**. There is still no corrected full local run of the combined transfer implementation.
 
-Ordinary `ctx.read` shares the mutation/publication gate: it preserves the SPEC snapshot guarantee, now supported by native publication tests, but does not meet the owner database design's nonblocking-read claim. This does not serialize every read—KV/pages also use direct snapshot transactions. Do not remove the gate on a documentation assumption. Full-suite parity, remote latency/budget measurements, broader direct-DDL and MySQL stored-object decisions, and remaining lower-layer review obligations stay explicit. No all-review-resolution or full-goal claim is made.
+Historical Linux `a7f4e6d` had **1,201 passed, eight failed and 88 skipped**: six filesystem fixtures, a Buffer-versus-Uint8Array comparison and a six-revert aggregate deadline. The latter reached a known phase at **62.466s** against 60 seconds; the underlying slowdown cause remains unproved. Keep these failures distinct from later runtime greens.
+
+Ordinary `ctx.read` currently shares the mutation/publication gate. Native tests support the SPEC snapshot guarantee, but the owner database design's nonblocking-read claim remains unmet until the read-gate work is integrated and verified. KV/pages also use direct snapshot transactions; not all reads share that gate. Retain the clear boot-ownership audit, scoped safety boundaries and honest modern backup provenance (`not_recorded`). Operator-guide validation, measured budgets, full-engine suite reconciliation and remaining review obligations still prevent a full-goal or all-comments-resolved claim.
 
 ### Earlier accepted runtime and failure evidence
 

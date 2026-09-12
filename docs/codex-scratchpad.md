@@ -2,23 +2,27 @@
 
 This is the handoff and remaining-work ledger for Codex. Implementation resumed with explicit owner authorization after the review landed. This records integrated changes, active isolated work and remaining requirements; worker reports alone are not completion claims.
 
-## Current database stack — CLI wired; transfer and repair acceptance incomplete
+## Current database stack — runtime verified; transfer remains a draft
 
-Runtime `c811211` and transfer `0dd418b` are pushed. The CLI is wired, and full image check, transfer and restart have passed for SQLite→PostgreSQL and SQLite→MySQL. This is two directions, not acceptance of all six or the whole database build plan. Four remote-source directions currently refuse during source inspection with `transfer_recovery_pending`; the new `0dd418b` diagnostic CI is pending and must establish the exact unfinished invariant.
+Runtime `1b883b6` passes full Linux CI, actual-board checks, private-CA TLS checks and remote repair acceptance (six repair cases on each remote engine). These results supersede the earlier unintegrated-repair and active MySQL hostname-fix status. They do not establish acceptance of the newer combined transfer tree.
+
+Transfer `9cc2aba` finished its image matrix with **two passed and six failed jobs**: three `seq_pending` refusals, one normal MySQL→SQLite observer-import failure and two activation-observer import failures. Its Linux shard 1 passed and shard 2 was cancelled, so there is no full Linux result for that head. Pushed `f1cdb6e` includes observer fixes and safer sequence-state diagnostics; the exact sequence refusals still need resolution and acceptance. Local `0ae1a98` adds a source-boot-retirement crash scenario and is not yet published at this checkpoint. A test's presence is not a passing crash-recovery result.
 
 | Work | Current evidence / remaining boundary |
 | --- | --- |
-| Runtime review additions | Shared engine fixture and migration portability warnings are integrated. Native two-publication snapshot and two-process epoch/allocator/edit-lock contention groups pass on both engines. This is shared focused behavior, not a full suite under every engine. |
-| TLS | Actual PostgreSQL private-CA CI passes. MySQL wrong-hostname acceptance exposed a confirmed defect; its fix is active, not accepted here. |
-| Remote damaged-store repair | The prepared repair commits remain frozen and unintegrated. Native acceptance currently fails at initial startup before damage is introduced; no damaged/foreign-store repair pass is claimed. Three unit/metadata passes are separate evidence. |
-| Transfer acceptance | SQLite-source image flows pass. Four remote-source directions, actual CLI crash boundaries, final combined suite and operator-guide reconciliation remain required. |
-| Boot ownership | The latest boot ownership audit is clear. This does not close unrelated review/spec obligations. |
+| Shared engine tests | Shared fixtures, migration portability warnings and native publication/contention checks are integrated. Default SQLite/PGlite behavior passes two cases. This is not the full suite under every engine. |
+| Scoped leases / nested transactions | Driver lease and nested-transaction groups pass six cases on each remote engine and 18 on SQLite. These prerequisites do not by themselves remove the ordinary read gate. |
+| Transfer crash coverage | Copy-crash and retirement-crash scenarios are added; complete exact-head crash acceptance, all six normal directions and a final combined full suite remain required. |
+| Active isolated work | Read-gate changes are prepared with ten SQLite and nine cases on each remote engine passing, plus focused rollback reruns; fresh review is pending and the changes remain unintegrated. PostgreSQL unaccent, realistic benchmarks and expanded tests are also active outside this tree. |
+| User scope decisions | Broader direct DDL and MySQL views/triggers remain unanswered. Current refusal/subset behavior is not owner approval of those restrictions. |
 
-The latest local full suite at `a53de28` used actual Node 22.22.3 and two workers: **1,207 passed, six failed and 88 skipped (1,301 tests)**; **265 passed files, two failed and 36 skipped (303 files)**, **750.64s**. The six failures were filesystem fault-fixture expectations. The integrated correction passes a separate ten-case diagnostic/WAL/fault group in **31.50s**. The generation aggregate fixture correction separately passes one case in **21.57s**. These focused passes are not a corrected full-suite result.
+Newer remote CI after the connection-discard change fails two MySQL session-fixture modes. Investigation is active; stale pool-reuse assumptions are a hypothesis, not an established cause or accepted fix. These failures are separate from `1b883b6` runtime acceptance.
 
-Historical Linux `a7f4e6d` completed **1,201 passed, eight failed and 88 skipped**: six filesystem fixtures, one Buffer-versus-Uint8Array comparison, and one six-revert aggregate deadline. The last case reached a known phase at **62.466s** against its 60-second aggregate limit; the underlying slowdown cause is not established. Corrections are integrated, but final full-suite and exact-head CI acceptance remain necessary.
+The latest local full suite remains historical `a53de28`, actual Node 22.22.3 with two workers: **1,207 passed, six failed and 88 skipped (1,301 tests)**; **265 passed files, two failed and 36 skipped (303 files)**, **750.64s**. Its six filesystem fault-fixture failures have integrated corrections with a separate ten-case diagnostic/WAL/fault pass in **31.50s**; the generation aggregate correction separately passed one case in **21.57s**. There is still no corrected full local run of the combined transfer implementation.
 
-Ordinary `ctx.read` shares the mutation/publication gate: it preserves the SPEC snapshot guarantee, now supported by native publication tests, but does not meet the owner database design's nonblocking-read claim. This does not serialize every read—KV/pages also use direct snapshot transactions. Do not remove the gate on a documentation assumption. Full-suite parity, remote latency/budget measurements, broader direct-DDL and MySQL stored-object decisions, and remaining lower-layer review obligations stay explicit. No all-review-resolution or full-goal claim is made.
+Historical Linux `a7f4e6d` had **1,201 passed, eight failed and 88 skipped**: six filesystem fixtures, a Buffer-versus-Uint8Array comparison and a six-revert aggregate deadline. The latter reached a known phase at **62.466s** against 60 seconds; the underlying slowdown cause remains unproved. Keep these failures distinct from later runtime greens.
+
+Ordinary `ctx.read` currently shares the mutation/publication gate. Native tests support the SPEC snapshot guarantee, but the owner database design's nonblocking-read claim remains unmet until the read-gate work is integrated and verified. KV/pages also use direct snapshot transactions; not all reads share that gate. Retain the clear boot-ownership audit, scoped safety boundaries and honest modern backup provenance (`not_recorded`). Operator-guide validation, measured budgets, full-engine suite reconciliation and remaining review obligations still prevent a full-goal or all-comments-resolved claim.
 
 ### Earlier accepted runtime and failure evidence
 
