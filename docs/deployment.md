@@ -37,6 +37,14 @@ The image sets `HOST=0.0.0.0`, `PORT=8080` and `DATA_DIR=/data`. Local execution
 
 The [Dockerfile](../Dockerfile) pins Bun 1.4.0 by image digest and installs frozen lockfiles. Host dependencies, generated output, databases, credentials, git history and reference repositories are excluded from the build context. These commands do not publish an image.
 
+## Native database tools
+
+The image build targets `linux/amd64` and includes PostgreSQL 17.11 clients and Oracle MySQL 8.4.11 clients. The installer verifies signed repositories and checksums; it refuses unsupported architectures instead of substituting MariaDB. On another host architecture, build with `docker build --platform linux/amd64 --tag comms:local .` and use an amd64 runtime or emulation.
+
+These clients match the PostgreSQL 17.11 and MySQL 8.4.11 container acceptance targets. PostgreSQL 18 servers need matching client support; installing a newer `pg_dump` does not guarantee that its output restores into an older server. Native tooling alone does not establish that remote recovery acceptance has passed.
+
+The immutable image retains the system CA bundle at `/etc/ssl/certs/ca-certificates.crt` for verified database TLS. Private certificate authorities must be added to the image trust store. Dump credentials are supplied privately by boot; do not add passwords to command arguments or editable app files. SQLite needs no external database executable.
+
 ## Put it behind HTTPS
 
 For a board at `https://comms.example.com`, add these environment options to the container command and configure your reverse proxy to forward to its published port:

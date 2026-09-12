@@ -1,12 +1,15 @@
 # Send only build inputs: never local databases, credentials, git or dependencies.
 *
 !Dockerfile
+!scripts/
+!scripts/install-database-clients.sh
 !deployment/
 !deployment/**
 !package.json
 !bun.lock
 !patches/
 !patches/@effect%2Fplatform-bun@4.0.0-rc.113.patch
+!patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch
 !tsconfig.json
 !tsconfig.base.json
 !packages/
