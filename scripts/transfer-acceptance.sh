@@ -5,6 +5,11 @@ umask 077
 source_engine=${1:?source engine}
 target_engine=${2:?target engine}
 board_image=${3:-comms:transfer-acceptance}
+acceptance=${4:-normal}
+case "$acceptance:$source_engine:$target_engine" in
+  normal:*|activation-crash:sqlite:pg|activation-crash:sqlite:mysql) ;;
+  *) echo "Unsupported transfer acceptance mode." >&2; exit 2 ;;
+esac
 case "$source_engine:$target_engine" in
   sqlite:pg|sqlite:mysql|pg:sqlite|pg:mysql|mysql:sqlite|mysql:pg) ;;
   *) echo 'Expected two distinct supported engines.' >&2; exit 2 ;;
@@ -172,16 +177,32 @@ stop_board "$board" source-seeded
 # The real wrapper requires a root-owned, non-writable ancestor chain. Host runner UID
 # ownership is not enough; copy each private config into a root-owned disposable volume.
 run_transfer() {
-  local mode=$1
+  local mode=$1 expectation=${2:-complete} exit_code=0
+  local mount_wrapper=()
+  if [ "$expectation" = crash ]; then
+    mount_wrapper=(--mount "type=bind,src=$private/activation-crash.js,dst=/opt/comms/packages/server/dist/store-transfer.js,readonly")
+  fi
   docker run --rm --network none --read-only --user 0:0 --entrypoint /bin/sh \
     --mount "type=bind,src=$private,dst=/input,readonly" \
     --mount "type=volume,src=$configuration,dst=/run/secrets" "$board_image" \
     -c 'chmod 0700 /run/secrets; cp "/input/$1.json" /run/secrets/transfer.json; chown 0:0 /run/secrets/transfer.json; chmod 0600 /run/secrets/transfer.json' transfer-config "$mode"
-  docker run --name "$transfer" --network "$network" --read-only --tmpfs /tmp "${capabilities[@]}" \
+  docker run "${mount_wrapper[@]}" --name "$transfer" --network "$network" --read-only --tmpfs /tmp "${capabilities[@]}" \
     --mount "type=volume,src=$volume,dst=/data" \
     --mount "type=volume,src=$configuration,dst=/run/secrets,readonly" \
     "$board_image" store-transfer --config /run/secrets/transfer.json \
-    > "$private/$mode-output" 2> "$private/$mode.errors"
+    > "$private/$mode-output" 2> "$private/$mode.errors" || exit_code=$?
+  if [ "$expectation" != complete ]; then
+    if [ "$expectation" = crash ]; then
+      [ "$exit_code" = 137 ]
+      grep -q '^Instrumented outer checkpoint: final activation rename$' "$private/$mode.errors"
+    else
+      [ "$exit_code" = 1 ]
+      [ ! -s "$private/$mode-output" ]
+    fi
+    docker rm "$transfer" >/dev/null
+    return
+  fi
+  [ "$exit_code" = 0 ]
   python3 - "$private" "$source_engine" "$target_engine" "$mode" <<'PY_RESULT'
 import json,pathlib,re,sys
 root=pathlib.Path(sys.argv[1]); mode=sys.argv[4]; config=json.loads((root/(mode+'.json')).read_text())
@@ -223,6 +244,10 @@ docker start "$board" >/dev/null
 wait_for_board "$board"
 bun scripts/transfer-acceptance-http.ts verify-checked-source http://localhost:8080 "$private/state.json"
 stop_board "$board" source-checked
+if [ "$acceptance" = activation-crash ]; then
+  # This deliberately instruments only the outer activation boundary; normal resume uses the real CLI.
+  source scripts/transfer-acceptance-activation.sh
+fi
 run_transfer transfer
 launch_board "$refused_board" source
 for attempt in $(seq 1 60); do

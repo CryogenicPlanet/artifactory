@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   transfer:
+    name: ${{ matrix.source }} to ${{ matrix.target }} (${{ matrix.mode || 'normal' }})
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -28,6 +29,12 @@ jobs:
             target: sqlite
           - source: mysql
             target: pg
+          - source: sqlite
+            target: pg
+            mode: activation-crash
+          - source: sqlite
+            target: mysql
+            mode: activation-crash
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -52,4 +59,4 @@ jobs:
       - name: Build immutable image with actual transfer command
         run: docker build --platform linux/amd64 --tag comms:transfer-acceptance .
       - name: Transfer and reopen the board across engines
-        run: bash scripts/transfer-acceptance.sh '${{ matrix.source }}' '${{ matrix.target }}' comms:transfer-acceptance
+        run: bash scripts/transfer-acceptance.sh '${{ matrix.source }}' '${{ matrix.target }}' comms:transfer-acceptance '${{ matrix.mode || 'normal' }}'
