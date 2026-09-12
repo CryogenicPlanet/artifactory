@@ -17,7 +17,7 @@ const main = Effect.gen(function* () {
 			VALUES('retained','/retained/exact.db','pre-flip',4096,123,42,7,'adopted-store')`;
 		const before = yield* sql`SELECT * FROM backups`;
 		yield* initializeBootSchema;
-		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 18 }]);
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
 		const migrated = yield* sql`SELECT * FROM backups`;
 		assert.deepEqual(
 			migrated,
@@ -25,7 +25,7 @@ const main = Effect.gen(function* () {
 		);
 		yield* initializeBootSchema;
 		assert.deepEqual(yield* sql`SELECT * FROM backups`, migrated);
-		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 18 }]);
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
 		return yield* Console.log("v17 backup provenance preserved");
 	}
 	yield* sql`ALTER TABLE child_attempts DROP COLUMN boot_id`;
@@ -74,7 +74,7 @@ const main = Effect.gen(function* () {
 			engine: "sqlite",
 		},
 	]);
-	assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 18 }]);
+	assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
 	yield* Console.log("backup metadata preserved");
 }).pipe(
 	Effect.scoped,

@@ -35,6 +35,7 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 		supervisor.operationGate.withPermit(
 			Effect.gen(function* () {
 				if (options.authorize) yield* options.authorize;
+				yield* backup.recoverCopy;
 				yield* supervisor.assertClosure;
 				if ((yield* recoveryIntents(sql)).count > 0)
 					return yield* new ChildError({ code: "cutover_recovery_required" });
@@ -112,9 +113,10 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 						}),
 					);
 					return record;
-				}).pipe(Effect.timeout("10 seconds"), Effect.interruptible, Effect.exit);
+				}).pipe(Effect.interruptible, Effect.exit);
 				// Cancellation and failed controls are not lifecycle acknowledgements. Restoration must
 				// finish before the gate is released; an unproven closure deliberately leaves traffic frozen.
+				yield* backup.recoverCopy;
 				yield* supervisor.assertClosure;
 				yield* canResume ? supervisor.resume(active).pipe(Effect.provideContext(context)) : restart;
 				if (result._tag === "Failure") {

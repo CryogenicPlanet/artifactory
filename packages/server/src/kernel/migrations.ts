@@ -1,5 +1,6 @@
 import { on } from "@comms/storage/dialect";
 import { assertNoPendingMigration, mysqlMigration } from "./migration-intent.ts";
+import { preserveMigrationState } from "./migration-state.ts";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { Migrator, SqlClient } from "effect/unstable/sql";
 import { writerGate } from "./database.ts";
@@ -36,7 +37,19 @@ export const migrate = (directory: string, epoch: string) =>
 				const url = yield* path.toFileUrl(path.join(directory, file));
 				imports[key] = (): Promise<unknown> => import(/* @vite-ignore */ url.href);
 			}
-			return yield* Migrator.fromGlob(imports);
+			const resolved = yield* Migrator.fromGlob(imports);
+			const exported = Schema.is(Schema.Struct({ default: Schema.Unknown }));
+			return resolved.map(([id, name, load]): Migrator.ResolvedMigration => [
+				id,
+				name,
+				load.pipe(
+					Effect.map((loaded: unknown) => {
+						const first = exported(loaded) ? loaded.default : loaded;
+						const effect = exported(first) ? first.default : first;
+						return Effect.isEffect(effect) ? preserveMigrationState(sql, effect) : loaded;
+					}),
+				),
+			]);
 		}).pipe(
 			Effect.mapError((cause) =>
 				cause instanceof Migrator.MigrationError

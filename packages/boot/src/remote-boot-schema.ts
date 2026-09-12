@@ -59,6 +59,7 @@ export const initializeRemoteBootSchema = (sql: SqlClient, engine: "pg" | "mysql
 			"reset_pin",
 			"store_identity",
 			"backup_engine",
+			"sqlite_copy_ownership",
 		] as const;
 		return yield* remoteMigrate(
 			sql,
