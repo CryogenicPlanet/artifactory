@@ -20,6 +20,6 @@ export const backupMetadataSchema = Effect.gen(function* () {
 	yield* sql`ALTER TABLE backups ADD COLUMN generation INTEGER`;
 });
 
-/** SQLite artifact names are rooted in DATA_DIR, never derived from the live store location. */
-export const backupPath = (path: Path.Path, dataDirectory: string, id: string) =>
-	path.join(dataDirectory, "backups", `${id}.db`);
+/** Artifact names are rooted in DATA_DIR, never derived from the live store location. */
+export const backupPath = (path: Path.Path, dataDirectory: string, id: string, engine: BackupRecord["engine"]) =>
+	path.join(dataDirectory, "backups", `${id}.${engine === "sqlite" ? "db" : engine === "pg" ? "dump" : "sql"}`);

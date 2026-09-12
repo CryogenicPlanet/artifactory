@@ -11,6 +11,7 @@ const main = Effect.gen(function* () {
 		Schema.fromJsonString(
 			Schema.Struct({
 				capacity: Schema.optionalKey(Schema.Int),
+				engine: Schema.optionalKey(Schema.Literals(["sqlite", "pg", "mysql"])),
 				required: Schema.optionalKey(Schema.Int),
 				preserve: Schema.optionalKey(Schema.Array(Schema.Int)),
 				fail_sync: Schema.optionalKey(Schema.Boolean),
@@ -33,7 +34,7 @@ const main = Effect.gen(function* () {
 	};
 	const result = yield* Effect.gen(function* () {
 		yield* initializeBootSchema;
-		return yield* (yield* artifactRetention(root)).prune(
+		return yield* (yield* artifactRetention(root, input.engine ?? "sqlite")).prune(
 			input.capacity === undefined
 				? { status: "unavailable", reason: "measurement_failed" }
 				: { status: "available", capacity_bytes: input.capacity, available_bytes: input.capacity },
