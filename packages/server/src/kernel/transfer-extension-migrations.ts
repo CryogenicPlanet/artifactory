@@ -9,7 +9,11 @@ import { work, type Work } from "./extension-work.ts";
 
 export class TransferExtensionError extends Schema.TaggedError<TransferExtensionError>()("TransferExtensionError", {
 	code: Schema.Literals(["transfer_extension_failed", "transfer_extension_context_forbidden"]),
-}) {}
+}) {
+	get message() {
+		return this.code;
+	}
+}
 const factory = Schema.Struct({
 	default: Schema.declare<(api: Api) => Work<void> | void>(
 		(value): value is (api: Api) => Work<void> | void => typeof value === "function",

@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Console, Effect, FileSystem, Schema } from "effect";
+import { Cause, Console, Effect, FileSystem, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { transferExtensionMigrations } from "../../src/kernel/transfer-extension-migrations.ts";
 
@@ -33,8 +33,15 @@ const program = Effect.gen(function* () {
 		["effects", `export default api => { try { api.effects; } catch {} }`],
 		["factory", `export default () => { throw new Error("private factory failure"); }`],
 		["migration", `export default api => api.migrate("bad", "CREATE TABLE broken(")`],
-	] as const)
-		assert.equal((yield* run(name, source))._tag, "Failure");
+	] as const) {
+		const result = yield* run(name, source);
+		assert.equal(result._tag, "Failure");
+		if (result._tag === "Failure") {
+			const text = Cause.pretty(Cause.fail(result.failure));
+			assert.ok(text.includes("transfer_extension_failed"));
+			assert.ok(!text.includes("private factory failure"));
+		}
+	}
 	assert.equal((yield* sql`SELECT * FROM extension_migrations`).length, 1);
 	assert.equal(
 		(yield* run(
