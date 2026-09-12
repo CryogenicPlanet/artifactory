@@ -1,7 +1,7 @@
 import { RegistryContext, useAtomValue, useAtomRefresh } from "@effect/atom-react";
 import { Effect, Option } from "effect";
 import { Atom, AsyncResult } from "effect/unstable/reactivity";
-import { useCallback, useContext, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { boardFailure } from "./board-api.ts";
 
 /** The mounted registry owns read results, refresh and cancellation; forms own their drafts. */
@@ -39,8 +39,14 @@ export function useLoad<A, E>(request: Effect.Effect<A, E> | Atom.Atom<AsyncResu
 		(change: (previous: A | undefined) => A | undefined) => registry.set(atoms.result, change),
 		[registry, atoms],
 	);
+	const fresh = Option.getOrUndefined(AsyncResult.value(state));
+	/* Stale-while-revalidate: keep the last loaded value so navigation never flashes a skeleton. */
+	const stale = useRef<A | undefined>(undefined);
+	useEffect(() => {
+		if (fresh !== undefined) stale.current = fresh;
+	}, [fresh]);
 	return {
-		value: Option.getOrUndefined(AsyncResult.value(state)),
+		value: fresh ?? stale.current,
 		error: Option.getOrNull(AsyncResult.error(state)),
 		loading: state.waiting,
 		reload,

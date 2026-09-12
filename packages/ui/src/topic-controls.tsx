@@ -1,8 +1,12 @@
 import { Effect, Schema } from "effect";
+import { ChevronRight, Settings2 } from "lucide-react";
 import { useId, useState } from "react";
 import { type BoardError } from "./board-api.ts";
 import type { TopicMutation } from "@comms/protocol";
 import { useBoardClient } from "./board-client.tsx";
+import { Alert } from "./ui/alert.tsx";
+import { Button } from "./ui/button.tsx";
+import { Textarea } from "./ui/input.tsx";
 
 export function TopicControls({
 	path,
@@ -49,7 +53,7 @@ export function TopicControls({
 	};
 	return (
 		<details
-			className="mb-7 rounded-lg border border-[#e3e8df] px-[18px] py-[14px] text-[13px] [&>summary]:cursor-pointer [&>summary]:font-semibold [&>summary]:text-[#68705f] [&>form]:mt-5 [&_textarea]:min-h-[140px] [&_textarea]:font-mono"
+			className="group mb-7 rounded-lg border border-border bg-card px-4 py-3 text-[13px]"
 			onToggle={(event) => {
 				if (event.currentTarget.open && !busy && !uncertain && !dirty) {
 					setDraft(JSON.stringify(meta, null, 2));
@@ -57,8 +61,13 @@ export function TopicControls({
 				}
 			}}
 		>
-			<summary>Topic settings{archived || parentArchived ? " · archived" : ""}</summary>
+			<summary className="flex cursor-pointer list-none items-center gap-2 text-[13px] font-semibold text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+				<Settings2 className="size-3.5" />
+				Topic settings{archived || parentArchived ? " · archived" : ""}
+				<ChevronRight className="ml-auto size-3.5 transition-transform group-open:rotate-90" />
+			</summary>
 			<form
+				className="mt-4"
 				onSubmit={(event) => {
 					event.preventDefault();
 					if (disabled || archived) return;
@@ -71,14 +80,14 @@ export function TopicControls({
 					mutate({ meta: parsed.success });
 				}}
 			>
-				<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor={fieldId}>
+				<label className="mb-1.5 block text-[11px] font-semibold text-muted-foreground" htmlFor={fieldId}>
 					Metadata
 				</label>
-				<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]" id={`${fieldId}-hint`}>
+				<p className="mb-2 text-[10px] leading-relaxed text-subtle" id={`${fieldId}-hint`}>
 					Save replaces all metadata. Omitted keys are removed. Setting public to true makes this topic’s pages public.
 				</p>
-				<textarea
-					className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c] min-h-[125px] resize-y"
+				<Textarea
+					className="min-h-[140px] font-mono"
 					id={fieldId}
 					aria-describedby={`${fieldId}-hint`}
 					aria-invalid={invalid}
@@ -92,37 +101,35 @@ export function TopicControls({
 						setSaved("");
 					}}
 				/>
-				{invalid && <p role="alert">Enter a valid JSON object, such as {`{"status":"doing"}`}.</p>}
-				<button
-					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
-					type="submit"
-					disabled={disabled || archived}
-				>
+				{invalid && (
+					<p className="mt-2 text-xs text-destructive" role="alert">
+						Enter a valid JSON object, such as {`{"status":"doing"}`}.
+					</p>
+				)}
+				<Button className="mt-3" variant="outline" size="sm" type="submit" disabled={disabled || archived}>
 					Save metadata
-				</button>
+				</Button>
 			</form>
-			<div className="mt-5 border-t border-[#e3e8df] pt-2">
-				<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
+			<div className="mt-5 border-t border-border pt-3">
+				<p className="mb-2 text-[10px] leading-relaxed text-subtle">
 					{parentArchived
 						? "A parent topic is archived. Unarchive the parent before changing this topic."
 						: archived
 							? "This topic is archived. Unarchive it to write messages or edit metadata."
 							: "Archiving makes this topic and its subtopics read-only and hides them from unread counts."}
 				</p>
-				<button
-					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+				<Button
+					variant="outline"
+					size="sm"
 					type="button"
 					disabled={disabled}
 					onClick={() => mutate({ archived: !archived })}
 				>
 					{archived ? "Unarchive topic" : "Archive topic"}
-				</button>
+				</Button>
 			</div>
 			{error && (
-				<div
-					className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mb-5 p-5"
-					role="alert"
-				>
+				<Alert className="mt-4">
 					<p>{error.message}</p>
 					{error.status === 401 && (
 						<a href="/auth/login" target="_blank" rel="noreferrer">
@@ -132,18 +139,14 @@ export function TopicControls({
 					{uncertain && (
 						<>
 							<p>The change may have saved. Reload and check this topic before making another change.</p>
-							<button
-								className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
-								type="button"
-								onClick={() => window.location.reload()}
-							>
+							<Button variant="outline" size="sm" type="button" onClick={() => window.location.reload()}>
 								Reload topic
-							</button>
+							</Button>
 						</>
 					)}
-				</div>
+				</Alert>
 			)}
-			<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]" role="status">
+			<p className="mt-3 text-[10px] leading-relaxed text-subtle" role="status">
 				{busy ? "Saving…" : saved}
 			</p>
 		</details>

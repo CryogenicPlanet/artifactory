@@ -4,6 +4,11 @@ import { useMemo, useState } from "react";
 import { type BoardError } from "./board-api.ts";
 import { accountPost, getFamilies, TokenPair, unreadable } from "./account-api.ts";
 import { confirmAccountAction } from "./account-passkeys.ts";
+import { Alert } from "./ui/alert.tsx";
+import { Button } from "./ui/button.tsx";
+import { Card, CardContent } from "./ui/card.tsx";
+import { Input, Textarea } from "./ui/input.tsx";
+import { SectionHeading } from "./ui/section-heading.tsx";
 
 type MintInput = {
 	readonly agent: string;
@@ -12,6 +17,12 @@ type MintInput = {
 	readonly long_lived: boolean;
 };
 type PendingMint = { readonly input: MintInput; readonly key: string; readonly proof: string };
+
+const labelClass = "mt-3.5 mb-1.5 block text-[11px] font-semibold text-muted-foreground";
+const checkClass =
+	"mt-3 flex items-center gap-2 text-xs font-medium text-muted-foreground [&_input]:size-3.5 [&_input]:accent-primary";
+const hintClass = "mt-1.5 text-[10px] leading-relaxed text-subtle";
+
 export function AccountTokens() {
 	const request = useMemo(() => getFamilies(), []);
 	const { value: families, error: loadError, reload } = useLoad(request);
@@ -64,10 +75,10 @@ export function AccountTokens() {
 	};
 	return (
 		<section className="mt-8 text-[13px]" aria-labelledby="account-tokens-heading">
-			<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
-				<h2 id="account-tokens-heading">Agent access</h2>
-				<button
-					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+			<SectionHeading title={<span id="account-tokens-heading">Agent access</span>}>
+				<Button
+					variant="outline"
+					size="sm"
 					type="button"
 					disabled={busy}
 					onClick={() => {
@@ -76,27 +87,25 @@ export function AccountTokens() {
 					}}
 				>
 					Refresh tokens
-				</button>
-			</div>
-			<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
+				</Button>
+			</SectionHeading>
+			<p className={hintClass}>
 				Revoking an instance ends access for every token in its family, including refreshed tokens.
 			</p>
 			{families?.items.map((family) => (
-				<article
-					className="flex items-center justify-between gap-3 border-b border-[#e3e8df] py-4 [&>div]:min-w-0 [&>div]:wrap-anywhere [&_strong]:min-w-0 [&_strong]:wrap-anywhere [&_p]:my-[5px] [&_p]:text-[#737d6d] [&_small]:wrap-anywhere [&_small]:text-[#939b89] [&_button]:max-w-[48%] [&_button]:shrink-0 [&_button]:wrap-anywhere"
-					key={family.family}
-				>
-					<div>
+				<article className="flex items-center justify-between gap-3 border-b border-border py-4" key={family.family}>
+					<div className="min-w-0 wrap-anywhere">
 						<strong>
 							{family.agent}@{family.label}
 						</strong>
-						<p>
+						<p className="my-1 text-muted-foreground">
 							{family.scopes.join(", ")} · {family.revoked ? "Revoked" : "Issued"}
 						</p>
-						<small>{family.family}</small>
+						<small className="wrap-anywhere text-subtle">{family.family}</small>
 					</div>
-					<button
-						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+					<Button
+						variant="outline"
+						size="sm"
 						type="button"
 						disabled={busy || family.revoked}
 						onClick={() =>
@@ -110,147 +119,118 @@ export function AccountTokens() {
 						}
 					>
 						Revoke
-					</button>
+					</Button>
 				</article>
 			))}
-			{families && !families.items.length && (
-				<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">No issued agent tokens.</p>
-			)}
-			<form
-				className="rounded-[10px] border border-[#dfe5d8] bg-white p-[17px] min-[651px]:p-[22px] mt-[18px] [&_h3]:text-sm [&_fieldset]:mb-4 [&_fieldset]:min-w-0 [&_button]:mt-[14px]"
-				onSubmit={(event) => {
-					event.preventDefault();
-					mint();
-				}}
-			>
-				<h3>Create agent tokens</h3>
-				<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
-					Read access is included. Confirm the identity and permissions with your passkey.
-				</p>
-				<fieldset disabled={busy || pending !== null || pair !== null}>
-					<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="token-agent">
-						Agent name
-					</label>
-					<input
-						className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
-						id="token-agent"
-						required
-						maxLength={64}
-						pattern="[a-z0-9][a-z0-9._\-]*"
-						value={agent}
-						onChange={(event) => setAgent(event.target.value)}
-						placeholder="codex"
-					/>
-					<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="token-label">
-						Instance label
-					</label>
-					<input
-						className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
-						id="token-label"
-						required
-						maxLength={100}
-						pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]*"
-						value={label}
-						onChange={(event) => setLabel(event.target.value)}
-						placeholder="macbook"
-					/>
-					<label className="mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c] flex items-center gap-[9px]">
-						<input
-							className="disabled:opacity-75"
-							type="checkbox"
-							checked={write}
-							onChange={(event) => setWrite(event.target.checked)}
-						/>{" "}
-						Write messages and topics
-					</label>
-					<label className="mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c] flex items-center gap-[9px]">
-						<input
-							className="disabled:opacity-75"
-							type="checkbox"
-							checked={fs}
-							onChange={(event) => setFs(event.target.checked)}
-						/>{" "}
-						Edit source and pages
-					</label>
-					<label className="mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c] flex items-center gap-[9px]">
-						<input
-							className="disabled:opacity-75"
-							type="checkbox"
-							checked={long}
-							onChange={(event) => setLong(event.target.checked)}
-						/>{" "}
-						Long-lived: access 7 days, refresh 90 days
-					</label>
-					<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
-						Default: access 24 hours, refresh 30 days.
-					</p>
-				</fieldset>
-				{pending && (
-					<p role="status">
-						A token request is pending. Retry unchanged to recover its result. If recovery fails, check the token list
-						and revoke the uncertain instance, then reload this page before creating another.
-					</p>
-				)}
-				{!pair && (
-					<button
-						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
-						type="submit"
-						disabled={busy}
+			{families && !families.items.length && <p className={hintClass}>No issued agent tokens.</p>}
+			<Card className="mt-4">
+				<CardContent>
+					<form
+						onSubmit={(event) => {
+							event.preventDefault();
+							mint();
+						}}
 					>
-						{busy ? "Waiting for confirmation…" : pending ? "Retry token request" : "Create with passkey"}
-					</button>
-				)}
-				{pair && (
-					<div className="mt-5 [&_textarea]:min-h-20 [&_textarea]:font-mono [&_textarea]:wrap-anywhere">
-						<h3>Save this token pair</h3>
-						<p>
-							These secrets are shown only here. Closing this view removes them from the page; they cannot be retrieved
-							from the token list.
+						<h3 className="text-sm font-semibold">Create agent tokens</h3>
+						<p className={hintClass}>
+							Read access is included. Confirm the identity and permissions with your passkey.
 						</p>
-						<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="token-access">
-							Access token
-						</label>
-						<textarea
-							className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c] min-h-[125px] resize-y"
-							id="token-access"
-							readOnly
-							value={pair.access}
-							autoComplete="off"
-							spellCheck={false}
-						/>
-						<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="token-refresh">
-							Refresh token
-						</label>
-						<textarea
-							className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c] min-h-[125px] resize-y"
-							id="token-refresh"
-							readOnly
-							value={pair.refresh}
-							autoComplete="off"
-							spellCheck={false}
-						/>
-						<button
-							className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
-							type="button"
-							onClick={() => setPair(null)}
-						>
-							I saved them — hide tokens
-						</button>
-					</div>
-				)}
-			</form>
+						<fieldset className="min-w-0" disabled={busy || pending !== null || pair !== null}>
+							<label className={labelClass} htmlFor="token-agent">
+								Agent name
+							</label>
+							<Input
+								id="token-agent"
+								required
+								maxLength={64}
+								pattern="[a-z0-9][a-z0-9._\-]*"
+								value={agent}
+								onChange={(event) => setAgent(event.target.value)}
+								placeholder="codex"
+							/>
+							<label className={labelClass} htmlFor="token-label">
+								Instance label
+							</label>
+							<Input
+								id="token-label"
+								required
+								maxLength={100}
+								pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]*"
+								value={label}
+								onChange={(event) => setLabel(event.target.value)}
+								placeholder="macbook"
+							/>
+							<label className={checkClass}>
+								<input type="checkbox" checked={write} onChange={(event) => setWrite(event.target.checked)} /> Write
+								messages and topics
+							</label>
+							<label className={checkClass}>
+								<input type="checkbox" checked={fs} onChange={(event) => setFs(event.target.checked)} /> Edit source and
+								pages
+							</label>
+							<label className={checkClass}>
+								<input type="checkbox" checked={long} onChange={(event) => setLong(event.target.checked)} /> Long-lived:
+								access 7 days, refresh 90 days
+							</label>
+							<p className={hintClass}>Default: access 24 hours, refresh 30 days.</p>
+						</fieldset>
+						{pending && (
+							<p className="mt-3 text-xs text-muted-foreground" role="status">
+								A token request is pending. Retry unchanged to recover its result. If recovery fails, check the token
+								list and revoke the uncertain instance, then reload this page before creating another.
+							</p>
+						)}
+						{!pair && (
+							<Button className="mt-3.5" variant="outline" size="sm" type="submit" disabled={busy}>
+								{busy ? "Waiting for confirmation…" : pending ? "Retry token request" : "Create with passkey"}
+							</Button>
+						)}
+						{pair && (
+							<div className="mt-5">
+								<h3 className="text-sm font-semibold">Save this token pair</h3>
+								<p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+									These secrets are shown only here. Closing this view removes them from the page; they cannot be
+									retrieved from the token list.
+								</p>
+								<label className={labelClass} htmlFor="token-access">
+									Access token
+								</label>
+								<Textarea
+									className="min-h-20 font-mono wrap-anywhere"
+									id="token-access"
+									readOnly
+									value={pair.access}
+									autoComplete="off"
+									spellCheck={false}
+								/>
+								<label className={labelClass} htmlFor="token-refresh">
+									Refresh token
+								</label>
+								<Textarea
+									className="min-h-20 font-mono wrap-anywhere"
+									id="token-refresh"
+									readOnly
+									value={pair.refresh}
+									autoComplete="off"
+									spellCheck={false}
+								/>
+								<Button className="mt-3.5" variant="outline" size="sm" type="button" onClick={() => setPair(null)}>
+									I saved them — hide tokens
+								</Button>
+							</div>
+						)}
+					</form>
+				</CardContent>
+			</Card>
 			{(error ?? loadError) && (
-				<div
-					className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mb-5 p-5"
-					role="alert"
-				>
+				<Alert className="mt-4">
 					{(error ?? loadError)?.message}
 					{(error ?? loadError)?.status === 401 && (
 						<p>
 							<a href="/auth/login">Sign in again</a>
 						</p>
 					)}
-				</div>
+				</Alert>
 			)}
 		</section>
 	);

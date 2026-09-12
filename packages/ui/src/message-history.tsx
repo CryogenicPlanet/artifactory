@@ -1,8 +1,13 @@
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useBoardClient } from "./board-client.tsx";
 import { useLoad } from "./use-load.ts";
 import { Message } from "./message.tsx";
 import { ReferencedMessage } from "./referenced-message.tsx";
+import { Alert } from "./ui/alert.tsx";
+import { Button } from "./ui/button.tsx";
+import { SectionHeading } from "./ui/section-heading.tsx";
+import { MessagesSkeleton } from "./ui/skeleton.tsx";
 
 export function MessageHistory({ path, onClose }: { readonly path: string; readonly onClose: () => void }) {
 	const client = useBoardClient();
@@ -20,46 +25,39 @@ export function MessageHistory({ path, onClose }: { readonly path: string; reado
 		<>
 			{page && <ReferencedMessage visible={page.items} />}
 			<section className="mb-8" aria-label="Message history">
-				<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
-					<h2>Message history</h2>
-					<button
-						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
-						type="button"
-						onClick={onClose}
-					>
+				<SectionHeading title="Message history">
+					<Button variant="outline" size="sm" type="button" onClick={onClose}>
 						Back to latest
-					</button>
-				</div>
-				<p className="text-[11px] text-[#89917f]">
+					</Button>
+				</SectionHeading>
+				<p className="text-[11px] text-subtle">
 					Page {position.previous.length + 1}, oldest first. Return to latest for live updates.
 				</p>
 				{error ? (
-					<div
-						className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mb-5 p-5 "
-						role="alert"
-					>
+					<Alert className="mt-4">
 						<p>{error.message}</p>
-						<button
-							className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
-							type="button"
-							onClick={reload}
-						>
+						<Button variant="outline" size="sm" type="button" onClick={reload}>
 							Retry history
-						</button>
-					</div>
+						</Button>
+					</Alert>
 				) : page === undefined ? (
-					<p role="status">Loading history…</p>
+					<MessagesSkeleton />
 				) : (
 					<>
 						{page.items.map((message) => (
 							<Message key={message.id} message={message} />
 						))}
-						{page.items.length < 100 && <p role="status">You have reached the end of this topic’s history.</p>}
+						{page.items.length < 100 && (
+							<p className="pt-4 text-center text-xs text-subtle" role="status">
+								You have reached the end of this topic’s history.
+							</p>
+						)}
 					</>
 				)}
-				<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
-					<button
-						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+				<div className="mt-4 flex items-center justify-between gap-4">
+					<Button
+						variant="outline"
+						size="sm"
 						type="button"
 						disabled={position.previous.length === 0}
 						onClick={() => {
@@ -67,10 +65,12 @@ export function MessageHistory({ path, onClose }: { readonly path: string; reado
 							if (since !== undefined) setPosition({ since, previous: position.previous.slice(0, -1) });
 						}}
 					>
+						<ChevronLeft />
 						Previous page
-					</button>
-					<button
-						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+					</Button>
+					<Button
+						variant="outline"
+						size="sm"
 						type="button"
 						disabled={page === undefined || page.items.length < 100}
 						onClick={() => {
@@ -78,7 +78,8 @@ export function MessageHistory({ path, onClose }: { readonly path: string; reado
 						}}
 					>
 						Next page
-					</button>
+						<ChevronRight />
+					</Button>
 				</div>
 			</section>
 		</>

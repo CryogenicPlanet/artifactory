@@ -1,9 +1,17 @@
 import { Effect } from "effect";
+import { ChevronRight, SearchIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { validTopic, type BoardMessage } from "./board-api.ts";
 import { Message } from "./message.tsx";
 import { useBoardClient } from "./board-client.tsx";
+import { Alert } from "./ui/alert.tsx";
+import { Button } from "./ui/button.tsx";
+import { Input } from "./ui/input.tsx";
+import { SectionHeading } from "./ui/section-heading.tsx";
+
 type MessageFilters = { readonly q: string; readonly topic: string; readonly tag: string; readonly agent: string };
+
+const labelClass = "block text-[11px] font-semibold text-muted-foreground [&>input]:mt-1.5 [&>input]:font-normal";
 
 export function Search({ path, onActive }: { readonly path: string; readonly onActive: (active: boolean) => void }) {
 	const client = useBoardClient();
@@ -76,47 +84,40 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 		load(filters, 0);
 	};
 	return (
-		<section
-			className="mb-7 [&_summary]:cursor-pointer [&_summary]:text-[13px] [&_summary]:font-semibold [&_form]:mt-4"
-			aria-label="Message search"
-		>
-			<details>
-				<summary>Search messages</summary>
-				<form onSubmit={submit}>
-					<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]">
+		<section className="mb-7" aria-label="Message search">
+			<details className="group rounded-lg border border-border bg-card px-4 py-3">
+				<summary className="flex cursor-pointer list-none items-center gap-2 text-[13px] font-semibold text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+					<SearchIcon className="size-3.5" />
+					Search messages
+					<ChevronRight className="ml-auto size-3.5 transition-transform group-open:rotate-90" />
+				</summary>
+				<form className="mt-4" onSubmit={submit}>
+					<label className={labelClass}>
 						Words or phrases
-						<input
-							className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
+						<Input
 							value={q}
 							onChange={(event) => setQ(event.target.value)}
 							maxLength={512}
 							placeholder={'Try: release "ready to ship"'}
 						/>
 					</label>
-					<div className="mt-3 grid gap-2.5 min-[651px]:grid-cols-[2fr_1fr_1fr]">
-						<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]">
+					<div className="mt-2.5 grid gap-2.5 sm:grid-cols-[2fr_1fr_1fr]">
+						<label className={labelClass}>
 							Search topic
-							<input
-								className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
+							<Input
 								value={topic}
 								onChange={(event) => setTopic(event.target.value)}
 								maxLength={200}
 								placeholder="All topics"
 							/>
 						</label>
-						<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]">
+						<label className={labelClass}>
 							Tag
-							<input
-								className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
-								value={tag}
-								onChange={(event) => setTag(event.target.value)}
-								placeholder="Any tag"
-							/>
+							<Input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="Any tag" />
 						</label>
-						<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]">
+						<label className={labelClass}>
 							Author
-							<input
-								className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
+							<Input
 								value={agent}
 								onChange={(event) => setAgent(event.target.value)}
 								maxLength={64}
@@ -124,32 +125,21 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 							/>
 						</label>
 					</div>
-					<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
+					<p className="mt-1.5 mb-3 text-[10px] leading-relaxed text-subtle">
 						Filters combine. Topic includes subtopics and archives. Words and quoted phrases search message bodies.
 					</p>
-					<button
-						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
-						type="submit"
-						disabled={loading}
-					>
+					<Button variant="outline" size="sm" type="submit" disabled={loading}>
 						{loading ? "Searching…" : "Search"}
-					</button>
+					</Button>
 				</form>
 			</details>
-			{error && (
-				<p
-					className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mb-5 p-5 "
-					role="alert"
-				>
-					{error}
-				</p>
-			)}
+			{error && <Alert className="mt-4">{error}</Alert>}
 			{applied && (
 				<div className="mt-6" aria-label="Search results">
-					<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
-						<h2>Search results</h2>
-						<button
-							className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+					<SectionHeading title="Search results">
+						<Button
+							variant="outline"
+							size="sm"
 							type="button"
 							onClick={() => {
 								request.current?.abort();
@@ -160,9 +150,9 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 							}}
 						>
 							Back to conversation
-						</button>
-					</div>
-					<p className="mt-[5px] mb-0 text-[10px] leading-[1.6] text-[#939b89]">
+						</Button>
+					</SectionHeading>
+					<p className="mt-1.5 mb-2 text-[10px] leading-relaxed text-subtle">
 						{items.length} shown, oldest first. Search again to include new messages and edits.
 					</p>
 					{items.map((message) => (
@@ -171,23 +161,14 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 					{!loading && !error && items.length === 0 && <p role="status">No messages match these filters.</p>}
 					{loading && <p role="status">Loading results…</p>}
 					{error && (
-						<button
-							className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
-							type="button"
-							onClick={() => load(applied, items.length ? cursor : 0)}
-						>
+						<Button variant="outline" size="sm" type="button" onClick={() => load(applied, items.length ? cursor : 0)}>
 							Retry search
-						</button>
+						</Button>
 					)}
 					{more && !error && (
-						<button
-							className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
-							type="button"
-							disabled={loading}
-							onClick={() => load(applied, cursor)}
-						>
+						<Button variant="outline" size="sm" type="button" disabled={loading} onClick={() => load(applied, cursor)}>
 							More results
-						</button>
+						</Button>
 					)}
 				</div>
 			)}

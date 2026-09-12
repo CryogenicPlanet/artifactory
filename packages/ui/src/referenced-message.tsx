@@ -1,18 +1,21 @@
 import { Atom } from "effect/unstable/reactivity";
 import { useBoardClient } from "./board-client.tsx";
 import { Effect } from "effect";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { BoardError, type BoardMessage } from "./board-api.ts";
+import { useLocation } from "./router.tsx";
 import { useLoad } from "./use-load.ts";
 import { Message } from "./message.tsx";
+import { SectionHeading } from "./ui/section-heading.tsx";
 
 export function ReferencedMessage({ visible }: { readonly visible: readonly BoardMessage[] }) {
 	const client = useBoardClient();
-	const [seq] = useState(() => {
-		const value = new URLSearchParams(window.location.search).get("message");
+	const { search } = useLocation();
+	const seq = useMemo(() => {
+		const value = new URLSearchParams(search).get("message");
 		const parsed = value && /^[1-9][0-9]*$/.test(value) ? Number(value) : 0;
 		return Number.isSafeInteger(parsed) ? parsed : 0;
-	});
+	}, [search]);
 	const displayed = visible.some((item) => item.seq === seq);
 	const request = useMemo(
 		() =>
@@ -40,13 +43,13 @@ export function ReferencedMessage({ visible }: { readonly visible: readonly Boar
 	if (!seq || displayed) return null;
 	return (
 		<section aria-label="Referenced message" className="mb-8">
-			<div className="mb-[18px] flex items-center justify-between gap-[15px] [&_h2]:m-0 [&_h2]:text-xs [&_h2]:font-[650] [&>span]:text-[11px] [&>span]:text-[#93998d]">
-				<h2>Referenced message #{seq}</h2>
-			</div>
+			<SectionHeading title={`Referenced message #${seq}`} />
 			{message && !error ? (
 				<Message message={message} />
 			) : (
-				<p role="status">{error?.message ?? "Loading referenced message…"}</p>
+				<p className="text-[13px] text-muted-foreground" role="status">
+					{error?.message ?? "Loading referenced message…"}
+				</p>
 			)}
 		</section>
 	);

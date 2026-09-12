@@ -1,9 +1,17 @@
 import { RecoveryControls } from "./recovery-controls.tsx";
-import { BoardLayout } from "./board-layout.tsx";
+import { BoardLayout, NavLink } from "./board-layout.tsx";
 import { DateTime } from "effect";
+import { RefreshCw } from "lucide-react";
 
 import { useLoad } from "./use-load.ts";
 import { useBoardClient } from "./board-client.tsx";
+import { Link } from "./router.tsx";
+import { Alert } from "./ui/alert.tsx";
+import { Badge } from "./ui/badge.tsx";
+import { Button } from "./ui/button.tsx";
+import { EmptyState } from "./ui/empty-state.tsx";
+import { PageHeader } from "./ui/page-header.tsx";
+import { Skeleton } from "./ui/skeleton.tsx";
 
 export function Extensions() {
 	const client = useBoardClient();
@@ -17,82 +25,54 @@ export function Extensions() {
 		<BoardLayout
 			navigation={
 				<>
-					<a
-						className="my-[3px] flex shrink-0 items-center gap-2 rounded-md px-[9px] py-1.5 text-xs whitespace-nowrap min-[651px]:px-2.5 min-[651px]:py-[9px] min-[651px]:text-[13px] min-[651px]:whitespace-normal"
-						href="/"
-					>
-						All topics
-					</a>
-					<a
-						className="my-[3px] flex shrink-0 items-center gap-2 rounded-md px-[9px] py-1.5 text-xs whitespace-nowrap min-[651px]:px-2.5 min-[651px]:py-[9px] min-[651px]:text-[13px] min-[651px]:whitespace-normal bg-[#e3ebdd] font-semibold text-[#36532e]"
-						aria-current="page"
-						href="/ext"
-					>
+					<NavLink href="/">All topics</NavLink>
+					<NavLink href="/ext" active>
 						Extensions
-					</a>
+					</NavLink>
 				</>
 			}
 		>
-			<header className="mb-[30px] flex items-start justify-between gap-4 min-[651px]:mb-10 min-[651px]:items-center [&_p]:mt-2.5 [&_p]:text-xs [&_p]:leading-[1.6] [&_p]:text-[#7b8176] min-[651px]:[&_p]:text-[13px]">
-				<div>
-					<nav className="mb-2.5 text-[11px] wrap-anywhere text-[#858b80] min-[651px]:mb-4" aria-label="Breadcrumb">
-						<a href="/">Board</a> / Extensions
-					</nav>
-					<h1 className="text-[26px] leading-[1.2] font-[650] tracking-[-0.9px] wrap-anywhere min-[651px]:text-[30px]">
-						Extensions
-					</h1>
-					<p>What is loaded in the current generation. Updates with server events.</p>
-				</div>
-				<button
-					type="button"
-					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] disabled:cursor-default disabled:opacity-50 shrink-0 bg-transparent text-[12px] text-[#68705f]"
-					onClick={reload}
-					disabled={loading}
-				>
-					{loading ? "Refreshing…" : "Refresh"}
-				</button>
-			</header>
+			<PageHeader
+				breadcrumb={
+					<>
+						<Link className="hover:text-foreground" href="/">
+							Board
+						</Link>{" "}
+						/ Extensions
+					</>
+				}
+				title="Extensions"
+				description="What is loaded in the current generation. Updates with server events."
+				actions={
+					<Button variant="outline" size="sm" onClick={reload} disabled={loading}>
+						<RefreshCw className={loading ? "animate-spin" : ""} />
+						{loading ? "Refreshing…" : "Refresh"}
+					</Button>
+				}
+			/>
 			{error && (
-				<div
-					className="rounded-lg border border-[#eadbc6] bg-[#fff9ef] text-[12px] leading-[1.7] text-[#87683f] [&_h2]:mt-0 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:font-semibold [&_h2]:text-[#6c573b] [&_p]:mt-0 [&_p]:mb-3 [&_a]:underline [&_a]:underline-offset-[3px] mb-5 p-5 "
-					role="alert"
-				>
+				<Alert className="mb-5">
 					<p>{error.message}</p>
 					{error.status === 401 && <a href="/auth/login">Sign in with a passkey</a>}
-				</div>
+				</Alert>
 			)}
-			{loading && items === undefined && !error && (
-				<p
-					className="px-2.5 py-[35px] text-center text-[13px] leading-[1.7] text-[#858c7c] [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-medium [&_h2]:text-[#5e6857] [&_h3]:mb-2 [&_h3]:text-base [&_h3]:font-medium [&_h3]:text-[#5e6857] [&_a]:underline [&_a]:underline-offset-[3px]"
-					role="status"
-				>
-					Loading extensions…
-				</p>
-			)}
+			{loading && items === undefined && !error && <Skeleton className="h-32 w-full" />}
 			{items !== undefined && !error && (
 				<section aria-label="Loaded extensions">
 					{items.length === 0 && (
-						<p className="px-2.5 py-[35px] text-center text-[13px] leading-[1.7] text-[#858c7c] [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-medium [&_h2]:text-[#5e6857] [&_h3]:mb-2 [&_h3]:text-base [&_h3]:font-medium [&_h3]:text-[#5e6857] [&_a]:underline [&_a]:underline-offset-[3px]">
-							No extensions are installed. <a href="/p/docs/extensions.md">Read the extension guide</a> to add one.
-						</p>
+						<EmptyState title="No extensions are installed.">
+							<a href="/p/docs/extensions.md">Read the extension guide</a> to add one.
+						</EmptyState>
 					)}
 					{items.map((item) => (
-						<article
-							className="border-t border-[#e3e8df] py-6 text-[13px] wrap-anywhere [&>header]:flex [&>header]:flex-wrap [&>header]:items-center [&>header]:gap-3 [&_h2]:text-[15px] [&_h2]:font-[650]"
-							key={item.name}
-						>
-							<header>
-								<h2>{item.name}</h2>
-								<span
-									data-status={item.status}
-									className="rounded-[5px] bg-[#e9eee3] px-2 py-[3px] text-[11px] text-[#36532e] data-[status=disabled]:bg-[#faebe6] data-[status=disabled]:text-[#914934]"
-								>
-									{item.status === "loaded" ? "Loaded" : "Disabled"}
-								</span>
-								<span className="text-[11px] text-[#737d6d]">{item.load_ms} ms to load</span>
+						<article className="border-t border-border py-6 text-[13px] wrap-anywhere" key={item.name}>
+							<header className="flex flex-wrap items-center gap-3">
+								<h2 className="text-[15px] font-semibold">{item.name}</h2>
+								{item.status === "loaded" ? <Badge>Loaded</Badge> : <Badge variant="destructive">Disabled</Badge>}
+								<span className="text-[11px] text-muted-foreground tabular-nums">{item.load_ms} ms to load</span>
 							</header>
 							{item.error !== null && (
-								<div className="my-4 text-[#914934] [&_summary]:cursor-pointer [&_pre]:text-[11px] [&_pre]:leading-[1.7] [&_pre]:wrap-anywhere [&_pre]:whitespace-pre-wrap">
+								<div className="my-4 text-destructive [&_pre]:text-[11px] [&_pre]:leading-relaxed [&_pre]:wrap-anywhere [&_pre]:whitespace-pre-wrap [&_summary]:cursor-pointer">
 									<p>{item.error.split("\n", 1)[0]}</p>
 									<details>
 										<summary>Full error</summary>
@@ -101,13 +81,13 @@ export function Extensions() {
 								</div>
 							)}
 							{item.registrations.length > 0 && (
-								<ul className="my-[18px] list-none p-0 [&>li]:my-3 [&_span]:mt-1 [&_span]:block [&_span]:leading-[1.6] [&_span]:text-[#737d6d]">
+								<ul className="my-4 list-none space-y-3 p-0">
 									{item.registrations.map((route, index) => (
 										<li key={`${route.method}-${route.path}-${index}`}>
-											<code>
+											<code className="rounded-sm bg-tag-surface px-1 py-0.5 text-xs">
 												{route.method} {route.path}
 											</code>
-											<span>
+											<span className="mt-1 block leading-relaxed text-muted-foreground">
 												{route.description} · {route.scope} scope
 											</span>
 										</li>
@@ -115,7 +95,7 @@ export function Extensions() {
 								</ul>
 							)}
 							<a
-								className="text-xs underline underline-offset-[3px]"
+								className="text-xs text-primary underline underline-offset-[3px] hover:text-primary-hover"
 								href={`/_boot/fs/app/ext/${encodeURIComponent(item.name)}`}
 							>
 								Read source ↗
@@ -125,20 +105,22 @@ export function Extensions() {
 				</section>
 			)}
 			<section
-				className="mt-[30px] border-t border-[#e3e8df] pt-6 text-[13px] leading-[1.7] wrap-anywhere [&>h2]:text-[15px] [&>h2]:font-[650]"
+				className="mt-8 border-t border-border pt-6 text-[13px] leading-relaxed wrap-anywhere"
 				aria-labelledby="edit-lock-heading"
 			>
-				<h2 id="edit-lock-heading">Edit lock</h2>
+				<h2 className="text-[15px] font-semibold" id="edit-lock-heading">
+					Edit lock
+				</h2>
 				{lockError ? (
 					<p>{lockError.message}</p>
 				) : lock === undefined ? (
-					<p>Loading lock status…</p>
+					<p className="text-muted-foreground">Loading lock status…</p>
 				) : lock ? (
 					<>
 						<p>
 							<strong>{lock.agent}</strong> is editing.
 							<br />
-							<span className="text-[11px] text-[#737d6d]">Instance: {lock.holder_family}</span>
+							<span className="text-[11px] text-muted-foreground">Instance: {lock.holder_family}</span>
 						</p>
 						{lock.note && <p>{lock.note}</p>}
 						<p>
@@ -149,12 +131,14 @@ export function Extensions() {
 						</p>
 					</>
 				) : (
-					<p>No one holds the edit lock.</p>
+					<p className="text-muted-foreground">No one holds the edit lock.</p>
 				)}
 				<RecoveryControls lock={lockError ? undefined : lock} refresh={reload} />
-				<p>Source edits and recovery use the bootloader. Source and diagnostic views require source access.</p>
+				<p className="text-muted-foreground">
+					Source edits and recovery use the bootloader. Source and diagnostic views require source access.
+				</p>
 				<nav
-					className="mt-5 flex flex-wrap gap-x-6 gap-y-3 [&>a]:text-xs [&>a]:underline [&>a]:underline-offset-[3px]"
+					className="mt-5 flex flex-wrap gap-x-6 gap-y-3 [&>a]:text-xs [&>a]:text-primary [&>a]:underline [&>a]:underline-offset-[3px] [&>a]:hover:text-primary-hover"
 					aria-label="Extension tools"
 				>
 					<a href="/_boot/recovery">Immutable recovery ↗</a>

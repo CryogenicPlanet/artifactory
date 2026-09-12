@@ -2,6 +2,8 @@ import { Effect } from "effect";
 import { useState } from "react";
 import { breakEditLock, revertSource } from "./recovery-api.ts";
 import { type EditLock } from "./extension-api.ts";
+import { Link } from "./router.tsx";
+import { Button } from "./ui/button.tsx";
 
 /** The mounted controls retain uncertain undo identity; refreshing reads never starts another undo. */
 export function RecoveryControls({
@@ -55,28 +57,30 @@ export function RecoveryControls({
 			</p>
 			<div className="flex flex-wrap gap-3">
 				{lock && (
-					<button
-						className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+					<Button
+						variant="outline"
+						size="sm"
 						type="button"
 						disabled={busy || pending !== null}
 						onClick={() => run("break")}
 					>
 						Break lock with passkey
-					</button>
+					</Button>
 				)}
-				<button
-					className="cursor-pointer rounded-[7px] border px-[14px] py-[9px] font-semibold border-[#d8ded5] bg-white text-[13px] disabled:cursor-default disabled:opacity-50 [&:not(:disabled):hover]:bg-[#eef3eb]"
+				<Button
+					variant="outline"
+					size="sm"
 					type="button"
 					disabled={busy || pending !== null}
 					onClick={() => run("revert")}
 				>
 					{pending ? "Undo requested — check boot diagnostics" : "Revert last source change"}
-				</button>
+				</Button>
 			</div>
 			{message && <p role="status">{message}</p>}
 			<p>
 				<a href="/auth/login">Sign in with a passkey</a> · <a href="/_boot/status">Boot diagnostics</a> ·{" "}
-				<a href="/">Open board</a>
+				<Link href="/">Open board</Link>
 			</p>
 		</div>
 	);
