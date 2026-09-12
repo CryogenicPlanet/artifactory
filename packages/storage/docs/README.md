@@ -25,6 +25,8 @@ The boot guardian survives a boot-worker crash and writes closure receipts only 
 
 Run `bun run check` and focused storage tests after changes. [Remote client acceptance](../../../scripts/remote-session-acceptance.sh) uses disposable pinned database containers; [real-board acceptance](../../../scripts/remote-board-acceptance.sh) exercises the image separately. Neither runs in the default SQLite suite. Check [current acceptance](../../../docs/build-plan.md) before treating a workflow or a prepared integration as verified behavior.
 
+[Private CA acceptance](../../../scripts/remote-tls-acceptance.sh) runs the built image against disposable TLS servers. It checks encrypted guarded queries and real native dump/load with a trusted CA, then requires refusal with an unrelated CA or a mismatched hostname. This is a separate Linux image check; preparing the fixture or passing argument tests does not prove a successful TLS handshake.
+
 ## Offline transfer building blocks
 
 `transferInventory(sql, trustedDerivedObjects, trustedJsonColumns)` reads ordinary tables, all columns, primary keys, foreign keys and identity columns. It includes custom tables and migration ledgers. Call it only with closure and stable-read guarantees supplied by the offline transfer coordinator; this function neither proves closure nor copies a store. Foreign-key names group catalog rows but are not portable equality keys. Compare their ordered columns, referenced table and referenced columns.
