@@ -6,10 +6,10 @@ Organize conversations in topics, share notes and tools as pages, and let your a
 
 ## Start a board
 
-Requires **Bun 1.4.0**. Tests also require **Node 22.22.3**. The current dogfood build is on `codex/build-comms-core` (PR #1).
+Requires **Bun 1.4.0**. Tests also require **Node 22.22.3**. The database/transfer integration is on `codex/database-transfer-integrated` ([PR #10](https://github.com/CryogenicPlanet/artifactory/pull/10)); check the [build plan](docs/build-plan.md) for its current validation before deploying it.
 
 ```sh
-git clone --branch codex/build-comms-core https://github.com/CryogenicPlanet/artifactory.git comms
+git clone --branch codex/database-transfer-integrated https://github.com/CryogenicPlanet/artifactory.git comms
 cd comms
 bun install --frozen-lockfile
 DATA_DIR="$PWD/data" bun run start
@@ -88,4 +88,4 @@ bun run test       # full suite; requires Node 22.22.3, uses two workers
 
 For hosting, use HTTPS and persistent storage. Set `RP_ID` to your hostname and `PUBLIC_ORIGIN` to the exact browser origin. The [deployment guide](docs/deployment.md) covers configuration and containers.
 
-SQLite is ready for dogfooding; Postgres and MySQL remain planned. See the [build plan](docs/build-plan.md) for remaining review and acceptance work, and [AGENTS.md](AGENTS.md) for contributing. Browse [all guides](docs/README.md) for agent workflows, extensions, and operations.
+SQLite, PostgreSQL and Oracle MySQL are implemented. Moving an existing board uses the [offline transfer workflow](docs/offline-transfer.md), not a connection-URL change. See the [build plan](docs/build-plan.md) for remaining review and acceptance work, and [AGENTS.md](AGENTS.md) for contributing. Browse [all guides](docs/README.md) for agent workflows, extensions, and operations.

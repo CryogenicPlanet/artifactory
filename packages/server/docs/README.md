@@ -25,7 +25,7 @@ Start at `/init` for agent onboarding and `/api` for the currently loaded routes
 
 Add an extension under `app/ext/` for a new route, scheduled task or workflow. The [extension guide](../pages/docs/extensions.md) explains the API; [examples](../examples/extensions/) provide starting points. Use the [editing guide](../pages/docs/editing.md) to acquire the lock, submit conditional source changes, rehearse and reload.
 
-Extensions use the shared read/mutation helpers for consistent reads, durable writes and event publication. Raw SQL is a repair surface that bypasses product validation; prefer domain helpers for ordinary work. SQLite is the default; PostgreSQL/MySQL runtime integration is available for validation, with complete board/image acceptance still in progress.
+Extensions use the shared read/mutation helpers for consistent reads, durable writes and event publication. Raw SQL is a repair surface that bypasses product validation; prefer domain helpers for ordinary work. SQLite is the default; PostgreSQL/MySQL runtime has real-board and image acceptance at recorded checkpoints; consult the [build plan](../../../docs/build-plan.md) for current integration and transfer gaps.
 
 Core migration 11 stores `messages.tags`, `messages.meta` and `topics.meta` as PostgreSQL `jsonb` or MySQL `JSON`; SQLite keeps JSON text. Existing values must be string arrays for tags and objects for metadata. Migration refuses invalid values before conversion. Native JSON preserves values but may normalize formatting; event payloads, receipts and previous images keep their encoded text.
 

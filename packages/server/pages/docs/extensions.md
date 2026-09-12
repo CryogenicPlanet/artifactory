@@ -126,29 +126,30 @@ import type { Api } from "../kernel/extension-api.ts";
 
 export default (api: Api) =>
 	Effect.gen(function* () {
-		yield* api.migrate("create_notes", "CREATE TABLE example_notes(id TEXT PRIMARY KEY, body TEXT NOT NULL)");
+		yield* api.migrate("create_notes", "CREATE TABLE example_notes(id VARCHAR(128) PRIMARY KEY, body TEXT NOT NULL)");
 		// Register the routes that use this table here.
 	});
 ```
 
-`yield* api.migrate(name, sql)` runs a named migration while the factory loads. Migration and checksum receipt commit in one transaction under the current writer epoch. Repeating the same name and SQL is a no-op; changing SQL under an applied name fails loading. Use another name for the next migration. It accepts one SQL statement at most 64 KiB, without semicolons, comments or NUL, including inside literals. This restriction avoids Bun silently executing only the first statement of a script. Use multiple named migrations or the app's TypeScript migrations for larger changes. A retained migration function cannot run after factory registration closes. Rehearsal migrations never emit live events.
+`yield* api.migrate(name, sql)` runs a named migration while the factory loads. SQLite and PostgreSQL commit migration and checksum receipt in one transaction under the current writer epoch. MySQL DDL commits implicitly: durable migration intent and recovery refusal protect an interrupted operation; it is not an atomic DDL/receipt transaction. Repeating the same name and SQL is a no-op; changing SQL under an applied name fails loading. Use another name for the next migration. It accepts one SQL statement at most 64 KiB, without semicolons, comments or NUL, including inside literals. This restriction avoids Bun silently executing only the first statement of a script. Use multiple named migrations or the app's TypeScript migrations for larger changes. A retained migration function cannot run after factory registration closes. Rehearsal migrations never emit live events.
 
 For engine-specific SQL, declare all three branches in the migration call:
 
 ```ts
-yield *
-	api.migrate("create_counter", {
+Effect.gen(function* () {
+	yield* api.migrate("create_counter", {
 		sqlite: "CREATE TABLE example_counter(id INTEGER PRIMARY KEY, value INTEGER NOT NULL)",
 		pg: "CREATE TABLE example_counter(id INTEGER PRIMARY KEY, value BIGINT NOT NULL)",
 		mysql: "CREATE TABLE example_counter(id INTEGER PRIMARY KEY, value BIGINT NOT NULL) ENGINE=InnoDB",
 	});
+});
 ```
 
 Each engine executes and hashes its exact SQL string. You can replace an existing dialect selection with this declaration only if every previously executed string remains byte-for-byte unchanged, including whitespace. This declaration is your promise that the branches represent the same logical migration; transfer still verifies schema and data. It is not automatic SQL translation.
 
 Offline transfer loads only the frozen target factory and records its migration declarations. Every source and target receipt must match the corresponding declared branch, with exactly the same extension/name set. A removed or disabled historical migration, changed source branch, missing receipt or inconsistent duplicate declaration refuses transfer. Plain strings remain supported when both engines use that same SQL. Ledger checksums are never rewritten or copied to make a mismatch pass.
 
-`yield* api.migrate(name, sql, {protect: true})` also durably protects that table from `/api/sql` writes, including writes reached through existing triggers or cascades. Protected migrations accept `CREATE TABLE [IF NOT EXISTS] name (...)` with a simple unquoted identifier (letters, numbers and underscores, beginning with a letter or underscore, at most 128 characters). Protection and migration commit together. A protected migration must create a new table in that transaction; an existing table is refused even with `IF NOT EXISTS` or different letter casing. Replaying an already-applied migration remains a no-op and cannot add protection to an old unprotected table. Protection survives factory failure, removing the extension, reload and restart; omitting `protect` later does not remove it. There is no automatic unprotect operation: removing source cannot discard protection for retained recovery records. Existing registrations are preserved, including registrations made by older code. Trusted extension code can still update its table through `ctx.mutate`. Core continuation records and bundled webhook subscriptions use this protection.
+`yield* api.migrate(name, sql, {protect: true})` also durably protects that table from `/api/sql` writes, including writes reached through existing triggers or cascades. Protected migrations accept `CREATE TABLE [IF NOT EXISTS] name (...)` with a simple unquoted identifier (letters, numbers and underscores, beginning with a letter or underscore, at most 128 characters). SQLite and PostgreSQL commit protection with the migration. MySQL records durable intent around its implicitly committed DDL and refuses unresolved migration state. A protected migration must create a new table; an existing table is refused even with `IF NOT EXISTS` or different letter casing. Replaying an already-applied migration remains a no-op and cannot add protection to an old unprotected table. Protection survives factory failure, removing the extension, reload and restart; omitting `protect` later does not remove it. There is no automatic unprotect operation: removing source cannot discard protection for retained recovery records. Existing registrations are preserved, including registrations made by older code. Trusted extension code can still update its table through `ctx.mutate`. Core continuation records and bundled webhook subscriptions use this protection.
 
 ## Background work and rehearsal
 
