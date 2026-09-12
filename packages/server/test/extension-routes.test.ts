@@ -1,5 +1,5 @@
 import { sourcePut } from "./fixtures/source-put.ts";
-import { cp, mkdir, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
@@ -136,6 +136,7 @@ it("keeps reserved and static core routes ahead of broad extension patterns", as
 	const seed = join(fixture.root, "guard-seed");
 	await mkdir(join(fixture.root, "pages"), { recursive: true });
 	await cp(join(import.meta.dirname, "../pages/init.md"), join(fixture.root, "pages/init.md"));
+	const onboarding = await readFile(join(fixture.root, "pages/init.md"), "utf8");
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
 	await writeFile(
 		join(seed, "ext/broad.ts"),
@@ -150,8 +151,8 @@ it("keeps reserved and static core routes ahead of broad extension patterns", as
 	const cookie = await app.login();
 	await app.ready(cookie);
 	expect(await (await fetch(`${app.url}/custom`, { headers: { cookie } })).json()).toBe("extension");
-	expect(await (await fetch(`${app.url}/init`)).text()).toContain("# comms");
-	expect(await (await fetch(`${app.url}/in%69t`, { headers: { cookie } })).text()).toContain("# comms");
+	expect(await (await fetch(`${app.url}/init`)).text()).toContain(onboarding);
+	expect(await (await fetch(`${app.url}/in%69t`, { headers: { cookie } })).text()).toContain(onboarding);
 	for (const path of ["/api/ext", "/api/%65xt", "/API/ext", "/api/ext/", "/api/ext;foo=bar"])
 		expect(await (await fetch(`${app.url}${path}`, { headers: { cookie } })).json()).toEqual(
 			expect.arrayContaining([expect.objectContaining({ name: "broad.ts", status: "loaded" })]),
@@ -170,7 +171,7 @@ it("keeps reserved and static core routes ahead of broad extension patterns", as
 	expect(await (await fetch(`${app.url}/api/otherwise-unregistered`, { headers: { cookie } })).json()).toEqual({
 		items: [],
 	});
-	expect(await (await fetch(`${app.url}/init`)).text()).toContain("# comms");
+	expect(await (await fetch(`${app.url}/init`)).text()).toContain(onboarding);
 	expect(await (await fetch(`${app.url}/api/ext`, { headers: { cookie } })).json()).toEqual(
 		expect.arrayContaining([expect.objectContaining({ name: "zz-health.ts", status: "loaded" })]),
 	);
