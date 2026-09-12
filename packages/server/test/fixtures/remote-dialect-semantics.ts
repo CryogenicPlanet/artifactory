@@ -50,11 +50,11 @@ async function main() {
 				const json = on(sql, { sqlite: () => sql`TEXT`, pg: () => sql`JSONB`, mysql: () => sql`JSON` });
 				yield* sql`CREATE TABLE topics(path VARCHAR(200) PRIMARY KEY,parent VARCHAR(200),name VARCHAR(200),meta ${json},previous ${json},last_seq BIGINT,created_at BIGINT,updated_seq BIGINT,archived_at BIGINT,deleted_at BIGINT)`;
 				yield* sql`CREATE TABLE messages(topic VARCHAR(200),seq BIGINT,id VARCHAR(200),agent VARCHAR(200),instance VARCHAR(200),created_at BIGINT,body TEXT,tags ${json},meta ${json},previous ${json},updated_seq BIGINT,edited_at BIGINT,deleted_at BIGINT)`;
-				yield* sql`CREATE TABLE reads(instance VARCHAR(200),topic VARCHAR(200),seq BIGINT,PRIMARY KEY(instance,topic))`;
+				yield* sql`CREATE TABLE ${sql("reads")}(instance VARCHAR(200),topic VARCHAR(200),seq BIGINT,PRIMARY KEY(instance,topic))`;
 				yield* sql`CREATE TABLE topic_page_continuations(seq BIGINT,from_path VARCHAR(200),to_path VARCHAR(200),marker VARCHAR(200),completed INTEGER)`;
 				yield* sql`INSERT INTO topics(path,parent,name,meta,last_seq,created_at,updated_seq) VALUES('old',NULL,'old','{}',10,0,0),('old/child','old','child','{}',10,0,0)`;
 				yield* sql`INSERT INTO messages(topic,seq) VALUES('old',8),('old/child',10)`;
-				yield* sql`INSERT INTO reads VALUES('source-higher','old',12),('source-higher','new',4),('destination-higher','old/child',3),('destination-higher','new/child',15),('only-source','old',7),('unrelated','oldish',9)`;
+				yield* sql`INSERT INTO ${sql("reads")} VALUES('source-higher','old',12),('source-higher','new',4),('destination-higher','old/child',3),('destination-higher','new/child',15),('only-source','old',7),('unrelated','oldish',9)`;
 				// Exercise the actual production move body; reservation/publication are independently tested.
 				const mutate: Mutate = (input) =>
 					sql.withTransaction(
@@ -70,7 +70,7 @@ async function main() {
 					"new",
 					{ prepare: () => Effect.succeed(false), finish: () => Effect.succeed(undefined) },
 				);
-				assert.deepEqual(yield* sql`SELECT instance,topic,seq FROM reads ORDER BY instance,topic`, [
+				assert.deepEqual(yield* sql`SELECT instance,topic,seq FROM ${sql("reads")} ORDER BY instance,topic`, [
 					{ instance: "destination-higher", topic: "new/child", seq: 15 },
 					{ instance: "only-source", topic: "new", seq: 7 },
 					{ instance: "source-higher", topic: "new", seq: 12 },

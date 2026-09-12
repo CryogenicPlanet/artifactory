@@ -97,7 +97,7 @@ export const moveTopic = (
 						mysql: () => sql`char_length(topic)`,
 					});
 					const invalid =
-						yield* sql`SELECT topic FROM messages WHERE (topic=${from} OR ${isDescendant(sql, sql("topic"), from)}) AND ${topicLength}-${from.length}+${to.length}>200 UNION ALL SELECT topic FROM reads WHERE (topic=${from} OR ${isDescendant(sql, sql("topic"), from)}) AND ${topicLength}-${from.length}+${to.length}>200 LIMIT 1`;
+						yield* sql`SELECT topic FROM messages WHERE (topic=${from} OR ${isDescendant(sql, sql("topic"), from)}) AND ${topicLength}-${from.length}+${to.length}>200 UNION ALL SELECT topic FROM ${sql("reads")} WHERE (topic=${from} OR ${isDescendant(sql, sql("topic"), from)}) AND ${topicLength}-${from.length}+${to.length}>200 LIMIT 1`;
 					if (invalid.length) return yield* new KernelError({ code: "input_invalid" });
 					if ((yield* pendingPageMove(sql, from)).length || (yield* pendingPageMove(sql, to)).length)
 						return yield* new KernelError({ code: "topic_move_pending" });
@@ -122,16 +122,16 @@ export const moveTopic = (
 					// Refresh old and new ancestors from their remaining message trees.
 					yield* sql`UPDATE topics SET last_seq=COALESCE((SELECT MAX(seq) FROM messages WHERE topic=topics.path OR ${isDescendant(sql, sql("topic"), sql("topics.path"))}),0) WHERE path=${to} OR ${isDescendant(sql, to, sql("path"))} OR path=${from} OR ${isDescendant(sql, from, sql("path"))}`;
 					// Marks can exist before a topic does; preserve the greater explicit cursor on collision.
-					const sourceMarks = sql`SELECT instance AS incoming_instance,${replacePrefix(sql, sql("topic"), from, to)} AS incoming_topic,seq AS incoming_seq FROM reads WHERE topic=${from} OR ${isDescendant(sql, sql("topic"), from)}`;
-					yield* sql`INSERT INTO reads(instance,topic,seq) ${on(sql, {
+					const sourceMarks = sql`SELECT instance AS incoming_instance,${replacePrefix(sql, sql("topic"), from, to)} AS incoming_topic,seq AS incoming_seq FROM ${sql("reads")} WHERE topic=${from} OR ${isDescendant(sql, sql("topic"), from)}`;
+					yield* sql`INSERT INTO ${sql("reads")}(instance,topic,seq) ${on(sql, {
 						sqlite: () =>
 							sql`${sourceMarks} ON CONFLICT(instance,topic) DO UPDATE SET seq=${greatest(sql, sql("reads.seq"), sql("excluded.seq"))}`,
 						pg: () =>
 							sql`${sourceMarks} ON CONFLICT(instance,topic) DO UPDATE SET seq=${greatest(sql, sql("reads.seq"), sql("excluded.seq"))}`,
 						mysql: () =>
-							sql`SELECT incoming_instance,incoming_topic,incoming_seq FROM (${sourceMarks}) AS moved ON DUPLICATE KEY UPDATE seq=GREATEST(reads.seq,incoming_seq)`,
+							sql`SELECT incoming_instance,incoming_topic,incoming_seq FROM (${sourceMarks}) AS moved ON DUPLICATE KEY UPDATE seq=GREATEST(${sql("reads.seq")},incoming_seq)`,
 					})}`;
-					yield* sql`DELETE FROM reads WHERE topic=${from} OR ${isDescendant(sql, sql("topic"), from)}`;
+					yield* sql`DELETE FROM ${sql("reads")} WHERE topic=${from} OR ${isDescendant(sql, sql("topic"), from)}`;
 					const outcome = { from, to, seq: range.to };
 
 					return { outcome, events: [event(range.to, now, "topic.moved")] };
