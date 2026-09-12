@@ -62,7 +62,7 @@ export const appStoreIdentity = (filename: string, dataDirectory?: string) =>
 			const directory = path.join(dataDirectory ?? path.dirname(filename), "backups");
 			if (
 				row.engine !== "sqlite" ||
-				row.path !== backupPath(path, dataDirectory ?? path.dirname(filename), row.id) ||
+				row.path !== backupPath(path, dataDirectory ?? path.dirname(filename), row.id, "sqlite") ||
 				!(yield* fs.exists(row.path))
 			)
 				return false;
@@ -107,7 +107,7 @@ export const appStoreIdentity = (filename: string, dataDirectory?: string) =>
 				)
 					return yield* new EventError({ code: "app_store_missing" });
 				if (state.adoption) {
-					if (state.adoption.filename !== selected) return yield* invalid();
+					if (state.adoption.phase === "pending" && state.adoption.filename !== selected) return yield* invalid();
 					return state.adoption;
 				}
 				const adoption: Adoption = {
@@ -136,7 +136,17 @@ export const appStoreIdentity = (filename: string, dataDirectory?: string) =>
 					yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(Adoption))({ ...saved, phase: "ready" })} WHERE key='app_store_adoption'`;
 				}),
 			);
-		return { reserve, current, complete };
+		const status = Effect.gen(function* () {
+			const { adoption } = yield* read;
+			const { selected } = yield* canonical;
+			return {
+				app_store_id: adoption?.store_id ?? null,
+				adoption_phase: adoption?.phase ?? null,
+				selected_filename: selected,
+				recorded_filename: adoption?.filename ?? null,
+			};
+		});
+		return { reserve, current, complete, status };
 	});
 
 /** Called inside the app transaction, before the writer fence or publication evidence is changed. */
@@ -158,23 +168,29 @@ export const verifyAppIdentity = (adoption: Adoption, allowMissing: boolean) =>
 		if (rows.length === 0) return yield* new EventError({ code: "app_store_missing" });
 		if (rows.length !== 1 || !row || row.singleton !== 1 || row.initialized_at < 0 || row.transferred_to !== null)
 			return yield* invalid();
-		if (row.store_id !== adoption.store_id) return yield* new EventError({ code: "app_store_missing" });
+		if (row.store_id !== adoption.store_id) return yield* new EventError({ code: "app_store_mismatch" });
 	});
 
 export const isAppStoreIdentityError = (
 	error: unknown,
 ): error is EventError & {
-	readonly code: "app_store_missing" | "app_store_identity_invalid" | "store_transferred" | "store_transfer_incomplete";
+	readonly code:
+		| "app_store_missing"
+		| "app_store_identity_invalid"
+		| "app_store_mismatch"
+		| "store_transferred"
+		| "store_transfer_incomplete";
 } =>
 	Schema.is(EventError)(error) &&
 	(error.code === "app_store_missing" ||
 		error.code === "app_store_identity_invalid" ||
+		error.code === "app_store_mismatch" ||
 		error.code === "store_transferred" ||
 		error.code === "store_transfer_incomplete");
 export const appIdentityPolicy = {
 	status: 409,
 	retriable: false,
-	hint: "Preserve both stores and recovery journals. Inspect /_boot/status and the backup catalog; restore the matching board rather than initializing or replacing its identity.",
+	hint: "Preserve both stores and recovery journals. Inspect /_boot/status and the backup catalog; select the matching store and restart. HTTP repair of a missing or foreign live store requires a separate preserved-before-image restore protocol; do not initialize or replace its identity.",
 } as const;
 
 export const transferPolicy = {
@@ -284,7 +300,15 @@ export const remoteAppStoreIdentity = (configured: RemoteStore) =>
 				yield* boot`UPDATE settings SET value=${target.database} WHERE ${boot("key")}='app_store_database'`;
 				yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(RemoteAdoption))({ ...adoption, database: target.database })} WHERE ${boot("key")}='app_store_adoption'`;
 			});
-		return { store, reserve, complete, selectRestored };
+		const status = read.pipe(
+			Effect.map(({ adoption, store }) => ({
+				app_store_id: adoption?.store_id ?? null,
+				adoption_phase: adoption?.phase ?? null,
+				selected_database: store.database,
+				recorded_database: adoption?.database ?? null,
+			})),
+		);
+		return { store, reserve, complete, selectRestored, status };
 	});
 
 /** Remote DDL has already completed outside this transaction. Only pending adoption may seed the row. */

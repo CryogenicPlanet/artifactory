@@ -35,6 +35,7 @@ export class EventError extends Schema.TaggedError<EventError>()("EventError", {
 		"store_transferred",
 		"store_transfer_incomplete",
 		"app_store_identity_invalid",
+		"app_store_mismatch",
 		"batch_conflict",
 		"batch_invalid",
 		"body_invalid",
