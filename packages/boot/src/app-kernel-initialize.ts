@@ -3,6 +3,7 @@ import { on } from "@comms/storage/dialect";
 import { asBoot, type RemoteStore } from "@comms/storage/store";
 import { Effect, Option, Redacted, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { replayAppKernel } from "./app-kernel-replay.ts";
 import { remoteAppKernelOperations } from "./app-kernel-schema.ts";
 import { RemoteAdoption } from "./app-store-identity.ts";
 import { lockBootWrite } from "./boot-write-lock.ts";
@@ -112,116 +113,33 @@ export const makeRemoteAppInitializer = (options: {
 								return yield* work(progress);
 							}),
 						);
-					let progress = yield* transaction((progress) => Effect.succeed(progress));
-					const database = yield* on(app, {
-						sqlite: () => {
-							throw new Error("Expected a remote app client");
-						},
-						pg: () => app`SELECT current_database() AS name`,
-						mysql: () => app`SELECT DATABASE() AS name`,
-					}).pipe(decodeRows(Schema.Struct({ name: Schema.String })));
-					if (
-						database.length !== 1 ||
-						database[0]?.name !== adoption.database ||
-						adoption.database === options.bootStore.database
-					)
-						return yield* invalid();
-					yield* on(app, {
-						sqlite: () => {
-							throw new Error("Expected a remote app client");
-						},
-						pg: () =>
-							Effect.gen(function* () {
-								const rows =
-									yield* app`SELECT current_user AS name,session_user AS session,NOT pg_has_role(${principal}::name,d.datdba,'MEMBER') AS database_ok,NOT pg_has_role(${principal}::name,n.nspowner,'MEMBER') AS schema_ok,NOT pg_has_role(${principal}::name,${bootPrincipal}::name,'MEMBER') AS role_ok FROM pg_catalog.pg_database d CROSS JOIN pg_catalog.pg_namespace n WHERE d.datname=current_database() AND n.nspname='public'`.pipe(
-										decodeRows(
-											Schema.Struct({
-												name: Schema.String,
-												session: Schema.String,
-												database_ok: Schema.Boolean,
-												schema_ok: Schema.Boolean,
-												role_ok: Schema.Boolean,
-											}),
-										),
-									);
-								if (
-									rows.length !== 1 ||
-									rows[0]?.name !== bootPrincipal ||
-									rows[0]?.session !== bootPrincipal ||
-									!rows[0]?.database_ok ||
-									!rows[0]?.schema_ok ||
-									!rows[0]?.role_ok
-								)
-									return yield* invalid();
-							}).pipe(Effect.asVoid),
-						mysql: () => Effect.void,
-					});
-					const catalog = yield* on(app, {
-						sqlite: () => {
-							throw new Error("Expected a remote app client");
-						},
-						pg: () =>
-							app`SELECT c.relname AS name,n.nspname AS namespace,CASE WHEN pg_get_userbyid(c.relowner)=current_user THEN 1 ELSE 0 END AS owned FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND NOT starts_with(n.nspname::text,'pg_toast') AND NOT starts_with(n.nspname::text,'pg_temp_') AND c.relkind IN ('r','p','v','m','f')`,
-						mysql: () =>
-							app`SELECT TABLE_NAME AS name,'public' AS namespace,1 AS owned FROM information_schema.tables WHERE TABLE_SCHEMA=DATABASE()`,
-					}).pipe(decodeRows(Schema.Struct({ name: Schema.String, namespace: Schema.String, owned: Schema.Int })));
-					const owned = progress
-						? names
-								.slice(0, progress.next + (progress.active === null ? 0 : 1))
-								.filter((name) => name.startsWith("table:"))
-								.map((name) => name.slice(6))
-						: [];
-					if (catalog.some((table) => table.namespace !== "public" || table.owned !== 1 || !owned.includes(table.name)))
-						return yield* invalid();
-					if (!progress) {
-						const initial: Progress = { ...adoption, principal, operations: names, next: 0, active: null };
-						progress = yield* transaction((existing) =>
+					const progress = yield* transaction((progress) => Effect.succeed(progress));
+					yield* replayAppKernel({
+						app,
+						principal,
+						bootPrincipal,
+						databaseName: adoption.database,
+						bootDatabase: options.bootStore.database,
+						progress,
+						validate: transaction(() => Effect.void),
+						initialize: transaction((existing) =>
 							Effect.gen(function* () {
 								if (existing) return yield* invalid();
+								const initial: Progress = { ...adoption, principal, operations: names, next: 0, active: null };
 								yield* boot`INSERT INTO settings(${boot("key")},value) VALUES('app_store_schema',${Schema.encodeSync(Schema.fromJsonString(Progress))(initial)})`;
 								return initial;
 							}),
-						);
-					}
-					for (let index = 0; index < progress.next; index++) {
-						const operation = operations[index];
-						if (!operation || !(yield* operation.postcondition)) return yield* invalid();
-					}
-					for (let index = progress.next; index < operations.length; index++) {
-						const operation = operations[index];
-						if (!operation) return yield* invalid();
-						const complete = yield* operation.postcondition;
-						if (progress.active === null) {
-							if (complete && !operation.name.startsWith("grant:")) return yield* invalid();
-							progress = yield* transaction((saved) =>
+						),
+						checkpoint: (index, prior, active) =>
+							transaction((saved) =>
 								Effect.gen(function* () {
-									if (!saved || saved.next !== index || saved.active !== null) return yield* invalid();
-									const active = { ...saved, active: operation.name };
-									yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(Progress))(active)} WHERE ${boot("key")}='app_store_schema'`;
-									return active;
+									if (!saved || saved.next !== index || saved.active !== prior) return yield* invalid();
+									const next = { ...saved, next: active === null ? index + 1 : index, active };
+									yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(Progress))(next)} WHERE ${boot("key")}='app_store_schema'`;
+									return next;
 								}),
-							);
-						}
-						const apply = Effect.gen(function* () {
-							if (!complete) yield* operation.run;
-							if (!(yield* operation.postcondition)) return yield* invalid();
-						});
-						yield* on(app, {
-							sqlite: () => {
-								throw new Error("Expected a remote app client");
-							},
-							pg: () => app.withTransaction(apply),
-							mysql: () => apply,
-						});
-						progress = yield* transaction((saved) =>
-							Effect.gen(function* () {
-								if (!saved || saved.next !== index || saved.active !== operation.name) return yield* invalid();
-								const advanced = { ...saved, next: index + 1, active: null };
-								yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(Progress))(advanced)} WHERE ${boot("key")}='app_store_schema'`;
-								return advanced;
-							}),
-						);
-					}
+							),
+					});
 				}).pipe(
 					Effect.mapError((error) =>
 						error._tag === "SchemaShapeError" || error._tag === "SchemaError" ? invalid() : error,

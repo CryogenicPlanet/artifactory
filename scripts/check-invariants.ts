@@ -11,6 +11,7 @@ function checkInvariants() {
 	const recoveryAccess: Readonly<Record<string, ReadonlyArray<string>>> = {
 		"app-recovery.ts": ["kernel_writer", "mutation_batches", "outbox"],
 		"app-kernel-schema.ts": ["kernel_writer", "mutation_batches", "outbox"],
+		"transfer-kernel-initialize.ts": ["kernel_writer", "mutation_batches", "outbox"],
 		"db-ops.ts": ["kernel_writer"],
 		"remote-db-ops.ts": ["kernel_writer"],
 	};

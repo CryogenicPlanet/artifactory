@@ -37,13 +37,13 @@ for (const engine of ["pg", "mysql"]) {
 			await symlink(join(import.meta.dirname, "../node_modules"), join(boot, "node_modules"));
 			const initializer = join(boot, "src/app-kernel-initialize.ts");
 			const source = await readFile(initializer, "utf8");
-			const needle = "const advanced = { ...saved, next: index + 1, active: null };";
+			const needle = "const next = { ...saved, next: active === null ? index + 1 : index, active };";
 			expect(source.split(needle)).toHaveLength(2);
 			await writeFile(
 				initializer,
 				source.replace(
 					needle,
-					`if (index === ${engine === "mysql" ? 6 : 0}) process.kill(process.pid, "SIGKILL");\n${needle}`,
+					`if (active === null && index === ${engine === "mysql" ? 6 : 0}) process.kill(process.pid, "SIGKILL");\n${needle}`,
 				),
 			);
 			await expect(run("initialize", copy)).rejects.toMatchObject({ signal: "SIGKILL" });
