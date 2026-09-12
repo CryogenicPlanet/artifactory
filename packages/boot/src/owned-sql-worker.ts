@@ -51,7 +51,16 @@ export const ownedSqlWorker = (options: { readonly entry: string; readonly env: 
 					}
 					return yield* Effect.die("Remote boot group closure unproven");
 				});
-				return { exitCode: worker.exitCode, close: yield* Effect.cached(closure) };
+				return {
+					exitCode: worker.exitCode,
+					close: yield* Effect.cached(closure),
+					// Three existing five-second drain phases plus five seconds for keeper
+					// termination. Only the root's explicit operator-signal path requests this
+					// opportunity; callers still require close and the guardian's SQL proof.
+					shutdown: worker
+						.kill({ killSignal: "SIGTERM", forceKillAfter: "20 seconds" })
+						.pipe(Effect.exit, Effect.asVoid),
+				};
 			}),
 		);
 	});
