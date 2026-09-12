@@ -7,7 +7,7 @@ const app = process.env.COMMS_CONCURRENCY_APP_CONFIG;
 const boot = process.env.COMMS_CONCURRENCY_BOOT_CONFIG;
 
 it.skipIf(!app || !boot)(
-	"native processes reject stale epochs and serialize allocator and edit-lock contenders",
+	"native processes reject stale epochs and serialize allocator, edit-lock and source-publication contenders",
 	async () => {
 		if (!app || !boot) throw new Error("Missing native concurrency configuration");
 		const children: ReturnType<typeof spawn>[] = [];
@@ -93,6 +93,22 @@ it.skipIf(!app || !boot)(
 				}
 				await Promise.all([left.finish(), right.finish(), blocker.finish()]);
 			}
+			await once("source-initialize", boot);
+			const publisher = start("source", boot, "source-left");
+			const contender = start("source", boot, "source-right");
+			await ready(publisher);
+			const contenderId = await ready(contender);
+			publisher.go();
+			expect(await publisher.next()).toEqual({ held: true });
+			contender.go();
+			await once("waiting", boot, JSON.stringify([contenderId]));
+			publisher.go();
+			expect(await publisher.next()).toEqual({ committed: true });
+			expect(await contender.next()).toEqual({ committed: false });
+			await once("source-inspect", boot);
+			contender.go();
+			expect(await contender.next()).toEqual({ done: true });
+			await Promise.all([publisher.finish(), contender.finish()]);
 			await once("inspect", app);
 			await once("inspect", boot);
 		} finally {
