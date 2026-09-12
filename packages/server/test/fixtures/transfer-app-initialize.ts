@@ -32,7 +32,7 @@ const program = Effect.gen(function* () {
 	const stale = yield* initializeTransferApp(sql, "b".repeat(64), source).pipe(Effect.result);
 	assert.equal(stale._tag, "Failure");
 	const result = yield* initializeTransferApp(sql, epoch, source);
-	assert.equal(result.core.at(-1)?.migration_id, 11);
+	assert.equal(result.core.at(-1)?.migration_id, 12);
 	assert.ok(result.extensions.length > 0);
 	assert.deepEqual(
 		result.extensionProofs.map(({ extension, name, targetChecksum }) => ({
