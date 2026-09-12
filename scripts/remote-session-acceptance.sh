@@ -27,7 +27,7 @@ GRANT comms_app TO comms_boot;
 CREATE DATABASE comms_boot OWNER comms_boot;
 CREATE DATABASE comms_app OWNER comms_app;
 CREATE DATABASE comms_schema_guard OWNER comms_app;
-CREATE DATABASE comms_dialect OWNER comms_app;
+CREATE DATABASE comms_shared_store OWNER comms_app;
 CREATE DATABASE comms_schema_core OWNER comms_app;
 CREATE DATABASE comms_schema_json_crash OWNER comms_app;
 REVOKE CONNECT ON DATABASE comms_boot FROM PUBLIC;
@@ -43,8 +43,8 @@ CREATE DATABASE comms_schema_guard CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bi
 CREATE DATABASE comms_schema_core CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 CREATE DATABASE comms_schema_json_crash CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 GRANT ALL ON comms_boot.* TO 'comms_boot'@'%';
-CREATE DATABASE comms_dialect CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
-GRANT ALL ON comms_dialect.* TO 'comms_app'@'%';
+CREATE DATABASE comms_shared_store CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+GRANT ALL ON comms_shared_store.* TO 'comms_app'@'%';
 GRANT ALL ON comms_app.* TO 'comms_app'@'%';
 GRANT ALL ON comms_schema_guard.* TO 'comms_app'@'%';
 GRANT ALL ON comms_schema_core.* TO 'comms_app'@'%';
@@ -53,7 +53,7 @@ GRANT SELECT ON performance_schema.session_account_connect_attrs TO 'comms_app'@
 """
 (root/'roles.sql').write_text(sql)
 (root/'client.json').write_text(json.dumps(dict(engine=engine,host='127.0.0.1',port=0,database='comms_app',username='comms_app',password=app)))
-(root/'dialect.json').write_text(json.dumps(dict(engine=engine,host='127.0.0.1',port=0,database='comms_dialect',username='comms_app',password=app)))
+(root/'dialect.json').write_text(json.dumps(dict(engine=engine,host='127.0.0.1',port=0,database='comms_shared_store',username='comms_app',password=app)))
 for path in root.iterdir():path.chmod(0o600)
 PY
 if [ "$engine" = pg ]; then
@@ -101,7 +101,7 @@ published=$(docker port "$container" "$port/tcp")
 python3 - "$private/client.json" "${published##*:}" <<'PY'
 import json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()); d['port']=int(sys.argv[2]); p.write_text(json.dumps(d))
-for database,name in [('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_dialect','dialect')]:
+for database,name in [('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect')]:
  d['database']=database; (p.parent/(name+'.json')).write_text(json.dumps(d))
 PY
 # The intentionally truncated session-attribute case refuses before SQL admission.
@@ -111,7 +111,7 @@ if [ "$attributes" != 32 ]; then
     node node_modules/vitest/vitest.mjs run packages/server/test/remote-core-schema.test.ts packages/server/test/remote-core-json-crash.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_MIGRATION_GUARD_CONFIG="$private/guard.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/migration-state-remote.test.ts --maxWorkers=1 --reporter=verbose
-  COMMS_REMOTE_DIALECT_CONFIG="$private/dialect.json" \
+  COMMS_TEST_ENGINE="$engine" COMMS_TEST_STORE_CONFIG="$private/dialect.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/remote-dialect-semantics.test.ts --maxWorkers=1 --reporter=verbose
 fi
 

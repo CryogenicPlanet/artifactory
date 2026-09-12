@@ -1,11 +1,8 @@
 import { BunServices } from "@effect/platform-bun";
 import { strict as assert } from "node:assert";
-import { readFile } from "node:fs/promises";
-import { Context, Effect, Layer, Redacted, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
-import { SqlClient } from "effect/unstable/sql/SqlClient";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { RemoteInspector, remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { testStore } from "./test-store.ts";
 import { dialectSemantics } from "./dialect-semantics.ts";
 import { on } from "@comms/storage/dialect";
 import { readIsolationSemantics } from "./read-isolation-semantics.ts";
@@ -13,35 +10,20 @@ import { publishedImageSemantics } from "./published-image-semantics.ts";
 import { moveTopic } from "../../src/ext/core/topic-move.ts";
 import type { Mutate } from "../../src/kernel/mutate.ts";
 
-const Settings = Schema.Struct({
-	engine: Schema.Literals(["pg", "mysql"]),
-	host: Schema.String,
-	port: Schema.Int,
-	database: Schema.String,
-	username: Schema.String,
-	password: Schema.String,
-});
-
 async function main() {
-	const filename = process.env.COMMS_REMOTE_DIALECT_CONFIG;
-	if (!filename) throw new Error("Missing dedicated dialect database configuration");
-	const settings = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFile(filename, "utf8"));
-	const connection = { ...settings, password: Redacted.make(settings.password), tls: false };
+	const engine = Schema.decodeUnknownSync(Schema.Literals(["sqlite", "pg", "mysql"]))(
+		process.env.COMMS_TEST_ENGINE ?? "sqlite",
+	);
 	let phase = "connect";
 	try {
 		await Effect.runPromise(
 			Effect.gen(function* () {
-				const attempt = "d3".repeat(32);
-				const inspector = Context.get(
-					yield* Layer.build(remoteInspectorLayer({ connection, attempt })),
-					RemoteInspector,
-				);
-				const context = yield* Layer.build(
-					remoteClientLayer({ connection, attempt, register: () => Effect.void }).pipe(
-						Layer.provide(Layer.succeed(RemoteInspector, inspector)),
-					),
-				);
-				const sql = Context.get(context, SqlClient);
+				const sql = yield* testStore({
+					engine,
+					config: process.env.COMMS_TEST_STORE_CONFIG,
+					database: "comms_shared_store",
+					tables: ["topic_page_continuations", "reads", "messages", "topics", "kv", "kernel_writer"],
+				});
 				phase = "dialect fragments";
 				yield* dialectSemantics(sql);
 				phase = "read site transaction isolation";
@@ -60,6 +42,20 @@ async function main() {
 					sql.withTransaction(
 						input.body(() => Effect.succeed({ from: 20, to: 20 })).pipe(Effect.map((result) => result.outcome)),
 					);
+				phase = "transaction rollback";
+				const rollback = yield* sql
+					.withTransaction(
+						Effect.gen(function* () {
+							yield* sql`UPDATE topics SET name='uncommitted' WHERE path='old'`;
+							yield* sql`INSERT INTO ${sql("reads")} VALUES('rolled-back','old',99)`;
+							return yield* Effect.fail("forced rollback");
+						}),
+					)
+					.pipe(Effect.result);
+				assert.equal(rollback._tag, "Failure");
+				if (rollback._tag === "Failure") assert.equal(rollback.failure, "forced rollback");
+				assert.deepEqual(yield* sql`SELECT name FROM topics WHERE path='old'`, [{ name: "old" }]);
+				assert.equal((yield* sql`SELECT * FROM ${sql("reads")} WHERE instance='rolled-back'`).length, 0);
 				phase = "production topic move with cursor collisions";
 				yield* moveTopic(
 					sql,
@@ -99,9 +95,9 @@ async function main() {
 				yield* publishedImageSemantics(sql);
 			}).pipe(Effect.provide(Layer.merge(Reactivity.layer, BunServices.layer)), Effect.scoped),
 		);
-		process.stdout.write("REMOTE_DIALECT_VERIFIED\n");
+		process.stdout.write("SHARED_STORE_VERIFIED\n");
 	} catch {
-		throw new Error(`Remote dialect fixture failed during ${phase}`);
+		throw new Error(`Shared store fixture failed during ${phase}`);
 	}
 }
 await main();
