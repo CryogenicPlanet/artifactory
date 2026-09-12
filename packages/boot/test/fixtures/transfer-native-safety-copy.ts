@@ -45,6 +45,7 @@ const program = Effect.gen(function* () {
 		yield* Console.log(`NATIVE_TRANSFER_SAFETY_${phase}_VERIFIED`);
 		return;
 	}
+	yield* Console.error("stage:runtime");
 	const runtime = yield* remoteRuntime(config, root);
 	const selection: TransferSelection = {
 		version: 1,
@@ -60,9 +61,14 @@ const program = Effect.gen(function* () {
 		target: { engine: "sqlite", endpoint: null, boot: `${root}/target-boot.db`, app: `${root}/target-app.db` },
 	};
 	const source = { boot: config.boot, app: config.app };
+	yield* Console.error("stage:journal");
 	const journal = yield* transferDumpJournal(selection, source);
+	const withSource = <A, E>(store: RemoteStore, effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
+		store.database === config.boot.database
+			? effect.pipe(Effect.provideService(SqlClient.SqlClient, runtime.bootSql))
+			: runtime.withStore(store, effect);
 	const rows = (store: RemoteStore) =>
-		runtime.withStore(
+		withSource(
 			store,
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -89,8 +95,9 @@ const program = Effect.gen(function* () {
 			: runtime.bootSql`SELECT USER FROM information_schema.USER_ATTRIBUTES WHERE USER=${principal}`
 		).pipe(Effect.map((rows) => rows.length !== 0));
 	if (phase === "provision") {
+		yield* Console.error("stage:seed-pair");
 		for (const store of [config.boot, config.app])
-			yield* runtime.withStore(
+			yield* withSource(
 				store,
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
@@ -120,9 +127,10 @@ const program = Effect.gen(function* () {
 			SqlClient.SqlClient
 		> = config.boot._tag === "postgres" ? postgresDatabaseProvision : mysql;
 		const provision = yield* selected.pipe(Effect.provideService(SqlClient.SqlClient, runtime.bootSql));
+		yield* Console.error("stage:allocate-dump");
 		const record = yield* journal.allocate("boot");
 		yield* provision.createPrincipal(record, yield* journal.credential(record.id));
-		yield* runtime.withStore(config.boot, selected.pipe(Effect.flatMap((service) => service.grantDump(record))));
+		yield* withSource(config.boot, selected.pipe(Effect.flatMap((service) => service.grantDump(record))));
 		assert.equal((yield* journal.read(record.id)).phase, "allocated");
 		assert.equal(yield* principalExists(record.principal), true);
 		// Exit with a fully journaled principal/grant, before ready/native keeper admission.
@@ -175,6 +183,15 @@ program.pipe(
 			const found = Cause.findError(cause);
 			if (found._tag === "Success" && Schema.is(RemoteDatabaseError)(found.success))
 				yield* Console.error(`provision:${found.success.code}:${found.success.stage ?? "unknown"}`);
+			if (
+				found._tag === "Success" &&
+				typeof found.success === "object" &&
+				found.success !== null &&
+				"code" in found.success &&
+				typeof found.success.code === "string" &&
+				/^(remote_|store_|transfer_)[a-z_]+$/.test(found.success.code)
+			)
+				yield* Console.error(`failure:${found.success.code}`);
 			return yield* Effect.die("Native transfer safety fixture failed; credentials omitted");
 		}),
 	),

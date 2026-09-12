@@ -85,4 +85,16 @@ The supplement grants boot server-wide `CREATE USER`, source `SELECT` with `GRAN
 
 Generated target prefixes also grant boot delegable `LOCK TABLES`. Existing native dump artifacts contain those statements even though capture uses a consistent transaction. The provisioner grants this privilege to the temporary loader only on its exact target database; handoff does not add it to the persistent app. Omitting it can leave a partially loaded target, which must never become authoritative.
 
+### Offline whole-board transfer backups
+
+Offline transfer captures both the boot and app databases before copying data. For MySQL, this additionally requires boot to delegate access to its own database. Enable this separate supplement only for that operation:
+
+```sh
+mysql --defaults-extra-file="$MYSQL_ADMIN_CONFIG" --batch < packages/boot/sql/mysql-transfer-roles.sql
+```
+
+Run it after both MySQL scripts above. As with app backup delegation, the database-level `GRANT OPTION` permits boot to delegate **all rights it already holds on its boot database**. It cannot enforce a SELECT-only delegation capability. The runtime grants each disposable dumper only `SELECT`, proves its keeper and sessions closed, then revokes its grants and drops the account. This supplement grants nothing to the persistent app and does not change ordinary app-backup requirements.
+
+Transfer safety-copy resource journals live under `/data/transfers/<transfer-id>/backup-resources/`, outside the source databases. Preserve that directory with the artifacts until transfer recovery finishes. PostgreSQL safety archives must be restored through the existing current-role policy (`pg_restore --no-owner --no-acl`): archived ACLs can reference the disposable dump role that cleanup has removed. These artifacts preserve database contents; they are not a replacement for the operator's role configuration.
+
 See [deployment](../../../docs/deployment.md) for runtime configuration and [the database design](../../../docs/database.md) for recovery guarantees and engine differences. Provisioning accounts does not migrate an existing board's data.
