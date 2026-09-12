@@ -186,7 +186,18 @@ it("fences stored request publication while direct boot diagnostics enforce acto
 			app.data,
 			JSON.stringify({ op, transaction: "http-test-pending", count: 1 }),
 		]);
-		expect(JSON.parse(stdout)).toMatchObject({ _tag: "Success" });
+		const result = Schema.decodeSync(
+			Schema.fromJsonString(
+				Schema.Struct({
+					_tag: Schema.String,
+					failure: Schema.optionalKey(
+						Schema.Struct({ _tag: Schema.optionalKey(Schema.String), code: Schema.optionalKey(Schema.String) }),
+					),
+				}),
+			),
+		)(stdout);
+		// Keep failure tags/codes visible without printing SQL parameters or other stored contents.
+		expect(result, `${op}: ${JSON.stringify(result)}`).toMatchObject({ _tag: "Success" });
 	};
 	await operation("reserve");
 	await (await fetch(`${app.url}/api/me`, { headers: codex.headers })).text();
