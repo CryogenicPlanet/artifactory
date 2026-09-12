@@ -262,16 +262,6 @@ export const remoteCoreSteps = (sql: SqlClient) => {
 					sql`CREATE INDEX idempotency_expiry ON idempotency(expires_at)`,
 					indexShape(sql, "idempotency", "idempotency_expiry", ["expires_at"], false),
 				),
-				ddl(
-					"outbox_unshipped",
-					sql`CREATE INDEX outbox_unshipped ON outbox(shipped_at,seq)`,
-					indexShape(sql, "outbox", "outbox_unshipped", ["shipped_at", "seq"], false),
-				),
-				ddl(
-					"outbox_transaction",
-					sql`CREATE INDEX outbox_transaction ON outbox(transaction_id,seq)`,
-					indexShape(sql, "outbox", "outbox_transaction", ["transaction_id", "seq"], false),
-				),
 			],
 		},
 		{
