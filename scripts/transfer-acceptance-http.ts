@@ -26,6 +26,7 @@ const Evidence = Schema.Struct({
 	page: Schema.String,
 	pageHistory: History,
 	written: Schema.optionalKey(Message),
+	checkedWrite: Schema.optionalKey(Message),
 });
 async function readPrivate<A>(filename: string, schema: Schema.Codec<A>) {
 	assert.equal((await stat(filename)).mode & 0o077, 0, "Private acceptance state required");
@@ -41,6 +42,7 @@ async function run() {
 	assert(
 		phase === "seed-source" ||
 			phase === "verify-target" ||
+			phase === "verify-checked-source" ||
 			phase === "verify-restarted" ||
 			phase === "verify-source-refused",
 		"Unknown transfer probe phase",
@@ -203,16 +205,16 @@ async function run() {
 		);
 		assert.deepEqual(await history(saved.sourcePath), saved.sourceHistory);
 		assert.deepEqual(await history(saved.pagePath), saved.pageHistory);
-		if (saved.written) {
+		for (const expected of [saved.checkedWrite, saved.written]) {
+			if (!expected) continue;
 			const prior = Schema.decodeUnknownSync(Schema.Struct({ items: Schema.Array(Message) }))(
 				await (
 					await ok(
-						await request(`/api/messages?since=0&wait=0&topic=${encodeURIComponent(saved.written.topic)}`),
+						await request(`/api/messages?since=0&wait=0&topic=${encodeURIComponent(expected.topic)}`),
 						"Retained target write",
 					)
 				).json(),
 			);
-			const expected = saved.written;
 			assert.deepEqual(
 				prior.items.find((row) => row.id === expected.id),
 				expected,
@@ -223,7 +225,7 @@ async function run() {
 			body: `Transfer searchable nebula ${crypto.randomUUID()}`,
 		};
 		const written = Schema.decodeUnknownSync(Message)(await (await json("/api/messages", input)).json());
-		assert(written.seq > Math.max(saved.published, saved.written?.seq ?? 0));
+		assert(written.seq > Math.max(saved.published, saved.written?.seq ?? 0, saved.checkedWrite?.seq ?? 0));
 		const found = Schema.decodeUnknownSync(Schema.Struct({ items: Schema.Array(Message) }))(
 			await (
 				await ok(
@@ -236,7 +238,12 @@ async function run() {
 			found.items.some((row) => row.id === written.id),
 			"Target search omitted acknowledged message",
 		);
-		if (phase === "verify-target") {
+		if (phase === "verify-checked-source") {
+			assert(current.last_good >= saved.generation, "Checked source generation regressed");
+			const published = await publication();
+			assert(published >= written.seq, "Checked source write was not published");
+			await save(evidenceFile, { ...saved, checkedWrite: written, published });
+		} else if (phase === "verify-target") {
 			await json("/api/lock", { note: "post-transfer generation allocation" });
 			const sourceRead = await ok(await request(`/api/fs/${saved.sourcePath}`), "Target source base");
 			const baseVersion = sourceRead.headers.get("x-comms-base-version");
