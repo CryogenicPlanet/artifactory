@@ -1,6 +1,7 @@
 import { Crypto, DateTime, Effect, Schema } from "effect";
 import type { RequestContext, BackgroundContext } from "../../kernel/extension-api.ts";
 import { created, Input, Stored, SubscriptionError } from "./contract.ts";
+import { greatest } from "@comms/storage/dialect";
 
 type Context = Pick<BackgroundContext, "db" | "read" | "emit" | "mutate">;
 export const makeStore = (ctx: Context) => {
@@ -39,7 +40,7 @@ export const makeStore = (ctx: Context) => {
 					at = (yield* DateTime.nowAsDate).getTime(),
 					since = yield* ctx.read((fence) => Effect.succeed(fence));
 				yield* ctx.emit("subscription.created", {}, (seq) =>
-					sql`INSERT INTO webhook_subscriptions(id,instance,agent,human,input,idempotency_key,created_at,start_seq,created_seq,cursor) VALUES(${id},${who.instance},${who.agent},${who.kind === "human" ? 1 : 0},${encoded},${key},${at},${since},${seq},${since})`.pipe(
+					sql`INSERT INTO webhook_subscriptions(id,instance,agent,human,input,idempotency_key,created_at,start_seq,created_seq,${sql("cursor")}) VALUES(${id},${who.instance},${who.agent},${who.kind === "human" ? 1 : 0},${encoded},${key},${at},${since},${seq},${since})`.pipe(
 						Effect.asVoid,
 					),
 				);
@@ -72,7 +73,7 @@ export const makeStore = (ctx: Context) => {
 						error === null
 							? 0
 							: (yield* DateTime.nowAsDate).getTime() + Math.min(60000, 1000 * 2 ** Math.min(attempts - 1, 6));
-					yield* sql`UPDATE webhook_subscriptions SET cursor=MAX(cursor,${cursor}),attempts=${attempts},next_attempt=${next},last_error=${error} WHERE id=${row.id} AND deleted_seq IS NULL AND cursor=${row.cursor}`;
+					yield* sql`UPDATE webhook_subscriptions SET ${sql("cursor")}=${greatest(sql, sql("cursor"), cursor)},attempts=${attempts},next_attempt=${next},last_error=${error} WHERE id=${row.id} AND deleted_seq IS NULL AND ${sql("cursor")}=${row.cursor}`;
 				}),
 			),
 	};

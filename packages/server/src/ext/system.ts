@@ -1,12 +1,20 @@
 import { Cause, Effect, Schema } from "effect";
 import type { Api, BackgroundContext } from "../kernel/extension-api.ts";
+import { on } from "@comms/storage/dialect";
+import { SqlClient } from "effect/unstable/sql";
 
 /** The event log remains authoritative; this removable extension provides a reading view. */
 export default function system(api: Api) {
 	return Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
 		yield* api.migrate(
 			"system_cursor",
-			"CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq INTEGER NOT NULL)",
+			on(sql, {
+				sqlite: () => "CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq INTEGER NOT NULL)",
+				pg: () => "CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq BIGINT NOT NULL)",
+				mysql: () =>
+					"CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq BIGINT NOT NULL) ENGINE=InnoDB",
+			}),
 		);
 		api.on("start", ({ reason }: { readonly reason: "live" | "rehearsal" }, ctx: BackgroundContext) =>
 			reason === "live" ? mirror(ctx).pipe(Effect.forkScoped, Effect.asVoid) : Effect.void,
@@ -47,9 +55,11 @@ const mirror = (ctx: BackgroundContext) =>
 				}
 				if (page.cursor > since)
 					yield* ctx.mutate(
-						ctx.db`INSERT INTO system_cursor(id,seq) VALUES(1,${page.cursor}) ON CONFLICT(id) DO UPDATE SET seq=excluded.seq`.pipe(
-							Effect.asVoid,
-						),
+						ctx.db`INSERT INTO system_cursor(id,seq) VALUES(1,${page.cursor}) ${on(ctx.db, {
+							sqlite: () => ctx.db`ON CONFLICT(id) DO UPDATE SET seq=excluded.seq`,
+							pg: () => ctx.db`ON CONFLICT(id) DO UPDATE SET seq=excluded.seq`,
+							mysql: () => ctx.db`AS incoming ON DUPLICATE KEY UPDATE seq=incoming.seq`,
+						})}`.pipe(Effect.asVoid),
 					);
 				if (page.items.length < 64) yield* ctx.events.changed(page.cursor);
 			}).pipe(Effect.exit);
