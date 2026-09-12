@@ -12,12 +12,16 @@ export const logRedactor = (configured: readonly string[]) => {
 	});
 	const secrets = [
 		...new Set(
-			values.filter(Boolean).flatMap((value) => {
-				const encoded = encodeURIComponent(value.toWellFormed());
-				const url = new URL("mysql://localhost");
-				url.password = value;
-				return [value, JSON.stringify(value).slice(1, -1), encoded, url.password];
-			}),
+			// Stream consumers redact complete lines; retain every raw line fragment of multiline passwords too.
+			values
+				.flatMap((value) => [value, ...value.split(/[\r\n]/)])
+				.filter(Boolean)
+				.flatMap((value) => {
+					const encoded = encodeURIComponent(value.toWellFormed());
+					const url = new URL("mysql://localhost");
+					url.password = value;
+					return [value, JSON.stringify(value).slice(1, -1), encoded, url.password];
+				}),
 		),
 	].sort((left, right) => right.length - left.length);
 	return (text: string): string => {

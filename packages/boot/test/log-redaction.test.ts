@@ -42,3 +42,9 @@ it("handles overlapping secrets longest first and never throws on malformed diag
 	const redact = logRedactor(["secret", "secret-suffix", "", "mysql://bad%zz:password@db", "\ud800"]);
 	expect(redact("secret-suffix secret mysql://bad%zz:password@db")).toBe("[redacted] [redacted] mysql://[redacted]@db");
 });
+
+it("redacts raw multiline credential fragments in individually captured stderr lines", () => {
+	const redact = logRedactor(["first-secret\r\nsecond-secret\nthird-secret"]);
+	for (const line of ["first-secret", "second-secret", "third-secret"])
+		expect(redact(`error password-part ${line}`)).toBe("error password-part [redacted]");
+});
