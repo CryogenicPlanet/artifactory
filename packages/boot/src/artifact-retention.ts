@@ -89,7 +89,7 @@ export const artifactRetention = (directory: string, engine: BackupRecord["engin
 								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Generation))),
 							);
 							const protectedGenerations = yield* sql`
-							SELECT n FROM (SELECT n FROM generations WHERE good=1 ORDER BY n DESC LIMIT 5)
+							SELECT n FROM (SELECT n FROM generations WHERE good=1 ORDER BY n DESC LIMIT 5) AS recent_good
 							-- Attempt closure, not a historical live label, identifies current filesystem owners.
 							UNION SELECT generation AS n FROM child_attempts WHERE closed=0
 							UNION SELECT candidate AS n FROM cutover
