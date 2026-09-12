@@ -1,3 +1,4 @@
+import { on, readTransaction } from "@comms/storage/dialect";
 import { RequestSpan } from "./request-span.ts";
 import { HealthProbe } from "./health-probe.ts";
 import { Crypto, Effect, Option, Schema } from "effect";
@@ -67,20 +68,21 @@ export const extensionData = Effect.gen(function* () {
 						if (encoded !== null && new TextEncoder().encode(encoded).byteLength > 65536)
 							return yield* new KernelError({ code: "input_invalid" });
 						yield* record(value === undefined ? "kv.deleted" : "kv.set", { key }, (seq) =>
-							sql`INSERT INTO kv(ns,key,value,updated_seq,previous) VALUES(${namespace},${key},${encoded},${seq},NULL) ON CONFLICT(ns,key) DO UPDATE SET previous=kv.value,value=excluded.value,updated_seq=excluded.updated_seq`.pipe(
+							sql`INSERT INTO kv(ns,${sql("key")},value,updated_seq,previous) VALUES(${namespace},${key},${encoded},${seq},NULL) ${on(sql, { sqlite: () => sql`ON CONFLICT(ns,key) DO UPDATE SET previous=kv.value,value=excluded.value,updated_seq=excluded.updated_seq`, pg: () => sql`ON CONFLICT(ns,key) DO UPDATE SET previous=kv.value,value=excluded.value,updated_seq=excluded.updated_seq`, mysql: () => sql`ON DUPLICATE KEY UPDATE previous=value,value=${encoded},updated_seq=${seq}` })}`.pipe(
 								Effect.asVoid,
 							),
 						);
 					});
 				return {
 					get: (key: string) =>
-						sql.withTransaction(
+						readTransaction(
+							sql,
 							Effect.gen(function* () {
 								if (!valid(key)) return yield* new KernelError({ code: "input_invalid" });
 								yield* sql`SELECT epoch FROM kernel_writer`;
 								const fence = (yield* publication.fence).published_through;
 								const rows =
-									yield* sql`SELECT CASE WHEN updated_seq<=${fence} THEN value ELSE previous END AS value FROM kv WHERE ns=${namespace} AND key=${key}`.pipe(
+									yield* sql`SELECT CASE WHEN updated_seq<=${fence} THEN value ELSE previous END AS value FROM kv WHERE ns=${namespace} AND ${sql("key")}=${key}`.pipe(
 										Effect.flatMap(
 											Schema.decodeUnknownEffect(
 												Schema.Array(Schema.Struct({ value: Schema.NullOr(Schema.fromJsonString(Schema.Json)) })),
