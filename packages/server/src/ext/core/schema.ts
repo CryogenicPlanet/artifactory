@@ -133,6 +133,7 @@ export const initialize = Effect.gen(function* () {
 			}),
 		},
 		{ id: 11, name: "domain_json", run: Effect.void },
+		{ id: 12, name: "search_diacritics", run: Effect.void },
 	];
 	const supported = steps(0).length;
 	yield* sql`PRAGMA busy_timeout = 2000`;

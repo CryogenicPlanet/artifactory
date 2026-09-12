@@ -4,13 +4,15 @@ import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { Statement } from "effect/unstable/sql/Statement";
 import { coreJsonOperations, type CoreJsonSchemaError } from "./core-json-schema.ts";
+import { postgresSearchOperation, postgresSearchShape, postgresSearchMode } from "./core-search-schema.ts";
+import { KernelError } from "../../kernel/boot-channel.ts";
 import { writerGate } from "../../kernel/database.ts";
 
 /** Remote stores have no supported pre-ledger schema. Build final table shapes directly;
  * legacy receipt conversion and retired product tables belong only to SQLite adoption. */
 export const remoteCoreSteps = (
 	sql: SqlClient,
-): ReadonlyArray<RemoteStep<Effect.Error<ReturnType<typeof tableShape>> | CoreJsonSchemaError>> => {
+): ReadonlyArray<RemoteStep<Effect.Error<ReturnType<typeof tableShape>> | CoreJsonSchemaError | KernelError>> => {
 	const mysql = on(sql, { sqlite: () => false, pg: () => false, mysql: () => true });
 	const text = (name: string, nullable = false) => ({
 		name,
@@ -298,6 +300,7 @@ export const remoteCoreSteps = (
 		{ id: 9, name: "mention_word_boundaries", operations: [] },
 		{ id: 10, name: "mention_punctuation", operations: [] },
 		{ id: 11, name: "domain_json", operations: coreJsonOperations(sql) },
+		{ id: 12, name: "search_diacritics", operations: mysql ? [] : [postgresSearchOperation(sql)] },
 	];
 };
 
@@ -315,6 +318,16 @@ export const initializeRemoteCore = (sql: SqlClient, epoch: string) =>
 							Schema.decodeUnknownEffect(Schema.Tuple([Schema.Struct({ encoding: Schema.Literal("UTF8") })])),
 						),
 					);
+			}),
+		),
+	).pipe(
+		Effect.andThen(
+			Effect.gen(function* () {
+				if (on(sql, { sqlite: () => false, pg: () => true, mysql: () => false })) {
+					if (!(yield* postgresSearchShape(sql))) return yield* new KernelError({ code: "app_schema_unsupported" });
+					if ((yield* postgresSearchMode(sql)) === "plain")
+						yield* Effect.logWarning("PostgreSQL search diacritic folding unavailable; using simple search");
+				}
 			}),
 		),
 	);
