@@ -1,3 +1,4 @@
+import { lockBootWrite } from "./boot-write-lock.ts";
 import { Context, Crypto, DateTime, Effect, FileSystem, Layer, Option, Path, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { EditAuthority, editAuthorityActive, EditLock, EditRejected, type Ownership } from "./edit-lock.ts";
@@ -189,6 +190,7 @@ const make = (dataDirectory: string) =>
 						Effect.gen(function* () {
 							yield* sql.withTransaction(
 								Effect.gen(function* () {
+									yield* lockBootWrite(sql);
 									const authority = Option.getOrNull(yield* Effect.serviceOption(EditAuthority));
 									if (authority) {
 										const now = (yield* DateTime.nowAsDate).getTime();

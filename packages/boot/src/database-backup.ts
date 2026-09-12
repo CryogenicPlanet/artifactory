@@ -1,3 +1,4 @@
+import { lockBootWrite } from "./boot-write-lock.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
 import { Crypto, DateTime, Effect, FileSystem, Path, Ref } from "effect";
 import { HttpClient } from "effect/unstable/http";
@@ -89,8 +90,9 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 					};
 					yield* sql.withTransaction(
 						Effect.gen(function* () {
-							yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation)
-						VALUES(${id},${saved},${options.reason},${bytes},${taken},${published},${active.generation.n})`;
+							yield* lockBootWrite(sql);
+							yield* sql`INSERT INTO backups(id,engine,path,reason,bytes,taken_at,published_through,generation)
+						VALUES(${id},${backup.engine},${saved},${options.reason},${bytes},${taken},${published},${active.generation.n})`;
 							yield* events.writeBoot({
 								at: taken,
 								type: "backup.taken",

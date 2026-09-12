@@ -1,3 +1,4 @@
+import type { BackupRecord } from "./backup-metadata.ts";
 import { Effect, FileSystem, Path, Ref } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { DbOps } from "./db-ops.ts";
@@ -17,7 +18,7 @@ import type { Supervisor } from "./supervisor.ts";
  * This creates an immutable candidate; editable source is published only at acceptance. */
 export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(function* (
 	record: DatabaseRestoreRequest,
-	backupPath: string,
+	artifact: BackupRecord,
 	supervisor: Supervisor,
 ) {
 	const sql = yield* SqlClient.SqlClient;
@@ -50,26 +51,32 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 	yield* Effect.scoped(
 		Effect.gen(function* () {
 			const temporary = yield* fs.makeTempDirectoryScoped({ directory: root, prefix: ".restore-rehearsal-" });
-			yield* (yield* storageHeadroom(root)).check(Number((yield* fs.stat(backupPath)).size));
-			const clone = path.join(temporary, "app.db");
-			yield* fs.copyFile(backupPath, clone);
+			yield* (yield* storageHeadroom(root)).check(Number((yield* fs.stat(artifact.path)).size));
 			// Rehearsal never publishes its private sequence space into boot.
 			const epoch = `restore-rehearsal-${record.proof_id}`;
-			yield* backup.prepareClone({ _tag: "file", filename: clone }, epoch);
 			const report = yield* Effect.acquireUseRelease(
-				supervisor
-					.launch(generation, { _tag: "file", filename: clone }, "rehearsal", (yield* events.state).next, epoch)
-					.pipe(Effect.provideContext(context)),
-				(rehearsed) =>
-					rehearsed.process.health.pipe(
-						Effect.timeout("30 seconds"),
-						Effect.catch(() =>
-							Ref.get(rehearsed.process.stderr).pipe(
-								Effect.flatMap((stderr) => Effect.fail(new ChildError({ code: "restore_rehearsal_failed", stderr }))),
-							),
-						),
-					),
-				(rehearsed) => supervisor.retire(rehearsed).pipe(Effect.provideContext(context), Effect.orDie),
+				backup.rehearsal({ _tag: "file", filename: path.join(temporary, "app.db") }, epoch, artifact),
+				(clone) =>
+					Effect.gen(function* () {
+						return yield* Effect.acquireUseRelease(
+							supervisor
+								.launch(generation, clone.store, "rehearsal", (yield* events.state).next, epoch)
+								.pipe(Effect.provideContext(context)),
+							(rehearsed) =>
+								rehearsed.process.health.pipe(
+									Effect.timeout("30 seconds"),
+									Effect.catch(() =>
+										Ref.get(rehearsed.process.stderr).pipe(
+											Effect.flatMap((stderr) =>
+												Effect.fail(new ChildError({ code: "restore_rehearsal_failed", stderr })),
+											),
+										),
+									),
+								),
+							(rehearsed) => supervisor.retire(rehearsed).pipe(Effect.provideContext(context), Effect.orDie),
+						);
+					}),
+				(clone) => supervisor.assertClosure.pipe(Effect.andThen(clone.dispose), Effect.orDie),
 			);
 			yield* generations.rehearsed(generation.n, report);
 		}),

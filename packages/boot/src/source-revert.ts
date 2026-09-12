@@ -17,7 +17,7 @@ const Rows = Schema.Array(Schema.Struct({ value: Schema.String }));
 const read = (id: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		const rows = yield* sql`SELECT value FROM settings WHERE key=${id}`.pipe(
+		const rows = yield* sql`SELECT value FROM settings WHERE ${sql("key")}=${id}`.pipe(
 			Effect.flatMap(Schema.decodeUnknownEffect(Rows)),
 		);
 		return rows[0] ? yield* Schema.decodeEffect(Stored)(rows[0].value) : null;
@@ -25,7 +25,7 @@ const read = (id: string) =>
 const save = (id: string, value: typeof Receipt.Type) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		yield* sql`UPDATE settings SET value=${yield* Schema.encodeEffect(Stored)(value)} WHERE key=${id}`;
+		yield* sql`UPDATE settings SET value=${yield* Schema.encodeEffect(Stored)(value)} WHERE ${sql("key")}=${id}`;
 	});
 const outcome = (id: string, value: typeof Outcome.Type) =>
 	Effect.gen(function* () {
@@ -101,7 +101,7 @@ export const sourceReverts = Effect.gen(function* () {
 						return 0;
 					const after = yield* Ref.get(cursor);
 					const rows =
-						yield* sql`SELECT key,value FROM settings WHERE key>${after} AND key<'source-revert-result:~' ORDER BY key LIMIT 256`.pipe(
+						yield* sql`SELECT ${sql("key")},value FROM settings WHERE ${sql("key")}>${after} AND ${sql("key")}<'source-revert-result:~' ORDER BY ${sql("key")} LIMIT 256`.pipe(
 							decodeRows(Schema.Struct({ key: Schema.String, value: Schema.String })),
 						);
 					const now = yield* Clock.currentTimeMillis;
@@ -121,7 +121,7 @@ export const sourceReverts = Effect.gen(function* () {
 							receipt.completed_at !== null &&
 							receipt.completed_at < now - 30 * 86_400_000
 						) {
-							yield* sql`DELETE FROM settings WHERE key=${row.key}`;
+							yield* sql`DELETE FROM settings WHERE ${sql("key")}=${row.key}`;
 							deleted++;
 						}
 					}
@@ -160,9 +160,10 @@ export const sourceReverts = Effect.gen(function* () {
 		recover: sql
 			.withTransaction(
 				Effect.gen(function* () {
-					const rows = yield* sql`SELECT key,value FROM settings WHERE key LIKE 'source-revert-result:%'`.pipe(
-						decodeRows(Schema.Struct({ key: Schema.String, value: Schema.String })),
-					);
+					const rows =
+						yield* sql`SELECT ${sql("key")},value FROM settings WHERE ${sql("key")} LIKE 'source-revert-result:%'`.pipe(
+							decodeRows(Schema.Struct({ key: Schema.String, value: Schema.String })),
+						);
 					for (const row of rows) {
 						const receipt = yield* reconcilePage(row.key, yield* Schema.decodeEffect(Stored)(row.value));
 						if (receipt.outcome === null && receipt.page_batch === null) yield* outcome(row.key, interrupted);
@@ -198,7 +199,8 @@ export const sourceReverts = Effect.gen(function* () {
 							}
 							// Old releases bound selection only, and may already have performed the undo.
 							// Refuse an unknown historical outcome rather than executing that key a second time.
-							const legacy = yield* sql`SELECT key FROM settings WHERE key=${`source-revert:${digest}`}`;
+							const legacy =
+								yield* sql`SELECT ${sql("key")} FROM settings WHERE ${sql("key")}=${`source-revert:${digest}`}`;
 							if (legacy.length > 0)
 								return response(
 									refusal(
@@ -207,7 +209,7 @@ export const sourceReverts = Effect.gen(function* () {
 										"This key predates exact outcome receipts. Inspect source and history, then use a new key only for a new operation.",
 									),
 								);
-							yield* sql`INSERT INTO settings(key,value) VALUES(${id},${yield* Schema.encodeEffect(Stored)({ selector, page_batch: null, outcome: null, created_at: yield* Clock.currentTimeMillis, completed_at: null })})`;
+							yield* sql`INSERT INTO settings(${sql("key")},value) VALUES(${id},${yield* Schema.encodeEffect(Stored)({ selector, page_batch: null, outcome: null, created_at: yield* Clock.currentTimeMillis, completed_at: null })})`;
 							const result = yield* restore(operation(id)).pipe(Effect.exit);
 							// Publication/acceptance evidence wins over a lost completion or cleanup error.
 							const durable = yield* sql.withTransaction(

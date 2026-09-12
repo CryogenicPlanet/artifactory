@@ -1,3 +1,4 @@
+import { lockBootWrite } from "./boot-write-lock.ts";
 import { humanAgent } from "./human-agent.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
 import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
@@ -53,7 +54,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BackupRecord))),
 			);
 			const row = rows[0];
-			if (row && row.engine !== "sqlite") return yield* new ChildError({ code: "backup_engine_mismatch" });
+			if (row && row.engine !== backup.engine) return yield* new ChildError({ code: "backup_engine_mismatch" });
 			if (
 				!row ||
 				row.published_through === null ||
@@ -68,6 +69,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 	const releaseLock = (record: DatabaseRestoreRequest) =>
 		sql.withTransaction(
 			Effect.gen(function* () {
+				yield* lockBootWrite(sql);
 				if (!record.lock_id || !record.lock_family) return;
 				const held = (yield* lock.inspect).value;
 				if (held?.id === record.lock_id && held.cutover_in_flight)
@@ -114,6 +116,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 
 	const rollback = (record: DatabaseRestoreRequest) =>
 		Effect.gen(function* () {
+			yield* supervisor.assertClosure;
 			if (!record.safety_backup) return yield* new ChildError({ code: "restore_safety_backup_missing" });
 			if (record.phase !== "rollback") {
 				// A candidate may have opened the selected store. Reconcile that store before selecting its replacement.
@@ -122,7 +125,15 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 			}
 			// The replacement app must republish its grants before activation can expose its pages.
 			yield* sql`DELETE FROM public_paths`;
-			yield* backup.restoreInto(yield* saved(record.safety_backup));
+			const restored = yield* backup.restoreInto(yield* saved(record.safety_backup));
+			if (restored._tag !== "file")
+				yield* sql.withTransaction(
+					Effect.gen(function* () {
+						yield* lockBootWrite(sql);
+						yield* recovery.selectRestored(restored);
+						yield* sql`UPDATE db_restore_requests SET phase='failed',failure='restore_not_accepted' WHERE proof_id=${record.proof_id}`;
+					}),
+				);
 			yield* recovery.prepare(yield* freshEpoch);
 			yield* sql`UPDATE db_restore_requests SET phase='failed',failure='restore_not_accepted' WHERE proof_id=${record.proof_id}`;
 			yield* releaseLock(record);
@@ -130,19 +141,28 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 	const install = (record: DatabaseRestoreRequest) =>
 		Effect.uninterruptibleMask((interruptible) =>
 			Effect.gen(function* () {
+				yield* supervisor.assertClosure;
 				const generation = yield* selectGeneration(record);
 				const target = yield* saved(record.backup);
 				if (target.published_through !== record.restored_to_seq)
 					return yield* new ChildError({ code: "restore_backup_changed" });
 				// The replacement app must republish its grants before activation can expose its pages.
 				yield* sql`DELETE FROM public_paths`;
-				yield* backup.restoreInto(target);
+				const restored = yield* backup.restoreInto(target);
 				const epoch = yield* freshEpoch;
+				if (restored._tag !== "file")
+					yield* sql.withTransaction(
+						Effect.gen(function* () {
+							yield* lockBootWrite(sql);
+							yield* recovery.selectRestored(restored);
+							yield* sql`UPDATE db_restore_requests SET phase='working',candidate_epoch=${epoch} WHERE proof_id=${record.proof_id}`;
+						}),
+					);
 				yield* recovery.prepare(epoch);
 				// From here, candidate effects belong to the working store. A crash must reconcile it before rollback.
 				yield* sql`UPDATE db_restore_requests SET phase='working',candidate_epoch=${epoch} WHERE proof_id=${record.proof_id}`;
 				const candidate = yield* supervisor
-					.launch(generation, recovery.store, "candidate", undefined, epoch)
+					.launch(generation, yield* recovery.store, "candidate", undefined, epoch)
 					.pipe(Effect.provideContext(context));
 				const accepted = yield* interruptible(
 					Effect.gen(function* () {
@@ -153,6 +173,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 						yield* recovery.prepare(epoch, epoch);
 						const acceptance = sql.withTransaction(
 							Effect.gen(function* () {
+								yield* lockBootWrite(sql);
 								yield* generations.healthy(generation.n);
 								const eventSeq = (yield* events.state).next;
 								yield* events.writeBoot({
@@ -305,6 +326,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					// Pin another holder without consuming their staging; record and pin commit together.
 					yield* sql.withTransaction(
 						Effect.gen(function* () {
+							yield* lockBootWrite(sql);
 							const current = (yield* lock.inspect).value;
 							const held =
 								current ??
@@ -314,7 +336,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 						}),
 					);
 					if (record.source_generation !== null)
-						yield* prepareRestoreGeneration(yield* read(record.proof_id), target.path, supervisor).pipe(
+						yield* prepareRestoreGeneration(yield* read(record.proof_id), target, supervisor).pipe(
 							Effect.provideContext(preparationContext),
 						);
 					yield* supervisor.freeze;
@@ -333,8 +355,9 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					const at = (yield* DateTime.nowAsDate).getTime();
 					yield* sql.withTransaction(
 						Effect.gen(function* () {
-							yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation)
-						VALUES(${id},${filename},'pre-restore',${bytes},${at},${fence},${generation.n})`;
+							yield* lockBootWrite(sql);
+							yield* sql`INSERT INTO backups(id,engine,path,reason,bytes,taken_at,published_through,generation)
+						VALUES(${id},${backup.engine},${filename},'pre-restore',${bytes},${at},${fence},${generation.n})`;
 							yield* events.writeBoot({
 								at,
 								type: "backup.taken",
