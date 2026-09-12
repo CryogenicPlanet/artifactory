@@ -38,7 +38,11 @@ if (operation === "wal") {
 				Effect.provideService(FileSystem.FileSystem, injected),
 			);
 		}
-		yield* migrateAppStore({ dataDirectory: root, filename: `${root}/store/comms.db` });
+		yield* migrateAppStore({
+			dataDirectory: root,
+			filename: `${root}/store/comms.db`,
+			allowMissingReady: operation === "offline",
+		});
 	});
 	migration.pipe(
 		Effect.provide(SqliteClient.layer({ filename: `${root}/boot.db`, disableWAL: true })),

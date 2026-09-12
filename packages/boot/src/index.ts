@@ -237,6 +237,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 									yield* migrateAppStore({
 										dataDirectory: options.dataDirectory,
 										filename: configuration.app.filename,
+										allowMissingReady: (yield* (yield* AppRecovery).identityStatus).adoption_phase === "ready",
 									});
 								yield* (yield* DbOps).recoverStaging;
 							}),
@@ -300,7 +301,17 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 				requests: yield* requestEvents(events),
 				backups: yield* makeBackupInventory,
 				captures: yield* databaseBackup(supervisor),
-				restores: restore,
+				restores: {
+					...restore,
+					restore: (...args: Parameters<typeof restore.restore>) =>
+						restore
+							.restore(...args)
+							.pipe(
+								Effect.tap((result) =>
+									result.status === "restored" ? retryRecovery(Effect.void, true).pipe(Effect.ignore) : Effect.void,
+								),
+							),
+				},
 				editing: {
 					retryRecovery,
 					reverts,

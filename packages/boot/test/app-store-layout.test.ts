@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -145,4 +145,26 @@ describe("separate app store layout", () => {
 		await writeFile(join(target, "store/comms.db"), "retain");
 		expect(await run(target)).toMatchObject({ result: "Failure" });
 	});
+});
+
+it("keeps a missing ready selection available only for explicit offline repair", async (test) => {
+	const root = await directory(test);
+	sql(join(root, "boot.db"), "INSERT INTO settings VALUES('app_store_layout','ready')");
+	sql(join(root, "boot.db"), "CREATE TABLE db_restore_requests(proof_id TEXT,phase TEXT)");
+	expect(await run(root)).toMatchObject({ result: "Failure" });
+	expect(await run(root, "offline")).toMatchObject({ result: "Success" });
+	await expect(stat(join(root, "store/comms.db"))).rejects.toMatchObject({ code: "ENOENT" });
+	await writeFile(join(root, "store/comms.db-journal"), "retained journal");
+	expect(await run(root, "offline")).toMatchObject({ result: "Failure" });
+	const boot = new DatabaseSync(join(root, "boot.db"));
+	try {
+		boot
+			.prepare("INSERT INTO settings VALUES(?,?)")
+			.run("restore-before:proof", JSON.stringify({ filename: join(await realpath(root), "store/comms.db") }));
+		boot.exec("INSERT INTO db_restore_requests VALUES('proof','rollback')");
+	} finally {
+		boot.close();
+	}
+	expect(await run(root, "offline")).toMatchObject({ result: "Success" });
+	expect(await readFile(join(root, "store/comms.db-journal"), "utf8")).toBe("retained journal");
 });
