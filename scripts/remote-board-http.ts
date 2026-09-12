@@ -98,6 +98,28 @@ async function run() {
 		assert.equal((await stat(stateFile)).mode & 0o077, 0, "Private state file permissions");
 		const state = Schema.decodeSync(Schema.fromJsonString(savedState))(await readFile(stateFile, "utf8"));
 		await verify(state);
+		if (phase === "check-restarted") {
+			const input = { topic: `${state.message.topic}/after-restart`, body: "Fresh write after restart" };
+			const written = Schema.decodeUnknownSync(message)(
+				await (await ok(await request("/api/messages", input, state.cookie), "Fresh post-restart write")).json(),
+			);
+			assert.equal(written.body, input.body);
+			assert.equal(written.topic, input.topic);
+			assert.ok(written.seq > state.message.seq);
+			const visible = Schema.decodeUnknownSync(Schema.Struct({ items: Schema.Array(message) }))(
+				await (
+					await ok(
+						await request(
+							`/api/messages?since=0&wait=0&topic=${encodeURIComponent(input.topic)}`,
+							undefined,
+							state.cookie,
+						),
+						"Fresh post-restart publication",
+					)
+				).json(),
+			);
+			assert.deepEqual(visible.items, [written]);
+		}
 		console.log(`Remote board ${phase}: authenticated persistence and idempotency passed`);
 		return;
 	}
