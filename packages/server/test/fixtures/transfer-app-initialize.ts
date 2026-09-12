@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
@@ -25,6 +26,22 @@ const program = Effect.gen(function* () {
 	const result = yield* initializeTransferApp(sql, epoch, source);
 	assert.equal(result.core.at(-1)?.migration_id, 11);
 	assert.ok(result.extensions.length > 0);
+	assert.deepEqual(
+		result.extensionProofs.map(({ extension, name, targetChecksum }) => ({
+			extension,
+			name,
+			checksum: targetChecksum,
+		})),
+		result.extensions,
+	);
+	const portable = yield* initializeTransferApp(sql, epoch, source, "pg");
+	assert.deepEqual(portable.extensions, result.extensions);
+	assert.equal(
+		portable.extensionProofs.find((row) => row.name === "system_cursor")?.sourceChecksum,
+		createHash("sha256")
+			.update("CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq BIGINT NOT NULL)")
+			.digest("hex"),
+	);
 	assert.deepEqual(yield* initializeTransferApp(sql, epoch, source), result);
 	assert.equal((yield* sql`SELECT * FROM messages`).length, 0);
 	assert.equal((yield* sql`SELECT * FROM outbox`).length, 0);

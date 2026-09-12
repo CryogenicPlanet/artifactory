@@ -4,6 +4,7 @@ import { SqlClient } from "effect/unstable/sql";
 import { initializeForEpoch } from "../ext/core/schema.ts";
 import { initializeRemoteKernelSchema } from "./schema.ts";
 import { migrate } from "./migrations.ts";
+import { type MigrationEngine } from "./extension-migrations.ts";
 import { transferExtensionMigrations } from "./transfer-extension-migrations.ts";
 import { assertNoPendingMigration } from "./migration-intent.ts";
 import { writerGate } from "./database.ts";
@@ -24,7 +25,12 @@ const ExtensionMigration = Schema.Struct({ extension: Schema.String, name: Schem
  * owns keeper admission and the incomplete transfer reservation before invoking this.
  * Imports and factories remain trusted arbitrary JavaScript; only managed lifecycle work
  * is excluded here. Migration seed rows are retained for the transfer's explicit copy policy. */
-export const initializeTransferApp = (sql: SqlClient.SqlClient, epoch: string, sourceDirectory: string) =>
+export const initializeTransferApp = (
+	sql: SqlClient.SqlClient,
+	epoch: string,
+	sourceDirectory: string,
+	sourceEngine?: MigrationEngine,
+) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
@@ -36,7 +42,12 @@ export const initializeTransferApp = (sql: SqlClient.SqlClient, epoch: string, s
 		yield* initializeRemoteKernelSchema(sql, epoch);
 		yield* initializeForEpoch(epoch);
 		yield* migrate(path.join(sourceDirectory, "migrations"), epoch);
-		yield* transferExtensionMigrations(sql, epoch, path.join(sourceDirectory, "ext"));
+		const extensionProofs = yield* transferExtensionMigrations(
+			sql,
+			epoch,
+			path.join(sourceDirectory, "ext"),
+			sourceEngine,
+		);
 		yield* assertNoPendingMigration(sql);
 		return yield* sql.withTransaction(
 			Effect.gen(function* () {
@@ -50,6 +61,7 @@ export const initializeTransferApp = (sql: SqlClient.SqlClient, epoch: string, s
 					mysql: () => Effect.succeed(true),
 				});
 				return {
+					extensionProofs,
 					core: yield* sql`SELECT migration_id,name FROM core_migrations ORDER BY migration_id`.pipe(
 						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Migration))),
 					),

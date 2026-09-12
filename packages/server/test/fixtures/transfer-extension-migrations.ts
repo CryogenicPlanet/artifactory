@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
@@ -16,7 +17,7 @@ const program = Effect.gen(function* () {
 			const directory = `${root}/${name}`;
 			yield* fs.makeDirectory(directory);
 			yield* fs.writeFileString(`${directory}/example.ts`, source);
-			return yield* transferExtensionMigrations(sql, "offline", directory).pipe(Effect.result);
+			return yield* transferExtensionMigrations(sql, "offline", directory, "pg").pipe(Effect.result);
 		});
 	const registration = `export default api => {
 	const forbidden = () => { throw new Error("Handler executed"); };
@@ -24,7 +25,18 @@ const program = Effect.gen(function* () {
 	api.page("/fixture", forbidden); api.cron("* * * * *", forbidden); api.on("start", forbidden);
 	return api.migrate("create", "CREATE TABLE extension_data(value TEXT)", { protect: true });
 	}`;
-	assert.equal((yield* run("good", registration))._tag, "Success");
+	const good = yield* run("good", registration);
+	assert.equal(good._tag, "Success");
+	const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+	if (good._tag === "Success")
+		assert.deepEqual(good.success, [
+			{
+				extension: "example.ts",
+				name: "create",
+				sourceChecksum: hash("CREATE TABLE extension_data(value TEXT)"),
+				targetChecksum: hash("CREATE TABLE extension_data(value TEXT)"),
+			},
+		]);
 	yield* transferExtensionMigrations(sql, "offline", `${root}/good`);
 	assert.equal((yield* sql`SELECT * FROM extension_migrations`).length, 1);
 	assert.deepEqual(yield* sql`SELECT name FROM protected_sql_tables`, [{ name: "extension_data" }]);
@@ -60,6 +72,29 @@ const program = Effect.gen(function* () {
 	)(imported);
 	assert.equal((yield* saved.late.pipe(Effect.result))._tag, "Failure");
 	assert.equal((yield* sql`SELECT name FROM sqlite_schema WHERE name='late_data'`).length, 0);
+	const portable = yield* run(
+		"portable",
+		`export default api => api.migrate("portable", {sqlite: "CREATE TABLE portable_data(value TEXT)", pg: "CREATE TABLE portable_data(value VARCHAR(32))", mysql: "CREATE TABLE portable_data(value LONGTEXT)"})`,
+	);
+	assert.equal(portable._tag, "Success");
+	if (portable._tag === "Success")
+		assert.deepEqual(portable.success, [
+			{
+				extension: "example.ts",
+				name: "portable",
+				sourceChecksum: hash("CREATE TABLE portable_data(value VARCHAR(32))"),
+				targetChecksum: hash("CREATE TABLE portable_data(value TEXT)"),
+			},
+		]);
+	const duplicate = yield* run(
+		"duplicate",
+		`import { Effect } from "${import.meta.resolve("effect")}"; export default api => {
+      return Effect.gen(function* () { yield* api.migrate("portable", {sqlite: "CREATE TABLE portable_data(value TEXT)", pg: "CREATE TABLE portable_data(value VARCHAR(32))", mysql: "unused"});
+      yield* api.migrate("portable", {sqlite: "CREATE TABLE portable_data(value TEXT)", pg: "CREATE TABLE portable_data(value VARCHAR(64))", mysql: "unused"}); });
+    }`,
+	);
+	assert.equal(duplicate._tag, "Failure");
+
 	yield* Console.log("TRANSFER_EXTENSION_REPLAY_VERIFIED");
 }).pipe(Effect.scoped, Effect.provide(SqliteClient.layer({ filename: ":memory:" })), Effect.provide(BunServices.layer));
 program.pipe(BunRuntime.runMain);

@@ -26,6 +26,14 @@ const run = Effect.gen(function* () {
 		const unprotected = "CREATE TABLE legacy_data(value TEXT)";
 		yield* migrate("legacy", unprotected);
 		const receipts = yield* sql`SELECT * FROM extension_migrations ORDER BY name`;
+		// Declaring portable alternatives must preserve the exact historical SQLite receipt.
+		yield* migrate("legacy", {
+			sqlite: unprotected,
+			pg: "CREATE TABLE legacy_data(value TEXT)",
+			mysql: "CREATE TABLE legacy_data(value LONGTEXT)",
+		});
+		assert.deepEqual(yield* sql`SELECT * FROM extension_migrations ORDER BY name`, receipts);
+
 		yield* migrate("legacy", unprotected, { protect: true });
 		assert.deepEqual(yield* sql`SELECT * FROM extension_migrations ORDER BY name`, receipts);
 		assert.deepEqual(yield* sql`SELECT name FROM protected_sql_tables WHERE name='legacy_data'`, []);

@@ -1,21 +1,15 @@
 import { Cause, Effect, Schema } from "effect";
 import type { Api, BackgroundContext } from "../kernel/extension-api.ts";
 import { on } from "@comms/storage/dialect";
-import { SqlClient } from "effect/unstable/sql";
 
 /** The event log remains authoritative; this removable extension provides a reading view. */
 export default function system(api: Api) {
 	return Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		yield* api.migrate(
-			"system_cursor",
-			on(sql, {
-				sqlite: () => "CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq INTEGER NOT NULL)",
-				pg: () => "CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq BIGINT NOT NULL)",
-				mysql: () =>
-					"CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq BIGINT NOT NULL) ENGINE=InnoDB",
-			}),
-		);
+		yield* api.migrate("system_cursor", {
+			sqlite: "CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq INTEGER NOT NULL)",
+			pg: "CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq BIGINT NOT NULL)",
+			mysql: "CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq BIGINT NOT NULL) ENGINE=InnoDB",
+		});
 		api.on("start", ({ reason }: { readonly reason: "live" | "rehearsal" }, ctx: BackgroundContext) =>
 			reason === "live" ? mirror(ctx).pipe(Effect.forkScoped, Effect.asVoid) : Effect.void,
 		);

@@ -7,13 +7,21 @@ import { KernelError } from "./boot-channel.ts";
 import { registerProtectedSqlTable } from "./protected-sql-tables.ts";
 import { writerGate } from "./database.ts";
 
+export type MigrationSql = string | { readonly sqlite: string; readonly pg: string; readonly mysql: string };
+export type MigrationEngine = "sqlite" | "pg" | "mysql";
+export const migrationSql = (declaration: MigrationSql, engine: MigrationEngine) =>
+	typeof declaration === "string" ? declaration : declaration[engine];
+export const migrationEngine = (sql: SqlClient.SqlClient): MigrationEngine =>
+	on(sql, { sqlite: () => "sqlite", pg: () => "pg", mysql: () => "mysql" });
+
 /** Loader-only migrations share the startup writer fence; they never publish candidate events. */
 export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, extension: string) =>
 	Effect.gen(function* () {
 		const crypto = yield* Crypto.Crypto;
 		const gate = yield* Semaphore.make(1);
-		return (name: string, statement: string, options?: { readonly protect?: boolean }) =>
+		return (name: string, declaration: MigrationSql, options?: { readonly protect?: boolean }) =>
 			Effect.gen(function* () {
+				const statement = migrationSql(declaration, migrationEngine(sql));
 				if (
 					!name ||
 					name.length > 128 ||
