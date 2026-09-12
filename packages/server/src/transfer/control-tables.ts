@@ -95,6 +95,14 @@ export const prepareControlTransfer = (options: {
 		const sourceWriter = yield* writer(sourceApp);
 		if (sourceWriter.length !== 1 || sourceWriter[0]?.singleton !== 1 || sourceWriter[0]?.epoch === epoch)
 			return yield* invalid();
+		const verifySource = Effect.gen(function* () {
+			const sequence = yield* readSequence(sourceBoot);
+			if (sequence.length !== 1 || JSON.stringify(sequence[0]) !== JSON.stringify(source)) return yield* invalid();
+			yield* identity(sourceApp, true);
+			const currentWriter = yield* writer(sourceApp);
+			if (currentWriter.length !== 1 || JSON.stringify(currentWriter[0]) !== JSON.stringify(sourceWriter[0]))
+				return yield* invalid();
+		});
 		const verifyKernel = Effect.gen(function* () {
 			yield* identity(targetApp, false);
 			const found = yield* writer(targetApp);
@@ -106,25 +114,29 @@ export const prepareControlTransfer = (options: {
 			const found = yield* readSequence(targetBoot);
 			if (found.length !== 1 || JSON.stringify(found[0]) !== JSON.stringify(source)) return yield* invalid();
 		});
-		const copySequence = targetBoot.withTransaction(
-			Effect.gen(function* () {
-				yield* lockSequence(targetBoot);
-				const found = yield* readSequence(targetBoot);
-				const row = found[0];
-				if (found.length !== 1 || !row || row.singleton !== 1) return yield* invalid();
-				if (JSON.stringify(row) === JSON.stringify(source)) return;
-				if (
-					row.next !== 1 ||
-					row.published_through !== 0 ||
-					row.pending_id !== null ||
-					row.pending_attempt !== null ||
-					row.pending_from !== null ||
-					row.pending_to !== null
-				)
-					return yield* invalid();
-				yield* targetBoot`UPDATE seq SET ${targetBoot("next")}=${source.next},published_through=${source.published_through} WHERE singleton=1`;
-				yield* verifySequence;
-			}),
+		const copySequence = verifySource.pipe(
+			Effect.andThen(
+				targetBoot.withTransaction(
+					Effect.gen(function* () {
+						yield* lockSequence(targetBoot);
+						const found = yield* readSequence(targetBoot);
+						const row = found[0];
+						if (found.length !== 1 || !row || row.singleton !== 1) return yield* invalid();
+						if (JSON.stringify(row) === JSON.stringify(source)) return;
+						if (
+							row.next !== 1 ||
+							row.published_through !== 0 ||
+							row.pending_id !== null ||
+							row.pending_attempt !== null ||
+							row.pending_from !== null ||
+							row.pending_to !== null
+						)
+							return yield* invalid();
+						yield* targetBoot`UPDATE seq SET ${targetBoot("next")}=${source.next},published_through=${source.published_through} WHERE singleton=1`;
+						yield* verifySequence;
+					}),
+				),
+			),
 		);
 		return {
 			manifest: {
@@ -132,9 +144,18 @@ export const prepareControlTransfer = (options: {
 				sequence: { next: source.next, published_through: source.published_through },
 				identity: { store_id: selection.store_id, initialized_at: initializedAt },
 				epoch,
+				source_epoch: sourceWriter[0].epoch,
 			},
 			copySequence,
-			copyRemaining: verifySequence.pipe(Effect.andThen(settings.copy), Effect.andThen(verifyKernel)),
-			verify: verifySequence.pipe(Effect.andThen(settings.verify), Effect.andThen(verifyKernel)),
+			copyRemaining: verifySource.pipe(
+				Effect.andThen(verifySequence),
+				Effect.andThen(settings.copy),
+				Effect.andThen(verifyKernel),
+			),
+			verify: verifySource.pipe(
+				Effect.andThen(verifySequence),
+				Effect.andThen(settings.verify),
+				Effect.andThen(verifyKernel),
+			),
 		};
 	});

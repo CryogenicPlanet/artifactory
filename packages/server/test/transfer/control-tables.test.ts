@@ -75,3 +75,20 @@ it("preserves legacy selection-only undo markers as terminal opaque receipts", a
 		],
 	});
 });
+
+it.for(["drift-sequence", "drift-pending", "drift-epoch", "drift-identity"])(
+	"refuses %s after preparing the manifest instead of verifying only the target",
+	async (mode, test) => {
+		expect(await fixture(test, mode)).toMatchObject({
+			result: {
+				_tag: "Success",
+				value: {
+					copyRejected: true,
+					verifyRejected: true,
+					...(mode === "drift-epoch" ? { restartManifestChanged: true } : {}),
+				},
+			},
+			targetSequence: [{ next: 91, published_through: 90 }],
+		});
+	},
+);

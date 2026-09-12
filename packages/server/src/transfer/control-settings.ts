@@ -1,5 +1,9 @@
 import { on } from "@comms/storage/dialect";
-import { TransferRejected, type TransferSelection } from "@comms/storage/store-transfer-schema";
+import {
+	TransferRejected,
+	validateTransferSelection,
+	type TransferSelection,
+} from "@comms/storage/store-transfer-schema";
 import { readTransferRows } from "@comms/storage/transfer-reader";
 import type { TransferTablePlan } from "@comms/storage/transfer-copy";
 import { makeTransferDigest } from "@comms/storage/transfer-values";
@@ -98,6 +102,46 @@ const settingsPlan: TransferTablePlan = {
 const scan = <E, R>(sql: SqlClient, consume: (row: Row) => Effect.Effect<void, E, R>) =>
 	readTransferRows(sql, settingsPlan, (raw) => Schema.decodeUnknownEffect(Row)(raw).pipe(Effect.flatMap(consume)));
 
+const projectedSettings = <E, R>(
+	source: SqlClient,
+	selection: TransferSelection,
+	initializedAt: number,
+	consume: (row: Row) => Effect.Effect<void, E, R>,
+) =>
+	scan(source, (row) =>
+		Effect.gen(function* () {
+			for (const value of yield* project(row, selection, initializedAt)) {
+				if (
+					(selection.target.engine === "mysql" && [...value.key].length > 128) ||
+					(selection.target.engine === "pg" && (value.key.includes("\0") || value.value.includes("\0")))
+				)
+					return yield* mismatch();
+				yield* consume(value);
+			}
+		}),
+	);
+
+/** Read-only portability proof for a scratch check. The caller holds the stable source owner.
+ * Counts only projected source rows, without rebuilding target-ready metadata or granting copy authority.
+ */
+export const inspectControlSettings = (source: SqlClient, input: TransferSelection, initializedAt: number) =>
+	Effect.gen(function* () {
+		const selection = yield* validateTransferSelection(input);
+		if (!Number.isSafeInteger(initializedAt) || initializedAt < 0) return yield* invalid();
+		const digest = yield* makeTransferDigest;
+		let count = 0;
+		yield* projectedSettings(source, selection, initializedAt, (row) =>
+			Effect.gen(function* () {
+				yield* digest.append([
+					{ kind: "text", value: row.key },
+					{ kind: "text", value: row.value },
+				]);
+				count++;
+			}),
+		);
+		return { rows: count, digest: yield* digest.finish };
+	});
+
 /** Caller holds all four offline owners throughout preparation, copy and verification. */
 export const prepareControlSettings = (
 	source: SqlClient,
@@ -134,18 +178,7 @@ export const prepareControlSettings = (
 		];
 		const expected = <E, R>(consume: (row: Row) => Effect.Effect<void, E, R>) =>
 			Effect.gen(function* () {
-				yield* scan(source, (row) =>
-					Effect.gen(function* () {
-						for (const value of yield* project(row, selection, initializedAt)) {
-							if (
-								(selection.target.engine === "mysql" && [...value.key].length > 128) ||
-								(selection.target.engine === "pg" && (value.key.includes("\0") || value.value.includes("\0")))
-							)
-								return yield* mismatch();
-							yield* consume(value);
-						}
-					}),
-				);
+				yield* projectedSettings(source, selection, initializedAt, consume);
 				for (const row of rebuilt) yield* consume(row);
 			});
 		const digest = yield* makeTransferDigest;

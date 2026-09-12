@@ -3,6 +3,7 @@ import { clientLayer } from "@comms/storage/client";
 import type { TransferSelection } from "@comms/storage/store-transfer-schema";
 import { Context, Effect, Layer } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { inspectControlSettings } from "../../../src/transfer/control-settings.ts";
 import { prepareControlTransfer } from "../../../src/transfer/control-tables.ts";
 
 const root = process.argv[2];
@@ -68,16 +69,51 @@ await Effect.runPromise(
 		if (mode === "source-progress") yield* sourceBoot`UPDATE settings SET value='moving' WHERE key='app_store_layout'`;
 		if (mode === "remote-progress")
 			yield* sourceBoot`UPDATE settings SET value='{"phase":"ready"}' WHERE key='remote_database:old'`;
-		if (mode === "receipt-progress")
+		if (mode === "receipt-progress" || mode === "inspect-pending")
 			yield* sourceBoot`INSERT INTO settings VALUES('source-revert-result:x','{"outcome":null}')`;
 		if (mode === "wrong-identity") yield* targetApp`UPDATE store_identity SET initialized_at=124`;
 		if (mode === "conflict") yield* targetBoot`INSERT INTO settings VALUES('receipt:example','newer target bytes')`;
+		if (mode === "inspect" || mode === "inspect-pending") {
+			const scratch = { ...selection, target: { ...selection.target, app: `${root}/scratch.db` } };
+			const before = JSON.stringify(yield* sourceBoot`SELECT key,value FROM settings ORDER BY key`);
+			const inspected = yield* inspectControlSettings(sourceBoot, scratch, 123).pipe(Effect.result);
+			const strict = yield* prepareControlTransfer({
+				sourceBoot,
+				sourceApp,
+				targetBoot,
+				targetApp,
+				selection: scratch,
+				initializedAt: 123,
+				epoch,
+			}).pipe(Effect.result);
+			const after = JSON.stringify(yield* sourceBoot`SELECT key,value FROM settings ORDER BY key`);
+			const targetRows = yield* targetBoot`SELECT COUNT(*) AS count FROM settings`;
+			console.log(JSON.stringify({ inspected, strict, sourceUnchanged: before === after, targetRows }));
+			return;
+		}
 		const result = yield* Effect.gen(function* () {
 			const options = { sourceBoot, sourceApp, targetBoot, targetApp, selection, initializedAt: 123, epoch };
 			const prepared = yield* prepareControlTransfer(options);
 			yield* prepared.copySequence;
 			yield* prepared.copyRemaining;
 			yield* prepared.verify;
+			if (mode?.startsWith("drift-")) {
+				if (mode === "drift-sequence") yield* sourceBoot`UPDATE seq SET next=92,published_through=91`;
+				if (mode === "drift-pending") yield* sourceBoot`UPDATE seq SET pending_id='new reservation'`;
+				if (mode === "drift-epoch") yield* sourceApp`UPDATE kernel_writer SET epoch=${"e".repeat(64)}`;
+				if (mode === "drift-identity") yield* sourceApp`UPDATE store_identity SET initialized_at=124`;
+				const copied = yield* prepared.copySequence.pipe(Effect.result);
+				const verified = yield* prepared.verify.pipe(Effect.result);
+				const restarted = mode === "drift-epoch" ? yield* prepareControlTransfer(options) : undefined;
+				return {
+					copyRejected: copied._tag === "Failure",
+					verifyRejected: verified._tag === "Failure",
+					restartManifestChanged:
+						restarted === undefined
+							? undefined
+							: JSON.stringify(restarted.manifest) !== JSON.stringify(prepared.manifest),
+				};
+			}
 			// Source retirement is coordinator-owned and excluded from the stable data commitment.
 			yield* sourceBoot`INSERT INTO settings VALUES('transferred_to','bound retirement marker')`;
 			yield* sourceApp`UPDATE store_identity SET transferred_to='bound retirement marker'`;
