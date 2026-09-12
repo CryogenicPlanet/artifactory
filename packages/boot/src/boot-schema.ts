@@ -224,7 +224,7 @@ export const initializeBootSchema = Effect.gen(function* () {
 					}),
 				},
 			]);
-			yield* sql`PRAGMA user_version = 18`;
+			if (currentVersion !== 18) yield* sql`PRAGMA user_version = 18`;
 		}),
 	);
 });
