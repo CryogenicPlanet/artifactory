@@ -43,7 +43,7 @@ export const restoreBeforeImage = (dataDirectory: string, filename: string) =>
 				if ((yield* fs.realPath(name)) !== name || (yield* fs.stat(name)).type !== type) return yield* invalid();
 				return true;
 			});
-		const validate = (value: unknown) =>
+		const validate = (value: unknown, bindFilename = true) =>
 			Effect.gen(function* () {
 				const manifest = yield* Schema.decodeUnknownEffect(RestoreBeforeImage)(value, {
 					onExcessProperty: "error",
@@ -51,7 +51,11 @@ export const restoreBeforeImage = (dataDirectory: string, filename: string) =>
 				if (
 					!uuid.test(manifest.storeId) ||
 					!uuid.test(manifest.artifact) ||
-					manifest.filename !== selected ||
+					(bindFilename && manifest.filename !== selected) ||
+					!path.isAbsolute(manifest.filename) ||
+					path.normalize(manifest.filename) !== manifest.filename ||
+					path.basename(manifest.filename) !== "comms.db" ||
+					manifest.filename.includes("\0") ||
 					manifest.files.length > 4 ||
 					(manifest.files.length > 0 && manifest.files[0]?.suffix !== "") ||
 					new Set(manifest.files.map((file) => file.suffix)).size !== manifest.files.length ||
@@ -148,5 +152,38 @@ export const restoreBeforeImage = (dataDirectory: string, filename: string) =>
 					yield* sync(parent);
 				}),
 			);
-		return { prepare, record, read, rollback };
+		// Only never-recorded preparation is reclaimed. Committed before-images have no expiry policy here.
+		const recoverUnrecorded = Effect.uninterruptible(
+			Effect.gen(function* () {
+				const rows = yield* sql`SELECT value FROM settings WHERE key LIKE 'restore-before:%'`.pipe(
+					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ value: Schema.String })))),
+				);
+				const referenced = new Set<string>();
+				for (const row of rows) {
+					const value = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(row.value).pipe(
+						Effect.mapError(invalid),
+					);
+					// Relocated historical stores still retain their artifacts; no filesystem path comes from this field.
+					referenced.add((yield* validate(value, false)).artifact);
+				}
+				if (!(yield* regular(directory, "Directory"))) return;
+				const unrecorded: string[] = [];
+				for (const entry of yield* fs.readDirectory(directory)) {
+					const artifact = path.join(directory, entry);
+					if (!uuid.test(entry) || !(yield* regular(artifact, "Directory"))) return yield* invalid();
+					for (const name of yield* fs.readDirectory(artifact)) {
+						if (
+							!suffixes.some((suffix) => name === `comms.db${suffix}`) ||
+							!(yield* regular(path.join(artifact, name), "File"))
+						)
+							return yield* invalid();
+					}
+					if (!referenced.has(entry)) unrecorded.push(artifact);
+				}
+				// Validate every reference and candidate first, so corruption cannot cause partial reclamation.
+				for (const artifact of unrecorded) yield* fs.remove(artifact, { recursive: true });
+				yield* sync(directory);
+			}),
+		);
+		return { prepare, record, read, rollback, recoverUnrecorded };
 	});

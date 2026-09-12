@@ -156,3 +156,79 @@ it("retries a SIGKILL between live replacements using retained artifacts", async
 	expect(await app.contents("")).toBe("original");
 	expect(await app.contents("-wal")).toBe("original-wal");
 });
+
+it("reclaims only unrecorded artifacts and retains historical relocated references", async (test) => {
+	const app = await fixture(test);
+	await app.write("", "preserved");
+	expect(await app.run("prepare")).toContain('"Success"');
+	const saved = await app.artifact();
+	await app.run("tamper", { filename: "/historical/relocated/store/comms.db" });
+	expect(await app.run("uncommitted")).toContain('"Success"');
+	expect(await app.run("recover-unrecorded")).toContain('"Success"');
+	expect(await readdir(join(app.root, "restore-before"))).toHaveLength(1);
+	expect(await readFile(join(saved, "comms.db"), "utf8")).toBe("preserved");
+	expect(await app.contents("")).toBe("preserved");
+	expect(await app.run("recover-unrecorded")).toContain('"Success"');
+});
+
+it.for([
+	{ artifact: "../other" },
+	{ filename: "comms.db" },
+	{ files: [{ suffix: "", bytes: -1, hash: "bad" }] },
+	{ extra: true },
+])("refuses malformed saved reference before reclaiming any artifact: %j", async (payload, test) => {
+	const app = await fixture(test);
+	await app.write("", "preserved");
+	expect(await app.run("prepare")).toContain('"Success"');
+	expect(await app.run("uncommitted")).toContain('"Success"');
+	const original = await readdir(join(app.root, "restore-before"));
+	await app.run("tamper", payload);
+	expect(await app.run("recover-unrecorded")).toContain('"Failure"');
+	expect(await readdir(join(app.root, "restore-before"))).toEqual(original);
+});
+
+it.for(["link", "nested", "unknown-name"])("refuses unsafe orphan %s before any reclamation", async (mode, test) => {
+	const app = await fixture(test);
+	await app.write("", "preserved");
+	expect(await app.run("uncommitted")).toContain('"Success"');
+	expect(await app.run("uncommitted")).toContain('"Success"');
+	const original = await readdir(join(app.root, "restore-before"));
+	const artifact = await app.artifact();
+	if (mode === "link") {
+		await rm(join(artifact, "comms.db"));
+		await symlink(join(app.root, "comms.db"), join(artifact, "comms.db"));
+	}
+	if (mode === "nested") await mkdir(join(artifact, "comms.db-wal"));
+	if (mode === "unknown-name") await writeFile(join(artifact, "unknown"), "preserved");
+	expect(await app.run("recover-unrecorded")).toContain('"Failure"');
+	expect(await readdir(join(app.root, "restore-before"))).toEqual(original);
+	expect(await app.contents("")).toBe("preserved");
+});
+
+it("reclaims a SIGKILL orphan after artifact fsync before manifest recording", async (test) => {
+	const app = await fixture(test);
+	await app.write("", "original");
+	const child = spawn(
+		"bun",
+		[join(import.meta.dirname, "fixtures/restore-before-image.ts"), app.root, "prepare-pause"],
+		{ stdio: ["ignore", "pipe", "pipe"] },
+	);
+	test.onTestFinished(() => {
+		child.kill("SIGKILL");
+	});
+	let output = "";
+	child.stdout.on("data", (chunk) => {
+		output += String(chunk);
+	});
+	child.stderr.on("data", (chunk) => {
+		output += String(chunk);
+	});
+	await expect.poll(() => output).toContain("PAUSED");
+	const exited = once(child, "exit");
+	child.kill("SIGKILL");
+	await exited;
+	expect(await readdir(join(app.root, "restore-before"))).toHaveLength(1);
+	expect(await app.run("recover-unrecorded")).toContain('"Success"');
+	expect(await readdir(join(app.root, "restore-before"))).toEqual([]);
+	expect(await app.contents("")).toBe("original");
+});

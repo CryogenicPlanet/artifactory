@@ -13,10 +13,18 @@ const main = Effect.gen(function* () {
 	yield* sql`CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)`;
 	yield* sql`PRAGMA synchronous=FULL`;
 	const before = yield* restoreBeforeImage(root, `${root}/comms.db`);
-	if (mode === "prepare" || mode === "uncommitted") {
+	if (mode === "prepare" || mode === "uncommitted" || mode === "prepare-pause") {
 		const manifest = yield* before.prepare(storeId);
+		if (mode === "prepare-pause") {
+			yield* Console.log("PAUSED");
+			return yield* Effect.never;
+		}
 		if (mode === "prepare") yield* sql.withTransaction(before.record("proof", manifest));
 		return manifest;
+	}
+	if (mode === "recover-unrecorded") {
+		yield* before.recoverUnrecorded;
+		return "recovered";
 	}
 	if (mode === "rollback") yield* before.rollback("proof", storeId);
 	if (mode === "wrong-store") yield* before.rollback("proof", "30e4d2e1-bd48-4c44-a716-94e7b5139f23");
