@@ -13,7 +13,10 @@ const savedState = Schema.Struct({ cookie: Schema.String, message, key: Schema.S
 
 async function run() {
 	const [phase, address, stateFile] = process.argv.slice(2);
-	assert.ok(phase === "prepare" || phase === "check-restored" || phase === "check-restarted", "Unknown probe phase");
+	assert.ok(
+		phase === "prepare" || phase === "check-restored" || phase === "check-restarted" || phase === "diagnose",
+		"Unknown probe phase",
+	);
 	assert.ok(address && stateFile, "Usage: remote-board-http.ts PHASE URL PRIVATE_STATE_FILE");
 	const url = new URL(address);
 	assert.ok(
@@ -40,9 +43,44 @@ async function run() {
 		assert.equal(response.status, 200, `${label}: HTTP ${response.status}`);
 		return response;
 	};
+	const failedGeneration = async (cookie: string, bootStatus?: unknown) => {
+		const response = await request("/_boot/generations", undefined, cookie);
+		if (!response.ok) {
+			await response.arrayBuffer();
+			return;
+		}
+		const diagnostic = await response.json();
+		const parsed = Schema.decodeUnknownSync(
+			Schema.Struct({
+				items: Schema.Array(
+					Schema.Struct({
+						n: Schema.Int,
+						status: Schema.String,
+						error: Schema.NullOr(Schema.String),
+						stderr: Schema.NullOr(Schema.String),
+					}),
+				),
+			}),
+		)(diagnostic);
+		const failed = parsed.items.find((item) => item.status === "failed");
+		const recovery =
+			bootStatus === undefined
+				? undefined
+				: Schema.decodeUnknownSync(
+						Schema.Struct({ source_recovery_error: Schema.optionalKey(Schema.NullOr(Schema.String)) }),
+					)(bootStatus).source_recovery_error;
+		if (!failed && !recovery) return;
+		const filename = process.env.COMMS_TEST_DIAGNOSTICS_FILE;
+		if (filename)
+			await writeFile(filename, JSON.stringify({ status: bootStatus, generations: diagnostic }), { mode: 0o600 });
+		throw new Error(
+			`Board ${failed ? `generation failed: generation ${failed.n}` : "boot recovery failed"}${filename ? "; private diagnostics recorded" : ""}`,
+		);
+	};
 	const ready = async (cookie: string) => {
 		const deadline = Date.now() + 180000;
 		let last = "unavailable";
+		let lastStatus: unknown;
 		while (Date.now() < deadline) {
 			try {
 				const response = await fetch(new URL("/_boot/status", url), {
@@ -51,8 +89,9 @@ async function run() {
 					redirect: "error",
 				});
 				if (response.ok) {
+					lastStatus = await response.json();
 					const status = Schema.decodeUnknownSync(Schema.Struct({ child: Schema.Struct({ state: Schema.String }) }))(
-						await response.json(),
+						lastStatus,
 					);
 					last = status.child.state;
 					if (last === "live") return;
@@ -60,8 +99,10 @@ async function run() {
 			} catch {
 				last = "unavailable";
 			}
+			if (last === "failed") await failedGeneration(cookie, lastStatus);
 			await setTimeout(500);
 		}
+		await failedGeneration(cookie, lastStatus);
 		throw new Error(`Board readiness deadline: ${last}`);
 	};
 	const verify = async (state: typeof savedState.Type) => {
@@ -94,6 +135,35 @@ async function run() {
 			409,
 		);
 	};
+	if (phase === "diagnose") {
+		const session = Schema.decodeSync(Schema.fromJsonString(Schema.Struct({ cookie: Schema.String })))(
+			await readFile(`${stateFile}.session`, "utf8"),
+		);
+		await ready(session.cookie);
+		const input = {
+			topic: `acceptance/diagnose-${crypto.randomUUID()}`,
+			body: "Native resumed board diagnostic write",
+		};
+		const created = Schema.decodeUnknownSync(message)(
+			await (await ok(await request("/api/messages", input, session.cookie), "Diagnostic domain write")).json(),
+		);
+		assert.equal(created.body, input.body);
+		const read = Schema.decodeUnknownSync(Schema.Struct({ items: Schema.Array(message) }))(
+			await (
+				await ok(
+					await request(
+						`/api/messages?since=0&wait=0&topic=${encodeURIComponent(input.topic)}`,
+						undefined,
+						session.cookie,
+					),
+					"Diagnostic domain read",
+				)
+			).json(),
+		);
+		assert.deepEqual(read.items, [created]);
+		console.log("Remote board diagnose: authenticated live state and domain write/read passed");
+		return;
+	}
 	if (phase !== "prepare") {
 		assert.equal((await stat(stateFile)).mode & 0o077, 0, "Private state file permissions");
 		const state = Schema.decodeSync(Schema.fromJsonString(savedState))(await readFile(stateFile, "utf8"));
@@ -129,6 +199,9 @@ async function run() {
 	const code = (await readFile(setupFile, "utf8")).trim();
 	const device = authenticator();
 	let counter = 0;
+	const saveAuthenticator = () =>
+		writeFile(`${stateFile}.authenticator`, JSON.stringify({ ...device.state, counter }), { mode: 0o600 });
+	await saveAuthenticator();
 	const setup = Schema.decodeUnknownSync(ceremony)(
 		await (await ok(await request("/_boot/auth/setup/options", { code }), "Setup options")).json(),
 	);
@@ -142,15 +215,19 @@ async function run() {
 	const options = Schema.decodeUnknownSync(ceremony)(
 		await (await ok(await request("/_boot/auth/login/options", {}), "Login options")).json(),
 	);
+	counter++;
+	await saveAuthenticator();
 	const login = await ok(
 		await request("/_boot/auth/login/verify", {
 			id: options.id,
-			response: device.assertion(options.options.challenge, ++counter, origin, rpId),
+			response: device.assertion(options.options.challenge, counter, origin, rpId),
 		}),
 		"Passkey login",
 	);
 	const cookie = login.headers.get("set-cookie")?.split(";")[0];
 	assert.ok(cookie, "Login cookie missing");
+	// Preserve authenticated diagnostic access even if first generation or restore fails.
+	await writeFile(`${stateFile}.session`, JSON.stringify({ cookie }), { mode: 0o600, flag: "wx" });
 	await ready(cookie);
 	const key = crypto.randomUUID();
 	const input = { topic: `acceptance/${key}`, body: "A preserved — café 🐘 数据" };
@@ -191,10 +268,12 @@ async function run() {
 			)
 		).json(),
 	);
+	counter++;
+	await saveAuthenticator();
 	const proof = Buffer.from(
 		JSON.stringify({
 			id: challenge.id,
-			response: device.assertion(challenge.options.challenge, ++counter, origin, rpId),
+			response: device.assertion(challenge.options.challenge, counter, origin, rpId),
 		}),
 	).toString("base64url");
 	const restored = Schema.decodeUnknownSync(
