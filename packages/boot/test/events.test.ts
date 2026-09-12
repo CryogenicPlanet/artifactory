@@ -145,6 +145,7 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 	for (const table of ["child_attempts", "backups", "cutover"]) await app.sql(`DROP TABLE ${table}`);
 	await app.sql("ALTER TABLE sessions DROP COLUMN last_seen_at");
 	await app.sql("DROP TABLE public_paths");
+	await app.sql("DROP TABLE IF EXISTS boot_migrations");
 	await app.sql("PRAGMA user_version=5");
 	await app.sql("INSERT INTO settings VALUES('preserved','value')");
 	await app.sql("INSERT INTO source_batches VALUES('pending','lock','rahul',1,'publishing')");
@@ -316,6 +317,7 @@ it("backfills legacy routing without altering pending state or original event by
 	for (const column of ["previous_directory", "directory"]) await app.sql(`ALTER TABLE versions DROP COLUMN ${column}`);
 	await app.sql("DROP TABLE public_paths");
 	await app.sql("ALTER TABLE backups DROP COLUMN legacy_store_id");
+	await app.sql("DROP TABLE IF EXISTS boot_migrations");
 	await app.sql("PRAGMA user_version=12");
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
 	expect(await app.sql("SELECT topic FROM events ORDER BY seq")).toEqual([
@@ -344,6 +346,7 @@ it("migrates indexed projections without changing routed topics, JSON bytes or p
 	for (const column of ["source_generation", "prior_generation", "source_batch"])
 		await app.sql(`ALTER TABLE db_restore_requests DROP COLUMN ${column}`);
 	await app.sql("ALTER TABLE backups DROP COLUMN legacy_store_id");
+	await app.sql("DROP TABLE IF EXISTS boot_migrations");
 	await app.sql("PRAGMA user_version=13");
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });

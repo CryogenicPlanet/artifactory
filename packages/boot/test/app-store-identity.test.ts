@@ -286,6 +286,7 @@ it.for(["cutover", "restore"])(
 	async (kind, test) => {
 		const app = await fixture(test);
 		await app.legacy();
+		await app.sql("DROP TABLE IF EXISTS boot_migrations");
 		await app.sql("ALTER TABLE backups DROP COLUMN legacy_store_id; PRAGMA user_version=16");
 		if (kind === "cutover")
 			await app.sql(

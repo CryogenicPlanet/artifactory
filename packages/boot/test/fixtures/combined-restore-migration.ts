@@ -13,6 +13,7 @@ const main = Effect.gen(function* () {
 		yield* sql.unsafe(`ALTER TABLE db_restore_requests DROP COLUMN ${column}`);
 	yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
 	yield* sql`ALTER TABLE backups DROP COLUMN legacy_store_id`;
+	yield* sql`DROP TABLE IF EXISTS boot_migrations`;
 	yield* sql`PRAGMA user_version=14`;
 	for (const n of [1, 2, 3, 4])
 		yield* sql`INSERT INTO generations(n,entry_file,status,good,started_at) VALUES(${n},'server.ts','retired',1,1)`;

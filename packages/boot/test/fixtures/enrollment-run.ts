@@ -48,6 +48,7 @@ const run = Effect.gen(function* () {
 		yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;
 		yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 		yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
+		yield* sql`DROP TABLE IF EXISTS boot_migrations`;
 		yield* sql`PRAGMA user_version=6`;
 		yield* sql`INSERT INTO passkeys VALUES('saved','public-key',4,'[]','label',12)`;
 		yield* sql`INSERT INTO sessions(id,hash,created_at,expires_at) VALUES('session','hash',1,9999999999999)`;
