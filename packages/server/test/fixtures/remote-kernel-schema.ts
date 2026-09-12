@@ -12,6 +12,7 @@ import { readFile } from "node:fs/promises";
 import { BunServices, BunHttpPlatform } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import type { RemoteStore } from "@comms/storage/store";
 import { remoteClientLayer } from "@comms/storage/remote-client";
 import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
 import { remoteAppKernelSchema } from "../../../boot/src/app-kernel-schema.ts";
@@ -49,9 +50,21 @@ await Effect.runPromise(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const fs = yield* FileSystem.FileSystem;
+			const url = new URL(`${settings.engine === "pg" ? "postgres" : "mysql"}://localhost`);
+			url.hostname = settings.host.includes(":") ? `[${settings.host}]` : settings.host;
+			url.port = String(settings.port);
+			url.username = encodeURIComponent(settings.username);
+			url.password = encodeURIComponent(settings.password);
+			url.pathname = `/${encodeURIComponent(settings.database)}`;
+			const store: RemoteStore = {
+				_tag: settings.engine === "pg" ? "postgres" : "mysql",
+				url: Redacted.make(url.href),
+				database: settings.database,
+			};
 			const boot: BootChannel["Service"] = {
 				epoch: "current",
-				filename: ":memory:",
+				filename: null,
+				store,
 				generation: 1,
 				backup: Effect.void,
 				changed: () => Effect.never,
