@@ -23,7 +23,8 @@ export const open = (options: RemoteConnection, tag: string) => {
 			: MysqlClient.make({
 					...common,
 					poolConfig: {
-						...(options.tls ? { ssl: { rejectUnauthorized: true } } : {}),
+						// mysql2 verifies the chain by default but requires this separate hostname check.
+						...(options.tls ? { ssl: { rejectUnauthorized: true, verifyIdentity: true } } : {}),
 						connectAttributes: { comms_attempt: tag },
 						bigNumberStrings: true,
 						typeCast: mysqlTypeCast,
