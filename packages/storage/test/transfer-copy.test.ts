@@ -10,7 +10,7 @@ const fixture = async (test: TestContext, mode: string) => {
 	const root = await mkdtemp(join(tmpdir(), "comms-transfer-copy-"));
 	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
 	const result = await promisify(execFile)("bun", [join(import.meta.dirname, "fixtures/transfer-copy.ts"), root, mode]);
-	return Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(result.stdout);
+	return Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(result.stdout);
 };
 
 it("copies across multiple reader chunks without changing integers, binary bytes, Unicode or JSON", async (test) => {
@@ -24,7 +24,10 @@ it("copies across multiple reader chunks without changing integers, binary bytes
 });
 
 it("refuses a late null before writing any row to a nonnullable destination", async (test) => {
-	expect(await fixture(test, "null-target")).toMatchObject({ result: { _tag: "Failure" }, count: 0 });
+	expect(await fixture(test, "null-target")).toMatchObject({
+		result: { _tag: "Failure", failure: { code: "transfer_value_invalid" } },
+		count: 0,
+	});
 });
 
 it("refuses a stale expected digest before writing any target data", async (test) => {

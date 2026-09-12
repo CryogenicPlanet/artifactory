@@ -73,7 +73,14 @@ await Effect.runPromise(
 			return yield* copyTransferTable(
 				source,
 				target,
-				plan,
+				mode === "null-target"
+					? {
+							...plan,
+							columns: plan.columns.map((column) =>
+								column.name === "optional" ? { ...column, nullable: false } : column,
+							),
+						}
+					: plan,
 				targetShape,
 				mode === "wrong-digest" ? { ...expected, digest: "0".repeat(64) } : expected,
 			);
