@@ -4,7 +4,7 @@ import { KernelBoot, validateKernelBootId } from "./kernel-boot.ts";
 import { ChildError } from "./child-process.ts";
 
 /** Durable process ownership evidence. A missing receipt is never interpreted as a dead process. */
-const make = (directory: string) =>
+const make = (directory: string, remote = false) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const fs = yield* FileSystem.FileSystem;
@@ -48,7 +48,7 @@ const make = (directory: string) =>
 					const priorBootId = validateKernelBootId(owner.boot_id);
 					// A changed kernel lifetime closes every previous process, even when power loss prevented receipts.
 					// Same-kernel container or keeper restarts still require positive keeper evidence.
-					if (bootId !== null && priorBootId !== null && bootId !== priorBootId) {
+					if (!remote && bootId !== null && priorBootId !== null && bootId !== priorBootId) {
 						yield* sql`UPDATE child_attempts SET closed=1 WHERE id=${owner.id}`;
 						continue;
 					}
@@ -65,4 +65,4 @@ const make = (directory: string) =>
 export class ChildAttempts extends Context.Service<ChildAttempts, Effect.Success<ReturnType<typeof make>>>()(
 	"comms/boot/ChildAttempts",
 ) {}
-export const layer = (directory: string) => Layer.effect(ChildAttempts, make(directory));
+export const layer = (directory: string, remote = false) => Layer.effect(ChildAttempts, make(directory, remote));

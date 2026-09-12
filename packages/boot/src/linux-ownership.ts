@@ -1,5 +1,5 @@
 import { Redacted } from "effect";
-import { childStore, render } from "@comms/storage/store";
+import { childStore, parseDescriptor, render } from "@comms/storage/store";
 import type { PlatformError } from "effect/PlatformError";
 import { Effect, FileSystem, Path } from "effect";
 import type { ChildConfiguration } from "./keeper-configuration.ts";
@@ -108,6 +108,13 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 	if (yield* fs.exists("/data/pages")) yield* sharePages("/data/pages");
 	const descriptor = config.env.APP_STORE;
 	if (!descriptor) return yield* Effect.die("Missing app store descriptor");
+	const parsed = yield* parseDescriptor(descriptor).pipe(Effect.orDie);
+	if (parsed._tag !== "file") {
+		if (!config.remote || config.remote.dataDirectory !== "/data" || config.env.APP_DATABASE !== undefined)
+			return yield* Effect.die("Invalid remote app configuration");
+		return { ...config, env: { ...config.env, TMPDIR: "/data/runtime", HOME: "/data/runtime" } };
+	}
+	if (config.remote) return yield* Effect.die("Invalid remote app configuration");
 	const store = yield* childStore(descriptor, config.env.APP_DATABASE).pipe(Effect.orDie);
 	const filename = store.filename;
 	if (config.env.STATE !== "rehearsal") {

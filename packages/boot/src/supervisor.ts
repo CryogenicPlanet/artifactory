@@ -1,7 +1,8 @@
+import type { RemoteRuntime } from "./remote-runtime.ts";
 import { Redacted } from "effect";
 import { recoveryIntents } from "./recovery-intents.ts";
 import { SqlClient } from "effect/unstable/sql";
-import { render, type FileStore } from "@comms/storage/store";
+import { render, StoreError, type Store } from "@comms/storage/store";
 import { redactHex } from "./auth-primitives.ts";
 import { Cause, Config, Crypto, Effect, FileSystem, Path, Queue, Ref, Schema, Scope, Semaphore } from "effect";
 import { HttpServer } from "effect/unstable/http";
@@ -41,7 +42,7 @@ export interface SupervisedChild {
 }
 
 /** Supervisor owns process recovery; the cutover coordinator shares its one operation gate. */
-export const supervise = Effect.fn("supervise")(function* (options: ApplicationSource) {
+export const supervise = Effect.fn("supervise")(function* (options: ApplicationSource, remote?: RemoteRuntime) {
 	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
 	const crypto = yield* Crypto.Crypto;
 	const path = yield* Path.Path;
@@ -113,7 +114,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		}));
 	const launch = (
 		generation: Generation,
-		store: FileStore,
+		store: Store,
 		mode: "candidate" | "rehearsal",
 		rehearsalSequence?: number,
 		epochOverride?: string,
@@ -135,19 +136,26 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 				? `${generation.snapshot_dir}.board`
 				: path.join(generation.snapshot_dir ?? "", "board");
 			const owner = yield* owners.reserve(generation.n);
+			const remoteConfiguration =
+				store._tag === "file"
+					? undefined
+					: remote
+						? yield* remote.reserveOwner(store, owner.id)
+						: yield* new StoreError({ code: "store_engine_unsupported" });
 			const process = yield* launchChild(
 				{
 					entry,
 					cwd: generation.snapshot_dir ?? "",
 					attempt: owner.id,
 					receipt: owner.receipt,
+					...(remoteConfiguration ? { remote: remoteConfiguration } : {}),
 					env: {
 						PORT: "0",
 						BOOT_SECRET: secret,
 						WRITER_EPOCH: epoch,
 						GENERATION: String(generation.n),
 						APP_STORE: Redacted.value(render(store)),
-						APP_DATABASE: store.filename,
+						...(store._tag === "file" ? { APP_DATABASE: store.filename } : {}),
 						PAGES_DIRECTORY: path.resolve(options.dataDirectory, "pages"),
 						BOARD_DIRECTORY: board,
 						STATE: mode,
