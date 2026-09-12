@@ -1,5 +1,5 @@
 import type { TransferColumn } from "@comms/storage/transfer-inventory";
-import type { TransferEngine } from "./derived-schema.ts";
+import type { TransferEngine, TransferStore } from "./derived-schema.ts";
 
 /** Compare only scalar literals. Executable defaults need trusted migration-specific equivalence,
  * not a parser which guesses whether arbitrary functions behave alike on another database. */
@@ -25,11 +25,20 @@ const literalDefault = (engine: TransferEngine, column: TransferColumn): string 
 };
 
 export const sameTransferDefault = (
+	store: TransferStore,
+	table: string,
 	sourceEngine: TransferEngine,
 	source: TransferColumn,
 	targetEngine: TransferEngine,
 	target: TransferColumn,
 ): boolean => {
+	// SQLite migration 18 backfilled old backup provenance with a literal default. Remote
+	// boot schemas were created with mandatory explicit provenance and intentionally no default.
+	if (store === "boot" && table === "backups" && source.name === "engine" && target.name === "engine") {
+		const trusted = (engine: TransferEngine, column: TransferColumn) =>
+			engine === "sqlite" ? column.default === "'sqlite'" : column.default === null;
+		return trusted(sourceEngine, source) && trusted(targetEngine, target);
+	}
 	const left = literalDefault(sourceEngine, source);
 	const right = literalDefault(targetEngine, target);
 	return left !== undefined && right !== undefined && left === right;

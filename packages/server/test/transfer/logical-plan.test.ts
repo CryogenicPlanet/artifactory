@@ -180,6 +180,7 @@ it("accepts only exact trusted SQLite internals and FTS shadow names", async () 
 	expect(await Effect.runPromise(logicalTransferPlan({ store: "app", source, target: side("pg", [], true) }))).toEqual({
 		tables: [],
 		ledgers: [],
+		empty: { source: [], target: [] },
 	});
 	await rejects(
 		logicalTransferPlan({
@@ -375,4 +376,71 @@ it("preserves the MySQL core scalar-expression default without accepting escaped
 		}),
 		"messages.mentions.default",
 	);
+});
+
+it("separates exact MySQL DDL journals as explicit empty prerequisites", async () => {
+	const journal = table(
+		"boot_migrations_intent",
+		[
+			column("singleton", "integer", { type: "int" }),
+			column("migration_id", "integer", { type: "int" }),
+			column("name", "text", { type: "varchar", length: 255 }),
+			column("operation", "integer", { type: "int" }),
+			column("active", "text", { type: "varchar", length: 255, nullable: true }),
+		],
+		["singleton"],
+	);
+	const result = await Effect.runPromise(
+		logicalTransferPlan({ store: "boot", source: side("mysql", [journal]), target: side("sqlite", []) }),
+	);
+	expect(result.tables).toEqual([]);
+	expect(result.ledgers).toEqual([]);
+	expect(result.empty.source.map((plan) => plan.name)).toEqual(["boot_migrations_intent"]);
+	expect(result.empty.target).toEqual([]);
+	await rejects(
+		logicalTransferPlan({
+			store: "boot",
+			source: side("mysql", [{ ...journal, columns: [...journal.columns, column("untracked")] }]),
+			target: side("sqlite", []),
+		}),
+		"boot_migrations_intent",
+	);
+	await rejects(
+		logicalTransferPlan({
+			store: "boot",
+			source: side("mysql", [{ ...journal, name: "custom_migrations_intent" }]),
+			target: side("sqlite", []),
+		}),
+		"tables",
+	);
+});
+
+it("allows only immutable backup-engine default variants", async () => {
+	const backup = (value: string | null) =>
+		table("backups", [column("id"), column("engine", "text", { default: value })], ["id"]);
+	for (const engine of ["pg", "mysql"] as const) {
+		await Effect.runPromise(
+			logicalTransferPlan({
+				store: "boot",
+				source: side("sqlite", [backup("'sqlite'")]),
+				target: side(engine, [backup(null)]),
+			}),
+		);
+		await rejects(
+			logicalTransferPlan({
+				store: "boot",
+				source: side("sqlite", [backup("'other'")]),
+				target: side(engine, [backup(null)]),
+			}),
+			"backups.engine.default",
+		);
+		await rejects(
+			logicalTransferPlan({
+				store: "boot",
+				source: side("sqlite", [backup("'sqlite'")]),
+				target: side(engine, [backup("'sqlite'")]),
+			}),
+			"backups.engine.default",
+		);
+	}
 });

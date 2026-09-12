@@ -1,4 +1,5 @@
 import type { TransferColumn, TransferInventory, TransferTable } from "@comms/storage/transfer-inventory";
+import { emptyJournalNames, emptyJournalPlan, withoutEmptyJournals } from "./empty-journals.ts";
 import { sameTransferDefault } from "./column-default.ts";
 import type { TransferKind } from "@comms/storage/transfer-values";
 import { Effect, Schema } from "effect";
@@ -146,7 +147,34 @@ export const logicalTransferPlan = (options: {
 	readonly target: { readonly engine: TransferEngine; readonly inventory: TransferInventory };
 }) =>
 	Effect.gen(function* () {
-		const { store, source, target } = options;
+		const { store } = options;
+		const empty: {
+			source: Array<NonNullable<ReturnType<typeof emptyJournalPlan>>>;
+			target: Array<NonNullable<ReturnType<typeof emptyJournalPlan>>>;
+		} = { source: [], target: [] };
+		for (const side of ["source", "target"] as const) {
+			for (const name of emptyJournalNames(store, options[side].engine)) {
+				const table = options[side].inventory.tables.find((table) => table.name === name);
+				if (!table) continue;
+				const plan = emptyJournalPlan(table);
+				if (!plan) return yield* unsupported(name);
+				empty[side].push(plan);
+			}
+		}
+		const source = {
+			...options.source,
+			inventory: withoutEmptyJournals(
+				options.source.inventory,
+				empty.source.map((table) => table.name),
+			),
+		};
+		const target = {
+			...options.target,
+			inventory: withoutEmptyJournals(
+				options.target.inventory,
+				empty.target.map((table) => table.name),
+			),
+		};
 		for (const side of [source, target]) {
 			const expected =
 				store === "app" && side.engine === "sqlite" ? coreSearchObjects.map((object) => object.name).sort() : [];
@@ -217,7 +245,7 @@ export const logicalTransferPlan = (options: {
 					destination.kind !== column.kind
 				)
 					return yield* mismatch(`${name}.${column.name}`);
-				if (!sameTransferDefault(source.engine, column, target.engine, destination))
+				if (!sameTransferDefault(store, name, source.engine, column, target.engine, destination))
 					return yield* unsupported(`${name}.${column.name}.default`);
 				columns.push({ name: column.name, kind: column.kind, nullable: destination.nullable });
 			}
@@ -266,5 +294,5 @@ export const logicalTransferPlan = (options: {
 			ordered.push(plan);
 			pending.splice(index, 1);
 		}
-		return { tables: ordered, ledgers };
+		return { tables: ordered, ledgers, empty };
 	});

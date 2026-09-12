@@ -99,7 +99,9 @@ for (const [store, settings] of [
 				source: { engine: settings.engine, inventory },
 				target: { engine: settings.engine, inventory },
 			});
-			assert.equal(plan.tables.length + plan.ledgers.length, inventory.tables.length);
+			assert.equal(plan.tables.length + plan.ledgers.length + plan.empty.source.length, inventory.tables.length);
+			for (const table of plan.empty.source)
+				assert.equal((yield* sql`SELECT singleton FROM ${sql(table.name)}`).length, 0);
 			assert.deepEqual(
 				plan.ledgers.map((table) => table.name).sort(),
 				store === "boot" ? ["boot_migrations"] : ["core_migrations", "extension_migrations", "migrations"],
