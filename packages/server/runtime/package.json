@@ -33,7 +33,12 @@
 		"vite": "8.2.2"
 	},
 	"comms": {
-		"board_directory": "environment-v1"
+		"board_directory": "environment-v1",
+		"storage_engines": [
+			"sqlite",
+			"pg",
+			"mysql"
+		]
 	},
 	"patchedDependencies": {
 		"@effect/sql-mysql2@4.0.0-rc.113": "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"

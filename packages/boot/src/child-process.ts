@@ -22,6 +22,7 @@ export class ChildError extends Schema.TaggedError<ChildError>()("ChildError", {
 		"cutover_backup_invalid",
 		"cutover_backup_missing",
 		"cutover_recovery_required",
+		"generation_store_incompatible",
 		"health_failed",
 		"incompatible_schema",
 		"keeper_closure_unproven",

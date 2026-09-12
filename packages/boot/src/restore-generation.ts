@@ -1,3 +1,4 @@
+import { snapshotStoreEntry } from "./application.ts";
 import type { BackupRecord } from "./backup-metadata.ts";
 import { Effect, FileSystem, Path, Ref } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -32,6 +33,7 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const source = (yield* generations.list).find((item) => item.n === record.source_generation && item.good === 1);
 	if (!source) return yield* new ChildError({ code: "restore_snapshot_missing" });
+	yield* snapshotStoreEntry(source, root, yield* recovery.store);
 	const directory = yield* generationSource(root, source.n);
 	const temporarySource = yield* fs.makeTempDirectoryScoped({ directory: root, prefix: ".restore-source-" });
 	const materialized = path.join(temporarySource, "app");

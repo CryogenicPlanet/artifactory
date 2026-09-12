@@ -1,3 +1,4 @@
+import { snapshotStoreEntry } from "./application.ts";
 import { lockBootWrite } from "./boot-write-lock.ts";
 import { restoreBeforeImage } from "./restore-before-image.ts";
 import { humanAgent } from "./human-agent.ts";
@@ -161,6 +162,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 			Effect.gen(function* () {
 				yield* supervisor.assertClosure;
 				const generation = yield* selectGeneration(record);
+				yield* snapshotStoreEntry(generation, recovery.dataDirectory, yield* recovery.store);
 				const target = yield* saved(record.backup);
 				if (target.published_through !== record.restored_to_seq)
 					return yield* new ChildError({ code: "restore_backup_changed" });
@@ -364,6 +366,8 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 						prior?.generation ??
 						(yield* generations.list).find((item) => item.good === 1 && item.snapshot_dir !== null);
 					if (!generation) return yield* new ChildError({ code: "restore_snapshot_missing" });
+					if (record.source_generation === null)
+						yield* snapshotStoreEntry(generation, recovery.dataDirectory, yield* recovery.store);
 					// Pin another holder without consuming their staging; record and pin commit together.
 					yield* sql.withTransaction(
 						Effect.gen(function* () {

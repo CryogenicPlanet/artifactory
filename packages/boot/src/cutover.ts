@@ -10,7 +10,7 @@ import { artifactRetention, ArtifactRetentionRejected } from "./artifact-retenti
 import { HeadroomPolicy, storageHeadroom, StorageRejected } from "./storage-headroom.ts";
 import { DbOps } from "./db-ops.ts";
 import { AppRecovery } from "./app-recovery.ts";
-import type { ApplicationSource } from "./application.ts";
+import { snapshotStoreEntry, type ApplicationSource } from "./application.ts";
 import { ChildAttempts } from "./child-attempts.ts";
 import { ChildError } from "./child-process.ts";
 import { Events } from "./events.ts";
@@ -231,6 +231,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					yield* generations.setSnapshot(reserved.n, snapshot.directory);
 					const generation = { ...reserved, snapshot_dir: snapshot.directory };
 					rollback.generation = generation;
+					yield* snapshotStoreEntry(generation, options.dataDirectory, yield* recovery.store);
 					if (recovery.filename !== undefined && !(yield* fs.exists(recovery.filename)))
 						yield* recovery.prepare(yield* freshEpoch);
 					const epoch = yield* freshEpoch;
@@ -463,7 +464,9 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					(Schema.is(FreezeTimeout)(failure.success) ||
 						Schema.is(StorageRejected)(failure.success) ||
 						Schema.is(ArtifactRetentionRejected)(failure.success) ||
-						(Schema.is(ChildError)(failure.success) && failure.success.code === "rehearsal_copy_timeout"))
+						(Schema.is(ChildError)(failure.success) &&
+							(failure.success.code === "rehearsal_copy_timeout" ||
+								failure.success.code === "generation_store_incompatible")))
 				)
 					return yield* failure.success;
 				return {

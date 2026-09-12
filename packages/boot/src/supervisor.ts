@@ -6,7 +6,7 @@ import { render, StoreError, type Store } from "@comms/storage/store";
 import { logRedactor } from "./log-redaction.ts";
 import { Cause, Config, Crypto, Effect, FileSystem, Path, Queue, Ref, Schema, Scope, Semaphore } from "effect";
 import { HttpServer } from "effect/unstable/http";
-import { prepareGeneration, snapshotEntry, type ApplicationSource } from "./application.ts";
+import { prepareGeneration, snapshotStoreEntry, type ApplicationSource } from "./application.ts";
 import { AppRecovery } from "./app-recovery.ts";
 import { ChildAttempts } from "./child-attempts.ts";
 import { ChildError, launchChild, type RunningChild } from "./child-process.ts";
@@ -119,7 +119,8 @@ export const supervise = Effect.fn("supervise")(function* (
 			error: redact(Cause.pretty(cause)),
 			stderr: redact(state.stderr),
 		}));
-	const launch = (
+	const launchSelected = (
+		entry: string,
 		generation: Generation,
 		store: Store,
 		mode: "candidate" | "rehearsal",
@@ -138,7 +139,6 @@ export const supervise = Effect.fn("supervise")(function* (
 				generation: generation.n,
 				state: "starting",
 			};
-			const entry = yield* snapshotEntry(generation, options.dataDirectory);
 			const board = (yield* fs.exists(`${generation.snapshot_dir}.board`))
 				? `${generation.snapshot_dir}.board`
 				: path.join(generation.snapshot_dir ?? "", "board");
@@ -182,6 +182,16 @@ export const supervise = Effect.fn("supervise")(function* (
 			);
 			return { process, attempt, generation, store, ...owner } satisfies ActiveChild;
 		});
+	const launch = (
+		generation: Generation,
+		store: Store,
+		mode: "candidate" | "rehearsal",
+		rehearsalSequence?: number,
+		epochOverride?: string,
+	) =>
+		snapshotStoreEntry(generation, options.dataDirectory, store).pipe(
+			Effect.flatMap((entry) => launchSelected(entry, generation, store, mode, rehearsalSequence, epochOverride)),
+		);
 	const recordAttempt = (value: ActiveChild, state: Attempt["state"]) =>
 		channelGate.withPermit(
 			Ref.update(attempts, (items) => [
@@ -283,10 +293,11 @@ export const supervise = Effect.fn("supervise")(function* (
 		Effect.gen(function* () {
 			const recovery = yield* AppRecovery;
 			const store = yield* recovery.store;
+			const entry = yield* snapshotStoreEntry(generation, options.dataDirectory, store);
 			const epoch = store._tag === "file" ? undefined : Buffer.from(yield* crypto.randomBytes(32)).toString("hex");
 			// Remote identity and initial schema must exist before any editable import can connect.
 			if (epoch) yield* recovery.prepare(epoch);
-			const value = yield* launch(generation, store, "candidate", undefined, epoch);
+			const value = yield* launchSelected(entry, generation, store, "candidate", undefined, epoch);
 			const started = yield* Effect.gen(function* () {
 				if (store._tag === "file") yield* recovery.prepare(value.attempt.epoch);
 				if (isolated && store._tag === "file" && ((yield* fs.stat(store.filename)).mode & 0o777) !== 0o660)
@@ -351,6 +362,10 @@ export const supervise = Effect.fn("supervise")(function* (
 				yield* Ref.update(status, (value) => ({ ...value, stderr }));
 				yield* fail(Cause.fail(result.failure));
 				yield* assertClosure;
+				if (Schema.is(ChildError)(result.failure) && result.failure.code === "generation_store_incompatible") {
+					yield* Ref.update(tried, (values) => ({ ...values, [generation.n]: 3 }));
+					break;
+				}
 				if (attempt < 3) yield* Effect.sleep(attempt === 1 ? "250 millis" : "500 millis");
 			}
 		}

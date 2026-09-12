@@ -1,3 +1,4 @@
+import type { Store } from "@comms/storage/store";
 import { on } from "@comms/storage/dialect";
 import { Cause, Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -34,6 +35,36 @@ export const snapshotEntry = Effect.fn("snapshotEntry")(function* (generation: G
 	if ((yield* fs.realPath(entry)) !== entry || (yield* fs.stat(entry)).type !== "File") {
 		return yield* new SnapshotRejected({ path: entry, reason: "Snapshot entry must be a regular file" });
 	}
+	return entry;
+});
+
+/** Capabilities belong to this frozen source, never the current image or editable tree. */
+export const snapshotStoreEntry = Effect.fn("snapshotStoreEntry")(function* (
+	generation: Generation,
+	dataDirectory: string,
+	store: Store,
+) {
+	const entry = yield* snapshotEntry(generation, dataDirectory);
+	const fs = yield* FileSystem.FileSystem;
+	const path = yield* Path.Path;
+	const manifest = path.join(generation.snapshot_dir ?? "", "package.json");
+	const incompatible = () => new ChildError({ code: "generation_store_incompatible" });
+	const engine = store._tag === "file" ? "sqlite" : store._tag === "postgres" ? "pg" : "mysql";
+	const declaration = Schema.Struct({
+		comms: Schema.optionalKey(
+			Schema.Struct({
+				storage_engines: Schema.optionalKey(Schema.Array(Schema.Literals(["sqlite", "pg", "mysql"]))),
+			}),
+		),
+	});
+	const engines = yield* Effect.gen(function* () {
+		if (!(yield* fs.readDirectory(generation.snapshot_dir ?? "")).includes("package.json")) return undefined;
+		const info = yield* fs.stat(manifest);
+		if (info.type !== "File" || (yield* fs.realPath(manifest)) !== manifest) return yield* incompatible();
+		const parsed = yield* Schema.decodeEffect(Schema.fromJsonString(declaration))(yield* fs.readFileString(manifest));
+		return parsed.comms?.storage_engines;
+	}).pipe(Effect.mapError(incompatible));
+	if (!(engines ?? ["sqlite"]).includes(engine)) return yield* incompatible();
 	return entry;
 });
 
