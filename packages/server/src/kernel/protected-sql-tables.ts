@@ -7,6 +7,7 @@ export const kernelSqlTables = Object.freeze([
 	"kernel_writer",
 	"store_identity",
 	"core_migrations",
+	"migrations",
 	"kernel_migration_intent",
 	"mutation_batches",
 	"outbox",
