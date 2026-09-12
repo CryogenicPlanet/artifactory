@@ -356,6 +356,7 @@ it("stamps legacy provenance only for SQLite backups during adoption", async (te
 it.for(["cutover", "restore"])("refuses a v17 %s upgrade before stamping backup engines", async (kind, test) => {
 	const app = await fixture(test);
 	expect(await app.run()).toContain('"Success"');
+	await app.sql("DROP TABLE boot_migrations");
 	await app.sql("ALTER TABLE backups DROP COLUMN engine; PRAGMA user_version=17");
 	if (kind === "cutover")
 		await app.sql(
@@ -419,6 +420,7 @@ it("codes malformed store shape in both legacy and pending fresh adoption", asyn
 it.for(["cutover", "restore"])("refuses a v18 %s upgrade before enabling copy-owner recovery", async (kind, test) => {
 	const app = await fixture(test);
 	expect(await app.run()).toContain('"Success"');
+	await app.sql("DROP TABLE boot_migrations");
 	await app.sql("PRAGMA user_version=18");
 	if (kind === "cutover")
 		await app.sql(
