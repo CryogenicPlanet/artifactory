@@ -49,7 +49,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const crypto = yield* Crypto.Crypto;
-	const retention = yield* artifactRetention(options.dataDirectory);
+	const retention = yield* artifactRetention(options.dataDirectory, backup.dialect);
 	const policy = yield* HeadroomPolicy;
 	const headroom = yield* storageHeadroom(options.dataDirectory);
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
@@ -71,13 +71,16 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BackupRecord))),
 			);
 			const artifact = rows[0];
-			if (artifact && artifact.engine !== "sqlite") return yield* new ChildError({ code: "backup_engine_mismatch" });
+			if (artifact && artifact.engine !== backup.dialect)
+				return yield* new ChildError({ code: "backup_engine_mismatch" });
 			const saved = artifact?.path;
 			if (
+				!artifact ||
 				!saved ||
-				saved !== backupPath(path, options.dataDirectory, record.backup) ||
+				saved !== backupPath(path, options.dataDirectory, record.backup, artifact.engine) ||
 				(yield* fs.stat(saved)).type !== "File" ||
-				(yield* fs.realPath(saved)) !== backupPath(path, yield* fs.realPath(options.dataDirectory), record.backup)
+				(yield* fs.realPath(saved)) !==
+					backupPath(path, yield* fs.realPath(options.dataDirectory), record.backup, artifact.engine)
 			)
 				return yield* new ChildError({ code: "cutover_backup_invalid" });
 			if (record.phase !== "restoring") {
@@ -86,7 +89,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			}
 			// The replacement app must republish its grants before activation can expose its pages.
 			yield* sql`DELETE FROM public_paths`;
-			yield* backup.restoreInto({ path: saved, legacy_store_id: artifact?.legacy_store_id ?? null, engine: "sqlite" });
+			yield* backup.restoreInto(artifact);
 			yield* recovery.prepare(yield* freshEpoch);
 			yield* sql`UPDATE cutover SET phase='restored' WHERE singleton=1`;
 		});
@@ -277,7 +280,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						const id = yield* crypto.randomUUIDv4;
 						const directory = path.join(options.dataDirectory, "backups");
 						yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
-						const saved = path.join(directory, `${id}.db`);
+						const saved = backupPath(path, options.dataDirectory, id, backup.dialect);
 						const fence = (yield* events.state).published_through;
 						yield* retention.prune(yield* headroom.sample, yield* backup.estimatedBytes, [
 							...(prior ? [prior.generation.n] : []),
@@ -286,7 +289,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						const bytes = Number(yield* backup.clone({ _tag: "file", filename: saved }));
 						yield* sql.withTransaction(
 							Effect.gen(function* () {
-								yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation) VALUES(${id},${saved},'pre-flip',${bytes},${frozenAt},${fence},${generation.n})`;
+								yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation,engine) VALUES(${id},${saved},'pre-flip',${bytes},${frozenAt},${fence},${generation.n},${backup.dialect})`;
 								yield* sql`UPDATE generations SET backup_id=${id} WHERE n=${generation.n}`;
 								yield* events.writeBoot({
 									at: frozenAt,

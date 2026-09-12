@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { cp, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -113,7 +113,7 @@ it("creates a fresh pair and refuses missing, foreign and malformed finalized id
 	const app = await fixture(test);
 	expect(await app.run()).toContain('"Success"');
 	await app.sql("UPDATE kernel_writer SET epoch='unchanged'; UPDATE store_identity SET store_id='foreign'", "comms.db");
-	expect(await app.run()).toContain("app_store_missing");
+	expect(await app.run()).toContain("app_store_mismatch");
 	expect(await app.sql("SELECT epoch FROM kernel_writer", "comms.db")).toEqual([{ epoch: "unchanged" }]);
 	await app.sql("DROP TABLE store_identity", "comms.db");
 	expect(await app.run()).toContain("app_store_missing");
@@ -141,7 +141,9 @@ it("restores only catalog-authorized legacy copies, retaining original bytes acr
 	await app.crash("restore-pause");
 	expect(await app.run()).toContain('"Success"');
 	expect(await readFile(target)).toEqual(original);
-	expect(await readFile(join(app.root, "comms.db.restore-journal"), "utf8")).toBe("stale journal");
+	expect(await app.run("sweep")).toContain('"Success"');
+	await expect(readFile(join(app.root, "comms.db.restore-journal"))).rejects.toThrow();
+	await expect(readFile(join(app.root, "comms.db.restore"))).rejects.toThrow();
 	expect(await app.sql("SELECT body FROM messages", "comms.db")).toEqual([{ body: "retained" }]);
 	await app.sql("UPDATE backups SET legacy_store_id=NULL WHERE id='saved'");
 	await app.sql("UPDATE messages SET body='acknowledged after restore'", "comms.db");
@@ -186,7 +188,7 @@ it("refuses foreign and malformed backup identity without replacing the live sto
 	);
 	await app.sql("UPDATE store_identity SET store_id='foreign'", "backups/saved.db");
 	const before = await readFile(join(app.root, "comms.db"));
-	expect(await app.run("restore")).toContain("app_store_missing");
+	expect(await app.run("restore")).toContain("app_store_mismatch");
 	expect(await readFile(join(app.root, "comms.db"))).toEqual(before);
 	await app.sql("ALTER TABLE store_identity DROP COLUMN initialized_at", "backups/saved.db");
 	expect(await app.run("restore")).toContain("app_store_identity_invalid");
@@ -349,4 +351,67 @@ it("stamps legacy provenance only for SQLite backups during adoption", async (te
 	expect(await app.sql("SELECT legacy_store_id AS id FROM backups WHERE engine='sqlite'")).toEqual(
 		await app.sql("SELECT value AS id FROM settings WHERE key='app_store_id'"),
 	);
+});
+
+it.for(["cutover", "restore"])("refuses a v17 %s upgrade before stamping backup engines", async (kind, test) => {
+	const app = await fixture(test);
+	expect(await app.run()).toContain('"Success"');
+	await app.sql("ALTER TABLE backups DROP COLUMN engine; PRAGMA user_version=17");
+	if (kind === "cutover")
+		await app.sql(
+			"INSERT INTO cutover(singleton,candidate,backup,lock_id,family,phase) VALUES(1,1,'saved','lock','family','restoring')",
+		);
+	else
+		await app.sql(
+			"INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES('proof','hash','session','saved','restoring',0)",
+		);
+	const before = await readFile(join(app.root, "boot.db"));
+	expect(await app.run()).toContain("BootIdentityUpgradePending");
+	expect(await readFile(join(app.root, "boot.db"))).toEqual(before);
+	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 17 }]);
+	expect(await app.sql("SELECT name FROM pragma_table_info('backups') WHERE name='engine'")).toEqual([]);
+});
+
+it("accepts finalized identity relocation while retaining the original adoption path", async (test) => {
+	const app = await fixture(test);
+	expect(await app.run()).toContain('"Success"');
+	const before = await app.sql("SELECT value FROM settings WHERE key='app_store_adoption'");
+	await mkdir(join(app.root, "store"));
+	await rename(join(app.root, "comms.db"), join(app.root, "store/comms.db"));
+	expect(await app.run("relocated")).toContain('"Success"');
+	expect(await app.sql("SELECT value FROM settings WHERE key='app_store_adoption'")).toEqual(before);
+});
+
+it("refuses pending adoption relocation without stamping the moved store", async (test) => {
+	const app = await fixture(test);
+	await app.legacy();
+	await app.crash("reserve");
+	await mkdir(join(app.root, "store"));
+	await rename(join(app.root, "comms.db"), join(app.root, "store/comms.db"));
+	const before = await readFile(join(app.root, "store/comms.db"));
+	expect(await app.run("relocated")).toContain("app_store_identity_invalid");
+	expect(await readFile(join(app.root, "store/comms.db"))).toEqual(before);
+});
+
+it("refuses app evidence ahead of a replaced boot allocator before stamping or fencing", async (test) => {
+	const app = await fixture(test);
+	await app.legacy();
+	await app.sql("DELETE FROM settings WHERE key='app_store_initialized'");
+	await app.sql(
+		"INSERT INTO mutation_batches VALUES('old',1,3,3); UPDATE kernel_writer SET epoch='unchanged'",
+		"comms.db",
+	);
+	expect(await app.run()).toContain("app_evidence_invalid");
+	expect(await app.sql("SELECT epoch FROM kernel_writer", "comms.db")).toEqual([{ epoch: "unchanged" }]);
+	expect(await app.sql("SELECT name FROM sqlite_master WHERE name='store_identity'", "comms.db")).toEqual([]);
+});
+
+it("codes malformed store shape in both legacy and pending fresh adoption", async (test) => {
+	const app = await fixture(test);
+	await app.crash("reserve");
+	await app.sql("CREATE TABLE unrelated(value TEXT)", "comms.db");
+	expect(await app.run()).toContain("app_store_identity_invalid");
+	expect(await app.sql("SELECT name FROM sqlite_master WHERE name='store_identity'", "comms.db")).toEqual([]);
+	await app.sql("DELETE FROM settings WHERE key='app_store_adoption'");
+	expect(await app.run()).toContain("app_store_identity_invalid");
 });

@@ -146,7 +146,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 						BOOT_SECRET: secret,
 						WRITER_EPOCH: epoch,
 						GENERATION: String(generation.n),
-						APP_STORE: Redacted.value(render(store)),
+						APP_STORE: Redacted.value(yield* render(store)),
 						APP_DATABASE: store.filename,
 						PAGES_DIRECTORY: path.resolve(options.dataDirectory, "pages"),
 						BOARD_DIRECTORY: board,

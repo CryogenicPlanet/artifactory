@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { readStoragePolicy } from "./settings-schema.ts";
-import { BackupRecord } from "./backup-metadata.ts";
+import { BackupRecord, backupPath } from "./backup-metadata.ts";
 import { StorageRejected } from "./storage-headroom.ts";
 import type { StorageVolume } from "./storage-volume.ts";
 
@@ -29,7 +29,7 @@ const BackupId = Schema.Struct({ id: Schema.String });
  * Only catalogued boot-owned artifacts are considered; this is not a volume scanner.
  * File removal precedes catalog removal so a crash leaves a retryable missing-file row.
  */
-export const artifactRetention = (directory: string) =>
+export const artifactRetention = (directory: string, engine: BackupRecord["engine"]) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const fs = yield* FileSystem.FileSystem;
@@ -142,6 +142,8 @@ export const artifactRetention = (directory: string) =>
 					}
 					let backupBytes = 0;
 					for (const backup of catalog.backups) {
+						// Foreign artifacts remain preserved; physical headroom still counts their bytes.
+						if (backup.engine !== engine) continue;
 						if (
 							!Number.isSafeInteger(backup.bytes) ||
 							backup.bytes < 0 ||
@@ -157,7 +159,7 @@ export const artifactRetention = (directory: string) =>
 						if (limit === null || backupBytes + requiredBackupBytes <= limit) break;
 						if (
 							protectedBackups.has(backup.id) ||
-							backup.engine !== "sqlite" ||
+							backup.engine !== engine ||
 							backup.published_through === null ||
 							backup.generation === null ||
 							(backup.reason !== "hourly" &&
@@ -169,7 +171,7 @@ export const artifactRetention = (directory: string) =>
 						)
 							continue;
 						if (!/^[A-Za-z0-9_-]+$/.test(backup.id)) continue;
-						const relative = path.join("backups", `${backup.id}.db`);
+						const relative = path.relative(root, backupPath(path, root, backup.id, backup.engine));
 						if (backup.path !== path.join(directory, relative) && backup.path !== path.join(root, relative)) continue;
 						yield* remove(root, relative, false);
 						yield* sql`DELETE FROM backups WHERE id=${backup.id}`;

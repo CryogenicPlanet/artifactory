@@ -37,7 +37,7 @@ export const initializeBootSchema = Effect.gen(function* () {
 	if (version === undefined) return yield* Effect.die("Missing boot schema version");
 	if (version > 18) return yield* new BootSchemaTooNew({ found: version, supported: 18 });
 	// Refuse before schema or journal-mode changes so the previous image can finish recovery.
-	if (version >= 9 && version < 17) {
+	if (version >= 9 && version < 18) {
 		const cutovers = yield* sql`SELECT singleton FROM cutover WHERE phase!='accepted' LIMIT 1`;
 		const restores =
 			version >= 13

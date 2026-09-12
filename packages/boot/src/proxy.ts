@@ -85,7 +85,8 @@ const hopHeaders: readonly string[] = Object.freeze([
 ]);
 
 export const proxy = Effect.gen(function* () {
-	const { child, authConfig, editing, requests, backups, restores, captures, phase, restart } = yield* BootHttp;
+	const { child, authConfig, editing, requests, backups, restores, captures, phase, restart, storeIdentity } =
+		yield* BootHttp;
 	const auth = yield* Auth;
 	const events = yield* Events;
 	const publicPages = yield* PublicPages;
@@ -247,6 +248,7 @@ export const proxy = Effect.gen(function* () {
 							authenticated: true,
 							child: safeState,
 							source_recovery_error: yield* Ref.get(child.sourceError),
+							store_identity: storeIdentity ? yield* storeIdentity.pipe(Effect.orElseSucceed(() => null)) : null,
 							traffic: yield* child.traffic.state,
 							last_good: lastGood,
 						}),
