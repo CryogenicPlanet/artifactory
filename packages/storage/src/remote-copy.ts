@@ -5,6 +5,7 @@ import type { RemoteStore } from "./store.ts";
 export class RemoteCopyError extends Schema.TaggedError<RemoteCopyError>()("RemoteCopyError", {
 	code: Schema.Literals([
 		"copy_target_invalid",
+		"copy_ownership_unsupported",
 		"backup_engine_mismatch",
 		"backup_failed",
 		"clone_load_failed",
@@ -18,6 +19,7 @@ export interface RemoteArtifact {
 interface CopyOptions {
 	readonly store: RemoteStore;
 	readonly budget: Duration.Input;
+	readonly tls: boolean;
 }
 const invalid = () => new RemoteCopyError({ code: "copy_target_invalid" });
 const connection = (store: RemoteStore) =>
@@ -54,9 +56,16 @@ const quoted = (value: string) =>
 	`"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t")}"`;
 
 /** Native tool stderr can contain credentials and SQL values. Discard it, returning only static failure codes. */
-const command = (store: RemoteStore, load: boolean) =>
+const command = (
+	store: RemoteStore,
+	load: boolean,
+	tls: boolean,
+	ownership: "preserve" | "current-role" = "preserve",
+) =>
 	Effect.gen(function* () {
 		const selected = yield* connection(store);
+		if (store._tag === "mysql" && ownership === "current-role")
+			return yield* new RemoteCopyError({ code: "copy_ownership_unsupported" });
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
 		const searchPath = yield* Config.String("PATH").pipe(Config.withDefault("/usr/bin:/bin"));
@@ -64,7 +73,12 @@ const command = (store: RemoteStore, load: boolean) =>
 			return ChildProcess.make(
 				load ? "pg_restore" : "pg_dump",
 				load
-					? ["--exit-on-error", "--dbname", `dbname='${store.database.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`]
+					? [
+							"--exit-on-error",
+							...(ownership === "current-role" ? ["--no-owner", "--no-acl"] : []),
+							"--dbname",
+							`dbname='${store.database.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`,
+						]
 					: ["--format=custom"],
 				{
 					env: {
@@ -76,7 +90,8 @@ const command = (store: RemoteStore, load: boolean) =>
 						PGPASSWORD: selected.password,
 						PGDATABASE: store.database,
 						PGPASSFILE: "/dev/null",
-						PGSSLMODE: "prefer",
+						PGSSLMODE: tls ? "verify-full" : "disable",
+						...(tls ? { PGSSLROOTCERT: "system" } : {}),
 					},
 					extendEnv: false,
 					stderr: "ignore",
@@ -96,6 +111,8 @@ const command = (store: RemoteStore, load: boolean) =>
 			[
 				`--defaults-file=${defaults}`,
 				"--no-login-paths",
+				tls ? "--ssl-mode=VERIFY_IDENTITY" : "--ssl-mode=DISABLED",
+				...(tls ? ["--ssl-ca=/etc/ssl/certs/ca-certificates.crt"] : []),
 				...(load
 					? ["--binary-mode", `--database=${store.database}`]
 					: [
@@ -134,7 +151,7 @@ export const dumpRemote = (options: CopyOptions & { readonly path: string }) =>
 		let created = false;
 		return yield* Effect.scoped(
 			Effect.gen(function* () {
-				const cmd = yield* command(options.store, false);
+				const cmd = yield* command(options.store, false, options.tls);
 				const output = yield* fs.open(options.path, { flag: "wx", mode: 0o600 });
 				created = true;
 				const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -165,7 +182,9 @@ export const dumpRemote = (options: CopyOptions & { readonly path: string }) =>
 	});
 
 /** Loads a trusted native artifact into an already-created destination. Does not create, drop or publish store authority. */
-export const loadRemote = (options: CopyOptions & { readonly artifact: RemoteArtifact }) =>
+export const loadRemote = (
+	options: CopyOptions & { readonly artifact: RemoteArtifact; readonly ownership?: "preserve" | "current-role" },
+) =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const engine = options.store._tag === "postgres" ? "pg" : "mysql";
@@ -173,7 +192,7 @@ export const loadRemote = (options: CopyOptions & { readonly artifact: RemoteArt
 			const fs = yield* FileSystem.FileSystem;
 			const path = yield* Path.Path;
 			if (!path.isAbsolute(options.artifact.path)) return yield* invalid();
-			const cmd = yield* command(options.store, true);
+			const cmd = yield* command(options.store, true, options.tls, options.ownership);
 			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 			const process = yield* spawner.spawn(cmd);
 			const [code] = yield* Effect.all(

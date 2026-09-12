@@ -14,13 +14,20 @@ const store: RemoteStore = {
 };
 const artifact = { path: `${root}/artifact`, engine: engine === "postgres" ? "pg" : "mysql" } as const;
 const operation =
-	mode === "load" || mode === "foreign"
+	mode === "load" || mode === "foreign" || mode === "rebind"
 		? loadRemote({
 				store,
 				artifact: mode === "foreign" ? { ...artifact, engine: engine === "postgres" ? "mysql" : "pg" } : artifact,
 				budget: "2 seconds",
+				tls: process.argv[6] === "tls",
+				ownership: mode === "rebind" ? "current-role" : "preserve",
 			})
-		: dumpRemote({ store, path: artifact.path, budget: mode === "hang" ? "1 second" : "2 seconds" });
+		: dumpRemote({
+				store,
+				path: artifact.path,
+				tls: process.argv[6] === "tls",
+				budget: mode === "hang" ? "1 second" : "2 seconds",
+			});
 operation.pipe(
 	Effect.result,
 	Effect.flatMap((result) => Console.log(JSON.stringify(result))),

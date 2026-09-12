@@ -34,8 +34,8 @@ const main = Effect.gen(function* () {
 		);
 	const source = yield* read(sourcePath);
 	const target = yield* read(targetPath);
-	const artifact = yield* dumpRemote({ store: source, path: artifactPath, budget: "10 seconds" });
-	yield* loadRemote({ store: target, artifact, budget: "10 seconds" });
+	const artifact = yield* dumpRemote({ store: source, path: artifactPath, tls: false, budget: "10 seconds" });
+	yield* loadRemote({ store: target, artifact, tls: false, budget: "10 seconds" });
 	return { engine: artifact.engine, bytes: artifact.bytes };
 });
 main.pipe(

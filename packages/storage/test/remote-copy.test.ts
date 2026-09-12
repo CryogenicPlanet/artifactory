@@ -18,12 +18,24 @@ const reportSchema = Schema.fromJsonString(
 const readReport = async (root: string) =>
 	Schema.decodeUnknownSync(reportSchema)(await readFile(join(root, "report"), "utf8"));
 
-async function fixture(test: TestContext, engine: "postgres" | "mysql", mode: string, database = "copy_board") {
+async function fixture(
+	test: TestContext,
+	engine: "postgres" | "mysql",
+	mode: string,
+	database = "copy_board",
+	tls = false,
+) {
 	const root = await mkdtemp(join(tmpdir(), "comms-copy-test-"));
 	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
 	const tool = join(
 		root,
-		engine === "postgres" ? (mode === "load" ? "pg_restore" : "pg_dump") : mode === "load" ? "mysql" : "mysqldump",
+		engine === "postgres"
+			? mode === "load" || mode === "rebind"
+				? "pg_restore"
+				: "pg_dump"
+			: mode === "load" || mode === "rebind"
+				? "mysql"
+				: "mysqldump",
 	);
 	await writeFile(
 		tool,
@@ -35,7 +47,7 @@ const configPath = args[0]?.startsWith('--defaults-file=') ? args[0].slice(16) :
 fs.writeFileSync(root + '/report', JSON.stringify({ args, env: process.env, configPath, config: configPath ? fs.readFileSync(configPath, 'utf8') : undefined, mode: configPath ? fs.statSync(configPath).mode & 511 : undefined, pid: process.pid }));
 if (${JSON.stringify(mode)} === 'hang') { process.on('SIGTERM', () => {}); setInterval(() => {}, 100); }
 else if (${JSON.stringify(mode)} === 'fail') { process.stdout.write('partial'); process.stderr.write('dummy secret private SQL'); process.exitCode = 7; }
-else if (${JSON.stringify(mode)} === 'load') { const chunks=[]; process.stdin.on('data', x => chunks.push(x)); process.stdin.on('end', () => fs.writeFileSync(root + '/loaded', Buffer.concat(chunks))); }
+else if (${JSON.stringify(mode)} === 'load' || ${JSON.stringify(mode)} === 'rebind') { const chunks=[]; process.stdin.on('data', x => chunks.push(x)); process.stdin.on('end', () => fs.writeFileSync(root + '/loaded', Buffer.concat(chunks))); }
 else process.stdout.write('complete artifact');
 `,
 	);
@@ -43,7 +55,7 @@ else process.stdout.write('complete artifact');
 	const run = async () => {
 		const output = await promisify(execFile)(
 			"bun",
-			[join(import.meta.dirname, "fixtures/remote-copy.ts"), root, engine, mode, database],
+			[join(import.meta.dirname, "fixtures/remote-copy.ts"), root, engine, mode, database, tls ? "tls" : "plain"],
 			{
 				env: {
 					...process.env,
@@ -127,5 +139,39 @@ for (const engine of ["postgres", "mysql"] as const) {
 		expect(() => process.kill(report.pid, 0)).toThrow();
 		await expect(stat(join(app.root, "artifact"))).rejects.toThrow();
 		if (engine === "mysql") await expect(stat(report.configPath ?? "")).rejects.toThrow();
+	});
+}
+
+it("PostgreSQL isolated load removes artifact ownership and ACL replay", async (test) => {
+	const app = await fixture(test, "postgres", "rebind");
+	await writeFile(join(app.root, "artifact"), "native bytes");
+	expect((await app.run()).value).toMatchObject({ _tag: "Success" });
+	expect((await readReport(app.root)).args).toEqual([
+		"--exit-on-error",
+		"--no-owner",
+		"--no-acl",
+		"--dbname",
+		"dbname='copy_board'",
+	]);
+});
+it("MySQL refuses owner rebinding before starting an unsupported loader", async (test) => {
+	const app = await fixture(test, "mysql", "rebind");
+	await writeFile(join(app.root, "artifact"), "native bytes");
+	expect((await app.run()).value).toMatchObject({ _tag: "Failure", failure: { code: "copy_ownership_unsupported" } });
+	await expect(stat(join(app.root, "report"))).rejects.toThrow();
+});
+
+for (const engine of ["postgres", "mysql"] as const) {
+	it(`${engine} native TLS requires authenticated encryption without downgrade`, async (test) => {
+		const app = await fixture(test, engine, "dump", "copy_board", true);
+		expect((await app.run()).value).toMatchObject({ _tag: "Success" });
+		const report = await readReport(app.root);
+		if (engine === "postgres") {
+			expect(report.env.PGSSLMODE).toBe("verify-full");
+			expect(report.env.PGSSLROOTCERT).toBe("system");
+		} else {
+			expect(report.args).toContain("--ssl-mode=VERIFY_IDENTITY");
+			expect(report.args).toContain("--ssl-ca=/etc/ssl/certs/ca-certificates.crt");
+		}
 	});
 }
