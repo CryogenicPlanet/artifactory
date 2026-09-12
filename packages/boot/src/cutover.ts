@@ -88,13 +88,43 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			if (held?.id === owner.id && held.holder_family === owner.family && held.cutover_in_flight)
 				yield* lock.finish(owner, { succeeded, release });
 		});
-	const pendingCleanup = yield* Ref.make<{ readonly proposal: string; readonly owner: Ownership } | null>(null);
+	const pendingCleanup = yield* Ref.make<
+		| { readonly proposal: string; readonly owner: Ownership }
+		| { readonly generation: number; readonly owner: Ownership; readonly release: boolean }
+		| null
+	>(null);
 	const completeCleanup = Effect.gen(function* () {
 		const cleanup = yield* Ref.get(pendingCleanup);
 		if (!cleanup) return;
-		yield* sources.recover;
-		yield* sources.discard(cleanup.proposal);
-		yield* finish(cleanup.owner, false);
+		if ("proposal" in cleanup) {
+			yield* sources.recover;
+			yield* sources.discard(cleanup.proposal);
+			yield* finish(cleanup.owner, false);
+		} else {
+			const record = yield* read;
+			if (!record) return;
+			const current = yield* Ref.get(supervisor.current);
+			const route = yield* Ref.get(supervisor.child.traffic.route);
+			if (
+				!current ||
+				current.generation.n !== cleanup.generation ||
+				route?.state !== "live" ||
+				route.epoch !== current.attempt.epoch
+			)
+				return;
+			yield* supervisor.assertClosure;
+			if (
+				record.phase !== "accepted" ||
+				record.candidate !== cleanup.generation ||
+				record.lock_id !== cleanup.owner.id ||
+				record.family !== cleanup.owner.family
+			)
+				return yield* new ChildError({ code: "cutover_recovery_required" });
+			// Only boot metadata changes: the accepted writer may already have acknowledged newer data.
+			yield* sql.withTransaction(
+				finish(cleanup.owner, true, cleanup.release).pipe(Effect.andThen(sql`DELETE FROM cutover WHERE singleton=1`)),
+			);
+		}
 		yield* Ref.update(pendingCleanup, (current) => (current === cleanup ? null : current));
 	});
 	const recover = Effect.gen(function* () {
@@ -112,6 +142,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 				yield* lock.finish({ id: record.lock_id, family: record.family }, { succeeded: true });
 		}
 		yield* sql`DELETE FROM cutover WHERE singleton=1`;
+		yield* Ref.set(pendingCleanup, null);
 		yield* Ref.set(ready, true);
 	});
 	const performReload = (
@@ -289,8 +320,12 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						yield* closePrior;
 					}
 					yield* activate(candidate, "live");
-					yield* finish(owner, true, request.release ?? false);
-					yield* sql`DELETE FROM cutover WHERE singleton=1`;
+					yield* Ref.set(pendingCleanup, {
+						generation: candidate.generation.n,
+						owner,
+						release: request.release ?? false,
+					});
+					yield* completeCleanup;
 					return {
 						generation: candidate.generation.n,
 						status: "live",
@@ -326,16 +361,25 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						? persisted.candidate
 						: (yield* generations.list).find((item) => item.n === failedGeneration?.n && item.good === 1)?.n;
 				if (acceptedGeneration !== undefined) {
-					// Accepted data is never restored: public acknowledged writes may already exist.
-					yield* supervisor.freeze;
-					yield* supervisor.withdraw;
-					if (failedCandidate) yield* stop(failedCandidate);
-					yield* closePrior;
+					// A completed activation needs metadata cleanup only; do not replace its healthy writer.
+					const current = yield* Ref.get(supervisor.current);
+					const route = yield* Ref.get(supervisor.child.traffic.route);
+					const needsRestart =
+						current?.generation.n !== acceptedGeneration ||
+						route?.state !== "live" ||
+						route.epoch !== current?.attempt.epoch;
+					if (needsRestart) {
+						// Accepted data is never restored: public acknowledged writes may already exist.
+						yield* supervisor.freeze;
+						yield* supervisor.withdraw;
+						if (failedCandidate) yield* stop(failedCandidate);
+						yield* closePrior;
+					}
 					const selected = (yield* generations.list).find((item) => item.n === acceptedGeneration);
 					if (!selected) return yield* new ChildError({ code: "accepted_snapshot_missing" });
-					yield* start(selected);
-					yield* finish(owner, true, request.release ?? false);
-					yield* sql`DELETE FROM cutover WHERE singleton=1`;
+					if (needsRestart) yield* start(selected);
+					yield* Ref.set(pendingCleanup, { generation: selected.n, owner, release: request.release ?? false });
+					yield* completeCleanup;
 					return { generation: selected.n, status: "live", lock: (yield* lock.inspect).value };
 				}
 				if (failedCandidate) yield* stop(failedCandidate);
