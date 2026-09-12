@@ -30,8 +30,9 @@ for ca in trusted untrusted; do
 FROM $board_image
 USER 0:0
 COPY ca.crt /usr/local/share/ca-certificates/comms-fixture.crt
-RUN update-ca-certificates
+RUN chmod 0644 /usr/local/share/ca-certificates/comms-fixture.crt && update-ca-certificates
 COPY remote-tls.ts /opt/comms/packages/server/test/fixtures/remote-tls.ts
+RUN chmod 0644 /opt/comms/packages/server/test/fixtures/remote-tls.ts
 DOCKER
   cp packages/server/test/fixtures/remote-tls.ts "$private/$ca/remote-tls.ts"
   docker build --quiet --tag "$prefix-$ca" "$private/$ca" >"$private/build-$ca.log" 2>&1 || {
@@ -95,8 +96,9 @@ if [ "$engine" = pg ]; then
 else
   docker exec -i "$server" mysql --defaults-extra-file=/run/secrets/admin.cnf < "$private/config/roles.sql" >"$private/provision.log" 2>&1
 fi
+# Keep the private bind mounts owned by their existing host UID; UID0 without DAC capabilities cannot read them.
 probe() {
-  docker run --rm --network "$network" --read-only --tmpfs /tmp --cap-drop ALL \
+  docker run --rm --user "$(id -u):$(id -g)" --network "$network" --read-only --tmpfs /tmp --cap-drop ALL \
     --mount "type=bind,src=$private/config,dst=/fixture,readonly" \
     --mount "type=bind,src=$private/artifacts,dst=/artifacts" \
     --entrypoint /usr/local/bin/bun "$prefix-$1" \
