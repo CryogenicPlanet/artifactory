@@ -62,7 +62,9 @@ wait_for() {
   count=0
   until docker logs "$container" 2>/dev/null | grep -q "$1"; do
     count=$((count + 1))
-    [ "$(docker inspect --format '{{.State.Running}}' "$container")" = true || failed "$1: container exited"
+    case "$(docker inspect --format '{{.State.Status}}' "$container")" in
+      exited|dead) failed "$1: container exited" ;;
+    esac
     [ "$count" -lt 50 ] || failed "$1: barrier not reached"
     sleep 0.1
   done
