@@ -9,6 +9,8 @@ export interface ColumnShape {
 	readonly expression?: string | null;
 	readonly default?: string | null;
 	readonly collation?: string | null;
+	readonly identity?: boolean;
+	readonly identityGeneration?: string | null;
 }
 export class SchemaShapeError extends Schema.TaggedError<SchemaShapeError>()("SchemaShapeError", {
 	object: Schema.String,
@@ -22,6 +24,8 @@ const columnRows = Schema.Array(
 		expression: Schema.NullOr(Schema.String),
 		default: Schema.NullOr(Schema.String),
 		collation: Schema.NullOr(Schema.String),
+		identity: Schema.String,
+		identityGeneration: Schema.NullOr(Schema.String),
 	}),
 );
 const indexRows = Schema.Array(
@@ -69,9 +73,9 @@ export const tableShape = (
 				throw new Error("Remote schema check requires PostgreSQL or MySQL");
 			},
 			pg: () =>
-				sql`SELECT column_name AS name,CASE WHEN data_type='USER-DEFINED' THEN udt_name ELSE data_type END AS type,is_nullable AS nullable,character_maximum_length AS length,generation_expression AS expression,column_default AS "default",collation_name AS collation FROM information_schema.columns WHERE table_schema='public' AND table_name=${table} ORDER BY ordinal_position`,
+				sql`SELECT column_name AS name,CASE WHEN data_type='USER-DEFINED' THEN udt_name ELSE data_type END AS type,is_nullable AS nullable,character_maximum_length AS length,generation_expression AS expression,column_default AS "default",collation_name AS collation,is_identity AS identity,identity_generation AS "identityGeneration" FROM information_schema.columns WHERE table_schema='public' AND table_name=${table} ORDER BY ordinal_position`,
 			mysql: () =>
-				sql`SELECT COLUMN_NAME AS name,DATA_TYPE AS type,IS_NULLABLE AS nullable,CHARACTER_MAXIMUM_LENGTH AS length,GENERATION_EXPRESSION AS expression,COLUMN_DEFAULT AS ${sql("default")},COLLATION_NAME AS collation FROM information_schema.columns WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=${table} ORDER BY ORDINAL_POSITION`,
+				sql`SELECT COLUMN_NAME AS name,DATA_TYPE AS type,IS_NULLABLE AS nullable,CHARACTER_MAXIMUM_LENGTH AS length,GENERATION_EXPRESSION AS expression,COLUMN_DEFAULT AS ${sql("default")},COLLATION_NAME AS collation,CASE WHEN EXTRA LIKE '%auto_increment%' THEN 'YES' ELSE 'NO' END AS identity,CASE WHEN EXTRA LIKE '%auto_increment%' THEN 'AUTO_INCREMENT' ELSE NULL END AS ${sql("identityGeneration")} FROM information_schema.columns WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=${table} ORDER BY ORDINAL_POSITION`,
 		}).pipe(Effect.flatMap(Schema.decodeUnknownEffect(columnRows)));
 		if (existing.length === 0) return false;
 		if (
@@ -86,7 +90,9 @@ export const tableShape = (
 					(expected.length !== undefined && actual.length !== expected.length) ||
 					(expected.expression !== undefined && actual.expression !== expected.expression) ||
 					(expected.default !== undefined && actual.default !== expected.default) ||
-					(expected.collation !== undefined && actual.collation !== expected.collation)
+					(expected.collation !== undefined && actual.collation !== expected.collation) ||
+					(expected.identity !== undefined && (actual.identity === "YES") !== expected.identity) ||
+					(expected.identityGeneration !== undefined && actual.identityGeneration !== expected.identityGeneration)
 				);
 			})
 		)
@@ -109,13 +115,21 @@ export const tableShape = (
 					throw new Error("Remote schema check requires PostgreSQL or MySQL");
 				},
 				pg: () =>
-					sql`SELECT pg_get_expr(c.conbin,c.conrelid) AS expression FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class t ON t.oid=c.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND t.relname=${table} AND c.contype='c'`,
+					sql`SELECT pg_get_expr(c.conbin,c.conrelid) AS expression,CASE WHEN c.convalidated THEN 1 ELSE 0 END AS valid FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class t ON t.oid=c.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND t.relname=${table} AND c.contype='c'`,
 				mysql: () =>
-					sql`SELECT c.CHECK_CLAUSE AS expression FROM information_schema.check_constraints c JOIN information_schema.table_constraints t ON t.CONSTRAINT_SCHEMA=c.CONSTRAINT_SCHEMA AND t.CONSTRAINT_NAME=c.CONSTRAINT_NAME WHERE t.TABLE_SCHEMA=DATABASE() AND t.TABLE_NAME=${table} AND t.CONSTRAINT_TYPE='CHECK'`,
-			}).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ expression: Schema.String })))));
+					sql`SELECT c.CHECK_CLAUSE AS expression,CASE WHEN t.ENFORCED='YES' THEN 1 ELSE 0 END AS valid FROM information_schema.check_constraints c JOIN information_schema.table_constraints t ON t.CONSTRAINT_SCHEMA=c.CONSTRAINT_SCHEMA AND t.CONSTRAINT_NAME=c.CONSTRAINT_NAME WHERE t.TABLE_SCHEMA=DATABASE() AND t.TABLE_NAME=${table} AND t.CONSTRAINT_TYPE='CHECK'`,
+			}).pipe(
+				Effect.flatMap(
+					Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ expression: Schema.String, valid: Schema.Int }))),
+				),
+			);
 			const actual = checks.map((row) => row.expression).sort();
 			const expected = [...options.checks].sort();
-			if (actual.length !== expected.length || actual.some((value, index) => value !== expected[index]))
+			if (
+				checks.some((row) => row.valid !== 1) ||
+				actual.length !== expected.length ||
+				actual.some((value, index) => value !== expected[index])
+			)
 				return yield* new SchemaShapeError({ object: table });
 		}
 		if (options.foreignKeys) {
@@ -124,13 +138,15 @@ export const tableShape = (
 					throw new Error("Remote schema check requires PostgreSQL or MySQL");
 				},
 				pg: () =>
-					sql`SELECT k.column_name AS "column",f.table_name AS "table",f.column_name AS target FROM information_schema.table_constraints c JOIN information_schema.key_column_usage k ON k.constraint_schema=c.constraint_schema AND k.constraint_name=c.constraint_name JOIN information_schema.referential_constraints r ON r.constraint_schema=c.constraint_schema AND r.constraint_name=c.constraint_name JOIN information_schema.key_column_usage f ON f.constraint_schema=r.unique_constraint_schema AND f.constraint_name=r.unique_constraint_name AND f.ordinal_position=k.position_in_unique_constraint WHERE c.table_schema='public' AND c.table_name=${table} AND c.constraint_type='FOREIGN KEY' ORDER BY k.column_name`,
+					sql`SELECT k.column_name AS "column",f.table_name AS "table",f.column_name AS target,CASE WHEN f.table_schema='public' AND r.update_rule IN ('NO ACTION','RESTRICT') AND r.delete_rule IN ('NO ACTION','RESTRICT') THEN 1 ELSE 0 END AS valid FROM information_schema.table_constraints c JOIN information_schema.key_column_usage k ON k.constraint_schema=c.constraint_schema AND k.constraint_name=c.constraint_name JOIN information_schema.referential_constraints r ON r.constraint_schema=c.constraint_schema AND r.constraint_name=c.constraint_name JOIN information_schema.key_column_usage f ON f.constraint_schema=r.unique_constraint_schema AND f.constraint_name=r.unique_constraint_name AND f.ordinal_position=k.position_in_unique_constraint WHERE c.table_schema='public' AND c.table_name=${table} AND c.constraint_type='FOREIGN KEY' ORDER BY k.column_name`,
 				mysql: () =>
-					sql`SELECT COLUMN_NAME AS ${sql("column")},REFERENCED_TABLE_NAME AS ${sql("table")},REFERENCED_COLUMN_NAME AS target FROM information_schema.key_column_usage WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=${table} AND REFERENCED_TABLE_NAME IS NOT NULL ORDER BY COLUMN_NAME`,
+					sql`SELECT k.COLUMN_NAME AS ${sql("column")},k.REFERENCED_TABLE_NAME AS ${sql("table")},k.REFERENCED_COLUMN_NAME AS target,CASE WHEN k.REFERENCED_TABLE_SCHEMA=DATABASE() AND r.UPDATE_RULE IN ('NO ACTION','RESTRICT') AND r.DELETE_RULE IN ('NO ACTION','RESTRICT') THEN 1 ELSE 0 END AS valid FROM information_schema.key_column_usage k JOIN information_schema.referential_constraints r ON r.CONSTRAINT_SCHEMA=k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME=k.CONSTRAINT_NAME AND r.TABLE_NAME=k.TABLE_NAME WHERE k.TABLE_SCHEMA=DATABASE() AND k.TABLE_NAME=${table} AND k.REFERENCED_TABLE_NAME IS NOT NULL ORDER BY k.COLUMN_NAME`,
 			}).pipe(
 				Effect.flatMap(
 					Schema.decodeUnknownEffect(
-						Schema.Array(Schema.Struct({ column: Schema.String, table: Schema.String, target: Schema.String })),
+						Schema.Array(
+							Schema.Struct({ column: Schema.String, table: Schema.String, target: Schema.String, valid: Schema.Int }),
+						),
 					),
 				),
 			);
@@ -139,6 +155,7 @@ export const tableShape = (
 				foreign.length !== expected.length ||
 				foreign.some(
 					(row, index) =>
+						row.valid !== 1 ||
 						row.column !== expected[index]?.column ||
 						row.table !== expected[index]?.table ||
 						row.target !== expected[index]?.target,
