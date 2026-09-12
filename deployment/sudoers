@@ -1,4 +1,4 @@
 Defaults:boot env_reset
 Defaults:boot !use_pty
-Defaults:boot env_keep += "COMMS_CHILD_CONFIG COMMS_PREPARATION_CONFIG"
-boot ALL=(root) NOPASSWD: /opt/comms/deployment/child-keeper "", /opt/comms/deployment/preparation-keeper ""
+Defaults:boot env_keep += "COMMS_CHILD_CONFIG COMMS_PREPARATION_CONFIG COMMS_NATIVE_COPY_CONFIG"
+boot ALL=(root) NOPASSWD: /opt/comms/deployment/child-keeper "", /opt/comms/deployment/preparation-keeper "", /opt/comms/deployment/native-copy-keeper ""
