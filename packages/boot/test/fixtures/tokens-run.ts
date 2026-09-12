@@ -287,6 +287,7 @@ const run = Effect.gen(function* () {
 			yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;
 			yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 			yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
+			yield* sql`DROP TABLE IF EXISTS boot_migrations`;
 			yield* sql`PRAGMA user_version=7`;
 			yield* initializeBootSchema;
 			const after: unknown[] = [];

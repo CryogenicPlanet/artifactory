@@ -10,7 +10,8 @@
 		"./dialect": "./src/dialect.ts",
 		"./remote-client": "./src/remote-client.ts",
 		"./remote-inspector": "./src/remote-inspector.ts",
-		"./remote-session": "./src/remote-session.ts"
+		"./remote-session": "./src/remote-session.ts",
+		"./migrations": "./src/migrations.ts"
 	},
 	"scripts": {
 		"check": "tsc --noEmit"

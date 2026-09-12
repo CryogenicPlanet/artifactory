@@ -31,6 +31,7 @@ it("removes reaction routes while preserving historical rows across restart", as
 		"ALTER TABLE messages DROP COLUMN mentions",
 		"ALTER TABLE messages DROP COLUMN previous_mentions",
 		"DROP TABLE topic_page_continuations",
+		"DROP TABLE IF EXISTS core_migrations",
 		"PRAGMA user_version=6",
 	])
 		await fixture.sql(statement);

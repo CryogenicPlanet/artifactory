@@ -21,3 +21,5 @@ This observes session absence on one continuously observed authoritative server.
 `bash scripts/remote-session-acceptance.sh pg` and `... mysql` use disposable digest-pinned containers and protected credential files. The separate CI workflow also verifies MySQL instrumentation truncation. These tests are explicitly gated and do not run containers during the default SQLite suite.
 
 Each pool owns its PostgreSQL integer codec; BIGINT values must fit JavaScript safe integers. MySQL keeps unsafe BIGINT results lossless until the guarded connection rejects them. Text and JSON strings are not treated as numbers. Query errors retain only unique-conflict, deadlock and serialization categories; driver causes, messages and constraint names are discarded.
+
+SQLite boot and core migration ledgers record complete named prefixes independently of editable and extension migration receipts. Adoption, schema changes and the legacy `user_version` mirror commit together; mismatched or newer histories refuse startup.

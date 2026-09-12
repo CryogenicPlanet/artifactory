@@ -34,6 +34,8 @@ export default api => Effect.gen(function*(){
 			"DELETE FROM protected_sql_tables",
 			"DROP TABLE protected_sql_tables",
 			"DELETE FROM extension_migrations",
+			"DELETE FROM core_migrations",
+			"DROP TABLE core_migrations",
 			"UPDATE webhook_subscriptions SET cursor=999",
 			"DELETE FROM topic_page_continuations",
 		])
@@ -43,6 +45,13 @@ export default api => Effect.gen(function*(){
 		);
 		expect((await running.post("/api/sql", { sql: "UPDATE repair_parent SET id=id" }, cookie)).status).toBe(400);
 		await fixture.sql("DROP TRIGGER evidence_guard");
+		const ledger = await fixture.sql("SELECT migration_id,name FROM core_migrations ORDER BY migration_id");
+		await fixture.sql(
+			"CREATE TRIGGER ledger_guard AFTER UPDATE ON repair_parent BEGIN DELETE FROM core_migrations; END",
+		);
+		expect((await running.post("/api/sql", { sql: "UPDATE repair_parent SET id=id" }, cookie)).status).toBe(400);
+		await fixture.sql("DROP TRIGGER ledger_guard");
+		expect(await fixture.sql("SELECT migration_id,name FROM core_migrations ORDER BY migration_id")).toEqual(ledger);
 		expect(await fixture.sql("SELECT * FROM extension_evidence")).toEqual([{ id: 1, value: "retained" }]);
 		expect((await running.post("/api/sql", { sql: "INSERT INTO repair_parent VALUES(2)" }, cookie)).status).toBe(200);
 		await fixture.sql("DELETE FROM repair_parent WHERE id=2");
