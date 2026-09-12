@@ -89,7 +89,10 @@ const keeper = Effect.gen(function* () {
 			}).pipe(Effect.orDie);
 		}
 		yield* Scope.close(processScope, Exit.void);
-		if (child) yield* child.exitCode.pipe(Effect.orDie);
+		if (child) {
+			yield* child.exitCode.pipe(Effect.exit);
+			if (yield* child.isRunning.pipe(Effect.orDie)) return yield* Effect.die("Native process closure is unknown");
+		}
 		for (let attempt = 0; attempt < 50; attempt++) {
 			if (!(yield* groupRunning)) return;
 			yield* Effect.sleep("20 millis");
