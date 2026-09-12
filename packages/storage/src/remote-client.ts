@@ -47,7 +47,6 @@ const safeConnection = (connection: Connection): Connection => ({
 
 const guarded = (options: RemoteClientOptions) =>
 	Effect.gen(function* () {
-		const inspector = yield* RemoteInspector;
 		const tag = yield* attemptTag(options);
 		const raw = yield* open(options.connection, tag);
 		const acquirer = Effect.uninterruptibleMask((restore) =>
@@ -59,9 +58,7 @@ const guarded = (options: RemoteClientOptions) =>
 					Effect.gen(function* () {
 						const connection = yield* Scope.provide(raw.reserve, lease);
 						const session = yield* identify(connection, options.connection, tag);
-						yield* inspector
-							.register(session, options.register(session))
-							.pipe(Effect.interruptible, Effect.timeout("5 seconds"));
+						yield* options.register(session).pipe(Effect.interruptible, Effect.timeout("5 seconds"));
 						return safeConnection(connection);
 					}),
 				).pipe(Effect.exit);
@@ -76,5 +73,17 @@ const guarded = (options: RemoteClientOptions) =>
 		// No borrower or raw driver tag escapes. All access paths use this acquirer.
 		return yield* make({ acquirer, compiler: compiler(options.connection.engine), spanAttributes: [] });
 	});
-export const remoteClientLayer = (options: RemoteClientOptions) =>
+/** Registration callback is a guardian IPC acknowledgement, not an app-side persistence claim. */
+export const guardianClientLayer = (options: RemoteClientOptions) =>
 	Layer.effect(SqlClient, guarded(options)).pipe(Layer.provide(Reactivity.layer));
+
+export const remoteClientLayer = (options: RemoteClientOptions) =>
+	Layer.unwrap(
+		Effect.gen(function* () {
+			const inspector = yield* RemoteInspector;
+			return guardianClientLayer({
+				...options,
+				register: (session) => inspector.register(session, options.register(session)),
+			});
+		}),
+	);

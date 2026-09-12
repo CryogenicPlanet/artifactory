@@ -99,3 +99,29 @@ export const connectionIds = (connection: Connection, engine: RemoteConnection["
 			.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Connections)), Effect.interruptible, Effect.timeout("5 seconds")),
 		"remote_inspection_failed",
 	);
+
+/** All sessions for the app login, including raw connections without a comms tag. */
+export const accountSessions = (connection: Connection, options: RemoteConnection) =>
+	sanitized(
+		connection
+			.executeValues(
+				options.engine === "pg"
+					? "SELECT pid::text FROM pg_catalog.pg_stat_activity WHERE usename=current_user"
+					: "SELECT CAST(ID AS CHAR) FROM information_schema.PROCESSLIST WHERE USER=?",
+				options.engine === "pg" ? [] : [options.username],
+			)
+			.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Connections)), Effect.interruptible, Effect.timeout("5 seconds")),
+		"remote_inspection_failed",
+	);
+
+/** MySQL 8 requires XA_RECOVER_ADMIN; refusal/missing visibility must fail closure, never act as an empty result. */
+export const assertNoPreparedXa = (connection: Connection) =>
+	sanitized(
+		Effect.gen(function* () {
+			const rows = yield* connection
+				.executeValues("XA RECOVER", [])
+				.pipe(Effect.interruptible, Effect.timeout("5 seconds"));
+			if (rows.length !== 0) return yield* failure("remote_sessions_open");
+		}),
+		"remote_inspection_failed",
+	);
