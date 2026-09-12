@@ -76,6 +76,11 @@ export const derivedExpression = (
 	column: string,
 ): string | undefined => {
 	if (engine === "sqlite") return undefined;
+	// Stock subscriptions migration uses binary SHA-256 uniqueness projections only on MySQL.
+	if (store === "app" && engine === "mysql" && table === "webhook_subscriptions") {
+		if (column === "instance_hash") return "unhex(sha2(`instance`,256))";
+		if (column === "idempotency_hash") return "unhex(sha2(`idempotency_key`,256))";
+	}
 	const hash = hashColumn(store, table);
 	if (hash && column === `${hash}_hash`)
 		return engine === "mysql"

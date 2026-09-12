@@ -24,6 +24,8 @@ const same = (left: readonly string[], right: readonly string[]) =>
 const normalized = (expression: string) => expression.trim().replace(/\s+/g, " ");
 const generatedNames = [
 	"id_hash",
+	"instance_hash",
+	"idempotency_hash",
 	"key_hash",
 	"path_hash",
 	"type",
