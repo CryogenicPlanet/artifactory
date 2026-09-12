@@ -7,6 +7,10 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 export class ChildError extends Schema.TaggedError<ChildError>()("ChildError", {
 	code: Schema.Literals([
 		"accepted_snapshot_missing",
+		"rehearsal_copy_timeout",
+		"sqlite_copy_failed",
+		"sqlite_copy_invalid",
+		"sqlite_copy_closure_unproven",
 		"backup_live_child_required",
 		"boot_shutting_down",
 		"child_closure_unproven",

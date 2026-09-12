@@ -414,3 +414,21 @@ it("codes malformed store shape in both legacy and pending fresh adoption", asyn
 	await app.sql("DELETE FROM settings WHERE key='app_store_adoption'");
 	expect(await app.run()).toContain("app_store_identity_invalid");
 });
+
+it.for(["cutover", "restore"])("refuses a v18 %s upgrade before enabling copy-owner recovery", async (kind, test) => {
+	const app = await fixture(test);
+	expect(await app.run()).toContain('"Success"');
+	await app.sql("PRAGMA user_version=18");
+	if (kind === "cutover")
+		await app.sql(
+			"INSERT INTO cutover(singleton,candidate,backup,lock_id,family,phase) VALUES(1,1,'saved','lock','family','restoring')",
+		);
+	else
+		await app.sql(
+			"INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES('proof','hash','session','saved','restoring',0)",
+		);
+	const before = await readFile(join(app.root, "boot.db"));
+	expect(await app.run()).toContain("BootIdentityUpgradePending");
+	expect(await readFile(join(app.root, "boot.db"))).toEqual(before);
+	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 18 }]);
+});
