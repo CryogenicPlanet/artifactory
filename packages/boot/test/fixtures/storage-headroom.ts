@@ -18,8 +18,10 @@ const main = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem;
 	const real = yield* ChildProcessSpawner.ChildProcessSpawner;
 	const availableBlocks = yield* Ref.make(5);
-	const spawner = ChildProcessSpawner.make(() =>
+	const spawner = ChildProcessSpawner.make((command) =>
 		Effect.gen(function* () {
+			if (command._tag !== "StandardCommand" || !["/bin/df", "/usr/bin/stat"].includes(command.command))
+				return yield* real.spawn(command);
 			const available = yield* Ref.get(availableBlocks);
 			const output =
 				process.platform === "linux"
