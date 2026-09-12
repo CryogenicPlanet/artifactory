@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { on } from "./dialect.ts";
+import { tableShape } from "./schema-shape.ts";
 export { tableShape, indexShape, type ColumnShape } from "./schema-shape.ts";
 
 export class RemoteMigrationError extends Schema.TaggedError<RemoteMigrationError>()("RemoteMigrationError", {
@@ -35,11 +36,11 @@ const intentRows = Schema.Array(
 
 /** Remote stores start with their own ledger, never a SQLite version stamp.
  * MySQL records each owned DDL boundary because DDL commits independently of transactions. */
-export const remoteMigrate = <E, R>(
+export const remoteMigrate = <E, R, E2 = never, R2 = never>(
 	sql: SqlClient,
 	ledger: "boot_migrations" | "core_migrations",
 	steps: ReadonlyArray<RemoteStep<E, R>>,
-	beforeOperation: Effect.Effect<void, E, R> = Effect.void,
+	beforeOperation: Effect.Effect<void, E2, R2> = Effect.void,
 ) => {
 	const invalid = () => new RemoteMigrationError({ code: "migration_ledger_invalid", ledger });
 	const initialize = Effect.gen(function* () {
@@ -61,8 +62,35 @@ export const remoteMigrate = <E, R>(
 			pg: () =>
 				sql`CREATE TABLE IF NOT EXISTS ${sql(ledger)} (migration_id integer PRIMARY KEY, name varchar(255) NOT NULL, created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
 			mysql: () =>
-				sql`CREATE TABLE IF NOT EXISTS ${sql(ledger)} (migration_id integer PRIMARY KEY, name varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+				sql`CREATE TABLE IF NOT EXISTS ${sql(ledger)} (migration_id integer PRIMARY KEY, name varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB`,
 		});
+		yield* tableShape(
+			sql,
+			ledger,
+			[
+				{
+					name: "migration_id",
+					type: on(sql, { sqlite: () => "integer", pg: () => "integer", mysql: () => "int" }),
+					nullable: false,
+				},
+				{
+					name: "name",
+					type: on(sql, { sqlite: () => "varchar", pg: () => "character varying", mysql: () => "varchar" }),
+					nullable: false,
+					length: 255,
+				},
+				{
+					name: "created_at",
+					type: on(sql, {
+						sqlite: () => "timestamp",
+						pg: () => "timestamp without time zone",
+						mysql: () => "timestamp",
+					}),
+					nullable: false,
+				},
+			],
+			["migration_id"],
+		);
 		const applied = yield* sql`SELECT migration_id,name FROM ${sql(ledger)} ORDER BY migration_id`.pipe(
 			Effect.flatMap(Schema.decodeUnknownEffect(rows)),
 		);
@@ -108,7 +136,7 @@ export const remoteMigrate = <E, R>(
 				);
 				yield* beforeOperation;
 				const applied = yield* initialize;
-				yield* sql`CREATE TABLE IF NOT EXISTS ${sql(intent)} (singleton integer PRIMARY KEY CHECK(singleton=1),migration_id integer NOT NULL,name varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,operation integer NOT NULL,active varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin)`;
+				yield* sql`CREATE TABLE IF NOT EXISTS ${sql(intent)} (singleton integer PRIMARY KEY CHECK(singleton=1),migration_id integer NOT NULL,name varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,operation integer NOT NULL,active varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin) ENGINE=InnoDB`;
 				const pending =
 					yield* sql`SELECT migration_id,name,operation,active FROM ${sql(intent)} WHERE singleton=1`.pipe(
 						Effect.flatMap(Schema.decodeUnknownEffect(intentRows)),
@@ -158,6 +186,8 @@ export const remoteMigrate = <E, R>(
 					current = undefined;
 				}
 			});
+			// Reserve one connection without an open transaction: depth -1 makes any nested
+			// withTransaction begin/commit on this lease instead of creating a savepoint.
 			yield* work.pipe(Effect.provideService(sql.transactionService, [connection, -1]));
 		}),
 	);
