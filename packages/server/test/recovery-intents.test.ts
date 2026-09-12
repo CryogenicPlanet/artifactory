@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -52,16 +53,23 @@ it.for([
 					(await (await fetch(`${restarted.url}/_boot/status`, { headers: { cookie } })).json()).source_recovery_error,
 				{ timeout: 10000 },
 			)
-			.toContain("recovery_intents_conflict");
+			.toContain(
+				inserts.some((statement) => statement === insertMove)
+					? "topic_move_recovery_required"
+					: "recovery_intents_conflict",
+			);
 		expect((await fetch(`${restarted.url}/_boot/db/backups`, { headers: { cookie } })).status).toBe(200);
 		expect((await fetch(`${restarted.url}/api/messages?since=0`, { headers: { cookie } })).status).toBe(503);
 		expect(
 			(
-				await fetch(`${restarted.url}/api/fs/pages/old/index.md`, {
-					method: "PUT",
-					headers: { cookie, origin: "https://comms.test", "content-type": "text/plain" },
-					body: "must not publish",
-				})
+				await fetch(
+					`${restarted.url}/api/fs/pages/old/index.md?baseVersion=${createHash("sha256").update("page before conflict").digest("hex")}`,
+					{
+						method: "PUT",
+						headers: { cookie, origin: "https://comms.test", "content-type": "text/plain" },
+						body: "must not publish",
+					},
+				)
 			).status,
 		).toBe(503);
 		expect(await readFile(join(fixture.root, "comms.db"))).toEqual(appBefore);
@@ -100,7 +108,7 @@ it.for([insertCutover, insertRestore, insertSource] as const)(
 		}
 		expect(
 			(
-				await fetch(`${app.url}/api/fs/pages/old/index.md`, {
+				await fetch(`${app.url}/api/fs/pages/old/index.md?baseVersion=null`, {
 					method: "PUT",
 					headers: { cookie, origin: "https://comms.test" },
 					body: "do not write",
