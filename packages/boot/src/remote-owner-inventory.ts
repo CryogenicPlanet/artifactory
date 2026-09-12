@@ -15,6 +15,7 @@ export const remoteOwnerInventory = (dataDirectory: string) =>
 		const encode = Schema.encodeSync(Schema.fromJsonString(Inventory));
 		const syncDirectory = Effect.scoped(fs.open(dataDirectory).pipe(Effect.flatMap((file) => file.sync)));
 		const claim = path.join(dataDirectory, ".remote-owner-inventory.lock");
+		let recovered = false;
 		if ((yield* fs.realPath(dataDirectory)) !== dataDirectory) return yield* invalid();
 		// Serialize entire root lifetimes, not just writes inside one instance. An
 		// orphan claim fails closed; a PID or changed kernel ID is not remote proof.
@@ -23,7 +24,17 @@ export const remoteOwnerInventory = (dataDirectory: string) =>
 				Effect.andThen(syncDirectory),
 				Effect.mapError(invalid),
 			),
-			() => fs.remove(claim).pipe(Effect.andThen(syncDirectory), Effect.orDie),
+			() =>
+				Effect.suspend(() =>
+					recovered
+						? recoverRemoteOwners(dataDirectory, current.owners).pipe(
+								Effect.matchEffect({
+									onFailure: () => Effect.void,
+									onSuccess: () => fs.remove(claim).pipe(Effect.andThen(syncDirectory), Effect.orDie),
+								}),
+							)
+						: Effect.void,
+				),
 		);
 		const write = (value: typeof Inventory.Type) =>
 			Effect.gen(function* () {
@@ -48,6 +59,7 @@ export const remoteOwnerInventory = (dataDirectory: string) =>
 		if (new Set(current.owners.map((owner) => owner.attempt)).size !== current.owners.length) return yield* invalid();
 		// Missing inventory cannot turn existing owner files into a fresh deployment.
 		yield* recoverRemoteOwners(dataDirectory, current.owners);
+		recovered = true;
 		if (yield* fs.exists(temporary)) {
 			if (!exists || (yield* fs.realPath(temporary)) !== temporary || (yield* fs.stat(temporary)).type !== "File")
 				return yield* invalid();
@@ -59,6 +71,7 @@ export const remoteOwnerInventory = (dataDirectory: string) =>
 		if (!exists) yield* write(current);
 		const gate = yield* Semaphore.make(1);
 		return {
+			snapshot: Effect.sync(() => current.owners),
 			/** Must finish before creating the per-owner journal or spawning its keeper. */
 			reserve: (owner: RemoteOwnerIntent) =>
 				gate.withPermit(

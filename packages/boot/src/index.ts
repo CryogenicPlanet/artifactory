@@ -36,6 +36,9 @@ import { makeEventStorage } from "./event-storage.ts";
 import { databaseRestore } from "./database-restore.ts";
 import { supervise } from "./supervisor.ts";
 
+export { launchRemoteRoot } from "./remote-root-launcher.ts";
+export { databaseConfiguration } from "./database-configuration.ts";
+
 type Handler = Effect.Effect<
 	Effect.Success<typeof proxy>,
 	Effect.Error<typeof proxy>,

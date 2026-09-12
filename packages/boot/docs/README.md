@@ -27,6 +27,8 @@ Keep these boundaries intact when changing boot:
 
 Local development runs under one OS user. The image separates boot, app and build users; see [deployment](../../../docs/deployment.md) for its limits. [Storage](storage.md) describes capacity admission, protected artifacts and retention.
 
+Remote deployments additionally launch boot beneath an immutable guardian. Its only jobs are private SQL registration, keeper admission and closure evidence. It holds the original database inspector while the boot worker runs; after a worker crash it closes that process group, waits for detached keepers' receipts, proves remote session/XA absence and releases the lifetime claim. A reserved keeper may receive a distinct never-opened receipt only when durable admission is closed and the worker group is positively gone. Losing the guardian itself or its database connection still refuses automatic recovery; a new connection or stale PID is not equivalent proof. These boundaries do not imply remote failover support.
+
 ## Source map
 
 Start with [index.ts](../src/index.ts) for wiring, [supervisor.ts](../src/supervisor.ts) for child lifetime and [application.ts](../src/application.ts) for seed and snapshot selection. Recovery changes need failure, restart and durability tests in [test/](../test/), alongside `bun run check`.

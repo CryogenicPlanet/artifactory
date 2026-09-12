@@ -21,10 +21,15 @@ export const RemoteOwnerIntent = Schema.Struct({
 	username: Schema.String,
 });
 export type RemoteOwnerIntent = typeof RemoteOwnerIntent.Type;
+export const RemoteAdmission = Schema.Struct({
+	root: Schema.String,
+	state: Schema.Literals(["open", "closed", "worker-closed"]),
+	owners: Schema.Array(Schema.Struct({ intent: RemoteOwnerIntent, admitted: Schema.Boolean })),
+});
 const Owner = Schema.Struct({
 	...RemoteOwnerIntent.fields,
 	inspector: Schema.NullOr(Session),
-	state: Schema.Literals(["pending", "closed"]),
+	state: Schema.Literals(["pending", "closed", "never-opened"]),
 	sessions: Schema.Array(Session),
 });
 
@@ -33,6 +38,26 @@ export class RemoteOwnerRejected extends Schema.TaggedError<RemoteOwnerRejected>
 }) {}
 const validAttempt = (id: string) => /^[a-f0-9]{64}$/.test(id);
 const invalid = () => new RemoteOwnerRejected({ code: "remote_owner_invalid" });
+const proveNeverOpened = (dataDirectory: string, selected: RemoteOwnerIntent) =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem;
+		const path = yield* Path.Path;
+		const filename = path.join(dataDirectory, `remote-admission-${selected.root}.json`);
+		if ((yield* fs.realPath(filename)) !== filename) return yield* invalid();
+		const proof = yield* fs
+			.readFileString(filename)
+			.pipe(Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(RemoteAdmission))), Effect.mapError(invalid));
+		const encode = Schema.encodeSync(Schema.fromJsonString(RemoteOwnerIntent));
+		const matches = proof.owners.filter((item) => item.intent.attempt === selected.attempt);
+		if (
+			proof.root !== selected.root ||
+			proof.state !== "worker-closed" ||
+			matches.length !== 1 ||
+			matches[0]?.admitted !== false ||
+			encode(matches[0].intent) !== encode(selected)
+		)
+			return yield* invalid();
+	});
 const inspectorMatches = (owner: RemoteOwnerIntent, session: RemoteSession) =>
 	session.engine === owner.engine &&
 	session.database === owner.database &&
@@ -51,7 +76,11 @@ const registrationMatches = (owner: RemoteOwnerIntent, inspector: RemoteSession,
 	session.tag === `comms:${Buffer.from(owner.attempt, "hex").toString("base64url")}`;
 
 /** Only terminal local receipts authorize restart; a new server observation never repairs an old intent. */
-export const recoverRemoteOwners = (dataDirectory: string, expected: readonly RemoteOwnerIntent[]) =>
+const checkRemoteOwners = (
+	dataDirectory: string,
+	expected: readonly RemoteOwnerIntent[],
+	requireClosed: (owner: RemoteOwnerIntent) => boolean,
+) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
@@ -107,10 +136,48 @@ export const recoverRemoteOwners = (dataDirectory: string, expected: readonly Re
 					new Set(owner.sessions.map((session) => session.connectionId)).size !== owner.sessions.length)
 			)
 				return yield* invalid();
-			if (owner.state !== "closed") return yield* new RemoteOwnerRejected({ code: "remote_owner_unclosed" });
+			if (owner.state === "never-opened") {
+				if (owner.inspector !== null || owner.sessions.length !== 0) return yield* invalid();
+				yield* proveNeverOpened(dataDirectory, selected);
+			} else if (owner.state !== "closed" && requireClosed(owner))
+				return yield* new RemoteOwnerRejected({ code: "remote_owner_unclosed" });
 		}
 		if (seen.size !== expected.length) return yield* invalid();
 	});
+
+export const recoverRemoteOwners = (dataDirectory: string, expected: readonly RemoteOwnerIntent[]) =>
+	checkRemoteOwners(dataDirectory, expected, () => true);
+
+/** The surviving guardian has not closed its own account until all child receipts finish. */
+export const assertRemoteChildrenClosed = (
+	dataDirectory: string,
+	expected: readonly RemoteOwnerIntent[],
+	root: string,
+) =>
+	checkRemoteOwners(
+		dataDirectory,
+		expected,
+		(owner) => !(owner.attempt === root && owner.root === root && owner.scope === "account"),
+	);
+
+/** Drop authority for one exact principal; historical roots always require terminal receipts. */
+export const assertRemotePrincipalClosed = (
+	dataDirectory: string,
+	expected: readonly RemoteOwnerIntent[],
+	root: string,
+	principal: Pick<RemoteOwnerIntent, "engine" | "host" | "port" | "tls" | "username">,
+) =>
+	checkRemoteOwners(
+		dataDirectory,
+		expected,
+		(owner) =>
+			owner.root !== root ||
+			(owner.engine === principal.engine &&
+				owner.host === principal.host &&
+				owner.port === principal.port &&
+				owner.tls === principal.tls &&
+				owner.username === principal.username),
+	);
 
 /** Call before opening inspectors or writer pools. All state belongs to this owner instance. */
 export const remoteOwner = (
@@ -168,6 +235,15 @@ export const remoteOwner = (
 				current = next;
 			});
 		return {
+			/** Reserved but denied keeper: durable closed admission and worker closure are mandatory. */
+			neverOpened: gate.withPermit(
+				Effect.gen(function* () {
+					if (current.state !== "pending" || current.inspector || current.sessions.length) return yield* invalid();
+					yield* proveNeverOpened(dataDirectory, selected);
+					closing = true;
+					yield* save({ ...current, state: "never-opened" });
+				}),
+			),
 			bindInspector: (session: RemoteSession) =>
 				gate.withPermit(
 					Effect.gen(function* () {
