@@ -211,3 +211,25 @@ it("does not combine catalog privileges from competing MySQL wildcard grants", a
 			);
 		}),
 	));
+
+it("retries dump cleanup after its schema grants have already been revoked", async () =>
+	run(
+		Effect.gen(function* () {
+			const resource = { ...record("dump"), phase: "closed" as const };
+			const { sql, commands } = yield* fixture((statement) =>
+				statement.includes("DATABASE()")
+					? [{ name: resource.database }]
+					: statement.includes("USER_ATTRIBUTES")
+						? [{ host: "%", stamp: resource.id }]
+						: [],
+			);
+			const provision = yield* mysqlDatabaseProvision({
+				created: () => Effect.void,
+				owns: () => Effect.succeed(false),
+			}).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+			yield* provision.revokeDump(resource);
+			expect(commands.some((text) => text.startsWith("REVOKE"))).toBe(false);
+			yield* provision.dropPrincipal(resource);
+			expect(commands.some((text) => text.startsWith("DROP USER"))).toBe(true);
+		}),
+	));

@@ -172,7 +172,10 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 			Effect.gen(function* () {
 				if (record.kind !== "dump" || record.phase !== "closed") return yield* invalid();
 				yield* selected(record);
-				if (yield* provePrincipal(record))
+				if (!(yield* provePrincipal(record))) return;
+				const grants =
+					yield* sql`SELECT PRIVILEGE_TYPE FROM information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE=${`'${record.principal}'@'%'`} AND TABLE_SCHEMA=${record.database.replace(/[_%]/g, "\\$&")}`;
+				if (grants.length > 0)
 					yield* execute(
 						`REVOKE ALL PRIVILEGES ON ${grantDatabase(record.database)}.* FROM ${account(record.principal)}`,
 					);
