@@ -1,4 +1,4 @@
-import { Effect, Exit, Scope } from "effect";
+import { Cause, Effect, Exit, Scope } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { databaseConfiguration } from "./database-configuration.ts";
 import { remoteRootGuardian } from "./remote-root-guardian.ts";
@@ -15,6 +15,23 @@ export const launchRemoteRoot = (
 	},
 ) =>
 	Effect.gen(function* () {
+		// This invocation owns its signal observation; arbitrary fiber interruption remains force-first.
+		let operatorSignal = false;
+		const observeStop = () => {
+			operatorSignal = true;
+		};
+		yield* Effect.acquireRelease(
+			Effect.sync(() => {
+				// Run before BunRuntime's listener interrupts the main fiber.
+				process.prependListener("SIGINT", observeStop);
+				process.prependListener("SIGTERM", observeStop);
+			}),
+			() =>
+				Effect.sync(() => {
+					process.removeListener("SIGINT", observeStop);
+					process.removeListener("SIGTERM", observeStop);
+				}),
+		);
 		const guardian = yield* remoteRootGuardian(configuration, options.dataDirectory);
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 		const workerScope = yield* Scope.make();
@@ -63,9 +80,19 @@ export const launchRemoteRoot = (
 					}
 					return yield* Effect.die("Remote boot group closure unproven");
 				});
-				yield* Effect.addFinalizer(() =>
-					guardian.close(closure).pipe(Effect.ensuring(Scope.close(workerScope, Exit.void)), Effect.orDie),
-				);
+				yield* Effect.addFinalizer((exit) => {
+					// Capture the cause before waiting: a later signal cannot soften an abnormal exit.
+					const graceful = operatorSignal && Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause);
+					return Effect.gen(function* () {
+						if (graceful) {
+							// Three existing five-second drain phases plus five seconds for keeper
+							// termination. This is a bounded drain opportunity, not closure proof or
+							// a bound on subsequent guardian recovery. Keep admission live during it.
+							yield* worker.kill({ killSignal: "SIGTERM", forceKillAfter: "20 seconds" }).pipe(Effect.exit);
+						}
+						yield* guardian.close(closure);
+					}).pipe(Effect.ensuring(Scope.close(workerScope, Exit.void)), Effect.orDie);
+				});
 				return yield* restore(worker.exitCode);
 			}),
 		);
