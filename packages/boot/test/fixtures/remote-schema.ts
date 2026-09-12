@@ -1,3 +1,4 @@
+import { assertBootTransferState } from "../../src/store-transfer-state.ts";
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
 import { Effect, Layer, Redacted, Schema } from "effect";
@@ -25,77 +26,119 @@ const options = {
 const layer = remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
 	Layer.provide(remoteInspectorLayer(options)),
 );
-await Effect.runPromise(
-	Effect.gen(function* () {
-		const sql = yield* SqlClient;
-		yield* initializeRemoteBootSchema(sql, settings.engine);
-		yield* initializeRemoteBootSchema(sql, settings.engine);
-		{
-			const expectFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-				effect.pipe(
-					Effect.result,
-					Effect.map((result) => assert.equal(result._tag, "Failure")),
+const mode = process.argv[2];
+if (mode === "old" || mode === "current") {
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const sql = yield* SqlClient;
+			const snapshot = Effect.gen(function* () {
+				return {
+					ledger: yield* sql`SELECT migration_id,name FROM boot_migrations ORDER BY migration_id`,
+					settings: yield* sql`SELECT ${sql("key")},value FROM settings ORDER BY ${sql("key")}`,
+					sequence: yield* sql`SELECT * FROM seq`,
+					credentials: yield* sql`SELECT id,public_key,counter FROM passkeys ORDER BY id`,
+				};
+			});
+			for (const key of ["transfer_state", "transferred_to"]) {
+				yield* sql`INSERT INTO settings(${sql("key")},value) VALUES(${key},'in_progress')`;
+				const before = yield* snapshot;
+				// The copied old image deliberately has no new startup marker preflight.
+				const start: Effect.Effect<void, unknown> =
+					mode === "old"
+						? initializeRemoteBootSchema(sql, settings.engine)
+						: assertBootTransferState(sql).pipe(Effect.andThen(initializeRemoteBootSchema(sql, settings.engine)));
+				const result = yield* start.pipe(Effect.result);
+				assert.equal(result._tag, "Failure");
+				assert.ok(
+					JSON.stringify(result).includes(
+						mode === "old"
+							? "migration_ledger_too_new"
+							: key === "transfer_state"
+								? "store_transfer_incomplete"
+								: "store_transferred",
+					),
 				);
-			const seq = yield* sql`SELECT ${sql("next")},published_through FROM seq WHERE singleton=1`;
-			assert.deepEqual(seq, [{ next: 1, published_through: 0 }]);
-			const path = `pages/${"雪😀segment/".repeat(600)}file.md`;
-			const bytes = new Uint8Array([0, 128, 255]);
-			yield* sql`INSERT INTO staging(lock_id,path,content,sha,at,mode) VALUES ('fixture',${path},${bytes},'a',9007199254740991,420)`;
-			const staged = yield* sql`SELECT path,content,at FROM staging WHERE path=${path}`;
-			assert.equal(staged[0]?.path, path);
-			assert.deepEqual(Schema.decodeUnknownSync(Schema.Uint8Array)(staged[0]?.content), bytes);
-			assert.equal(staged[0]?.at, 9007199254740991);
-			yield* expectFailure(
-				sql`INSERT INTO staging(lock_id,path,content,sha,at) VALUES ('fixture',${path},NULL,NULL,1)`,
-			);
-			yield* expectFailure(sql`INSERT INTO staging(lock_id,path,content,sha,at) VALUES ('fixture','bad',NULL,'a',1)`);
-			yield* sql`INSERT INTO public_paths(path) VALUES (${path}),(${path + "X"})`;
-			assert.equal((yield* sql`SELECT path FROM public_paths WHERE path=${path}`).length, 1);
-			const credential = "A".repeat(6000);
-			yield* sql`INSERT INTO passkeys(id,public_key,counter,transports,label,created_at) VALUES (${credential},'key',0,'[]','fixture',1)`;
-			assert.equal((yield* sql`SELECT id FROM passkeys WHERE id=${credential}`)[0]?.id, credential);
-			yield* expectFailure(
-				sql`INSERT INTO passkeys(id,public_key,counter,transports,label,created_at) VALUES (${credential},'key',0,'[]','fixture',1)`,
-			);
-			const event = { type: "type".repeat(2000), actor: "actor".repeat(2000), instance: "null", level: "info" };
-			yield* sql`INSERT INTO events(seq,event) VALUES (1,${JSON.stringify(event)})`;
-			const projected = yield* sql`SELECT ${sql("type")},actor,instance FROM events WHERE seq=1`;
-			assert.equal(projected[0]?.type, event.type);
-			assert.equal(projected[0]?.actor, event.actor);
-			assert.equal(projected[0]?.instance, "null");
-			yield* sql`INSERT INTO events(seq,event) VALUES (2,${JSON.stringify({ ...event, instance: null })})`;
-			assert.equal((yield* sql`SELECT instance FROM events WHERE seq=2`)[0]?.instance, null);
-			yield* sql`INSERT INTO source_batches(id,agent,at,state) VALUES ('first','agent',1,'publishing')`;
-			yield* expectFailure(sql`INSERT INTO source_batches(id,agent,at,state) VALUES ('second','agent',1,'publishing')`);
-			yield* sql`UPDATE source_batches SET state='published' WHERE id='first'`;
-			yield* sql`INSERT INTO source_batches(id,agent,at,state) VALUES ('second','agent',1,'publishing')`;
-			yield* sql`INSERT INTO sessions(id,hash,created_at,expires_at) VALUES ('session','hash',1,2)`;
-			yield* expectFailure(sql`INSERT INTO sessions(id,hash,created_at,expires_at) VALUES ('duplicate','hash',1,2)`);
-			yield* sql`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES ('first','hash','session','backup','authorized',0)`;
-			yield* expectFailure(
-				sql`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES ('second','hash','session','backup','working',0)`,
-			);
-			yield* sql`UPDATE db_restore_requests SET phase='restored' WHERE proof_id='first'`;
-			yield* sql`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES ('second','hash','session','backup','working',0)`;
-			yield* expectFailure(sql`INSERT INTO seq(singleton,${sql("next")},published_through) VALUES (2,1,0)`);
+				assert.deepEqual(yield* snapshot, before);
+				yield* sql`DELETE FROM settings WHERE ${sql("key")}=${key}`;
+			}
+		}).pipe(Effect.scoped, Effect.provide(layer)),
+	);
+	process.stdout.write(`${mode} image refused both transfer markers without changing retained state\n`);
+} else {
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const sql = yield* SqlClient;
 			yield* initializeRemoteBootSchema(sql, settings.engine);
-			assert.equal((yield* sql`SELECT path FROM staging WHERE lock_id='fixture'`)[0]?.path, path);
-			assert.equal((yield* sql`SELECT migration_id FROM boot_migrations`).length, 20);
-			process.stdout.write("boot native constraints, long values, binary, sequence and reopen durability passed\n");
-		}
-	}).pipe(Effect.scoped, Effect.provide(layer)),
-);
+			yield* initializeRemoteBootSchema(sql, settings.engine);
+			{
+				const expectFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+					effect.pipe(
+						Effect.result,
+						Effect.map((result) => assert.equal(result._tag, "Failure")),
+					);
+				const seq = yield* sql`SELECT ${sql("next")},published_through FROM seq WHERE singleton=1`;
+				assert.deepEqual(seq, [{ next: 1, published_through: 0 }]);
+				const path = `pages/${"雪😀segment/".repeat(600)}file.md`;
+				const bytes = new Uint8Array([0, 128, 255]);
+				yield* sql`INSERT INTO staging(lock_id,path,content,sha,at,mode) VALUES ('fixture',${path},${bytes},'a',9007199254740991,420)`;
+				const staged = yield* sql`SELECT path,content,at FROM staging WHERE path=${path}`;
+				assert.equal(staged[0]?.path, path);
+				assert.deepEqual(Schema.decodeUnknownSync(Schema.Uint8Array)(staged[0]?.content), bytes);
+				assert.equal(staged[0]?.at, 9007199254740991);
+				yield* expectFailure(
+					sql`INSERT INTO staging(lock_id,path,content,sha,at) VALUES ('fixture',${path},NULL,NULL,1)`,
+				);
+				yield* expectFailure(sql`INSERT INTO staging(lock_id,path,content,sha,at) VALUES ('fixture','bad',NULL,'a',1)`);
+				yield* sql`INSERT INTO public_paths(path) VALUES (${path}),(${path + "X"})`;
+				assert.equal((yield* sql`SELECT path FROM public_paths WHERE path=${path}`).length, 1);
+				const credential = "A".repeat(6000);
+				yield* sql`INSERT INTO passkeys(id,public_key,counter,transports,label,created_at) VALUES (${credential},'key',0,'[]','fixture',1)`;
+				assert.equal((yield* sql`SELECT id FROM passkeys WHERE id=${credential}`)[0]?.id, credential);
+				yield* expectFailure(
+					sql`INSERT INTO passkeys(id,public_key,counter,transports,label,created_at) VALUES (${credential},'key',0,'[]','fixture',1)`,
+				);
+				const event = { type: "type".repeat(2000), actor: "actor".repeat(2000), instance: "null", level: "info" };
+				yield* sql`INSERT INTO events(seq,event) VALUES (1,${JSON.stringify(event)})`;
+				const projected = yield* sql`SELECT ${sql("type")},actor,instance FROM events WHERE seq=1`;
+				assert.equal(projected[0]?.type, event.type);
+				assert.equal(projected[0]?.actor, event.actor);
+				assert.equal(projected[0]?.instance, "null");
+				yield* sql`INSERT INTO events(seq,event) VALUES (2,${JSON.stringify({ ...event, instance: null })})`;
+				assert.equal((yield* sql`SELECT instance FROM events WHERE seq=2`)[0]?.instance, null);
+				yield* sql`INSERT INTO source_batches(id,agent,at,state) VALUES ('first','agent',1,'publishing')`;
+				yield* expectFailure(
+					sql`INSERT INTO source_batches(id,agent,at,state) VALUES ('second','agent',1,'publishing')`,
+				);
+				yield* sql`UPDATE source_batches SET state='published' WHERE id='first'`;
+				yield* sql`INSERT INTO source_batches(id,agent,at,state) VALUES ('second','agent',1,'publishing')`;
+				yield* sql`INSERT INTO sessions(id,hash,created_at,expires_at) VALUES ('session','hash',1,2)`;
+				yield* expectFailure(sql`INSERT INTO sessions(id,hash,created_at,expires_at) VALUES ('duplicate','hash',1,2)`);
+				yield* sql`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES ('first','hash','session','backup','authorized',0)`;
+				yield* expectFailure(
+					sql`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES ('second','hash','session','backup','working',0)`,
+				);
+				yield* sql`UPDATE db_restore_requests SET phase='restored' WHERE proof_id='first'`;
+				yield* sql`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES ('second','hash','session','backup','working',0)`;
+				yield* expectFailure(sql`INSERT INTO seq(singleton,${sql("next")},published_through) VALUES (2,1,0)`);
+				yield* initializeRemoteBootSchema(sql, settings.engine);
+				assert.equal((yield* sql`SELECT path FROM staging WHERE lock_id='fixture'`)[0]?.path, path);
+				assert.equal((yield* sql`SELECT migration_id FROM boot_migrations`).length, 20);
+				process.stdout.write("boot native constraints, long values, binary, sequence and reopen durability passed\n");
+			}
+		}).pipe(Effect.scoped, Effect.provide(layer)),
+	);
 
-// A new scope creates new physical connections; preserve data after closing the first client.
-await Effect.runPromise(
-	Effect.gen(function* () {
-		const sql = yield* SqlClient;
-		yield* initializeRemoteBootSchema(sql, settings.engine);
-		assert.equal(
-			(yield* sql`SELECT path FROM staging WHERE lock_id='fixture'`)[0]?.path,
-			`pages/${"雪😀segment/".repeat(600)}file.md`,
-		);
-		assert.equal((yield* sql`SELECT id FROM passkeys`)[0]?.id, "A".repeat(6000));
-	}).pipe(Effect.scoped, Effect.provide(layer)),
-);
-process.stdout.write("boot native constraints, long values, binary, sequence and reopen durability passed\n");
+	// A new scope creates new physical connections; preserve data after closing the first client.
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const sql = yield* SqlClient;
+			yield* initializeRemoteBootSchema(sql, settings.engine);
+			assert.equal(
+				(yield* sql`SELECT path FROM staging WHERE lock_id='fixture'`)[0]?.path,
+				`pages/${"雪😀segment/".repeat(600)}file.md`,
+			);
+			assert.equal((yield* sql`SELECT id FROM passkeys`)[0]?.id, "A".repeat(6000));
+		}).pipe(Effect.scoped, Effect.provide(layer)),
+	);
+	process.stdout.write("boot native constraints, long values, binary, sequence and reopen durability passed\n");
+}
