@@ -80,10 +80,18 @@ export const fenceAppStore = (filename: string, epoch: string, rejectedAttempt?:
 			yield* sql`PRAGMA synchronous = FULL`;
 			return yield* sql.withTransaction(
 				Effect.gen(function* () {
-					if (adoption.mode === "legacy" && adoption.phase === "pending") {
-						yield* sql`SELECT singleton,epoch FROM kernel_writer LIMIT 0`;
-						yield* sql`SELECT id,from_seq,to_seq,count FROM mutation_batches LIMIT 0`;
-						yield* sql`SELECT seq,transaction_id,event,shipped_at FROM outbox LIMIT 0`;
+					const tables = yield* sql`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`;
+					if (tables.length > 0 || adoption.mode === "legacy" || adoption.phase === "ready") {
+						yield* Effect.gen(function* () {
+							yield* sql`SELECT singleton,epoch FROM kernel_writer LIMIT 0`;
+							yield* sql`SELECT id,from_seq,to_seq,count FROM mutation_batches LIMIT 0`;
+							yield* sql`SELECT seq,transaction_id,event,shipped_at FROM outbox LIMIT 0`;
+						}).pipe(Effect.mapError(() => new EventError({ code: "app_store_identity_invalid" })));
+						const high = yield* sql`SELECT MAX(value) AS value FROM (
+						 SELECT COALESCE(MAX(seq),0) AS value FROM outbox
+						 UNION ALL SELECT COALESCE(MAX(to_seq),0) AS value FROM mutation_batches
+						)`.pipe(decodeRows(Schema.Struct({ value: Schema.Int })));
+						if ((high[0]?.value ?? 0) >= pending.next) return yield* new EventError({ code: "app_evidence_invalid" });
 					}
 					yield* verifyAppIdentity(adoption, adoption.phase === "pending");
 					if (marker.length === 0) {
@@ -126,6 +134,7 @@ const make = (filename: string, dataDirectory?: string) =>
 			reserveIdentity: identity.reserve,
 			selectRestored: (_target: RemoteStore) => Effect.fail(new EventError({ code: "app_store_identity_invalid" })),
 			store: Effect.succeed(store),
+			identityStatus: identity.status.pipe(Effect.provideContext(context)),
 			filename,
 			dataDirectory: dataDirectory ?? path.dirname(filename),
 			prepare: (epoch: string, rejectedAttempt?: string) =>
@@ -200,6 +209,7 @@ export const remoteRecovery = (options: RemoteRecoveryOptions) =>
 		return {
 			store: remoteIdentity.store,
 			reserveIdentity: remoteIdentity.reserve,
+			identityStatus: remoteIdentity.status,
 			selectRestored: remoteIdentity.selectRestored,
 			filename: undefined,
 			dataDirectory: options.dataDirectory,

@@ -59,6 +59,7 @@ const policy = {
 	...childErrorPolicy,
 	app_store_missing: appIdentityPolicy,
 	app_store_identity_invalid: appIdentityPolicy,
+	app_store_mismatch: appIdentityPolicy,
 	authority_expired: {
 		status: 401,
 		retriable: false,

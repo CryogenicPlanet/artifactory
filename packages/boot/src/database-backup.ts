@@ -1,4 +1,5 @@
 import { lockBootWrite } from "./boot-write-lock.ts";
+import { backupPath } from "./backup-metadata.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
 import { Crypto, DateTime, Effect, FileSystem, Path, Ref } from "effect";
 import { HttpClient } from "effect/unstable/http";
@@ -23,7 +24,7 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const crypto = yield* Crypto.Crypto;
-	const retention = yield* artifactRetention(recovery.dataDirectory);
+	const retention = yield* artifactRetention(recovery.dataDirectory, backup.engine);
 	const headroom = yield* storageHeadroom(recovery.dataDirectory);
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const capture = <E = never>(options: {
@@ -75,13 +76,16 @@ export const databaseBackup = Effect.fn("databaseBackup")(function* (supervisor:
 					const id = yield* crypto.randomUUIDv4;
 					const directory = path.join(recovery.dataDirectory, "backups");
 					yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
-					const saved = path.join(directory, `${id}.db`);
+					const saved = backupPath(path, recovery.dataDirectory, id, backup.engine);
 					created = saved;
 					yield* retention.prune(yield* headroom.sample, yield* backup.estimatedBytes, [active.generation.n]);
 					const bytes = Number(yield* backup.clone({ _tag: "file", filename: saved }));
 					const taken = (yield* DateTime.nowAsDate).getTime();
 					const record = {
 						id,
+						engine: backup.engine,
+						path: saved,
+						legacy_store_id: null,
 						reason: options.reason,
 						bytes,
 						taken_at: taken,

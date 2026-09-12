@@ -1,5 +1,5 @@
 import { lockBootWrite } from "./boot-write-lock.ts";
-import { backupPath, BackupRecord } from "./backup-metadata.ts";
+import { backupPath, backupRelativePath, BackupRecord } from "./backup-metadata.ts";
 import { acceptSourceRevert } from "./source-revert.ts";
 import { seedSource } from "./seed-source.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
@@ -49,7 +49,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const crypto = yield* Crypto.Crypto;
-	const retention = yield* artifactRetention(options.dataDirectory);
+	const retention = yield* artifactRetention(options.dataDirectory, backup.engine);
 	const policy = yield* HeadroomPolicy;
 	const headroom = yield* storageHeadroom(options.dataDirectory);
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
@@ -79,11 +79,14 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			if (artifact && artifact.engine !== backup.engine)
 				return yield* new ChildError({ code: "backup_engine_mismatch" });
 			const saved = artifact?.path;
+			const root = yield* fs.realPath(options.dataDirectory);
+			const relative = artifact ? backupRelativePath(path, options.dataDirectory, root, artifact) : null;
 			if (
+				!artifact ||
 				!saved ||
-				saved !== backupPath(path, options.dataDirectory, record.backup) ||
+				relative === null ||
 				(yield* fs.stat(saved)).type !== "File" ||
-				(yield* fs.realPath(saved)) !== backupPath(path, yield* fs.realPath(options.dataDirectory), record.backup)
+				(yield* fs.realPath(saved)) !== path.join(root, relative)
 			)
 				return yield* new ChildError({ code: "cutover_backup_invalid" });
 			if (record.phase !== "restoring") {
@@ -92,11 +95,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			}
 			// The replacement app must republish its grants before activation can expose its pages.
 			yield* sql`DELETE FROM public_paths`;
-			const restored = yield* backup.restoreInto({
-				path: saved,
-				legacy_store_id: artifact?.legacy_store_id ?? null,
-				engine: backup.engine,
-			});
+			const restored = yield* backup.restoreInto(artifact);
 			if (restored._tag !== "file")
 				yield* sql.withTransaction(
 					Effect.gen(function* () {
@@ -315,7 +314,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						const id = yield* crypto.randomUUIDv4;
 						const directory = path.join(options.dataDirectory, "backups");
 						yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
-						const saved = path.join(directory, `${id}.db`);
+						const saved = backupPath(path, options.dataDirectory, id, backup.engine);
 						const fence = (yield* events.state).published_through;
 						yield* retention.prune(yield* headroom.sample, yield* backup.estimatedBytes, [
 							...(prior ? [prior.generation.n] : []),

@@ -8,7 +8,7 @@ import { storageHeadroom, StorageRejected } from "./storage-headroom.ts";
 import { DbOps } from "./db-ops.ts";
 import { AppRecovery } from "./app-recovery.ts";
 import { Auth } from "./auth.ts";
-import { BackupRecord, backupPath } from "./backup-metadata.ts";
+import { BackupRecord, backupPath, backupRelativePath } from "./backup-metadata.ts";
 import { ChildAttempts } from "./child-attempts.ts";
 import { ChildError } from "./child-process.ts";
 import { DatabaseRestoreRequest, type RestoreSelection } from "./database-restore-schema.ts";
@@ -35,7 +35,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 	const crypto = yield* Crypto.Crypto;
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
-	const retention = yield* artifactRetention(recovery.dataDirectory);
+	const retention = yield* artifactRetention(recovery.dataDirectory, backup.engine);
 	const headroom = yield* storageHeadroom(recovery.dataDirectory);
 	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const preparationContext = yield* Effect.context<Effect.Services<ReturnType<typeof prepareRestoreGeneration>>>();
@@ -55,12 +55,14 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 			);
 			const row = rows[0];
 			if (row && row.engine !== backup.engine) return yield* new ChildError({ code: "backup_engine_mismatch" });
+			const root = yield* fs.realPath(recovery.dataDirectory);
+			const relative = row ? backupRelativePath(path, recovery.dataDirectory, root, row) : null;
 			if (
 				!row ||
 				row.published_through === null ||
 				row.published_through < 0 ||
-				row.path !== backupPath(path, recovery.dataDirectory, id) ||
-				(yield* fs.realPath(row.path)) !== backupPath(path, yield* fs.realPath(recovery.dataDirectory), id) ||
+				relative === null ||
+				(yield* fs.realPath(row.path)) !== path.join(root, relative) ||
 				(yield* fs.stat(row.path)).type !== "File"
 			)
 				return yield* new ChildError({ code: "restore_backup_invalid" });
@@ -346,7 +348,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					const id = yield* crypto.randomUUIDv4;
 					const directory = path.join(recovery.dataDirectory, "backups");
 					yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
-					const filename = backupPath(path, recovery.dataDirectory, id);
+					const filename = backupPath(path, recovery.dataDirectory, id, backup.engine);
 					const fence = (yield* events.state).published_through;
 					const frozenEstimate = yield* backup.estimatedBytes;
 					yield* retention.prune(yield* headroom.sample, frozenEstimate, [generation.n]);

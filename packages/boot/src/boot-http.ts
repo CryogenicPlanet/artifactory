@@ -1,4 +1,5 @@
 import { type Cause, Context, type Effect, Layer, type Ref } from "effect";
+import type { AppRecovery } from "./app-recovery.ts";
 import type { AuthConfig } from "./auth.ts";
 import type { BackupInventory } from "./backup-inventory.ts";
 import type { DatabaseBackup } from "./database-backup.ts";
@@ -18,6 +19,7 @@ export class BootHttp extends Context.Service<
 	BootHttp,
 	{
 		readonly child: SupervisedChild;
+		readonly storeIdentity?: AppRecovery["Service"]["identityStatus"];
 		readonly authConfig: AuthConfig;
 		readonly editing: Omit<Editing, "writable">;
 		readonly backups: BackupInventory;

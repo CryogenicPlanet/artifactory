@@ -14,6 +14,7 @@ import { type EventRecord, Events, layer as eventsLayer } from "../../src/events
 import { layer as generationsLayer } from "../../src/generations.ts";
 import { layer as kernelBootLayer } from "../../src/kernel-boot.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
+import { BackupRecord } from "../../src/backup-metadata.ts";
 import { databaseBackup } from "../../src/database-backup.ts";
 import type { ActiveChild, ChildStatus, Supervisor } from "../../src/supervisor.ts";
 import { traffic } from "../../src/traffic.ts";
@@ -261,6 +262,7 @@ const main = Effect.gen(function* () {
 		const recordedEvents = yield* sql`SELECT event FROM events`;
 		let saved: unknown = null;
 		if (result._tag === "Success") {
+			yield* Schema.decodeUnknownEffect(BackupRecord)(result.value);
 			const copy = new Database(`${root}/backups/${result.value.id}.db`, { readonly: true });
 			try {
 				saved = {
