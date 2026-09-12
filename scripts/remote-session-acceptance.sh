@@ -30,6 +30,7 @@ CREATE DATABASE comms_schema_guard OWNER comms_app;
 CREATE DATABASE comms_shared_store OWNER comms_app;
 CREATE DATABASE comms_failed_lease OWNER comms_app;
 CREATE DATABASE comms_read_cleanup OWNER comms_app;
+CREATE DATABASE comms_collation_boot OWNER comms_app;
 CREATE DATABASE comms_snapshot_boot OWNER comms_app;
 CREATE DATABASE comms_snapshot_app OWNER comms_app;
 CREATE DATABASE comms_schema_core OWNER comms_app;
@@ -62,6 +63,8 @@ CREATE DATABASE comms_failed_lease CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bi
 GRANT ALL ON comms_failed_lease.* TO 'comms_app'@'%';
 CREATE DATABASE comms_read_cleanup CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 GRANT ALL ON comms_read_cleanup.* TO 'comms_app'@'%';
+CREATE DATABASE comms_collation_boot CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
+GRANT ALL ON comms_collation_boot.* TO 'comms_app'@'%';
 CREATE DATABASE comms_snapshot_boot CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 CREATE DATABASE comms_snapshot_app CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 GRANT ALL ON comms_snapshot_boot.* TO 'comms_app'@'%';
@@ -127,7 +130,7 @@ published=$(docker port "$container" "$port/tcp")
 python3 - "$private/client.json" "${published##*:}" <<'PY'
 import json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()); d['port']=int(sys.argv[2]); p.write_text(json.dumps(d))
-for database,name in [('comms_concurrency_app','concurrency-app'),('comms_concurrency_boot','concurrency-boot'),('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect'),('comms_failed_lease','failed-lease'),('comms_read_cleanup','read-cleanup'),('comms_snapshot_boot','snapshot-boot'),('comms_snapshot_app','snapshot-app')]:
+for database,name in [('comms_collation_boot','collation'),('comms_concurrency_app','concurrency-app'),('comms_concurrency_boot','concurrency-boot'),('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect'),('comms_failed_lease','failed-lease'),('comms_read_cleanup','read-cleanup'),('comms_snapshot_boot','snapshot-boot'),('comms_snapshot_app','snapshot-app')]:
  d['database']=database; (p.parent/(name+'.json')).write_text(json.dumps(d))
 if d['engine']=='pg':
  for suffix,name in [('', 'upgrade'),('_fresh','fresh'),('_denied','denied')]:
@@ -141,6 +144,8 @@ if [ "$attributes" != 32 ]; then
     COMMS_UNACCENT_DENIED_CONFIG="$private/unaccent-denied.json" \
       node node_modules/vitest/vitest.mjs run packages/server/test/postgres-unaccent.test.ts --maxWorkers=1 --reporter=verbose
   fi
+  COMMS_COLLATION_CONFIG="$private/collation.json" \
+    node node_modules/vitest/vitest.mjs run packages/server/test/kernel/native-identifier-collation.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_CONCURRENCY_APP_CONFIG="$private/concurrency-app.json" COMMS_CONCURRENCY_BOOT_CONFIG="$private/concurrency-boot.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/native-concurrency.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_REMOTE_CORE_TEST_CONFIG="$private/core.json" \

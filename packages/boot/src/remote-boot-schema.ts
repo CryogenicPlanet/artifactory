@@ -62,7 +62,7 @@ export const initializeRemoteBootSchema = (sql: SqlClient, engine: "pg" | "mysql
 			"sqlite_copy_ownership",
 			"offline_store_transfer",
 		] as const;
-		return yield* remoteMigrate(
+		yield* remoteMigrate(
 			sql,
 			"boot_migrations",
 			names.map((name, offset) => ({
@@ -89,4 +89,10 @@ export const initializeRemoteBootSchema = (sql: SqlClient, engine: "pg" | "mysql
 				],
 			})),
 		);
+		// These are the final remote table definitions, not historical migration
+		// operations. Recheck on reopen so an applied ledger cannot hide drift.
+		for (const table of tables) {
+			if (!(yield* table.postcondition))
+				return yield* new RemoteMigrationError({ code: "migration_postcondition_failed", ledger: "boot_migrations" });
+		}
 	});
