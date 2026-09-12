@@ -1,3 +1,4 @@
+import { assertTransferActivation } from "./store-transfer-activation.ts";
 import { transferPolicy } from "./app-store-identity.ts";
 import { assertBootTransferState } from "./store-transfer-state.ts";
 import { logRedactor } from "./log-redaction.ts";
@@ -107,6 +108,9 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const { child, run, fail } = supervisor;
 	const initialized = Layer.effectDiscard(
 		Effect.flatMap(SqlClient.SqlClient, assertBootTransferState).pipe(
+			Effect.flatMap((rows) =>
+				assertTransferActivation(rows, { dataDirectory: options.dataDirectory, boot: configuration.boot }),
+			),
 			Effect.andThen(initializeBootSchema),
 			Effect.andThen(
 				isolated && configuration._tag === "file" ? fs.chmod(configuration.boot.filename, 0o600) : Effect.void,

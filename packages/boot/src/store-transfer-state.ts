@@ -21,12 +21,13 @@ export const assertBootTransferState = (sql: SqlClient) =>
 			mysql: () =>
 				sql`SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='settings'`,
 		});
-		if (tables.length === 0) return;
+		if (tables.length === 0) return [];
 		const rows =
-			yield* sql`SELECT ${sql("key")},value FROM settings WHERE ${sql("key")} IN ('transferred_to','transfer_state')`.pipe(
+			yield* sql`SELECT ${sql("key")},value FROM settings WHERE ${sql("key")} IN ('transferred_to','transfer_state','transfer_journal','app_store_id')`.pipe(
 				Effect.flatMap(
 					Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String }))),
 				),
 			);
 		yield* assertTransferState(rows);
+		return rows;
 	});
