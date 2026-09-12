@@ -38,7 +38,9 @@ const project = (row: Row, selection: TransferSelection, initializedAt: number) 
 		if (row.key.startsWith(prefix)) return yield* invalid();
 		if (row.key === "transferred_to") return [];
 		if (row.key === "app_store_id" && row.value !== selection.store_id) return yield* invalid();
-		if (row.key === "sqlite_copy" || row.key.startsWith("source-revert:")) return yield* invalid();
+		if (row.key === "sqlite_copy") return yield* invalid();
+		// Legacy source-revert:<digest> binds selection only. Current boot treats key presence
+		// as a permanent outcome-unavailable refusal; retain its opaque value bytes.
 		if (row.key === "app_store_layout" && row.value !== "ready") return yield* invalid();
 		if (row.key === "transfer_state" && row.value !== "complete") return yield* invalid();
 		if (row.key === "app_store_adoption" || row.key === "app_store_schema" || row.key.startsWith("remote_database:")) {

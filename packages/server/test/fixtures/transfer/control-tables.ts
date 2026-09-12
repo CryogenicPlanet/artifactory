@@ -56,6 +56,11 @@ await Effect.runPromise(
 				}),
 			);
 		}
+		if (mode === "legacy-receipt") {
+			// source-journal.ts at409aae3 (before exact outcome receipts) stored this Binding.
+			yield* sourceBoot`INSERT INTO settings VALUES(${"source-revert:" + "c".repeat(64)},${' { "request": "{\\"path\\":null,\\"batch\\":null,\\"version\\":1}", "selected": {"batch":null,"version":1,"previous":false} } '})`;
+			yield* sourceBoot`INSERT INTO settings VALUES(${"source-revert:" + "d".repeat(64)},'opaque old value retained verbatim')`;
+		}
 		if (mode === "publication-gap") yield* sourceBoot`UPDATE seq SET published_through=87`;
 		if (mode === "malformed-receipt")
 			yield* sourceBoot`INSERT INTO settings VALUES('source-revert-result:x','{"outcome":false}')`;
@@ -92,10 +97,11 @@ await Effect.runPromise(
 			yield* targetBoot`SELECT key,value FROM settings WHERE key LIKE ${`transfer-history:${transferId}:%`} ORDER BY key`;
 		const activeRemote = yield* targetBoot`SELECT key FROM settings WHERE key LIKE 'remote_database:%'`;
 		const history = yield* targetBoot`SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'receipt:history:%'`;
+		const legacy = yield* targetBoot`SELECT value FROM settings WHERE key LIKE 'source-revert:%' ORDER BY key`;
 		const receipt = yield* targetBoot`SELECT value FROM settings WHERE key='receipt:example'`;
 		const watcher = yield* targetBoot`SELECT value FROM settings WHERE key='source.watcher_baseline'`;
 		console.log(
-			JSON.stringify({ result, targetSequence, controls, archived, activeRemote, watcher, receipt, history }),
+			JSON.stringify({ result, targetSequence, controls, archived, activeRemote, watcher, receipt, history, legacy }),
 		);
 	}).pipe(Effect.scoped, Effect.provide(BunCrypto.layer)),
 );

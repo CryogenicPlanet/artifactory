@@ -62,3 +62,16 @@ it("copies and verifies large receipt history through the shared bounded reader"
 		history: [{ count: 513 }],
 	});
 });
+
+it("preserves legacy selection-only undo markers as terminal opaque receipts", async (test) => {
+	expect(await fixture(test, "legacy-receipt")).toMatchObject({
+		result: { _tag: "Success", value: { unchanged: true, corruptionDetected: true } },
+		legacy: [
+			{
+				value:
+					' { "request": "{\\"path\\":null,\\"batch\\":null,\\"version\\":1}", "selected": {"batch":null,"version":1,"previous":false} } ',
+			},
+			{ value: "opaque old value retained verbatim" },
+		],
+	});
+});
