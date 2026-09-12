@@ -12,7 +12,7 @@ import { ChildAttempts } from "./child-attempts.ts";
 import { ChildError, launchChild, type RunningChild } from "./child-process.ts";
 import type { Attempt } from "./event-http.ts";
 import { Generations, type Generation } from "./generations.ts";
-import { Events } from "./events.ts";
+import { EventError, Events } from "./events.ts";
 import { traffic, type Traffic } from "./traffic.ts";
 
 export interface ChildStatus {
@@ -24,6 +24,7 @@ export interface ChildStatus {
 	readonly port: number | null;
 	readonly error: string | null;
 	readonly stderr: string;
+	readonly identity_error?: EventError["identity"] | null;
 }
 export interface ActiveChild {
 	readonly store: Store;
@@ -96,7 +97,9 @@ export const supervise = Effect.fn("supervise")(function* (
 		Effect.andThen(Ref.set(current, null)),
 		Effect.andThen(
 			Ref.update(status, (value): ChildStatus =>
-				value.state === "live" ? { ...value, state: "starting", pid: null, port: null } : value,
+				value.state === "live"
+					? { ...value, state: "starting", pid: null, port: null, error: "route_withdrawn" }
+					: value,
 			),
 		),
 	);
@@ -113,12 +116,18 @@ export const supervise = Effect.fn("supervise")(function* (
 		traffic: routing,
 	} satisfies SupervisedChild;
 	const fail = (cause: Cause.Cause<unknown>) =>
-		Ref.update(status, (state): ChildStatus => ({
-			...state,
-			state: "failed",
-			error: redact(Cause.pretty(cause)),
-			stderr: redact(state.stderr),
-		}));
+		Ref.update(status, (state): ChildStatus => {
+			const error = Cause.findError(cause);
+			return {
+				...state,
+				state: "failed",
+				error: redact(Cause.pretty(cause)),
+				stderr: redact(state.stderr),
+				// Only authenticated status exposes these validated fields; no new store read is needed.
+				identity_error:
+					error._tag === "Success" && Schema.is(EventError)(error.success) ? (error.success.identity ?? null) : null,
+			};
+		});
 	const launchSelected = (
 		entry: string,
 		generation: Generation,

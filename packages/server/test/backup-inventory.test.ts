@@ -56,6 +56,14 @@ it("lists backup metadata with a human session and rejects every Authorization h
 		"INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation) VALUES ('legacy','/private/backup-never-created.db','pre-flip',2048,10,NULL,NULL),('new','/private/current.db','hourly',4096,20,123,7)",
 		"boot.db",
 	);
+	const [identity] = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ value: Schema.String })))(
+		await fixture.sql("SELECT value FROM settings WHERE key='app_store_id'", "boot.db"),
+	);
+	if (!identity) throw new Error("Missing adopted store identity");
+	await fixture.sql(
+		"UPDATE backups SET legacy_store_id=(SELECT value FROM settings WHERE key='app_store_id') WHERE id='legacy'",
+		"boot.db",
+	);
 	const response = await fetch(url, { headers: { cookie } });
 	expect(response.status).toBe(200);
 	expect(response.headers.get("cache-control")).toBe("no-store");
@@ -71,6 +79,7 @@ it("lists backup metadata with a human session and rejects every Authorization h
 				taken_at: 20,
 				published_through: 123,
 				generation: 7,
+				provenance: { kind: "not_recorded", store_id: null },
 			},
 			{
 				id: "legacy",
@@ -80,9 +89,22 @@ it("lists backup metadata with a human session and rejects every Authorization h
 				taken_at: 10,
 				published_through: null,
 				generation: null,
+				provenance: { kind: "legacy_adoption", store_id: identity.value },
 			},
 		],
 		next: null,
+		expected_store_id: identity.value,
+	});
+	// Catalog reads never echo malformed identity bytes, including a valid UUID followed by a newline.
+	await fixture.sql(
+		"UPDATE backups SET legacy_store_id=(SELECT value FROM settings WHERE key='app_store_id') || char(10) WHERE id='legacy'",
+		"boot.db",
+	);
+	expect(await (await fetch(url, { headers: { cookie } })).json()).toMatchObject({
+		items: [
+			{ id: "new", provenance: { kind: "not_recorded", store_id: null } },
+			{ id: "legacy", provenance: { kind: "legacy_adoption", store_id: null } },
+		],
 	});
 	for (const method of ["POST", "PUT", "PATCH", "DELETE"])
 		expect((await fetch(url, { method, headers: { cookie, origin: "https://comms.test" } })).status).toBe(501);
