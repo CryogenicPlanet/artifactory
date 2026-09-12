@@ -48,6 +48,7 @@ const coreNames = [
 	"mention_word_boundaries",
 	"mention_punctuation",
 	"domain_json",
+	"search_diacritics",
 ] as const;
 const names = (values: readonly string[]) => values.map((name, index) => ({ migration_id: index + 1, name }));
 const scratch = () => testStore({ engine, config: undefined, database: "unused", tables: [] });
@@ -161,7 +162,7 @@ const main = Effect.gen(function* () {
 			{ name: "webhook_subscriptions" },
 		]);
 		yield* sql`SELECT id,input,start_seq,cursor,attempts,last_error FROM webhook_subscriptions LIMIT 0`;
-		if (engine === "sqlite") assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 11 }]);
+		if (engine === "sqlite") assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 12 }]);
 	}).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.provideService(BootChannel, boot));
 }).pipe(Effect.provide(Layer.merge(BunServices.layer, Reactivity.layer)), Effect.scoped);
 await Effect.runPromise(main);
