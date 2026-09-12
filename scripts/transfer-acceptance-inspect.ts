@@ -3,8 +3,8 @@ import { Database } from "bun:sqlite";
 import { Schema } from "effect";
 
 const [boot, app] = process.argv.slice(2);
-const expected = /^\/data\/transfers\/[a-f0-9-]{36}\/scratch\/(?:boot\.db|store\/comms\.db)$/;
-if (!boot || !app || !expected.test(boot) || !expected.test(app) || boot === app)
+const selected = boot?.match(/^\/data\/transfers\/([a-f0-9-]{36})\/scratch\/boot\.db$/);
+if (!boot || !selected || app !== `/data/rehearsals/transfer-check-${selected[1]}/comms.db`)
 	throw new Error("Invalid disposable check paths");
 const inspect = (filename: string, tables: readonly string[], marker: boolean) => {
 	const database = new Database(filename, { readonly: true });

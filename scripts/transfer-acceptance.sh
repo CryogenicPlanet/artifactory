@@ -55,7 +55,8 @@ for side,engine in [('source',sys.argv[2]),('target',sys.argv[3]),('check',sys.a
     env='RP_ID=localhost\nPUBLIC_ORIGIN=http://localhost:8080\nDATABASE_TLS=false\n'
     if engine=='sqlite':
         base=f'/data/transfers/{check_id}/scratch' if side=='check' else '/data'
-        pairs[side]={'boot':f'file:{base}/boot.db','app':f'file:{base}/store/comms.db'}
+        app=f'/data/rehearsals/transfer-check-{check_id}/comms.db' if side=='check' else '/data/store/comms.db'
+        pairs[side]={'boot':f'file:{base}/boot.db','app':f'file:{app}'}
     else:
         admin,boot,app=(secrets.token_hex(32) for _ in range(3))
         (directory/'admin-password').write_text(admin)
@@ -190,7 +191,7 @@ if [ "$target_engine" = sqlite ]; then
     --mount "type=volume,src=$volume,dst=/data,readonly" \
     --mount "type=bind,src=$PWD/scripts,dst=/opt/comms/scripts,readonly" "$board_image" \
     /opt/comms/scripts/transfer-acceptance-inspect.ts \
-    "/data/transfers/$check_id/scratch/boot.db" "/data/transfers/$check_id/scratch/store/comms.db"
+    "/data/transfers/$check_id/scratch/boot.db" "/data/rehearsals/transfer-check-$check_id/comms.db"
 else
   if [ "$target_engine" = pg ]; then
     check_sql() { docker exec "$prefix-check-database" psql -X -U postgres -d "$1" -At -v ON_ERROR_STOP=1 -c "$2"; }
