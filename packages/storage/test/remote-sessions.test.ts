@@ -17,7 +17,7 @@ for (const mode of ["leases", "reject", "pending", "stream", "restart", "prepare
 			const root = await mkdtemp(join(tmpdir(), "comms-remote-sessions-"));
 			test.onTestFinished(() => rm(root, { recursive: true, force: true }));
 			const journal = join(root, "registered");
-			const child = spawn("bun", [join(import.meta.dirname, "fixtures/remote-sessions.ts")], {
+			const child = spawn(process.execPath, [join(import.meta.dirname, "fixtures/remote-sessions.ts")], {
 				env: { ...process.env, COMMS_REMOTE_TEST_MODE: mode, COMMS_REMOTE_TEST_JOURNAL: journal },
 				stdio: ["ignore", "pipe", "pipe"],
 			});
@@ -55,8 +55,8 @@ for (const mode of ["leases", "reject", "pending", "stream", "restart", "prepare
 						async () => {
 							const command =
 								process.env.COMMS_REMOTE_TEST_ENGINE === "pg"
-									? ["pg_isready", "-U", "postgres"]
-									: ["mysql", "--defaults-extra-file=/run/secrets/admin.cnf", "-e", "SELECT 1"];
+									? ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+									: ["mysql", "--defaults-extra-file=/run/secrets/admin.cnf", "--host=127.0.0.1", "-e", "SELECT 1"];
 							try {
 								await promisify(execFile)("docker", ["exec", container, ...command]);
 								return true;
