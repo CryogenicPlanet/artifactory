@@ -11,7 +11,8 @@
 		"./remote-client": "./src/remote-client.ts",
 		"./remote-inspector": "./src/remote-inspector.ts",
 		"./remote-session": "./src/remote-session.ts",
-		"./migrations": "./src/migrations.ts"
+		"./migrations": "./src/migrations.ts",
+		"./remote-migrations": "./src/remote-migrations.ts"
 	},
 	"scripts": {
 		"check": "tsc --noEmit"
