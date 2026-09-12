@@ -221,8 +221,8 @@ if [ "$target_engine" = sqlite ]; then
   check_id=$(cat "$private/check-id")
   docker run --rm --network none --read-only --user 0:0 --entrypoint /usr/local/bin/bun \
     --mount "type=volume,src=$volume,dst=/data,readonly" \
-    --mount "type=bind,src=$PWD/scripts,dst=/opt/comms/scripts,readonly" "$board_image" \
-    /opt/comms/scripts/transfer-acceptance-inspect.ts \
+    --mount "type=bind,src=$PWD/scripts/transfer-acceptance-inspect.ts,dst=/opt/comms/packages/server/dist/transfer-acceptance-inspect.ts,readonly" "$board_image" \
+    /opt/comms/packages/server/dist/transfer-acceptance-inspect.ts \
     "/data/transfers/$check_id/scratch/boot.db" "/data/rehearsals/transfer-check-$check_id/comms.db"
 else
   if [ "$target_engine" = pg ]; then
