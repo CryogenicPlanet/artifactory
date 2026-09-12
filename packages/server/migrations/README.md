@@ -1,3 +1,5 @@
-# App migrations
+# Migration location
 
-Runtime migrations live in [`../src/migrations/`](../src/migrations/README.md), inside the source tree copied into each generation. This legacy scaffold directory is not loaded.
+Add runtime migrations to [`packages/server/src/migrations/`](../src/migrations/README.md). That directory becomes `app/migrations/` on the board and is copied into each generation.
+
+This older scaffold directory is not loaded; placing a migration here has no effect.
