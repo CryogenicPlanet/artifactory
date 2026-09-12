@@ -113,17 +113,32 @@ done
 # Use the shipped native client tools with the checked-out source and exact host Node test runtime.
 # The existing board job separately verifies the immutable entrypoint and OS user boundary.
 node_binary=$(node -p 'process.execPath')
-docker run --rm --name "$runner" --init --user "$(id -u):$(id -g)" --network "$network" \
-  --read-only --tmpfs /tmp:exec --cap-drop ALL --workdir /workspace \
-  --mount "type=bind,src=$PWD,dst=/workspace" \
-  --mount "type=bind,src=$private/configs,dst=/fixture,readonly" \
-  --mount "type=bind,src=$node_binary,dst=/usr/local/bin/node,readonly" \
-  --env NODE_ENV=test --env COMMS_ISOLATED=false \
-  --env COMMS_REPAIR_ENGINE="$engine" --env COMMS_REPAIR_CONFIG_DIR=/fixture \
-  --entrypoint /bin/bash "$board_image" -c '
-    set -euo pipefail
-    test "$(node --version)" = v22.22.3
-    test "$(bun --version)" = 1.4.0
-    node node_modules/vitest/vitest.mjs run packages/server/test/remote-selected-store-repair.test.ts packages/server/test/remote-publication-shutdown.test.ts packages/boot/test/remote-foreign-backup-native.test.ts --maxWorkers=1 --reporter=verbose
-  ' > "$private/tests.log" 2>&1
+# Retained board roots contain large dependency caches. Each scenario gets a fresh
+# disposable /tmp; do not delete individual roots or reinterpret their closure evidence.
+run_scenario() {
+  local test_file=$1 test_pattern=$2
+  printf '\nNative scenario: %s\n' "$test_pattern" >> "$private/tests.log"
+  docker run --rm --name "$runner" --init --user "$(id -u):$(id -g)" --network "$network" \
+    --read-only --tmpfs /tmp:exec --cap-drop ALL --workdir /workspace \
+    --mount "type=bind,src=$PWD,dst=/workspace" \
+    --mount "type=bind,src=$private/configs,dst=/fixture,readonly" \
+    --mount "type=bind,src=$node_binary,dst=/usr/local/bin/node,readonly" \
+    --env NODE_ENV=test --env COMMS_ISOLATED=false \
+    --env COMMS_REPAIR_ENGINE="$engine" --env COMMS_REPAIR_CONFIG_DIR=/fixture \
+    --env COMMS_NATIVE_TEST_FILE="$test_file" --env COMMS_NATIVE_TEST_PATTERN="$test_pattern" \
+    --entrypoint /bin/bash "$board_image" -c '
+      set -euo pipefail
+      test "$(node --version)" = v22.22.3
+      test "$(bun --version)" = 1.4.0
+      node node_modules/vitest/vitest.mjs run "$COMMS_NATIVE_TEST_FILE" --testNamePattern "$COMMS_NATIVE_TEST_PATTERN" --maxWorkers=1 --reporter=verbose
+    ' >> "$private/tests.log" 2>&1
+}
+for scenario in missing foreign candidate beforeallocation afterselection pending password migration; do
+  run_scenario packages/server/test/remote-selected-store-repair.test.ts "^remote selected store repair: ${scenario}$"
+done
+for scenario in shutdownnormal shutdownforce; do
+  run_scenario packages/server/test/remote-publication-shutdown.test.ts "^remote held publication shutdown: ${scenario}$"
+done
+run_scenario packages/boot/test/remote-foreign-backup-native.test.ts '^a genuine foreign native backup cannot replace the adopted recipient$'
+
 echo "All eight $engine repair/migration, both publication shutdown and foreign-backup rejection scenarios passed."
