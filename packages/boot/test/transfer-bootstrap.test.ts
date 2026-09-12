@@ -6,7 +6,7 @@ import { createServer } from "node:net";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
-// Opt-in, disposable native families: bootstrap-create2, bootstrap-insert2, bootstrap-positive.
+// Opt-in, disposable native families: bootstrap-create2, bootstrap-insert2, bootstrap-positive2.
 // Reprovision these dedicated databases before rerunning; retained rows are crash evidence.
 // COMMS_TRANSFER_HISTORICAL_ROOT must be a clean 50122ca checkout with frozen dependencies.
 const execute = promisify(execFile);

@@ -18,7 +18,7 @@ export const bootstrapConfiguration = Effect.gen(function* () {
 	if (!directory || !dataDirectory || (phase !== "create" && phase !== "insert" && phase !== "positive"))
 		return yield* Effect.die("Invalid bootstrap fixture arguments");
 	const fs = yield* FileSystem.FileSystem;
-	const family = phase === "positive" ? "positive" : `${phase}2`;
+	const family = `${phase}2`;
 	const read = (suffix: string) =>
 		fs
 			.readFileString(`${directory}/mysql-bootstrap-${family}-${suffix}.json`)
