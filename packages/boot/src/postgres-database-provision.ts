@@ -128,12 +128,13 @@ export const postgresDatabaseProvision = Effect.gen(function* () {
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ database: Schema.String })))),
 			);
 			if (selected[0]?.database !== record.database) return yield* invalid();
+			// Function ownership transfer requires the destination role to CREATE in its schema.
+			yield* execute(`GRANT USAGE, CREATE ON SCHEMA public TO ${identifier(appRole)}`);
 			yield* execute(`REASSIGN OWNED BY ${identifier(record.principal)} TO ${identifier(appRole)}`);
 			yield* protectKernel(record, appRole);
 			yield* execute(
 				`GRANT CONNECT, TEMPORARY, CREATE ON DATABASE ${identifier(record.database)} TO ${identifier(appRole)}`,
 			);
-			yield* execute(`GRANT USAGE, CREATE ON SCHEMA public TO ${identifier(appRole)}`);
 			yield* execute(`DROP OWNED BY ${identifier(record.principal)}`);
 		});
 	const grantDump = (record: RemoteDatabaseRecord) =>
