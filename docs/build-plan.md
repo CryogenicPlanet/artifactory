@@ -2,15 +2,25 @@
 
 The lead owns integration and acceptance. Writers use isolated checkouts; only the lead integrates and advances the reviewed PR stack. Explicit user decisions and the current review guide implementation; distinguish those decisions from agent-proposed scope changes. Preserve the uncommitted owner files: `SPEC.md`, `docs/tech.md`, `docs/database.md`, and `docs/pr-1/`.
 
-## Current database stack — runtime accepted; transfer assembly in progress
+## Current database stack — CLI wired; transfer and repair acceptance incomplete
 
-The review/runtime integration at `50122ca` passes its full local suite and exact-head CI. This accepts the current SQLite/PostgreSQL/MySQL runtime checkpoint, not the entire swappable-database build plan or every review comment. Preserve owner design files; remaining findings are in the [review checklist](stack-review-status.md).
+Runtime `c811211` and transfer `0dd418b` are pushed. The CLI is wired, and full image check, transfer and restart have passed for SQLite→PostgreSQL and SQLite→MySQL. This is two directions, not acceptance of all six or the whole database build plan. Four remote-source directions currently refuse during source inspection with `transfer_recovery_pending`; the new `0dd418b` diagnostic CI is pending and must establish the exact unfinished invariant.
 
-| Layer | Accepted checkpoint |
+| Work | Current evidence / remaining boundary |
 | --- | --- |
-| [PR #7](https://github.com/CryogenicPlanet/artifactory/pull/7) | `ddf0c67`: all checks green; ledger authority, historical adoption/shape checks and editable receipt protection integrated. |
-| [PR #8](https://github.com/CryogenicPlanet/artifactory/pull/8) | `1739ee7`: all checks green; isolation, snapshot, JSON and dialect corrections integrated. |
-| [PR #9](https://github.com/CryogenicPlanet/artifactory/pull/9) | `a6db9c5`: all CI green, including both actual-board jobs, remote checks, Linux, image and QEMU. Full local runtime acceptance remains exact `50122ca`. |
+| Runtime review additions | Shared engine fixture and migration portability warnings are integrated. Native two-publication snapshot and two-process epoch/allocator/edit-lock contention groups pass on both engines. This is shared focused behavior, not a full suite under every engine. |
+| TLS | Actual PostgreSQL private-CA CI passes. MySQL wrong-hostname acceptance exposed a confirmed defect; its fix is active, not accepted here. |
+| Remote damaged-store repair | The prepared repair commits remain frozen and unintegrated. Native acceptance currently fails at initial startup before damage is introduced; no damaged/foreign-store repair pass is claimed. Three unit/metadata passes are separate evidence. |
+| Transfer acceptance | SQLite-source image flows pass. Four remote-source directions, actual CLI crash boundaries, final combined suite and operator-guide reconciliation remain required. |
+| Boot ownership | The latest boot ownership audit is clear. This does not close unrelated review/spec obligations. |
+
+The latest local full suite at `a53de28` used actual Node 22.22.3 and two workers: **1,207 passed, six failed and 88 skipped (1,301 tests)**; **265 passed files, two failed and 36 skipped (303 files)**, **750.64s**. The six failures were filesystem fault-fixture expectations. The integrated correction passes a separate ten-case diagnostic/WAL/fault group in **31.50s**. The generation aggregate fixture correction separately passes one case in **21.57s**. These focused passes are not a corrected full-suite result.
+
+Historical Linux `a7f4e6d` completed **1,201 passed, eight failed and 88 skipped**: six filesystem fixtures, one Buffer-versus-Uint8Array comparison, and one six-revert aggregate deadline. The last case reached a known phase at **62.466s** against its 60-second aggregate limit; the underlying slowdown cause is not established. Corrections are integrated, but final full-suite and exact-head CI acceptance remain necessary.
+
+Ordinary `ctx.read` shares the mutation/publication gate: it preserves the SPEC snapshot guarantee, now supported by native publication tests, but does not meet the owner database design's nonblocking-read claim. This does not serialize every read—KV/pages also use direct snapshot transactions. Do not remove the gate on a documentation assumption. Full-suite parity, remote latency/budget measurements, broader direct-DDL and MySQL stored-object decisions, and remaining lower-layer review obligations stay explicit. No all-review-resolution or full-goal claim is made.
+
+### Earlier accepted runtime and failure evidence
 
 Exact `50122ca` full local acceptance: **1,041 passed and 63 skipped (1,104 tests)**; **234 passed files and 27 skipped (261 files)**, **714.22s**, actual Node 22.22.3 with at most two workers (`/tmp/comms-runtime-full-50122ca.log`). Exact-head [Linux](https://github.com/CryogenicPlanet/artifactory/actions/runs/34691445242) also passes 1,041 with 63 skipped; [actual boards](https://github.com/CryogenicPlanet/artifactory/actions/runs/34691445279), [remote checks](https://github.com/CryogenicPlanet/artifactory/actions/runs/34691445330), [QEMU](https://github.com/CryogenicPlanet/artifactory/actions/runs/34691445200) and image pass. No new reviews were found at this checkpoint.
 
@@ -19,10 +29,6 @@ The documentation successor `a6db9c5` also passes all exact-head CI, including [
 The accepted integration includes native JSON columns/codecs and crash recovery, portable migration protection, guardian/copy closure, and the production freeze/admitted-forward race correction. `50122ca` adds safe observed-store UUID and `route_withdrawn` diagnostics; modern backup catalogue identity provenance is honestly reported as `not_recorded`, not reconstructed or fabricated. Native PostgreSQL 18.6 and MySQL 8.4.11 full board flows remain distinct from pinned PostgreSQL 17.11/MySQL 8.4.11 image evidence. MySQL's second-backup check proves creation and closure, not an independent restore of that artifact.
 
 Historical failures remain evidence: `709ae2c` local full suite had 1,019 passed, one failed and 59 skipped (1,079), across 231 passed files, one failed and 24 skipped (256), in 655.69s; its Linux run had 1,018 passed, two failed and 59 skipped. The stale preparation anchor and real admission/freeze race were corrected. `edea32c` subsequently had **1,036 passed, five failed and 63 skipped (1,104)**, across **232 passed files, two failed and 27 skipped (261)**, in **718.79s**. Those five failures came from synthetic legacy fixtures lowering only the version mirror while retaining the current ledger; three fixture setup lines correct them. Earlier PR #8 `ac3fada` normal-instrumentation CI had five passed, one failed and two skipped after restart; a test-order correction removes a possible stale-port hazard, but the old log does not prove a port remap or production isolation defect. New exact-head greens do not retroactively prove that historical cause.
-
-Transfer foundations are composed through `76b96c9` in the separate integration checkout. Component verification includes nine native copier tests covering all six engine directions; logical boot-catalogue groups of four and 25 cases; 15 protocol and nine control tests; native PostgreSQL/MySQL boot-protocol-20 tests; two SQLite backup-stream tests; and two dump-authority tests. These are separate, potentially overlapping groups, not an end-to-end acceptance total. Cross-engine app-catalogue verification and two native-backup tests are still running at this checkpoint.
-
-The transfer CLI is not wired. Guard/sentinel handling, portability-checksum proof, CLI assembly, `--check` and the acceptance harness remain active work. There is no accepted end-to-end transfer or filesystem crash-recovery workflow yet. A foundations checkpoint branch may be pushed separately; that is not a usable transfer release or a new PR acceptance claim. Runtime acceptance above does not extend to this transfer checkout. Remote SQL repair remains bounded to 200 returned rows and a 1,000-row/1 MiB protected-write image budget. Advanced-object rehearsal/direct-DDL decisions, private-CA acceptance, lease-latency measurement and remaining lower-layer review obligations stay explicit; no complete SQL parity or full-goal claim is made.
 
 ## Base checkpoint before database resumption — fourth review
 
