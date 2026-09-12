@@ -49,9 +49,10 @@ if [ "$engine" = pg ]; then
     --env POSTGRES_PASSWORD_FILE=/run/secrets/admin-password "$image" >/dev/null
   ready() { docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>"$private/readiness-errors"; }
 else
+  # The readiness probe uses TCP loopback; grant that exact host in addition to the default socket root account.
   docker run --detach --name "$container" --publish "127.0.0.1::$port" \
     --mount "type=bind,src=$private,dst=/run/secrets,readonly" \
-    --env MYSQL_ROOT_PASSWORD_FILE=/run/secrets/admin-password --env MYSQL_ROOT_HOST=localhost \
+    --env MYSQL_ROOT_PASSWORD_FILE=/run/secrets/admin-password --env MYSQL_ROOT_HOST=127.0.0.1 \
     "$image" --performance-schema-session-connect-attrs-size="$attributes" >/dev/null
   ready() { docker exec "$container" mysql --defaults-extra-file=/run/secrets/admin.cnf --host=127.0.0.1 -e 'SELECT 1' >/dev/null 2>"$private/readiness-errors"; }
 fi

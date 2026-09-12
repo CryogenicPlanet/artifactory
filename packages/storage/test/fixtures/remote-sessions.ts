@@ -30,6 +30,7 @@ async function main() {
 			Effect.gen(function* () {
 				const attempt = "a1".repeat(32);
 				if (mode === "missing" || mode === "prepared") {
+					let selected = connection;
 					if (mode === "prepared") {
 						phase = "prepared_restart";
 						yield* Effect.promise(() => writeFile(`${journal}.restart`, "ready"));
@@ -45,9 +46,15 @@ async function main() {
 							yield* Effect.sleep("100 millis");
 						}
 						assert(resumed);
+						const port = Number(yield* Effect.promise(() => readFile(`${journal}.restarted`, "utf8")));
+						assert(Number.isInteger(port) && port > 0 && port <= 65535);
+						process.stdout.write(JSON.stringify({ publishedPortChanged: port !== connection.port }));
+						// Docker may allocate a new random host port at restart. Only this fresh observer follows it;
+						// the restart case keeps its original pinned inspector and must still refuse closure.
+						selected = { ...connection, port };
 					}
 					phase = "configuration_observer";
-					const observer = yield* open(connection, "fixture-observer");
+					const observer = yield* open(selected, "fixture-observer");
 					phase = "configuration_query";
 					const setting = yield* observer.unsafe<{ readonly configured: string | number }>(
 						mode === "prepared"
@@ -57,7 +64,11 @@ async function main() {
 					phase = `configuration_value_${String(setting[0]?.configured)}`;
 					assert.equal(String(setting[0]?.configured), mode === "prepared" ? "10" : "32");
 					phase = "configuration_refusal";
-					assert(Exit.isFailure(yield* Layer.build(remoteInspectorLayer({ connection, attempt })).pipe(Effect.exit)));
+					assert(
+						Exit.isFailure(
+							yield* Layer.build(remoteInspectorLayer({ connection: selected, attempt })).pipe(Effect.exit),
+						),
+					);
 					return;
 				}
 				phase = "inspector";
