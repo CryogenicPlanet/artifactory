@@ -1,3 +1,4 @@
+import { assertTransferState } from "./store-transfer-state.ts";
 import { on } from "@comms/storage/dialect";
 import { withDatabase, type RemoteStore } from "@comms/storage/store";
 import { lockBootWrite } from "./boot-write-lock.ts";
@@ -73,11 +74,12 @@ export const appStoreIdentity = (filename: string, dataDirectory?: string) =>
 		});
 		const read = Effect.gen(function* () {
 			const rows =
-				yield* boot`SELECT key,value FROM settings WHERE key IN ('app_store_adoption','app_store_id','app_store_initialized')`.pipe(
+				yield* boot`SELECT key,value FROM settings WHERE key IN ('app_store_adoption','app_store_id','app_store_initialized','transferred_to','transfer_state')`.pipe(
 					Effect.flatMap(
 						Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String }))),
 					),
 				);
+			yield* assertTransferState(rows);
 			const saved = rows.find((row) => row.key === "app_store_adoption")?.value;
 			const id = rows.find((row) => row.key === "app_store_id")?.value;
 			const initialized = rows.some((row) => row.key === "app_store_initialized");
@@ -166,8 +168,8 @@ export const verifyAppIdentity = (adoption: Adoption, allowMissing: boolean) =>
 		);
 		const row = rows[0];
 		if (rows.length === 0) return yield* new EventError({ code: "app_store_missing" });
-		if (rows.length !== 1 || !row || row.singleton !== 1 || row.initialized_at < 0 || row.transferred_to !== null)
-			return yield* invalid();
+		if (rows.length !== 1 || !row || row.singleton !== 1 || row.initialized_at < 0) return yield* invalid();
+		if (row.transferred_to !== null) return yield* new EventError({ code: "store_transferred" });
 		if (row.store_id !== adoption.store_id)
 			return yield* new EventError({
 				code: "app_store_mismatch",
@@ -230,9 +232,7 @@ export const remoteAppStoreIdentity = (configured: RemoteStore) =>
 					decodeRows(Schema.Struct({ key: Schema.String, value: Schema.String })),
 				);
 			const value = (key: string) => rows.find((row) => row.key === key)?.value;
-			if (value("transferred_to") !== undefined) return yield* new EventError({ code: "store_transferred" });
-			if (value("transfer_state") !== undefined && value("transfer_state") !== "complete")
-				return yield* new EventError({ code: "store_transfer_incomplete" });
+			yield* assertTransferState(rows);
 			const raw = value("app_store_adoption");
 			const id = value("app_store_id");
 			const initialized = value("app_store_initialized") !== undefined;

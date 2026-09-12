@@ -1,3 +1,5 @@
+import { transferPolicy } from "./app-store-identity.ts";
+import { assertBootTransferState } from "./store-transfer-state.ts";
 import { logRedactor } from "./log-redaction.ts";
 import { logEvents } from "./log-events.ts";
 import { migrateAppStore } from "./app-store-layout.ts";
@@ -29,7 +31,7 @@ import { initializeBootSchema, BootIdentityUpgradePending } from "./boot-schema.
 import { EditLock, layer as editLockLayer } from "./edit-lock.ts";
 import { Generations, layer as generationsLayer } from "./generations.ts";
 import { SourceFiles, layer as sourceLayer } from "./source-files.ts";
-import { Events, layer as eventsLayer } from "./events.ts";
+import { Events, EventError, layer as eventsLayer } from "./events.ts";
 import { AppRecovery, layer as recoveryLayer, remoteRecovery } from "./app-recovery.ts";
 import { layer as attemptsLayer, ChildAttempts } from "./child-attempts.ts";
 import { cutover } from "./cutover.ts";
@@ -104,7 +106,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const supervisor = yield* supervise(options, remote, redact);
 	const { child, run, fail } = supervisor;
 	const initialized = Layer.effectDiscard(
-		initializeBootSchema.pipe(
+		Effect.flatMap(SqlClient.SqlClient, assertBootTransferState).pipe(
+			Effect.andThen(initializeBootSchema),
 			Effect.andThen(
 				isolated && configuration._tag === "file" ? fs.chmod(configuration.boot.filename, 0o600) : Effect.void,
 			),
@@ -378,6 +381,27 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 										{
 											error: { code: "boot_identity_upgrade_pending", message: hint, hint, retriable: false },
 										},
+										{ status: 409, headers: { "cache-control": "no-store" } },
+									),
+							),
+						),
+					}));
+				}
+				if (
+					failure._tag === "Success" &&
+					Schema.is(EventError)(failure.success) &&
+					(failure.success.code === "store_transferred" || failure.success.code === "store_transfer_incomplete")
+				) {
+					const code = failure.success.code;
+					const policy = transferPolicy[code];
+					yield* Ref.update(installed, (current) => ({
+						...current,
+						handle: publicRoute.pipe(
+							Effect.map(
+								(response) =>
+									response ??
+									HttpServerResponse.jsonUnsafe(
+										{ error: { code, message: policy.hint, hint: policy.hint, retriable: false } },
 										{ status: 409, headers: { "cache-control": "no-store" } },
 									),
 							),

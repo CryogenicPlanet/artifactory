@@ -1,3 +1,4 @@
+import { assertTransferState } from "./store-transfer-state.ts";
 import { on } from "@comms/storage/dialect";
 import { asBoot, type RemoteStore } from "@comms/storage/store";
 import { Effect, Option, Redacted, Schema, Semaphore } from "effect";
@@ -74,9 +75,7 @@ export const makeRemoteAppInitializer = (options: {
 										decodeRows(Schema.Struct({ key: Schema.String, value: Schema.String })),
 									);
 								const value = (key: string) => rows.find((row) => row.key === key)?.value;
-								if (value("transferred_to") !== undefined) return yield* new EventError({ code: "store_transferred" });
-								if (value("transfer_state") !== undefined && value("transfer_state") !== "complete")
-									return yield* new EventError({ code: "store_transfer_incomplete" });
+								yield* assertTransferState(rows);
 								const raw = value("app_store_adoption");
 								if (
 									raw === undefined ||
