@@ -3,7 +3,6 @@ import { HttpClientRequest } from "effect/unstable/http";
 import { accountPost, accountRequest } from "./account-api.ts";
 import { BoardError } from "./board-api.ts";
 
-const EventRetention = Schema.Struct({ http_request_days: Schema.Int, other_days: Schema.Int });
 const Storage = Schema.Struct({
 	backup_percent: Schema.Finite,
 	event_percent: Schema.Finite,
@@ -11,7 +10,6 @@ const Storage = Schema.Struct({
 });
 const Settings = Schema.Struct({
 	revision: Schema.Int,
-	event_retention: EventRetention,
 	storage: Storage,
 	public_paths: Schema.Array(Schema.String),
 });
@@ -34,7 +32,7 @@ export const getSettings = Effect.suspend(() =>
 export const settingsError = (error: BoardError) => {
 	const messages: Readonly<Partial<Record<number, string>>> = {
 		0: "The settings response was lost or unreadable. Read current settings before starting a new confirmation; an exact signed retry will not apply the change twice.",
-		400: "Settings were refused. Check the day ranges, storage percentages and exact public paths before confirming again.",
+		400: "Settings were refused. Check the storage percentages and exact public paths before confirming again.",
 		401: "Your session or passkey confirmation expired. Sign in again if needed, then read current settings before a new confirmation.",
 		403: "Settings require a human session and a fresh passkey confirmation from this board.",
 		409: "Settings changed since this draft began. Refresh and compare current values before confirming a new revision.",

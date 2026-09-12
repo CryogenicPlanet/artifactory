@@ -65,8 +65,6 @@ function SettingsForm({
 	readonly readBlocked: boolean;
 }) {
 	const [revision, setRevision] = useState(current.revision);
-	const [httpDays, setHttpDays] = useState(String(current.event_retention.http_request_days));
-	const [otherDays, setOtherDays] = useState(String(current.event_retention.other_days));
 	const [backup, setBackup] = useState(String(current.storage.backup_percent));
 	const [events, setEvents] = useState(String(current.storage.event_percent));
 	const [headroom, setHeadroom] = useState(String(current.storage.headroom_percent));
@@ -77,12 +75,6 @@ function SettingsForm({
 	const [message, setMessage] = useState("");
 	const changed = current.revision !== revision;
 	const valid =
-		Number.isInteger(Number(httpDays)) &&
-		Number(httpDays) >= 1 &&
-		Number(httpDays) <= 36500 &&
-		Number.isInteger(Number(otherDays)) &&
-		Number(otherDays) >= 1 &&
-		Number(otherDays) <= 36500 &&
 		[backup, events, headroom].every(
 			(value) => value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) > 0 && Number(value) < 100,
 		) &&
@@ -98,7 +90,6 @@ function SettingsForm({
 				const body: SettingsChange = {
 					revision,
 					patch: {
-						event_retention: { http_request_days: Number(httpDays), other_days: Number(otherDays) },
 						storage: {
 							backup_percent: Number(backup),
 							event_percent: Number(events),
@@ -143,37 +134,7 @@ function SettingsForm({
 				Draft revision {revision} · current revision {current.revision}
 			</p>
 			<fieldset disabled={busy || pending !== null}>
-				<legend>Event retention (days)</legend>
-				<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="settings-http-days">
-					Request diagnostics
-				</label>
-				<input
-					className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
-					id="settings-http-days"
-					type="number"
-					min={1}
-					max={36500}
-					required
-					value={httpDays}
-					onChange={(event) => setHttpDays(event.target.value)}
-				/>
-				<label
-					className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]"
-					htmlFor="settings-other-days"
-				>
-					Other events
-				</label>
-				<input
-					className="disabled:opacity-75 w-full min-w-0 rounded-md border border-[#dfe4d8] bg-[#fcfdfa] px-3 py-2.5 text-[13px] leading-[1.6] text-[#32392c]"
-					id="settings-other-days"
-					type="number"
-					min={1}
-					max={36500}
-					required
-					value={otherDays}
-					onChange={(event) => setOtherDays(event.target.value)}
-				/>
-				<h3>Storage limits (% of volume)</h3>
+				<legend>Storage limits (% of volume)</legend>
 				<label className="block mt-[14px] mb-1.5 text-[11px] font-semibold text-[#646e5c]" htmlFor="settings-backup">
 					Backups
 				</label>
@@ -244,9 +205,8 @@ function SettingsForm({
 							: "Current settings changed. Your draft is preserved; review the current values before choosing a new revision."}
 					</p>
 					<p>
-						Current retention: requests {current.event_retention.http_request_days} days, other events{" "}
-						{current.event_retention.other_days} days. Storage: backups {current.storage.backup_percent}%, events{" "}
-						{current.storage.event_percent}%, free space {current.storage.headroom_percent}%.
+						Current storage: backups {current.storage.backup_percent}%, events {current.storage.event_percent}%, free
+						space {current.storage.headroom_percent}%.
 					</p>
 					<p>Current public paths: {current.public_paths.length ? current.public_paths.join(", ") : "none"}.</p>
 					<button
