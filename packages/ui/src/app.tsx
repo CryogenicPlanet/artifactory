@@ -253,7 +253,7 @@ function Board({ pathname }: { readonly pathname: string }) {
 										<SectionHeading title="Subtopics">
 											<span>{topic.subtopics.length}</span>
 										</SectionHeading>
-										<div className="grid gap-2 lg:grid-cols-2">
+										<div className="grid gap-2 lg:grid-cols-2 min-[1900px]:grid-cols-3">
 											{topic.subtopics.map((item) => (
 												<Link
 													key={item.path}
@@ -284,7 +284,7 @@ function Board({ pathname }: { readonly pathname: string }) {
 								{(topic.index !== null || topic.pages.length > 0) && (
 									<section className="pb-8" aria-label="Pages">
 										<SectionHeading title="Pages" />
-										<div className="grid gap-2 lg:grid-cols-2">
+										<div className="grid gap-2 lg:grid-cols-2 min-[1900px]:grid-cols-3">
 											{topic.pages.map((file) => (
 												<a
 													key={file}

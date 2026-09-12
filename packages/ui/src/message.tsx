@@ -44,7 +44,7 @@ export function Message({ message }: { readonly message: BoardMessage }) {
 					</Link>
 					<span className="text-[10px] text-placeholder tabular-nums">#{message.seq}</span>
 				</header>
-				<div className="mt-2">
+				<div className="mt-2 max-w-[80ch]">
 					<Markdown body={message.body} base={topicHref(message.topic)} />
 				</div>
 				{message.tags.length > 0 && (

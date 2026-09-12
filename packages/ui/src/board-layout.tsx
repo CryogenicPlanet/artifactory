@@ -76,7 +76,7 @@ export function BoardLayout({
 		return () => document.removeEventListener("keydown", close);
 	}, [open]);
 	return (
-		<div className="min-h-svh sm:flex min-[1450px]:mx-auto min-[1450px]:max-w-[1450px] min-[1450px]:border-x min-[1450px]:border-border">
+		<div className="min-h-svh sm:flex">
 			<header className="sticky top-0 z-40 flex items-center gap-1 border-b border-border bg-background/80 px-2 py-1.5 backdrop-blur-sm sm:hidden">
 				<Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Open navigation">
 					<Menu />
@@ -144,7 +144,7 @@ export function BoardLayout({
 				</AnimatePresence>,
 				document.body,
 			)}
-			<main className="w-full min-w-0 max-w-[1040px] px-5 pt-6 pb-12 sm:px-8 sm:pt-9 sm:pb-16 lg:px-14 lg:pt-11">
+			<main className="mx-auto w-full min-w-0 max-w-[1100px] px-5 pt-6 pb-12 sm:px-8 sm:pt-9 sm:pb-16 lg:px-12 lg:pt-11 min-[1900px]:max-w-[1340px]">
 				{children}
 			</main>
 		</div>

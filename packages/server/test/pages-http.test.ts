@@ -108,6 +108,25 @@ it("preserves HTML and binary bytes, redirects directory bases and lists escaped
 	expect(await head.text()).toBe("");
 }, 20000);
 
+it("serves text files with unknown or misleading extensions inline as plain text", async (test) => {
+	const fixture = await conversation(test);
+	await mkdir(join(fixture.root, "pages", "plain"), { recursive: true });
+	const source = "export const answer = 42;\n";
+	await writeFile(join(fixture.root, "pages", "plain", "evlog-sink.ts"), source);
+	await writeFile(join(fixture.root, "pages", "plain", "notes"), "no extension\n");
+	const app = await fixture.launch();
+	await app.setup();
+	const cookie = await app.login();
+	await app.ready(cookie);
+	const script = await fetch(app.url + "/p/plain/evlog-sink.ts", { headers: { cookie } });
+	expect(script.status).toBe(200);
+	expect(script.headers.get("content-type")).toContain("text/");
+	expect(await script.text()).toBe(source);
+	const notes = await fetch(app.url + "/p/plain/notes", { headers: { cookie } });
+	expect(notes.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+	expect(await notes.text()).toBe("no extension\n");
+}, 20000);
+
 it("rejects symlink and traversal reads and hides publishing temporaries from page listings", async (test) => {
 	const fixture = await conversation(test);
 	await mkdir(join(fixture.root, "pages", "safe"), { recursive: true });
