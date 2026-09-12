@@ -38,6 +38,18 @@ const indexRows = Schema.Array(
 		prefix: Schema.NullOr(Schema.Int),
 	}),
 );
+/** Read the complete ordered column catalog without adopting or changing an object. */
+export const inspectRemoteColumns = (sql: SqlClient, table: string) =>
+	on(sql, {
+		sqlite: () => {
+			throw new Error("Remote schema check requires PostgreSQL or MySQL");
+		},
+		pg: () =>
+			sql`SELECT column_name AS name,CASE WHEN data_type='USER-DEFINED' THEN udt_name ELSE data_type END AS type,is_nullable AS nullable,character_maximum_length AS length,generation_expression AS expression,column_default AS "default",collation_name AS collation,is_identity AS identity,identity_generation AS "identityGeneration" FROM information_schema.columns WHERE table_schema='public' AND table_name=${table} ORDER BY ordinal_position`,
+		mysql: () =>
+			sql`SELECT COLUMN_NAME AS name,DATA_TYPE AS type,IS_NULLABLE AS nullable,CHARACTER_MAXIMUM_LENGTH AS length,GENERATION_EXPRESSION AS expression,COLUMN_DEFAULT AS ${sql("default")},COLLATION_NAME AS collation,CASE WHEN EXTRA LIKE '%auto_increment%' THEN 'YES' ELSE 'NO' END AS identity,CASE WHEN EXTRA LIKE '%auto_increment%' THEN 'AUTO_INCREMENT' ELSE NULL END AS ${sql("identityGeneration")} FROM information_schema.columns WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=${table} ORDER BY ORDINAL_POSITION`,
+	}).pipe(Effect.flatMap(Schema.decodeUnknownEffect(columnRows)));
+
 /** Catalog checks never adopt unknown pre-existing objects; migration intent establishes ownership. */
 export const tableShape = (
 	sql: SqlClient,
@@ -68,15 +80,7 @@ export const tableShape = (
 		if (tables.length === 0) return false;
 		if (tables.length !== 1 || tables[0]?.kind !== "BASE TABLE" || tables[0]?.engine !== "InnoDB")
 			return yield* new SchemaShapeError({ object: table });
-		const existing = yield* on(sql, {
-			sqlite: () => {
-				throw new Error("Remote schema check requires PostgreSQL or MySQL");
-			},
-			pg: () =>
-				sql`SELECT column_name AS name,CASE WHEN data_type='USER-DEFINED' THEN udt_name ELSE data_type END AS type,is_nullable AS nullable,character_maximum_length AS length,generation_expression AS expression,column_default AS "default",collation_name AS collation,is_identity AS identity,identity_generation AS "identityGeneration" FROM information_schema.columns WHERE table_schema='public' AND table_name=${table} ORDER BY ordinal_position`,
-			mysql: () =>
-				sql`SELECT COLUMN_NAME AS name,DATA_TYPE AS type,IS_NULLABLE AS nullable,CHARACTER_MAXIMUM_LENGTH AS length,GENERATION_EXPRESSION AS expression,COLUMN_DEFAULT AS ${sql("default")},COLLATION_NAME AS collation,CASE WHEN EXTRA LIKE '%auto_increment%' THEN 'YES' ELSE 'NO' END AS identity,CASE WHEN EXTRA LIKE '%auto_increment%' THEN 'AUTO_INCREMENT' ELSE NULL END AS ${sql("identityGeneration")} FROM information_schema.columns WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=${table} ORDER BY ORDINAL_POSITION`,
-		}).pipe(Effect.flatMap(Schema.decodeUnknownEffect(columnRows)));
+		const existing = yield* inspectRemoteColumns(sql, table);
 		if (existing.length === 0) return false;
 		if (
 			existing.length !== columns.length ||

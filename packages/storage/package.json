@@ -13,7 +13,9 @@
 		"./remote-session": "./src/remote-session.ts",
 		"./migrations": "./src/migrations.ts",
 		"./remote-migrations": "./src/remote-migrations.ts",
-		"./remote-copy": "./src/remote-copy.ts"
+		"./remote-copy": "./src/remote-copy.ts",
+		"./transfer-inventory": "./src/transfer-inventory.ts",
+		"./transfer-values": "./src/transfer-values.ts"
 	},
 	"scripts": {
 		"check": "tsc --noEmit"
