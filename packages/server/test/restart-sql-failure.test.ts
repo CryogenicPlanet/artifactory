@@ -28,7 +28,7 @@ async function failingRestart(test: TestContext, boundary: "backup" | "accepted"
 			),
 	);
 	const transport = join(fixture.boot, "src/child-process.ts");
-	const child = await readFile(transport, "utf8");
+	const child = 'import { FileSystem as FaultFileSystem } from "effect";\n' + (await readFile(transport, "utf8"));
 	const control =
 		'const control = (action: Parameters<typeof transition>[0]) => transition(action).pipe(Effect.timeout("5 seconds"));';
 	expect(child.split(control)).toHaveLength(2);
@@ -37,6 +37,7 @@ async function failingRestart(test: TestContext, boundary: "backup" | "accepted"
 		child.replace(
 			control,
 			`const control = (action: Parameters<typeof transition>[0]) => Effect.gen(function* () {
+		const fs = yield* FaultFileSystem.FileSystem;
 		const marker = ${JSON.stringify(join(fixture.root, "fail-control"))};
 		if (action === ${JSON.stringify(boundary === "backup" || boundary === "history" ? "frozen" : "accepted")} && (yield* fs.exists(marker))) {
 			yield* fs.remove(marker);

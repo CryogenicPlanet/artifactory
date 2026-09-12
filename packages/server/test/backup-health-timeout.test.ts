@@ -6,7 +6,7 @@ import { resetFixture } from "./fixtures/source-reset.ts";
 it("releases unavailable admission after a backup restart misses health and proves closure", async (test) => {
 	const fixture = await resetFixture(test);
 	const filename = join(fixture.boot, "src/child-process.ts");
-	const source = await readFile(filename, "utf8");
+	const source = 'import { FileSystem as FaultFileSystem } from "effect";\n' + (await readFile(filename, "utf8"));
 	const control =
 		'const control = (action: Parameters<typeof transition>[0]) => transition(action).pipe(Effect.timeout("5 seconds"));';
 	const health = "const health = Effect.gen(function* () {";
@@ -19,6 +19,7 @@ it("releases unavailable admission after a backup restart misses health and prov
 			.replace(
 				control,
 				`const control = (action: Parameters<typeof transition>[0]) => Effect.gen(function* () {
+		const fs = yield* FaultFileSystem.FileSystem;
 		if (action === "frozen" && (yield* fs.exists(options.env.APP_DATABASE + ".stall-health")))
 			return yield* new ChildError({ code: "child_control_failed" });
 		return yield* transition(action).pipe(Effect.timeout("5 seconds"));
@@ -27,6 +28,7 @@ it("releases unavailable admission after a backup restart misses health and prov
 			.replace(
 				health,
 				`${health}
+		const fs = yield* FaultFileSystem.FileSystem;
 		if (yield* fs.exists(options.env.APP_DATABASE + ".stall-health")) {
 			// Only the targeted restart needs the real timeout; later attempts test the bounded recovery cap.
 			if (yield* fs.exists(options.env.APP_DATABASE + ".health-waiting"))
