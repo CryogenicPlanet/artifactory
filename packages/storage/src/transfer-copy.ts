@@ -9,15 +9,10 @@ import {
 	type TransferTableManifest,
 	type TransferTablePlan,
 } from "./transfer-plan.ts";
-import {
-	decodeTransferRow,
-	transferInsert,
-	transferOrder,
-	transferProjection,
-	validateTransferPlan,
-} from "./transfer-projection.ts";
+import { decodeTransferRow, transferInsert, transferOrder, validateTransferPlan } from "./transfer-projection.ts";
 import type { TransferTable } from "./transfer-schema.ts";
 import { makeTransferDigest, type TransferValue } from "./transfer-values.ts";
+import { readTransferRows } from "./transfer-reader.ts";
 import { validateTransferTargetValues } from "./transfer-target-values.ts";
 
 export {
@@ -51,13 +46,8 @@ const scan = <E, R>(
 			yield* digest.append([{ kind: "text", value: JSON.stringify(plan) }]);
 			const maxima = new Map<string, bigint>();
 			let count = 0;
-			while (true) {
-				const raw = yield* sql<
-					Readonly<Record<string, unknown>>
-				>`SELECT ${transferProjection(sql, plan)} FROM ${sql(plan.name)} ORDER BY ${order} LIMIT 1 OFFSET ${count}`;
-				if (!raw.length) break;
-				const rows: TransferValue[][] = [];
-				for (const entry of raw) {
+			yield* readTransferRows(sql, plan, (entry) =>
+				Effect.gen(function* () {
 					const row = yield* decodeTransferRow(entry, plan, target, engine);
 					yield* digest.append(row);
 					for (const name of plan.identities) {
@@ -67,12 +57,11 @@ const scan = <E, R>(
 						const previous = maxima.get(name);
 						if (previous === undefined || integer > previous) maxima.set(name, integer);
 					}
-					rows.push(row);
-				}
-				count += raw.length;
-				if (!Number.isSafeInteger(count)) return yield* failure("transfer_value_invalid");
-				yield* consume(rows);
-			}
+					count++;
+					if (!Number.isSafeInteger(count)) return yield* failure("transfer_value_invalid");
+					yield* consume([row]);
+				}),
+			);
 			return {
 				rows: count,
 				digest: yield* digest.finish,

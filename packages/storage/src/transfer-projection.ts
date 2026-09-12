@@ -91,9 +91,9 @@ export const transferOrder = (sql: SqlClient, plan: TransferTablePlan) =>
 			const name = sql`${sql(plan.name)}.${sql(key)}`;
 			return column?.kind === "text"
 				? on(sql, {
-						sqlite: () => sql`CAST(${name} AS BLOB)`,
+						sqlite: () => sql`${name} COLLATE BINARY`,
 						pg: () => sql`convert_to(${name},'UTF8')`,
-						mysql: () => sql`CAST(${name} AS BINARY)`,
+						mysql: () => sql`CAST(CONVERT(${name} USING utf8mb4) AS BINARY)`,
 					})
 				: sql`${name}`;
 		}),
