@@ -8,14 +8,13 @@ import { writerGate } from "../../kernel/database.ts";
 import { registerProtectedSqlTable } from "../../kernel/protected-sql-tables.ts";
 import { initializeMentions, reindexMentions } from "./message-mentions.ts";
 import { migrateIdempotency } from "./legacy-idempotency.ts";
-export const initialize = Effect.gen(function* () {
+export const initializeForEpoch = Effect.fn("initializeForEpoch")(function* (epoch: string) {
 	const sql = yield* SqlClient.SqlClient;
-	const boot = yield* BootChannel;
 	if (on(sql, { sqlite: () => false, pg: () => true, mysql: () => true })) {
-		yield* initializeRemoteCore(sql, boot.epoch);
+		yield* initializeRemoteCore(sql, epoch);
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
-				yield* writerGate(sql, boot.epoch);
+				yield* writerGate(sql, epoch);
 				yield* registerProtectedSqlTable(sql, "topic_page_continuations");
 				// Completed ledgers do not recreate missing objects. Probe the live contract,
 				// while permitting extensions to add their own columns and indexes.
@@ -146,7 +145,7 @@ export const initialize = Effect.gen(function* () {
 	yield* sql`PRAGMA synchronous = FULL`;
 	yield* sql.withTransaction(
 		Effect.gen(function* () {
-			yield* writerGate(sql, boot.epoch);
+			yield* writerGate(sql, epoch);
 			const { version } = yield* inspectMigrations(sql, "core_migrations", steps(0));
 			if (version >= 1) {
 				yield* sql`SELECT path,parent,name,meta,last_seq,created_at FROM topics LIMIT 1`;
@@ -167,4 +166,10 @@ export const initialize = Effect.gen(function* () {
 			yield* sql`SELECT instance,topic,seq FROM reads LIMIT 1`;
 		}),
 	);
+});
+
+/** Normal startup obtains the admitted epoch from the live boot channel. */
+export const initialize = Effect.gen(function* () {
+	const boot = yield* BootChannel;
+	yield* initializeForEpoch(boot.epoch);
 });

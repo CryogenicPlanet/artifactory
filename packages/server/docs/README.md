@@ -38,3 +38,20 @@ Saved generations declare supported engines in their frozen `package.json`: `"co
 Start with [server.ts](../src/server.ts) for child wiring, [ext/core/api.ts](../src/ext/core/api.ts) for product routes and [kernel/publication.ts](../src/kernel/publication.ts) for transactions and publication. [main.ts](../src/main.ts) launches boot and must remain separate from the child entry.
 
 Preserve verified attribution, writer fencing and atomic mutation/outbox/retry records. A successful write follows event publication; readers expose published state. Background work runs only while the generation is live. See [observability](observability.md) for diagnostics and [deployment](../../../docs/deployment.md) for runtime configuration. Run `bun run check` and focused transaction, authorization and cursor tests after code changes.
+
+## Offline transfer source compatibility
+
+Offline engine transfer requires the selected frozen generation to export
+`initializeTransferApp(sql, epoch, sourceDirectory)` from
+`kernel/transfer-app-initialize.ts`, with core `initializeForEpoch(epoch)` in
+`ext/core/schema.ts`. Older installed source must first be updated through the
+normal source editing and reload workflow. Transfer never substitutes the image's
+newer core schema or rewrites installed source.
+
+The transfer worker replays that source's core, editable and extension migrations
+using only the target app credential and its admitted writer epoch. It does not
+start HTTP routes, lifecycle hooks, event handlers or cron jobs. An extension
+factory that accesses request context or managed external effects refuses the
+transfer. Module imports and factory bodies are still trusted arbitrary JavaScript,
+not a sandbox. Migration seed rows remain present for explicit comparison and
+copy reconciliation; they are not silently deleted by initialization.
