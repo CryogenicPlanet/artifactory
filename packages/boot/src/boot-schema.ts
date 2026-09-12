@@ -1,3 +1,4 @@
+import { verifyBootSchemaShape } from "./boot-schema-shape.ts";
 import { inspectMigrations, migrate } from "@comms/storage/migrations";
 import { publicPathsSchema } from "./public-paths.ts";
 import { Effect, Schema } from "effect";
@@ -225,6 +226,7 @@ export const initializeBootSchema = Effect.gen(function* () {
 			if (currentVersion === undefined) return yield* Effect.die("Missing schema version");
 			if (currentVersion > supported) return yield* new BootSchemaTooNew({ found: currentVersion, supported });
 			yield* migrate(sql, "boot_migrations", steps);
+			yield* verifyBootSchemaShape(sql);
 		}),
 	);
 });
