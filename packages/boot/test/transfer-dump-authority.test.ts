@@ -5,12 +5,17 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
-it("requires the exact ready offline boot dump resource, credentials and private journal", async (test) => {
-	const root = await realpath(await mkdtemp(join(tmpdir(), "comms-dump-authority-")));
-	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
-	const result = await promisify(execFile)("bun", [
-		join(import.meta.dirname, "fixtures/transfer-dump-authority.ts"),
-		root,
-	]);
-	expect(result.stdout).toContain("verified exact offline dump authority");
-}, 30000);
+it.for(["localhost", "127.0.0.1", "[::1]"])(
+	"requires exact offline dump authority at %s",
+	{ timeout: 30000 },
+	async (host, test) => {
+		const root = await realpath(await mkdtemp(join(tmpdir(), "comms-dump-authority-")));
+		test.onTestFinished(() => rm(root, { recursive: true, force: true }));
+		const result = await promisify(execFile)("bun", [
+			join(import.meta.dirname, "fixtures/transfer-dump-authority.ts"),
+			root,
+			host,
+		]);
+		expect(result.stdout).toContain("verified exact offline dump authority");
+	},
+);

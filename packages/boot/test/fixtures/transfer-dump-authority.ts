@@ -6,6 +6,7 @@ import { transferDumpJournal } from "../../src/transfer-dump-journal.ts";
 import { authorizeTransferDump, TransferDumpReference } from "../../src/transfer-dump-authority.ts";
 
 const root = process.argv[2];
+const host = process.argv[3] ?? "localhost";
 if (!root) throw new Error("Missing isolated root");
 await Effect.runPromise(
 	Effect.gen(function* () {
@@ -15,16 +16,16 @@ await Effect.runPromise(
 			transfer_id: "11111111-1111-4111-8111-111111111111",
 			data_directory: root,
 			store_id: "22222222-2222-4222-8222-222222222222",
-			source: { engine: "pg", endpoint: "localhost:5432", boot: "boot", app: "app" },
+			source: { engine: "pg", endpoint: `${host}:5432`, boot: "boot", app: "app" },
 			target: { engine: "sqlite", endpoint: null, boot: `${root}/target-boot`, app: `${root}/target-app` },
 		};
 		const source = {
 			boot: {
 				_tag: "postgres" as const,
 				database: "boot",
-				url: Redacted.make("postgres://owner:secret@localhost/boot"),
+				url: Redacted.make(`postgres://owner:secret@${host}/boot`),
 			},
-			app: { _tag: "postgres" as const, database: "app", url: Redacted.make("postgres://app:secret@localhost/app") },
+			app: { _tag: "postgres" as const, database: "app", url: Redacted.make(`postgres://app:secret@${host}/app`) },
 		};
 		const journal = yield* transferDumpJournal(selection, source);
 		const record = yield* journal.allocate("boot");
@@ -61,12 +62,24 @@ await Effect.runPromise(
 		yield* refused(authorize(source.app));
 		yield* refused(authorize({ ...credential, database: "app" }));
 		yield* refused(
-			authorize({ ...credential, url: Redacted.make(Redacted.value(credential.url).replace("localhost", "foreign")) }),
+			authorize({ ...credential, url: Redacted.make(Redacted.value(credential.url).replace(host, "foreign")) }),
 		);
 		yield* refused(authorize(credential, { ...reference, resourceId: "33333333-3333-4333-8333-333333333333" }));
 		yield* refused(authorize(credential, { ...reference, transferId: "44444444-4444-4444-8444-444444444444" }));
 		const filename = `${root}/transfers/${selection.transfer_id}/backup-resources/${record.id}.json`;
 		const bytes = yield* fs.readFileString(filename);
+		const otherPort = new URL(Redacted.value(credential.url));
+		otherPort.port = "5433";
+		yield* refused(authorize({ ...credential, url: Redacted.make(otherPort.href) }));
+		if (host === "[::1]") {
+			yield* authorize({
+				...credential,
+				url: Redacted.make(Redacted.value(credential.url).replace("[::1]", "[0:0:0:0:0:0:0:1]")),
+			});
+			yield* fs.writeFileString(filename, bytes.replace('"endpoint":"[::1]:5432"', '"endpoint":"::1:5432"'));
+			yield* refused(authorize());
+			yield* fs.writeFileString(filename, bytes);
+		}
 		const url = new URL(Redacted.value(credential.url));
 		const password = decodeURIComponent(url.password);
 		url.password = encodeURIComponent(password + "\n");

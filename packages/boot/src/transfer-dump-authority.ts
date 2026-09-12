@@ -61,7 +61,8 @@ export const authorizeTransferDump = (
 			selected.database !== owner.database ||
 			saved.selection.source.boot !== owner.database ||
 			saved.selection.source.engine !== owner.engine ||
-			saved.selection.source.endpoint !== `${owner.host}:${owner.port}` ||
+			saved.selection.source.endpoint !==
+				`${owner.host.includes(":") ? `[${owner.host}]` : owner.host}:${owner.port}` ||
 			selected.username === owner.username ||
 			selected.username !== `comms_t_${saved.id.replaceAll("-", "").slice(0, 24)}` ||
 			Redacted.value(selected.password) !== saved.password
