@@ -10,8 +10,8 @@ transfer_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["t
 inspect_activation() {
   docker run --rm --network none --read-only --user 0:0 --entrypoint /usr/local/bin/bun \
     --mount "type=volume,src=$volume,dst=/data,readonly" \
-    --mount "type=bind,src=$private/activation-inspect.js,dst=/opt/comms/scripts/activation-inspect.js,readonly" "$board_image" \
-    /opt/comms/scripts/activation-inspect.js "$transfer_id"
+    --mount "type=bind,src=$private/activation-inspect.js,dst=/opt/comms/packages/server/dist/activation-inspect.js,readonly" "$board_image" \
+    /opt/comms/packages/server/dist/activation-inspect.js "$transfer_id"
 }
 if [ "$target_engine" = pg ]; then
   target_sql() { docker exec -i "$prefix-target-database" psql -X -U postgres -d "$1" -At -v ON_ERROR_STOP=1 2>"$private/activation-sql-private"; }
