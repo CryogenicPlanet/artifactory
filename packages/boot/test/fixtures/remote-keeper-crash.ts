@@ -54,7 +54,7 @@ const program = Effect.gen(function* () {
 	const selected = {
 		entry: fileURLToPath(new URL("./remote-keeper-child.ts", import.meta.url)),
 		cwd: root,
-		env: { APP_STORE: Redacted.value(render(config.app)), MODE: "root-crash" },
+		env: { APP_STORE: Redacted.value(yield* render(config.app)), MODE: "root-crash" },
 		receipt: `${root}/closed`,
 		attempt,
 		remote: yield* runtime.reserveOwner(config.app, attempt),

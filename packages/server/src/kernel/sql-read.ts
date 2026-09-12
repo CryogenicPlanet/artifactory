@@ -26,7 +26,7 @@ const inspectSql = (input: typeof SqlInput.Type, allowRead: boolean) =>
 			const relative = import.meta.url.endsWith(".ts") ? "./sql-read-worker.ts" : "./kernel/sql-read-worker.js";
 			const entry = yield* path.fromFileUrl(new URL(relative, import.meta.url));
 			const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(ReadRequest))({
-				store: Redacted.value(render(boot.store)),
+				store: Redacted.value(yield* render(boot.store)),
 				allowRead,
 				input,
 			});

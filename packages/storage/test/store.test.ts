@@ -6,8 +6,8 @@ import { asBoot, childStore, parse, parseDescriptor, render, withDatabase } from
 it("round trips absolute POSIX filenames without interpreting URL characters", async () => {
 	for (const filename of ["/data/store/comms.db", "/tmp/a b/é?#%.db", "/tmp/日本語.db", "/tmp/100%25.db"]) {
 		const store = { _tag: "file", filename } as const;
-		expect(await Effect.runPromise(parse(Redacted.value(render(store))))).toEqual(store);
-		expect(JSON.stringify(render(store))).not.toContain(filename);
+		expect(await Effect.runPromise(parse(Redacted.value(await Effect.runPromise(render(store)))))).toEqual(store);
+		expect(JSON.stringify(await Effect.runPromise(render(store)))).not.toContain(filename);
 	}
 });
 it("refuses malformed descriptors and unsupported engines without exposing input", async () => {
@@ -64,7 +64,7 @@ it("parses remote database names while keeping credentials redacted", async () =
 		const store = await remote(`${scheme}://app:password%40secret@db:5432/board%20one`);
 		expect(store._tag).toBe(scheme === "mysql" ? "mysql" : "postgres");
 		expect(store.database).toBe("board one");
-		expect(await remote(Redacted.value(render(store)))).toEqual(store);
+		expect(await remote(Redacted.value(await Effect.runPromise(render(store))))).toEqual(store);
 		for (const representation of [JSON.stringify(store), inspect(store)]) {
 			expect(representation).not.toContain("password");
 			expect(representation).not.toContain("secret");
@@ -107,7 +107,9 @@ it("changes only the database on an immutable remote descriptor", async () => {
 	const clone = await Effect.runPromise(withDatabase(source, "rehearsal #1"));
 	expect(source.database).toBe("board");
 	expect(clone.database).toBe("rehearsal #1");
-	expect(Redacted.value(render(clone))).toBe("postgres://app:private%40password@[::1]:5432/rehearsal%20%231");
+	expect(Redacted.value(await Effect.runPromise(render(clone)))).toBe(
+		"postgres://app:private%40password@[::1]:5432/rehearsal%20%231",
+	);
 	for (const database of ["", ".", "..", "a/b", "a\\b", "a\u0000b"]) {
 		expect(await Effect.runPromise(withDatabase(source, database).pipe(Effect.result))).toMatchObject({
 			_tag: "Failure",
@@ -123,7 +125,9 @@ it("derives the app database with only matching-endpoint boot credentials", asyn
 		const boot = await remote(`${scheme}://boot:boot-password@db:${port}/boot`);
 		const selected = await Effect.runPromise(asBoot(app, boot));
 		expect(selected.database).toBe("app");
-		expect(Redacted.value(render(selected))).toBe(`${scheme}://boot:boot-password@db:${port}/app`);
+		expect(Redacted.value(await Effect.runPromise(render(selected)))).toBe(
+			`${scheme}://boot:boot-password@db:${port}/app`,
+		);
 		for (const other of [
 			`${scheme}://boot:secret@other/boot`,
 			`${scheme}://boot:secret@db:1234/boot`,
@@ -135,5 +139,36 @@ it("derives the app database with only matching-endpoint boot credentials", asyn
 				failure: { code: "store_engine_mismatch" },
 			});
 		}
+	}
+});
+
+it("refuses unrenderable paths as typed failures", async () => {
+	for (const filename of [
+		"relative.db",
+		"/tmp/a\tb.db",
+		"/tmp/a\\b.db",
+		"/tmp/a\u0000b.db",
+		"/tmp/\ud800",
+		"/tmp/../a.db",
+	]) {
+		expect(await Effect.runPromise(render({ _tag: "file", filename }).pipe(Effect.result))).toMatchObject({
+			_tag: "Failure",
+			failure: { code: "store_descriptor_invalid" },
+		});
+	}
+});
+
+it("supports an old image alias without permitting missing or conflicting selection", async () => {
+	expect(await Effect.runPromise(childStore(undefined, "/tmp/a b.db"))).toEqual({
+		_tag: "file",
+		filename: "/tmp/a b.db",
+	});
+	for (const [raw, legacy, variable] of [
+		[undefined, undefined, "APP_STORE"],
+		[undefined, "relative.db", "APP_DATABASE"],
+		["file:/a/../b", "/b", "APP_STORE"],
+	] as const) {
+		const result = await Effect.runPromise(childStore(raw, legacy).pipe(Effect.result));
+		expect(result).toMatchObject({ _tag: "Failure", failure: { code: "store_descriptor_invalid", variable } });
 	}
 });

@@ -71,8 +71,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const path = yield* Path.Path;
 	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
 	const configured = yield* databaseConfiguration(
-		path.join(options.dataDirectory, "boot.db"),
-		path.join(options.dataDirectory, isolated ? "store/comms.db" : "comms.db"),
+		path.resolve(options.dataDirectory, "boot.db"),
+		path.resolve(options.dataDirectory, isolated ? "store/comms.db" : "comms.db"),
 	);
 	yield* validateAuthConfig(options.auth);
 	yield* fs.makeDirectory(options.dataDirectory, { recursive: true, mode: 0o700 });

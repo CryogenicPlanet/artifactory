@@ -21,17 +21,12 @@ export class StoreError extends Schema.TaggedError<StoreError>()("StoreError", {
 		"store_descriptor_mismatch",
 		"store_engine_mismatch",
 	]),
+	variable: Schema.optionalKey(Schema.Literals(["APP_STORE", "APP_DATABASE"])),
 }) {
 	override get message() {
-		return this.code;
+		return this.variable ? `${this.variable}: ${this.code}` : this.code;
 	}
 }
-
-/** Encode each path segment: ?, # and % are filenames, never connection options. */
-export const render = (store: Store): Redacted.Redacted<string> =>
-	store._tag === "file"
-		? Redacted.make(`file:${store.filename.split("/").map(encodeURIComponent).join("/")}`)
-		: store.url;
 
 /** POSIX absolute paths only. Never opens a store or includes the supplied value in an error. */
 export const parse = (raw: string) =>
@@ -56,15 +51,34 @@ export const parse = (raw: string) =>
 		return { _tag: "file", filename } satisfies FileStore;
 	});
 
-/** Retained generations still read APP_DATABASE. Never accept conflicting selections. */
-export const childStore = (raw: string, legacy?: string) =>
-	parse(raw).pipe(
-		Effect.flatMap((store) =>
-			legacy !== undefined && legacy !== store.filename
-				? Effect.fail(new StoreError({ code: "store_descriptor_mismatch" }))
-				: Effect.succeed(store),
-		),
-	);
+/** Rendering cannot produce a descriptor the parser rejects, including malformed Unicode. */
+export const render = (store: Store) =>
+	store._tag !== "file"
+		? Effect.succeed(store.url)
+		: Effect.try({
+				try: () => `file:${store.filename.split("/").map(encodeURIComponent).join("/")}`,
+				catch: () => new StoreError({ code: "store_descriptor_invalid" }),
+			}).pipe(Effect.flatMap((raw) => parse(raw).pipe(Effect.as(Redacted.make(raw)))));
+
+/** Old images provide only APP_DATABASE; current images provide both. Validate either selection. */
+export const childStore = (raw: string | undefined, legacy?: string) =>
+	Effect.gen(function* () {
+		const variable = raw === undefined && legacy !== undefined ? "APP_DATABASE" : "APP_STORE";
+		const selected =
+			raw === undefined
+				? legacy === undefined
+					? Effect.fail(new StoreError({ code: "store_descriptor_invalid" }))
+					: render({ _tag: "file", filename: legacy }).pipe(Effect.map(Redacted.value))
+				: Effect.succeed(raw);
+		return yield* selected.pipe(
+			Effect.flatMap(parse),
+			Effect.filterOrFail(
+				(store) => legacy === undefined || legacy === store.filename,
+				() => new StoreError({ code: "store_descriptor_mismatch" }),
+			),
+			Effect.mapError((error) => new StoreError({ code: error.code, variable })),
+		);
+	});
 
 const validDatabase = (database: string) =>
 	database.length > 0 && database !== "." && database !== ".." && !/[\\/\x00-\x1f\x7f]/.test(database);

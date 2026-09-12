@@ -1,4 +1,4 @@
-import { Redacted } from "effect";
+import { Effect, Redacted } from "effect";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { render } from "@comms/storage/store";
 import { spawn } from "node:child_process";
@@ -83,7 +83,9 @@ for (const fails of [false, true]) {
 				BOOT_SECRET: "candidate-test-secret",
 				BOOT_URL: "http://127.0.0.1:1",
 				WRITER_EPOCH: "candidate-test",
-				APP_STORE: Redacted.value(render({ _tag: "file", filename: join(fixture.root, "comms.db") })),
+				APP_STORE: Redacted.value(
+					await Effect.runPromise(render({ _tag: "file", filename: join(fixture.root, "comms.db") })),
+				),
 				APP_DATABASE: join(fixture.root, "comms.db"),
 				PAGES_DIRECTORY: join(fixture.root, "pages"),
 				STATE: "candidate",

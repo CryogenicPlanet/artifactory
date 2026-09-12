@@ -86,7 +86,7 @@ export const remoteRuntime = (configuration: Configuration, dataDirectory: strin
 				const child = yield* connectionOf(store, connection.tls);
 				if (child.username === connection.username) return yield* new StoreError({ code: "store_descriptor_mismatch" });
 				const reserved = yield* request(
-					{ action: "reserve-owner", store: Redacted.value(render(store)), attempt: childAttempt, scope },
+					{ action: "reserve-owner", store: Redacted.value(yield* render(store)), attempt: childAttempt, scope },
 					200,
 				).pipe(
 					Effect.flatMap((response) => response.json),
@@ -102,7 +102,7 @@ export const remoteRuntime = (configuration: Configuration, dataDirectory: strin
 				yield* asBoot(store, configuration.boot);
 				const account = yield* connectionOf(store, connection.tls);
 				if (account.username === connection.username) return yield* failure("remote_configuration_invalid");
-				yield* request({ action: "assert-principal-closed", store: Redacted.value(render(store)) });
+				yield* request({ action: "assert-principal-closed", store: Redacted.value(yield* render(store)) });
 			});
 		return { bootSql, withStore, reserveOwner, assertAccountClosed, rootAttempt: attempt };
 	});

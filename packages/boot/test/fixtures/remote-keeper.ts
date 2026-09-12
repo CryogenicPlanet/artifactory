@@ -40,6 +40,7 @@ const program = Effect.gen(function* () {
 			const receipt = join(root, "closed");
 			let childPid: number | undefined;
 			let verified = false;
+			const descriptor = Redacted.value(yield* render(config.app));
 			const child = yield* Effect.acquireRelease(
 				Effect.sync(() =>
 					spawn("bun", [join(import.meta.dirname, "../../src/child-keeper.ts")], {
@@ -49,7 +50,7 @@ const program = Effect.gen(function* () {
 							COMMS_CHILD_CONFIG: JSON.stringify({
 								entry: join(import.meta.dirname, "remote-keeper-child.ts"),
 								cwd: root,
-								env: { APP_STORE: Redacted.value(render(config.app)), MODE: mode },
+								env: { APP_STORE: descriptor, MODE: mode },
 								receipt,
 								attempt,
 								remote,
