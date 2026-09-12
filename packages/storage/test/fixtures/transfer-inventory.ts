@@ -21,6 +21,10 @@ await Effect.runPromise(
 			yield* sql`CREATE TABLE messages(id TEXT PRIMARY KEY,body TEXT)`;
 			yield* sql`CREATE VIRTUAL TABLE search USING fts5(body)`;
 			yield* sql`CREATE TABLE search_custom(payload BLOB)`;
+		} else if (mode === "trusted-index" || mode === "changed-index") {
+			yield* sql`CREATE TABLE custom(id INTEGER PRIMARY KEY,value TEXT)`;
+			if (mode === "trusted-index") yield* sql`CREATE INDEX expression ON custom((1)) WHERE value='active'`;
+			else yield* sql`CREATE INDEX expression ON custom((2)) WHERE value='active'`;
 		} else if (mode === "expression") {
 			yield* sql`CREATE TABLE custom(value TEXT)`;
 			yield* sql`CREATE INDEX executable ON custom(lower(value))`;
@@ -37,7 +41,15 @@ await Effect.runPromise(
 			sql,
 			mode === "fts"
 				? [{ name: "search", kind: "table", definition: "CREATE VIRTUAL TABLE search USING fts5(body)" }]
-				: [],
+				: mode === "trusted-index" || mode === "changed-index"
+					? [
+							{
+								name: "expression",
+								kind: "index",
+								definition: "CREATE INDEX expression ON custom((1)) WHERE value='active'",
+							},
+						]
+					: [],
 		).pipe(Effect.result);
 		process.stdout.write(
 			JSON.stringify(

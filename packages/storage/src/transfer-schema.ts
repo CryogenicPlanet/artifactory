@@ -33,7 +33,7 @@ export interface TransferTable {
 /** Supplied from trusted migrations, never inferred from the source database being transferred. */
 export interface TransferDerivedObject {
 	readonly name: string;
-	readonly kind: "table" | "trigger";
+	readonly kind: "table" | "trigger" | "index";
 	readonly definition: string;
 }
 export interface TransferInventory {

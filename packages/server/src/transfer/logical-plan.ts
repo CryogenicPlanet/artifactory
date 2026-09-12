@@ -4,6 +4,7 @@ import type { TransferKind } from "@comms/storage/transfer-values";
 import { Effect, Schema } from "effect";
 import {
 	coreSearchObjects,
+	bootDerivedObjects,
 	derivedExpression,
 	sqliteEventsDefinition,
 	syntheticKey,
@@ -161,7 +162,9 @@ export const logicalTransferPlan = (options: {
 							"messages_fts_config",
 						]
 					: [];
-			const allowed = [...expected, ...internal, ...shadows];
+			const bootIndexes =
+				store === "boot" && side.engine === "sqlite" ? bootDerivedObjects.map((object) => object.name) : [];
+			const allowed = [...expected, ...internal, ...shadows, ...bootIndexes];
 			if (
 				new Set(side.inventory.derived).size !== side.inventory.derived.length ||
 				expected.some((name) => !side.inventory.derived.includes(name)) ||

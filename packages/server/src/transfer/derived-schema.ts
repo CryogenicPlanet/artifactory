@@ -106,3 +106,13 @@ export const derivedExpression = (
 /** SQLite stores generated expressions only inside CREATE TABLE text. Boot's events schema is immutable. */
 export const sqliteEventsDefinition =
 	"CREATE TABLE events (seq INTEGER PRIMARY KEY, transaction_id TEXT, event TEXT NOT NULL, topic TEXT, type TEXT GENERATED ALWAYS AS (json_extract(event,'$.type')) VIRTUAL, actor TEXT GENERATED ALWAYS AS (json_extract(event,'$.actor')) VIRTUAL, instance TEXT GENERATED ALWAYS AS (json_extract(event,'$.instance')) VIRTUAL, level TEXT GENERATED ALWAYS AS (json_extract(event,'$.level')) VIRTUAL)";
+
+/** Immutable boot migration 13. An exact catalog match is required before ignoring its expression. */
+export const bootDerivedObjects: readonly TransferDerivedObject[] = [
+	{
+		name: "db_restore_active",
+		kind: "index",
+		definition:
+			"CREATE UNIQUE INDEX db_restore_active ON db_restore_requests ((1))\n\t\tWHERE phase IN ('authorized','restoring','working','rollback')",
+	},
+];

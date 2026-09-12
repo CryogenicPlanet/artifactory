@@ -10,7 +10,7 @@ import { initializeBootSchema } from "../../../boot/src/boot-schema.ts";
 import { remoteAppKernelOperations } from "../../../boot/src/app-kernel-schema.ts";
 import { initializeRemoteKernelSchema } from "../../src/kernel/schema.ts";
 import { initializeRemoteCore } from "../../src/ext/core/core-schema-remote.ts";
-import { coreJsonColumns } from "../../src/transfer/derived-schema.ts";
+import { coreJsonColumns, bootDerivedObjects } from "../../src/transfer/derived-schema.ts";
 import { logicalTransferPlan, TransferPlanError } from "../../src/transfer/logical-plan.ts";
 
 const Settings = Schema.Struct({
@@ -24,6 +24,8 @@ const Settings = Schema.Struct({
 const bootPath = process.argv[2];
 const appPath = process.argv[3];
 const sqlitePath = process.argv[4];
+const selectedStore = process.argv[5];
+if (selectedStore !== "boot" && selectedStore !== "app") throw Error("Missing catalog store role");
 if (!bootPath || !appPath || !sqlitePath) throw Error("Missing disposable catalog configurations");
 const boot = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFile(bootPath, "utf8"));
 const app = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFile(appPath, "utf8"));
@@ -40,6 +42,7 @@ for (const [store, settings] of [
 	["boot", boot],
 	["app", app],
 ] as const) {
+	if (store !== selectedStore) continue;
 	let stage = "initialize";
 	const options = {
 		connection: { ...settings, password: Redacted.make(settings.password), tls: false },
@@ -68,7 +71,28 @@ for (const [store, settings] of [
 			}
 			stage = "inventory";
 			const inventory = yield* sql.withTransaction(transferInventory(sql, [], store === "app" ? coreJsonColumns : []));
-			assert(inventory.tables.length >= (store === "boot" ? 20 : 15));
+			for (const name of store === "boot"
+				? ["boot_migrations", "settings", "seq", "events", "backups", "source_batches", "versions"]
+				: [
+						"kernel_writer",
+						"outbox",
+						"store_identity",
+						"mutation_batches",
+						"messages",
+						"topics",
+						"reads",
+						"kv",
+						"idempotency",
+						"topic_page_continuations",
+						"core_migrations",
+						"extension_migrations",
+						"migrations",
+						"protected_sql_tables",
+					])
+				assert(
+					inventory.tables.some((table) => table.name === name),
+					`Missing initialized table ${name}`,
+				);
 			stage = "projection";
 			const plan = yield* logicalTransferPlan({
 				store,
@@ -86,15 +110,22 @@ for (const [store, settings] of [
 				const sqlite = yield* Effect.gen(function* () {
 					const local = yield* SqlClient.SqlClient;
 					yield* initializeBootSchema;
-					return yield* transferInventory(local);
+					return {
+						inventory: yield* transferInventory(local, bootDerivedObjects),
+						ledger: yield* local`SELECT migration_id,name FROM boot_migrations ORDER BY migration_id`,
+					};
 				}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: sqlitePath })));
+				assert.deepEqual(
+					yield* sql`SELECT migration_id,name FROM boot_migrations ORDER BY migration_id`,
+					sqlite.ledger,
+				);
 				for (const [source, target] of [
 					[
 						{ engine: settings.engine, inventory },
-						{ engine: "sqlite", inventory: sqlite },
+						{ engine: "sqlite", inventory: sqlite.inventory },
 					],
 					[
-						{ engine: "sqlite", inventory: sqlite },
+						{ engine: "sqlite", inventory: sqlite.inventory },
 						{ engine: settings.engine, inventory },
 					],
 				] as const) {

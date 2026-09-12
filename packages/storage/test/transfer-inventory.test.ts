@@ -80,3 +80,14 @@ it("retains unsupported custom and ledger columns explicitly for coordinator pre
 		},
 	});
 });
+
+it("accepts only an exact trusted expression-index definition", async (test) => {
+	expect(await fixture(test, "trusted-index")).toMatchObject({
+		_tag: "Success",
+		success: { tables: [{ name: "custom" }], derived: expect.arrayContaining(["expression"]) },
+	});
+	expect(await fixture(test, "changed-index")).toMatchObject({
+		_tag: "Failure",
+		failure: { code: "transfer_catalog_invalid", object: "expression" },
+	});
+});

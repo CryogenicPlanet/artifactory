@@ -67,7 +67,7 @@ export const sqliteTransferInventory = (
 			}
 		}
 		for (const object of objects) {
-			if (object.type !== "index") continue;
+			if (object.type !== "index" || excluded.includes(object.name)) continue;
 			const expressions =
 				yield* sql`SELECT cid FROM pragma_index_xinfo(${object.name},'main') WHERE key=1 AND cid=-2`.pipe(
 					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ cid: Schema.Int })))),
