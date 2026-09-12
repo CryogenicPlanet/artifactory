@@ -42,9 +42,10 @@ chmod 644 "$private/store-transfer.js"
 volume=$(docker volume create)
 docker run --rm --entrypoint /bin/sh --mount "type=volume,src=$volume,dst=/data" "$image" -c \
   'umask 077; printf %s "{\"fixture\":true}" > /data/transfer-config.json'
+# Tini remains root and needs KILL to forward signals to the boot-UID child.
 run() {
   docker run "$@" --read-only --tmpfs /tmp --cap-drop ALL \
-    --cap-add SETUID --cap-add SETGID --cap-add SETPCAP \
+    --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SETPCAP \
     --mount "type=volume,src=$volume,dst=/data" \
     --mount "type=bind,src=$private/store-transfer.js,dst=/opt/comms/packages/server/dist/store-transfer.js,readonly" \
     "$image" store-transfer --config "${fixture_config:-/data/transfer-config.json}"
@@ -85,7 +86,7 @@ test "$(docker wait "$container")" = 0
 code=0
 # Use a new short-lived command by overriding only fixture input, not the entrypoint.
 docker run --rm --read-only --tmpfs /tmp --cap-drop ALL \
-  --cap-add SETUID --cap-add SETGID --cap-add SETPCAP \
+  --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SETPCAP \
   --mount "type=volume,src=$volume,dst=/data" \
   --mount "type=bind,src=$private/store-transfer.js,dst=/opt/comms/packages/server/dist/store-transfer.js,readonly" \
   --env COMMS_TEST_FINISH=1 "$image" store-transfer --config /data/transfer-config.json >/dev/null || code=$?
