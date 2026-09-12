@@ -6,6 +6,7 @@ import { SqlClient } from "effect/unstable/sql";
 import { layer as lifecycleLayer } from "../../src/kernel/lifecycle.ts";
 import { layer as warningLayer, MigrationWarnings } from "../../src/kernel/migration-portability.ts";
 import { migrate } from "../../src/kernel/migrations.ts";
+import { makeExtensionMigrate } from "../../src/kernel/extension-migrations.ts";
 
 const main = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem;
@@ -51,6 +52,21 @@ export default Effect.gen(function* () { const sql = yield* SqlClient.SqlClient;
 	assert.equal((yield* migrate(root, "current").pipe(Effect.result))._tag, "Failure");
 	assert.deepEqual(yield* warnings.report, expected);
 	assert.deepEqual(yield* sql`SELECT value FROM example ORDER BY value`, [{ value: 2 }, { value: 3 }, { value: 4 }]);
+	const extension = yield* makeExtensionMigrate(sql, "current", "example.ts");
+	yield* extension("plain", "CREATE TABLE extension_example(value INTEGER)");
+	const after = yield* warnings.report;
+	assert.deepEqual(
+		after.warnings?.items.at(-1),
+		warnings.enabled ? { code: "migration.non_portable", migration: "plain", extension: "example.ts" } : undefined,
+	);
+	yield* extension("plain", "CREATE TABLE extension_example(value INTEGER)");
+	yield* extension("branches", {
+		sqlite: "INSERT INTO extension_example VALUES(1)",
+		pg: "INSERT INTO extension_example VALUES(1)",
+		mysql: "INSERT INTO extension_example VALUES(1)",
+	});
+	assert.equal((yield* extension("failed", "INSERT INTO missing_table VALUES(1)").pipe(Effect.result))._tag, "Failure");
+	assert.deepEqual(yield* warnings.report, after);
 	yield* Console.log("MIGRATION_ADVISORIES_VERIFIED");
 }).pipe(
 	Effect.provide(SqliteClient.layer({ filename: ":memory:", transformResultNames: (name) => name })),

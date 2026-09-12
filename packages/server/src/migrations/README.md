@@ -33,7 +33,9 @@ This checks reserved table definitions and rows through the supplied client when
 Successful rehearsal records `migration.non_portable` in the `generation.rehearsed`
 event when a newly applied migration never called `sql.onDialect`,
 `sql.onDialectOrElse`, or a shared dialect helper through its supplied SQL client.
-Applied receipts and ordinary startup remain quiet. The report retains at most 64 warning identities with an overflow count.
+New plain-string `api.migrate` declarations receive the same advisory; explicit
+SQLite/PostgreSQL/MySQL alternatives do not. Applied receipts and ordinary startup
+remain quiet. The report retains at most 64 warning identities with an overflow count.
 
 This is an observation, not a portability verdict: even a branch can contain
 unsupported SQL, and generic SQL can work across engines without branching.

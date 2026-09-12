@@ -1,3 +1,4 @@
+import { migrationWarnings } from "./migration-portability.ts";
 import { on } from "@comms/storage/dialect";
 import { assertNoPendingMigration, mysqlMigration } from "./migration-intent.ts";
 import { Crypto, Effect, Schema, Semaphore } from "effect";
@@ -21,6 +22,8 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 		const gate = yield* Semaphore.make(1);
 		return (name: string, declaration: MigrationSql, options?: { readonly protect?: boolean }) =>
 			Effect.gen(function* () {
+				const warnings = yield* migrationWarnings;
+				const report = warnings && typeof declaration === "string" ? warnings.record(name, extension) : Effect.void;
 				const statement = migrationSql(declaration, migrationEngine(sql));
 				if (
 					!name ||
@@ -94,14 +97,16 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 						name,
 						sql.withTransaction(preserveMigrationState(sql, sql.unsafe(statement))).pipe(Effect.asVoid),
 						receipt,
-					);
+					).pipe(Effect.andThen(report));
 				}
-				yield* sql.withTransaction(
+				const applied = yield* sql.withTransaction(
 					Effect.gen(function* () {
-						if (yield* prior) return;
+						if (yield* prior) return false;
 						yield* preserveMigrationState(sql, sql.unsafe(statement));
 						yield* receipt;
+						return true;
 					}),
 				);
+				if (applied) yield* report;
 			}).pipe(gate.withPermit);
 	});
