@@ -1,5 +1,7 @@
 name: Remote board
 on:
+  schedule:
+    - cron: "37 8 * * *"
   pull_request:
   push:
     branches: [master]
