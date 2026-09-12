@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { Schema } from "effect";
 import { beforeAll, expect, it } from "vitest";
+import { remoteRestoreForward } from "./fixtures/remote-restore-forward.ts";
 import { remoteMigrationChain } from "./fixtures/remote-migration-chain.ts";
 import { repairAuthenticator } from "./fixtures/remote-repair-authenticator.ts";
 
@@ -26,6 +27,7 @@ const Evidence = Schema.Struct({
 	settings: Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String })),
 	evidence: Schema.Unknown,
 	migrationState: Schema.optionalKey(Schema.Unknown),
+	forwardState: Schema.optionalKey(Schema.Unknown),
 	original: Schema.Unknown,
 	pending: Schema.Array(
 		Schema.Struct({
@@ -48,6 +50,7 @@ const scenarios = [
 	"pending",
 	"password",
 	"migration",
+	"restoreforward",
 ] as const;
 
 beforeAll(async () => {
@@ -234,6 +237,22 @@ for (const scenario of scenarios)
 			);
 			await stop(first.child);
 			const before = await operator("inspect");
+			if (scenario === "restoreforward") {
+				await remoteRestoreForward({
+					launch,
+					stop,
+					operator,
+					before,
+					cookie,
+					input,
+					key,
+					message,
+					root,
+					backup: backup.id,
+					assertion: device.assertion,
+				});
+				return;
+			}
 			if (scenario === "migration") {
 				await remoteMigrationChain({ launch, stop, operator, before, cookie, input, key, message, root });
 				return;

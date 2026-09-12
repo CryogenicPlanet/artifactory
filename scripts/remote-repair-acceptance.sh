@@ -53,7 +53,7 @@ operator=pathlib.Path('packages/boot/sql')
 vendor='postgres' if engine=='pg' else 'mysql'
 baseline=(operator/(vendor+'-roles.sql')).read_text()
 scratch=(operator/(vendor+'-scratch-roles.sql')).read_text()
-for scenario in ['missing','foreign','candidate','beforeallocation','afterselection','pending','password','migration','shutdownnormal','shutdownforce','foreigndonor','foreignrecipient']:
+for scenario in ['missing','foreign','candidate','beforeallocation','afterselection','pending','password','migration','restoreforward','shutdownnormal','shutdownforce','foreigndonor','foreignrecipient']:
     boot,app=secrets.token_hex(32),secrets.token_hex(32)
     databases={kind:f'comms_repair_{scenario}_{kind}' for kind in ['boot','app']}
     users={kind:databases[kind] if engine=='pg' else f'cr_{scenario}_{kind[0]}' for kind in databases}
@@ -101,7 +101,7 @@ for attempt in $(seq 1 120); do
   fi
   sleep 1
 done
-for scenario in missing foreign candidate beforeallocation afterselection pending password migration shutdownnormal shutdownforce foreigndonor foreignrecipient; do
+for scenario in missing foreign candidate beforeallocation afterselection pending password migration restoreforward shutdownnormal shutdownforce foreigndonor foreignrecipient; do
   if [ "$engine" = pg ]; then
     docker exec --env-file "$private/$scenario.env" -i "$server" psql -X -U postgres -v ON_ERROR_STOP=1 \
       < "$private/$scenario.sql" >/dev/null 2>>"$private/provision.log"
@@ -133,7 +133,7 @@ run_scenario() {
       node node_modules/vitest/vitest.mjs run "$COMMS_NATIVE_TEST_FILE" --testNamePattern "$COMMS_NATIVE_TEST_PATTERN" --maxWorkers=1 --reporter=verbose
     ' >> "$private/tests.log" 2>&1
 }
-for scenario in missing foreign candidate beforeallocation afterselection pending password migration; do
+for scenario in missing foreign candidate beforeallocation afterselection pending password migration restoreforward; do
   run_scenario packages/server/test/remote-selected-store-repair.test.ts "^remote selected store repair: ${scenario}$"
 done
 for scenario in shutdownnormal shutdownforce; do
@@ -141,4 +141,4 @@ for scenario in shutdownnormal shutdownforce; do
 done
 run_scenario packages/boot/test/remote-foreign-backup-native.test.ts '^a genuine foreign native backup cannot replace the adopted recipient$'
 
-echo "All eight $engine repair/migration, both publication shutdown and foreign-backup rejection scenarios passed."
+echo "All nine $engine repair/migration, both publication shutdown and foreign-backup rejection scenarios passed."
