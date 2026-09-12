@@ -41,6 +41,12 @@ await Effect.runPromise(
 			const crypto = yield* Crypto.Crypto;
 			const reset = Effect.gen(function* () {
 				if (settings.engine === "pg") yield* sql`DROP FUNCTION IF EXISTS raw_write_trigger() CASCADE`.unprepared;
+				const views = yield* (
+					settings.engine === "pg"
+						? sql`SELECT viewname AS name FROM pg_catalog.pg_views WHERE schemaname='public'`
+						: sql`SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='VIEW'`
+				).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ name: Schema.String })))));
+				for (const { name } of views) yield* sql`DROP VIEW ${sql(name)}`.unprepared;
 				const tables = yield* (
 					settings.engine === "pg"
 						? sql`SELECT tablename AS name FROM pg_catalog.pg_tables WHERE schemaname='public'`
@@ -183,6 +189,22 @@ await Effect.runPromise(
 					assert(Schema.is(KernelError)(conflict.failure));
 					assert.equal(conflict.failure.code, "idempotency_conflict");
 				}
+				phase = "insert-delete-counts";
+				assert.equal((yield* write("INSERT INTO repair_rows(id,value) VALUES(2,7)")).changes, 1);
+				assert.equal((yield* write("UPDATE repair_rows SET value=7 WHERE id=2")).changes, 1);
+				assert.equal((yield* write("DELETE FROM repair_rows WHERE id=2")).changes, 1);
+				assert.deepEqual(yield* sql`SELECT * FROM repair_rows`, [{ id: 1, value: 1 }]);
+				phase = "view-refusal";
+				yield* sql`CREATE VIEW repair_view AS SELECT * FROM repair_rows`.unprepared;
+				yield* unsupported("UPDATE repair_rows SET value=9 WHERE id=1");
+				yield* sql`DROP VIEW repair_view`.unprepared;
+				if (settings.engine === "mysql") {
+					phase = "nontransactional-refusal";
+					yield* sql`CREATE TABLE unsafe_repair(value INTEGER) ENGINE=MyISAM`;
+					yield* unsupported("UPDATE repair_rows SET value=9 WHERE id=1");
+					yield* sql`DROP TABLE unsafe_repair`;
+				}
+				assert.deepEqual(yield* sql`SELECT value FROM repair_rows`, [{ value: 1 }]);
 			}
 			console.log(`REMOTE_SQL_WRITE_VERIFIED ${mode}`);
 		}),
