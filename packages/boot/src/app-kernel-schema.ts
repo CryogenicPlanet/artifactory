@@ -15,9 +15,9 @@ export const remoteAppKernelSchema = (sql: SqlClient.SqlClient, appRole: string)
 			sql`GRANT SELECT ON store_identity TO ${sql(appRole)}`,
 		],
 		mysql: () => [
-			sql`CREATE TABLE IF NOT EXISTS kernel_writer(singleton INTEGER PRIMARY KEY CHECK(singleton=1),epoch TEXT NOT NULL)`,
-			sql`CREATE TABLE IF NOT EXISTS mutation_batches(id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin PRIMARY KEY,from_seq BIGINT NOT NULL,to_seq BIGINT NOT NULL,count BIGINT NOT NULL)`,
-			sql`CREATE TABLE IF NOT EXISTS outbox(seq BIGINT PRIMARY KEY,transaction_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,event LONGTEXT NOT NULL,shipped_at BIGINT)`,
-			sql`CREATE TABLE IF NOT EXISTS store_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),store_id VARCHAR(36) NOT NULL,initialized_at BIGINT NOT NULL,transferred_to TEXT)`,
+			sql`CREATE TABLE IF NOT EXISTS kernel_writer(singleton INTEGER PRIMARY KEY CHECK(singleton=1),epoch TEXT NOT NULL) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`,
+			sql`CREATE TABLE IF NOT EXISTS mutation_batches(id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin PRIMARY KEY,from_seq BIGINT NOT NULL,to_seq BIGINT NOT NULL,count BIGINT NOT NULL) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`,
+			sql`CREATE TABLE IF NOT EXISTS outbox(seq BIGINT PRIMARY KEY,transaction_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,event LONGTEXT NOT NULL,shipped_at BIGINT) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`,
+			sql`CREATE TABLE IF NOT EXISTS store_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),store_id VARCHAR(36) NOT NULL,initialized_at BIGINT NOT NULL,transferred_to TEXT) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`,
 		],
 	});

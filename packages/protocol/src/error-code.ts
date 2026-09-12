@@ -15,6 +15,7 @@ export const KernelErrorCode = Schema.Literals([
 	"extension_disabled",
 	"extension_migration_conflict",
 	"extension_migration_invalid",
+	"migration_recovery_required",
 	"generation_not_live",
 	"health_context_invalid",
 	"health_create_invalid",

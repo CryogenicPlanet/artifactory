@@ -1,6 +1,6 @@
 import { on } from "@comms/storage/dialect";
 import { assertNoPendingMigration, mysqlMigration } from "./migration-intent.ts";
-import { Crypto, Effect, Schema } from "effect";
+import { Crypto, Effect, Schema, Semaphore } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
 import { registerProtectedSqlTable } from "./protected-sql-tables.ts";
@@ -10,6 +10,7 @@ import { writerGate } from "./database.ts";
 export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, extension: string) =>
 	Effect.gen(function* () {
 		const crypto = yield* Crypto.Crypto;
+		const gate = yield* Semaphore.make(1);
 		return (name: string, statement: string, options?: { readonly protect?: boolean }) =>
 			Effect.gen(function* () {
 				if (
@@ -86,5 +87,5 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 						yield* receipt;
 					}),
 				);
-			});
+			}).pipe(gate.withPermit);
 	});
