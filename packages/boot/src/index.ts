@@ -58,6 +58,9 @@ import { StoreError } from "@comms/storage/store";
 import { failure as remoteFailure } from "@comms/storage/remote-session";
 
 export { launchRemoteRoot } from "./remote-root-launcher.ts";
+export { launchRemoteTransfer } from "./remote-transfer-launcher.ts";
+export { RemoteTransferConfiguration } from "./remote-transfer-configuration.ts";
+export { remoteRuntime } from "./remote-runtime.ts";
 export { databaseConfiguration } from "./database-configuration.ts";
 
 type Handler = Effect.Effect<

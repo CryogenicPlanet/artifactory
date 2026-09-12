@@ -35,6 +35,8 @@ Open **http://localhost:8080/setup** and use the code in the container output. T
 
 The image sets `HOST=0.0.0.0`, `PORT=8080` and `DATA_DIR=/data`. Local execution defaults to `HOST=127.0.0.1`. If you change the container's `PORT`, also change the container-side published port. If only the host-side port changes, set `PUBLIC_ORIGIN` to the address you will actually open.
 
+The supported image entrypoint holds an exclusive OS lock on `/data/.comms-lifetime.lock` throughout startup and shutdown. A second image command using that volume exits with status 75. Never remove the lock file: removing its inode can defeat exclusion. Offline transfer integration uses the same locked entrypoint; direct `bun` and development launches do not establish this transfer ownership guarantee. Releasing this local lock does not prove remote SQL closure; the guardian receipts remain mandatory.
+
 The [Dockerfile](../Dockerfile) pins Bun 1.4.0 by image digest and installs frozen lockfiles. Host dependencies, generated output, databases, credentials, git history and reference repositories are excluded from the build context. These commands do not publish an image.
 
 ## Choose a database
@@ -96,7 +98,7 @@ The image separates these roles:
 | Editable app | 1001 | Live app store, pages and runtime scratch |
 | Dependency/UI preparation | 1002 | Disposable preparation workspace; no boot or live-store access |
 
-`tini` reaps orphan descendants. Boot may invoke two fixed, root-owned sudo keeper wrappers without arguments. The keepers reset the environment, drop groups and capabilities, and apply `no-new-privileges` before executing editable code. Do not add container-wide `no-new-privileges`: it prevents this required boot-to-keeper transition. Root is limited to initialization, reaping and the per-child keepers; there is no privileged HTTP daemon.
+`tini` reaps orphan descendants. Boot may invoke two fixed, root-owned sudo keeper wrappers without arguments. The keepers reset the environment, drop groups and capabilities, and apply `no-new-privileges` before executing editable code. Do not add container-wide `no-new-privileges`: it prevents this required boot-to-keeper transition. Root is limited to initialization, reaping, the outer lifetime lock and the per-child keepers; there is no privileged HTTP daemon.
 
 For SQLite, `/data/boot.db` is mode `0600`; receipts, backups and staging are private. Live SQLite files are in `/data/store`, owned app:comms with shared group write access. Saved generation code and dependencies are boot-owned and app-readable. Pages share the write group; app scratch lives in `/data/runtime`.
 

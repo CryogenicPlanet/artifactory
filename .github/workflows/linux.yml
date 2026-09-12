@@ -72,6 +72,8 @@ jobs:
           persist-credentials: false
       - name: Build isolated runtime image
         run: docker build --tag comms:acceptance .
+      - name: Linux lifetime ownership acceptance
+        run: sh scripts/lifetime-lock-acceptance.sh comms:acceptance
       - name: Linux privileged keeper closure acceptance
         run: sh scripts/linux-keeper-acceptance.sh comms:acceptance
       - name: Linux UID and persistence acceptance

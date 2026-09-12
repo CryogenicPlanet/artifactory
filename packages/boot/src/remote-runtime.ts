@@ -11,14 +11,20 @@ import { RemoteRootConfiguration, type RemoteRootRequest } from "./remote-root-p
 type Configuration = Extract<Effect.Success<ReturnType<typeof databaseConfiguration>>, { readonly _tag: "remote" }>;
 
 /** Boot borrows guarded SQL leases; the surviving launcher owns all remote closure evidence. */
-export const remoteRuntime = (configuration: Configuration, dataDirectory: string) =>
+export const remoteRuntime = (
+	configuration: Configuration,
+	dataDirectory: string,
+	suppliedGuardian?: typeof RemoteRootConfiguration.Type,
+) =>
 	Effect.gen(function* () {
 		const guardian = yield* sanitized(
-			Config.Redacted("COMMS_REMOTE_ROOT_CONFIG").pipe(
-				Effect.flatMap((value) =>
-					Schema.decodeEffect(Schema.fromJsonString(RemoteRootConfiguration))(Redacted.value(value)),
-				),
-			),
+			suppliedGuardian === undefined
+				? Config.Redacted("COMMS_REMOTE_ROOT_CONFIG").pipe(
+						Effect.flatMap((value) =>
+							Schema.decodeEffect(Schema.fromJsonString(RemoteRootConfiguration))(Redacted.value(value)),
+						),
+					)
+				: Schema.decodeUnknownEffect(RemoteRootConfiguration)(suppliedGuardian),
 			"remote_configuration_invalid",
 		);
 		const client = yield* HttpClient.HttpClient;

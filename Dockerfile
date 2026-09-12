@@ -52,7 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo util-linux
     && usermod --append --groups comms boot \
     && mkdir /data
 COPY deployment /opt/comms/deployment
-RUN chmod 0755 /opt/comms/deployment/entrypoint /opt/comms/deployment/child-keeper /opt/comms/deployment/preparation-keeper /opt/comms/deployment/native-copy-keeper \
+RUN chmod 0755 /opt/comms/deployment/entrypoint /opt/comms/deployment/locked-command /opt/comms/deployment/child-keeper /opt/comms/deployment/preparation-keeper /opt/comms/deployment/native-copy-keeper \
     && cp /opt/comms/deployment/sudoers /etc/sudoers.d/comms \
     && chmod 0440 /etc/sudoers.d/comms \
     && visudo --check
