@@ -80,7 +80,7 @@ await Effect.runPromise(
 			yield* expectFailure(sql`INSERT INTO seq(singleton,${sql("next")},published_through) VALUES (2,1,0)`);
 			yield* initializeRemoteBootSchema(sql, settings.engine);
 			assert.equal((yield* sql`SELECT path FROM staging WHERE lock_id='fixture'`)[0]?.path, path);
-			assert.equal((yield* sql`SELECT migration_id FROM boot_migrations`).length, 18);
+			assert.equal((yield* sql`SELECT migration_id FROM boot_migrations`).length, 19);
 			process.stdout.write("boot native constraints, long values, binary, sequence and reopen durability passed\n");
 		}
 	}).pipe(Effect.scoped, Effect.provide(layer)),

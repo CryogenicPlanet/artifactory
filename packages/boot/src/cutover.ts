@@ -137,6 +137,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 				route.epoch !== current.attempt.epoch
 			)
 				return;
+			yield* backup.recoverCopy;
 			yield* supervisor.assertClosure;
 			if (
 				record.phase !== "accepted" ||
@@ -341,7 +342,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 								yield* sql`INSERT INTO cutover(singleton,candidate,prior,backup,lock_id,family,phase,candidate_epoch) VALUES(1,${generation.n},${prior?.generation.n ?? null},${id},${owner.id},${owner.family},'working',${candidateEpoch})`;
 							}),
 						);
-					}).pipe(Effect.timeout("30 seconds"));
+					});
 					// Edited module imports can open connections before go. Preserve the frozen store first.
 					const candidate = waitingCandidate ?? (yield* launchCandidate(candidateEpoch));
 					yield* Effect.gen(function* () {
@@ -386,6 +387,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					yield* refresh;
 					return { ...result.value, lock: (yield* lock.inspect).value };
 				}
+				yield* backup.recoverCopy;
 				const failure = Cause.findError(result.cause);
 				const incompatibleSeed =
 					request.trustedSource !== undefined &&
@@ -460,7 +462,8 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					failure._tag === "Success" &&
 					(Schema.is(FreezeTimeout)(failure.success) ||
 						Schema.is(StorageRejected)(failure.success) ||
-						Schema.is(ArtifactRetentionRejected)(failure.success))
+						Schema.is(ArtifactRetentionRejected)(failure.success) ||
+						(Schema.is(ChildError)(failure.success) && failure.success.code === "rehearsal_copy_timeout"))
 				)
 					return yield* failure.success;
 				return {

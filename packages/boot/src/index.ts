@@ -232,6 +232,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 								if (yield* hasLegacyTopicMoves(sql))
 									return yield* new RecoveryRejected({ code: "topic_move_recovery_required" });
 								yield* (yield* Generations).recover;
+								yield* (yield* DbOps).recoverCopy;
 								if (isolated && configuration._tag === "file")
 									yield* migrateAppStore({
 										dataDirectory: options.dataDirectory,

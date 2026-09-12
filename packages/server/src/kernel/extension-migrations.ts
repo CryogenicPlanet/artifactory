@@ -1,6 +1,7 @@
 import { on } from "@comms/storage/dialect";
 import { assertNoPendingMigration, mysqlMigration } from "./migration-intent.ts";
 import { Crypto, Effect, Schema, Semaphore } from "effect";
+import { preserveMigrationState } from "./migration-state.ts";
 import type { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
 import { registerProtectedSqlTable } from "./protected-sql-tables.ts";
@@ -83,7 +84,7 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 				yield* sql.withTransaction(
 					Effect.gen(function* () {
 						if (yield* prior) return;
-						yield* sql.unsafe(statement);
+						yield* preserveMigrationState(sql, sql.unsafe(statement));
 						yield* receipt;
 					}),
 				);

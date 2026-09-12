@@ -175,6 +175,8 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 			);
 		return {
 			engine,
+			// Native copies already await their keeper proof; startup remote journal recovery stays below.
+			recoverCopy: Effect.void,
 			estimatedBytes,
 			clone,
 			prepareClone: (_clone: FileStore, _epoch: string) =>
