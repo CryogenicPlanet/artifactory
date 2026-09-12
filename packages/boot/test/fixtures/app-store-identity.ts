@@ -11,7 +11,7 @@ import { AppBackup, layer as backupLayer } from "../../src/app-backup.ts";
 const root = process.argv[2];
 if (!root) throw Error("Missing root");
 const mode = process.argv[3];
-const filename = `${root}/comms.db`;
+const filename = `${root}/${mode === "relocated" ? "store/comms.db" : "comms.db"}`;
 const pause = Console.log("PAUSED").pipe(Effect.andThen(Effect.never));
 const main = Effect.gen(function* () {
 	yield* initializeBootSchema;

@@ -310,3 +310,35 @@ it("commits human lock metadata while recovery remains broken and refuses confli
 	expect(await env.sql("SELECT * FROM cutover")).toEqual(journal);
 	expect(await env.sql("SELECT * FROM edit_lock")).toEqual([]);
 }, 30000);
+
+it("exposes adoption status only after authentication and surfaces preidentity upgrade refusal without migration", async (test) => {
+	const env = await fixture(test);
+	const first = await env.start();
+	expect(await first.status()).toMatchObject({
+		store_identity: {
+			app_store_id: expect.any(String),
+			adoption_phase: "ready",
+			selected_filename: join(env.root, "data/comms.db"),
+			recorded_filename: join(env.root, "data/comms.db"),
+		},
+	});
+	expect((await fetch(`${first.url}/_boot/status`)).status).toBe(401);
+	await first.stop();
+	await env.sql("DELETE FROM settings WHERE key IN ('app_store_adoption','app_store_id')");
+	await env.sql("ALTER TABLE backups DROP COLUMN legacy_store_id");
+	await env.sql("PRAGMA user_version=16");
+	await env.sql("INSERT INTO cutover VALUES(1,1,NULL,NULL,'held','family','working',NULL)");
+	const journal = await env.sql("SELECT * FROM cutover");
+	const restarted = await env.start(false);
+	for (const path of ["/setup", "/auth/login", "/_boot/status"]) {
+		await expect.poll(async () => (await fetch(`${restarted.url}${path}`)).status).toBe(409);
+		const response = await fetch(`${restarted.url}${path}`);
+		const body: unknown = await response.json();
+		expect(body).toMatchObject({ error: { code: "boot_identity_upgrade_pending", retriable: false } });
+		expect(JSON.stringify(body)).not.toContain(env.root);
+	}
+	expect((await fetch(`${restarted.url}/_kernel/control`)).status).toBe(403);
+	expect((await fetch(`${restarted.url}/health`)).status).toBe(200);
+	expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 16 }]);
+	expect(await env.sql("SELECT * FROM cutover")).toEqual(journal);
+});
