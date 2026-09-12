@@ -47,17 +47,33 @@ if [ "$engine" = pg ]; then
   docker run --detach --name "$container" --publish "127.0.0.1::$port" \
     --mount "type=bind,src=$private,dst=/run/secrets,readonly" \
     --env POSTGRES_PASSWORD_FILE=/run/secrets/admin-password "$image" >/dev/null
-  ready() { docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; }
+  ready() { docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>"$private/readiness-errors"; }
 else
   docker run --detach --name "$container" --publish "127.0.0.1::$port" \
     --mount "type=bind,src=$private,dst=/run/secrets,readonly" \
     --env MYSQL_ROOT_PASSWORD_FILE=/run/secrets/admin-password --env MYSQL_ROOT_HOST=localhost \
     "$image" --performance-schema-session-connect-attrs-size="$attributes" >/dev/null
-  ready() { docker exec "$container" mysql --defaults-extra-file=/run/secrets/admin.cnf --host=127.0.0.1 -e 'SELECT 1' >/dev/null 2>&1; }
+  ready() { docker exec "$container" mysql --defaults-extra-file=/run/secrets/admin.cnf --host=127.0.0.1 -e 'SELECT 1' >/dev/null 2>"$private/readiness-errors"; }
 fi
+diagnose_readiness() {
+  echo 'Database did not become ready' >&2
+  docker inspect --format '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$container" >&2 || true
+  docker logs --tail 40 "$container" >"$private/server-errors" 2>&1 || true
+  python3 - "$private" <<'PYDIAG'
+import pathlib,re,sys
+root=pathlib.Path(sys.argv[1])
+for name in ['readiness-errors','server-errors']:
+ text=(root/name).read_text(errors='replace') if (root/name).exists() else ''
+ # Every generated fixture password is exactly 48 lowercase hexadecimal characters.
+ print(name+':\n'+re.sub(r'(?<![a-f0-9])[a-f0-9]{48}(?![a-f0-9])', '[REDACTED]', text), file=sys.stderr)
+PYDIAG
+}
 for attempt in $(seq 1 120); do
   if ready; then break; fi
-  if [ "$attempt" = 120 ]; then echo 'Database did not become ready' >&2; exit 1; fi
+  if [ "$attempt" = 120 ] || [ "$(docker inspect --format '{{.State.Running}}' "$container")" != true ]; then
+    diagnose_readiness
+    exit 1
+  fi
   sleep 1
 done
 if [ "$engine" = pg ]; then
@@ -74,4 +90,4 @@ p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()); d['port']=int(sys.argv
 PY
 COMMS_REMOTE_TEST_CONFIG="$private/client.json" COMMS_REMOTE_TEST_CONTAINER="$container" \
   COMMS_REMOTE_TEST_ENGINE="$engine" COMMS_REMOTE_TEST_ATTRIBUTES="$attributes" \
-  bun run test packages/storage/test/remote-sessions.test.ts --maxWorkers=2 --reporter=verbose
+  node node_modules/vitest/vitest.mjs run packages/storage/test/remote-sessions.test.ts --maxWorkers=2 --reporter=verbose

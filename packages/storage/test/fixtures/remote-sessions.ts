@@ -31,6 +31,7 @@ async function main() {
 				const attempt = "a1".repeat(32);
 				if (mode === "missing" || mode === "prepared") {
 					if (mode === "prepared") {
+						phase = "prepared_restart";
 						yield* Effect.promise(() => writeFile(`${journal}.restart`, "ready"));
 						let resumed = false;
 						for (let index = 0; index < 300; index++) {
@@ -45,13 +46,17 @@ async function main() {
 						}
 						assert(resumed);
 					}
+					phase = "configuration_observer";
 					const observer = yield* open(connection, "fixture-observer");
+					phase = "configuration_query";
 					const setting = yield* observer.unsafe<{ readonly configured: string | number }>(
 						mode === "prepared"
 							? "SELECT current_setting('max_prepared_transactions') AS configured"
 							: "SELECT @@performance_schema_session_connect_attrs_size AS configured",
 					);
+					phase = `configuration_value_${String(setting[0]?.configured)}`;
 					assert.equal(String(setting[0]?.configured), mode === "prepared" ? "10" : "32");
+					phase = "configuration_refusal";
 					assert(Exit.isFailure(yield* Layer.build(remoteInspectorLayer({ connection, attempt })).pipe(Effect.exit)));
 					return;
 				}
