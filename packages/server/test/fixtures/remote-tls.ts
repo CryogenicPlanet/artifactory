@@ -75,6 +75,7 @@ const query = Effect.scoped(
 const artifact = { path: "/artifacts/trusted.dump", engine: settings.engine };
 const options = { store, budget: "15 seconds", tls: true } as const;
 let phase = "query";
+process.stdout.write(`TLS ${settings.engine} ${mode} ${host}: starting\n`);
 try {
 	await Effect.runPromise(
 		Effect.gen(function* () {
@@ -110,5 +111,5 @@ try {
 	);
 	process.stdout.write(`TLS ${settings.engine} ${mode} ${host}: passed\n`);
 } catch {
-	throw new Error(`TLS fixture failed during ${phase}`);
+	throw new Error(`TLS ${settings.engine} ${mode} ${host} failed during ${phase}`);
 }
