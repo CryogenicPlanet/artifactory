@@ -30,7 +30,8 @@ const make = (store: FileStore, dataDirectory: string) =>
 			}).pipe(Effect.provide(clientLayer(store))),
 		);
 		const sync = (name: string) => Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
-		return {
+		const operations = {
+			engine: "sqlite" as const,
 			recoverStaging: fs.remove(`${filename}.restore-staging`, { recursive: true, force: true }),
 			estimatedBytes,
 			clone: (destination: FileStore) =>
@@ -78,8 +79,22 @@ const make = (store: FileStore, dataDirectory: string) =>
 						for (const suffix of ["-wal", "-shm"]) yield* fs.remove(`${filename}${suffix}`, { force: true });
 						yield* fs.rename(temporary, filename);
 						yield* sync(path.dirname(filename));
+						return store;
 					}),
 				),
+		};
+		return {
+			...operations,
+			rehearsal: (destination: FileStore, epoch: string, artifact?: BackupRecord) =>
+				Effect.gen(function* () {
+					if (artifact) {
+						if (artifact.engine !== "sqlite") return yield* new ChildError({ code: "backup_engine_mismatch" });
+						yield* fs.copyFile(artifact.path, destination.filename);
+					} else yield* operations.clone(destination);
+					yield* operations.prepareClone(destination, epoch);
+					// The coordinator owns this file inside its materialized source tree.
+					return { store: destination, dispose: Effect.void };
+				}),
 		};
 	});
 export class DbOps extends Context.Service<DbOps, Effect.Success<ReturnType<typeof make>>>()("comms/boot/DbOps") {}
