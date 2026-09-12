@@ -50,3 +50,34 @@ it("returns safe MySQL BIGINT numbers and rejects lossless unsafe sentinels in e
 	}
 	expect(mysqlTypeCast({ type: "LONGLONG", string: () => null }, () => null)).toBe(null);
 });
+
+it("preserves PostgreSQL JSON wire text, SQL nulls and arrays in each pool", () => {
+	const types = postgresTypes();
+	const text = ' { "n":9007199254740993, "x":"雪 🐘", "escaped":"\\u0061\\n" } ';
+	for (const oid of [PgTypes.OID.json, PgTypes.OID.jsonb]) {
+		const body = new TextEncoder().encode(text);
+		const bytes = oid === PgTypes.OID.jsonb ? new Uint8Array([1, ...body]) : body;
+		expect(Result.getOrThrow(PgTypes.decode(bytes, oid, 1, types))).toBe(text);
+		const read = Result.getOrThrow(PgTypes.makeFieldReader([{ dataTypeOid: oid, format: 1 }], types));
+		const framed = new Uint8Array([7, ...bytes, 8]);
+		expect(read(framed, 1, bytes.length, 0)).toBe(text);
+		expect(read(framed, 0, -1, 0)).toBe(null);
+		const encoded = Result.getOrThrow(PgTypes.encode({ hello: "雪" }, oid, types));
+		expect(encoded).toEqual(Result.getOrThrow(PgTypes.encode({ hello: "雪" }, oid)));
+		expect(Result.getOrThrow(PgTypes.decode(encoded, oid, 1))).toEqual({ hello: "雪" });
+		const arrayOid = oid === PgTypes.OID.json ? PgTypes.OID.jsonArray : PgTypes.OID.jsonbArray;
+		const array = Result.getOrThrow(PgTypes.encode([{ hello: "雪" }, null], arrayOid));
+		expect(Result.getOrThrow(PgTypes.decode(array, arrayOid, 1, types))).toEqual(['{"hello":"雪"}', null]);
+	}
+});
+
+it("rejects an unknown JSONB version without exposing payload text", () => {
+	for (const bytes of [new Uint8Array(), new Uint8Array([2, ...new TextEncoder().encode("secret-canary")])]) {
+		const result = PgTypes.decode(bytes, PgTypes.OID.jsonb, 1, postgresTypes());
+		expect(Result.isFailure(result)).toBe(true);
+		if (Result.isFailure(result)) {
+			expect(result.failure.message).toBe("remote_jsonb_version_invalid");
+			expect(String(result.failure)).not.toContain("secret-canary");
+		}
+	}
+});

@@ -36,6 +36,7 @@ export type RemoteFailure =
 	| "remote_connection_failed"
 	| "remote_registration_failed"
 	| "remote_inspection_failed"
+	| "remote_isolation_unsupported"
 	| "remote_sessions_open"
 	| "remote_local_closure_unproven"
 	| "remote_query_failed";
@@ -46,6 +47,14 @@ export const failure = (code: RemoteFailure) =>
 /** Keep only categories used for conflict handling; driver text/constraint names can contain secrets. */
 export const sanitizedCause = <E>(cause: Cause.Cause<E>, code: RemoteFailure) => {
 	const only = cause.reasons.length === 1 ? cause.reasons[0] : undefined;
+	if (
+		only &&
+		Cause.isFailReason(only) &&
+		isSqlError(only.error) &&
+		only.error.reason.operation === "remote_session" &&
+		only.error.reason.message === "remote_isolation_unsupported"
+	)
+		return failure("remote_isolation_unsupported");
 	if (code === "remote_query_failed" && only && Cause.isFailReason(only) && isSqlError(only.error)) {
 		const fields = { cause: undefined, message: code, operation: "remote_session" };
 		switch (only.error.reason._tag) {
