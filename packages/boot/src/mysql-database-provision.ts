@@ -98,7 +98,10 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 				);
 				// An uncertain receipt leaves an orphan, never permission to delete an existing database.
 				yield* receipts.created(record, "database");
-				yield* execute(`GRANT ${permissions} ON ${grantDatabase(record.database)}.* TO ${account(record.principal)}`);
+				// Existing native dumps contain LOCK TABLES; only the disposable loader needs this privilege.
+				yield* execute(
+					`GRANT ${permissions}, LOCK TABLES ON ${grantDatabase(record.database)}.* TO ${account(record.principal)}`,
+				);
 			});
 		const grantSchema = selected;
 		const protectKernel = (record: RemoteDatabaseRecord, _appRole = record.principal) =>
