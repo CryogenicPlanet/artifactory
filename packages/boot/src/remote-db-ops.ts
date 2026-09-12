@@ -6,6 +6,7 @@ import { EventError } from "./events.ts";
 import { remoteAppStoreIdentity, verifyRemoteAppIdentity } from "./app-store-identity.ts";
 import type { BackupRecord } from "./backup-metadata.ts";
 import { remoteDatabaseJournal, RemoteDatabaseError, type RemoteDatabaseRecord } from "./remote-database-journal.ts";
+import { mysqlDatabaseProvision } from "./mysql-database-provision.ts";
 import { postgresDatabaseProvision } from "./postgres-database-provision.ts";
 import { storageHeadroom } from "./storage-headroom.ts";
 
@@ -15,7 +16,7 @@ type NativeRequest = {
 	readonly budgetMs: number;
 } & (
 	| { readonly operation: "dump"; readonly path: string }
-	| { readonly operation: "load"; readonly artifact: RemoteArtifact; readonly ownership: "current-role" }
+	| { readonly operation: "load"; readonly artifact: RemoteArtifact; readonly ownership: "current-role" | "preserve" }
 );
 export interface RemoteDbOpsOptions {
 	readonly store: Effect.Effect<RemoteStore, unknown>;
@@ -47,10 +48,15 @@ const safe = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 	Effect.gen(function* () {
 		const configured = yield* safe(options.store);
-		if (configured._tag !== "postgres")
-			return yield* new RemoteDatabaseError({ code: "remote_database_provision_failed" });
+		const engine = configured._tag === "postgres" ? "pg" : "mysql";
 		const journal = yield* remoteDatabaseJournal(options.bootStore, options.dataDirectory);
-		const provision = yield* postgresDatabaseProvision;
+		const mysqlProvision = mysqlDatabaseProvision(journal);
+		const selectedProvision: Effect.Effect<
+			Effect.Success<typeof postgresDatabaseProvision> | Effect.Success<typeof mysqlProvision>,
+			Effect.Error<typeof postgresDatabaseProvision> | Effect.Error<typeof mysqlProvision>,
+			SqlClient.SqlClient
+		> = engine === "pg" ? postgresDatabaseProvision : mysqlProvision;
+		const provision = yield* selectedProvision;
 		const identity = yield* remoteAppStoreIdentity(configured);
 		const headroom = yield* storageHeadroom(options.dataDirectory);
 		const budgetMs = yield* Config.Duration("REHEARSAL_COPY_BUDGET").pipe(
@@ -60,6 +66,15 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 		const limit = yield* Config.Number("SCRATCH_DATABASE_LIMIT").pipe(Config.withDefault(4));
 		if (!Number.isSafeInteger(budgetMs) || budgetMs <= 0 || !Number.isSafeInteger(limit) || limit <= 0)
 			return yield* new RemoteDatabaseError({ code: "remote_database_invalid" });
+		const bounded = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+			safe(
+				effect.pipe(
+					Effect.timeoutOrElse({
+						duration: budgetMs,
+						orElse: () => Effect.fail(new RemoteCopyError({ code: "rehearsal_copy_timeout" })),
+					}),
+				),
+			);
 		const withStore = <A, E>(store: RemoteStore, effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
 			safe(options.withStore(store, effect));
 		const closed = (record: RemoteDatabaseRecord, store: RemoteStore) =>
@@ -69,7 +84,7 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 				yield* closed(record, store);
 				const saved = yield* journal.read(record.id);
 				const done = saved.phase === "closed" ? saved : yield* journal.phase(saved.id, "ready", "closed");
-				yield* withStore(store, postgresDatabaseProvision.pipe(Effect.flatMap((service) => service.revokeDump(done))));
+				yield* withStore(store, selectedProvision.pipe(Effect.flatMap((service) => service.revokeDump(done))));
 				yield* provision.dropPrincipal(done);
 				yield* journal.forget(done.id);
 			});
@@ -88,9 +103,11 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 					selected,
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
-						const rows = yield* sql`SELECT pg_database_size(current_database())::text AS bytes`.pipe(
-							Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ bytes: Schema.String })))),
-						);
+						const rows = yield* (
+							engine === "pg"
+								? sql`SELECT pg_database_size(current_database())::text AS bytes`
+								: sql`SELECT CAST(COALESCE(SUM(DATA_LENGTH+INDEX_LENGTH),0) AS CHAR) AS bytes FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()`
+						).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ bytes: Schema.String })))));
 						const bytes = Number(rows[0]?.bytes);
 						if (!Number.isSafeInteger(bytes) || bytes < 0)
 							return yield* new RemoteDatabaseError({ code: "remote_database_invalid" });
@@ -100,17 +117,14 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 			}),
 		);
 		const clone = (destination: FileStore) =>
-			safe(
+			bounded(
 				Effect.gen(function* () {
 					yield* headroom.check(yield* estimatedBytes);
 					const source = yield* options.store;
 					const record = yield* journal.allocate("dump", source);
 					const credential = yield* journal.credential(record.id);
 					yield* provision.createPrincipal(record, credential);
-					yield* withStore(
-						source,
-						postgresDatabaseProvision.pipe(Effect.flatMap((service) => service.grantDump(record))),
-					);
+					yield* withStore(source, selectedProvision.pipe(Effect.flatMap((service) => service.grantDump(record))));
 					const ready = yield* journal.phase(record.id, "allocated", "ready");
 					const artifact = yield* options.withNative({
 						operation: "dump",
@@ -126,7 +140,7 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 		const load = (kind: "rehearsal" | "restore", artifact: RemoteArtifact) =>
 			safe(
 				Effect.gen(function* () {
-					if (artifact.engine !== "pg") return yield* new RemoteCopyError({ code: "backup_engine_mismatch" });
+					if (artifact.engine !== engine) return yield* new RemoteCopyError({ code: "backup_engine_mismatch" });
 					if (
 						kind === "rehearsal" &&
 						(yield* journal.list).filter((record) => record.kind === "rehearsal").length >= limit
@@ -139,7 +153,7 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 					yield* provision.createDatabase(record);
 					yield* withStore(
 						credential,
-						postgresDatabaseProvision.pipe(Effect.flatMap((service) => service.grantSchema(record))),
+						selectedProvision.pipe(Effect.flatMap((service) => service.grantSchema(record))),
 					);
 					const ready = yield* journal.phase(record.id, "allocated", "ready");
 					yield* options.withNative({
@@ -147,19 +161,19 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 						resourceId: record.id,
 						store: credential,
 						artifact,
-						ownership: "current-role",
+						ownership: engine === "pg" ? "current-role" : "preserve",
 						budgetMs,
 					});
 					yield* closed(ready, credential);
 					yield* withStore(
 						credential,
-						postgresDatabaseProvision.pipe(Effect.flatMap((service) => service.protectKernel(record))),
+						selectedProvision.pipe(Effect.flatMap((service) => service.protectKernel(record))),
 					);
 					return { record: ready, store: credential, source };
 				}),
 			);
 		return {
-			engine: "pg" as const,
+			engine,
 			estimatedBytes,
 			clone,
 			prepareClone: (_clone: FileStore, _epoch: string) =>
@@ -176,7 +190,7 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 								const source = yield* withDatabase(options.bootStore, record.database);
 								yield* withStore(
 									source,
-									postgresDatabaseProvision.pipe(Effect.flatMap((service) => service.revokeDump(record))),
+									selectedProvision.pipe(Effect.flatMap((service) => service.revokeDump(record))),
 								);
 								yield* provision.dropPrincipal(record);
 							}
@@ -190,12 +204,12 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 				}),
 			),
 			rehearsal: (destination: FileStore, epoch: string, artifact?: BackupRecord) =>
-				safe(
+				bounded(
 					Effect.gen(function* () {
-						if (artifact && artifact.engine !== "pg")
+						if (artifact && artifact.engine !== engine)
 							return yield* new RemoteCopyError({ code: "backup_engine_mismatch" });
 						if (!artifact) yield* clone(destination);
-						const loaded = yield* load("rehearsal", { path: artifact?.path ?? destination.filename, engine: "pg" });
+						const loaded = yield* load("rehearsal", { path: artifact?.path ?? destination.filename, engine });
 						yield* withStore(
 							loaded.store,
 							Effect.gen(function* () {
@@ -207,10 +221,10 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 					}),
 				),
 			restoreInto: (artifact: Pick<BackupRecord, "path" | "legacy_store_id" | "engine">) =>
-				safe(
+				bounded(
 					Effect.gen(function* () {
-						if (artifact.engine !== "pg") return yield* new RemoteCopyError({ code: "backup_engine_mismatch" });
-						const loaded = yield* load("restore", { path: artifact.path, engine: "pg" });
+						if (artifact.engine !== engine) return yield* new RemoteCopyError({ code: "backup_engine_mismatch" });
+						const loaded = yield* load("restore", { path: artifact.path, engine });
 						const adoption = yield* identity.reserve;
 						const appRole = yield* Effect.try({
 							try: () => decodeURIComponent(new URL(Redacted.value(loaded.source.url)).username),
@@ -220,13 +234,19 @@ export const remoteDbOps = (options: RemoteDbOpsOptions) =>
 							loaded.store,
 							Effect.gen(function* () {
 								const sql = yield* SqlClient.SqlClient;
-								yield* sql.withTransaction(
-									Effect.gen(function* () {
-										yield* verifyRemoteAppIdentity(adoption);
-										const target = yield* postgresDatabaseProvision;
-										yield* target.handoff(loaded.record, appRole);
-									}),
-								);
+								const target = yield* selectedProvision;
+								if (engine === "pg")
+									yield* sql.withTransaction(
+										Effect.gen(function* () {
+											yield* verifyRemoteAppIdentity(adoption);
+											yield* target.handoff(loaded.record, appRole);
+										}),
+									);
+								else {
+									yield* sql.withTransaction(verifyRemoteAppIdentity(adoption));
+									// MySQL GRANT commits implicitly; this fresh target remains unselected.
+									yield* target.handoff(loaded.record, appRole);
+								}
 							}),
 						);
 						const done = yield* journal.phase(loaded.record.id, "ready", "closed");
