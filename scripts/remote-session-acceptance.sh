@@ -34,6 +34,11 @@ CREATE DATABASE comms_snapshot_boot OWNER comms_app;
 CREATE DATABASE comms_snapshot_app OWNER comms_app;
 CREATE DATABASE comms_schema_core OWNER comms_app;
 CREATE DATABASE comms_schema_json_crash OWNER comms_app;
+CREATE DATABASE comms_schema_unaccent OWNER comms_app;
+CREATE DATABASE comms_schema_unaccent_fresh OWNER comms_app;
+CREATE DATABASE comms_schema_unaccent_denied OWNER postgres;
+REVOKE ALL ON DATABASE comms_schema_unaccent_denied FROM PUBLIC;
+GRANT CONNECT ON DATABASE comms_schema_unaccent_denied TO comms_app;
 CREATE DATABASE comms_concurrency_app OWNER comms_app;
 CREATE DATABASE comms_concurrency_boot OWNER comms_app;
 REVOKE CONNECT ON DATABASE comms_boot FROM PUBLIC;
@@ -112,6 +117,7 @@ for attempt in $(seq 1 120); do
 done
 if [ "$engine" = pg ]; then
   docker exec -i "$container" psql -U postgres -v ON_ERROR_STOP=1 < "$private/roles.sql" >/dev/null 2>"$private/provision-errors" || { echo "Database provisioning failed" >&2; exit 1; }
+  docker exec "$container" psql -U postgres -d comms_schema_unaccent_denied -v ON_ERROR_STOP=1 -c 'GRANT USAGE,CREATE ON SCHEMA public TO comms_app' >/dev/null 2>"$private/provision-errors"
   docker exec "$container" psql -U postgres -Atc 'SHOW server_version_num'
 else
   docker exec -i "$container" mysql --defaults-extra-file=/run/secrets/admin.cnf < "$private/roles.sql" >/dev/null 2>"$private/provision-errors" || { echo "Database provisioning failed" >&2; exit 1; }
@@ -123,9 +129,18 @@ import json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()); d['port']=int(sys.argv[2]); p.write_text(json.dumps(d))
 for database,name in [('comms_concurrency_app','concurrency-app'),('comms_concurrency_boot','concurrency-boot'),('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect'),('comms_failed_lease','failed-lease'),('comms_read_cleanup','read-cleanup'),('comms_snapshot_boot','snapshot-boot'),('comms_snapshot_app','snapshot-app')]:
  d['database']=database; (p.parent/(name+'.json')).write_text(json.dumps(d))
+if d['engine']=='pg':
+ for suffix,name in [('', 'upgrade'),('_fresh','fresh'),('_denied','denied')]:
+  d['database']='comms_schema_unaccent'+suffix; (p.parent/('unaccent-'+name+'.json')).write_text(json.dumps(d))
 PY
 # The intentionally truncated session-attribute case refuses before SQL admission.
 if [ "$attributes" != 32 ]; then
+  if [ "$engine" = pg ]; then
+    COMMS_UNACCENT_FRESH_CONFIG="$private/unaccent-fresh.json" \
+    COMMS_UNACCENT_UPGRADE_CONFIG="$private/unaccent-upgrade.json" \
+    COMMS_UNACCENT_DENIED_CONFIG="$private/unaccent-denied.json" \
+      node node_modules/vitest/vitest.mjs run packages/server/test/postgres-unaccent.test.ts --maxWorkers=1 --reporter=verbose
+  fi
   COMMS_CONCURRENCY_APP_CONFIG="$private/concurrency-app.json" COMMS_CONCURRENCY_BOOT_CONFIG="$private/concurrency-boot.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/native-concurrency.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_REMOTE_CORE_TEST_CONFIG="$private/core.json" \
