@@ -39,6 +39,8 @@ export const dialectSemantics = (sql: SqlClient) =>
 				equal_text: 0,
 			},
 		]);
+		// GREATEST is polymorphic: typed numeric operands match production cursor columns.
+		// PGlite otherwise infers two unconstrained bound parameters as text.
 		const values = yield* sql`SELECT
 		 ${dialect.replacePrefix(sql, "é😀/child", "é😀", "new")} AS replaced,
 		 ${dialect.jsonText(sql, '{"body":"null"}', "body")} AS body,
@@ -48,7 +50,7 @@ export const dialectSemantics = (sql: SqlClient) =>
 		 ${dialect.jsonInt(sql, '{"edited_at":42}', "edited_at")} AS edited_at,
 		 ${dialect.jsonInt(sql, '{"seq":9007199254740991}', "seq")} AS safe_integer,
 		 ${dialect.jsonInt(sql, '{"seq":-42}', "seq")} AS negative,
-		 ${dialect.greatest(sql, 12, 4)} AS greatest`;
+		 ${dialect.greatest(sql, sql`12`, sql`4`)} AS greatest`;
 		assert.deepEqual(values, [
 			{
 				replaced: "new/child",

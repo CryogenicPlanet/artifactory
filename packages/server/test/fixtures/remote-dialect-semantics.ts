@@ -11,7 +11,7 @@ import { moveTopic } from "../../src/ext/core/topic-move.ts";
 import type { Mutate } from "../../src/kernel/mutate.ts";
 
 async function main() {
-	const engine = Schema.decodeUnknownSync(Schema.Literals(["sqlite", "pg", "mysql"]))(
+	const engine = Schema.decodeUnknownSync(Schema.Literals(["sqlite", "pglite", "pg", "mysql"]))(
 		process.env.COMMS_TEST_ENGINE ?? "sqlite",
 	);
 	let phase = "connect";
@@ -96,7 +96,9 @@ async function main() {
 			}).pipe(Effect.provide(Layer.merge(Reactivity.layer, BunServices.layer)), Effect.scoped),
 		);
 		process.stdout.write("SHARED_STORE_VERIFIED\n");
-	} catch {
+	} catch (error) {
+		// Local-only engines carry no database credentials; retain useful assertion/SQL diagnostics.
+		if (engine === "sqlite" || engine === "pglite") throw error;
 		throw new Error(`Shared store fixture failed during ${phase}`);
 	}
 }
