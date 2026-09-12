@@ -70,6 +70,34 @@ const program = Effect.gen(function* () {
 			);
 		});
 	const evidence = yield* readEvidence(selected);
+	const migrationState = ["comms_repair_migration_app", "comms_repair_migrationretry_app"].includes(config.app.database)
+		? yield* runtime.withStore(
+				store,
+				Effect.gen(function* () {
+					const app = yield* SqlClient.SqlClient;
+					return {
+						ledger:
+							yield* app`SELECT migration_id,name FROM migrations WHERE migration_id >= 900 ORDER BY migration_id`,
+						tables:
+							config.app._tag === "postgres"
+								? yield* app`SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('migration_chain_first','migration_chain_second') ORDER BY table_name`
+								: yield* app`SELECT TABLE_NAME AS table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND TABLE_NAME IN ('migration_chain_first','migration_chain_second') ORDER BY TABLE_NAME`,
+					};
+				}),
+			)
+		: undefined;
+	const forwardState = ["comms_repair_restoreforward_app", "comms_repair_restoreforwardretry_app"].includes(
+		config.app.database,
+	)
+		? yield* runtime.withStore(
+				store,
+				Effect.gen(function* () {
+					const app = yield* SqlClient.SqlClient;
+					const ledger = yield* app`SELECT migration_id,name FROM migrations WHERE migration_id=900`;
+					return { ledger, rows: ledger.length ? yield* app`SELECT value FROM restore_forward_owned` : [] };
+				}),
+			)
+		: undefined;
 	const original = selected === config.app.database ? evidence : yield* readEvidence(config.app.database);
 	const pending = yield* sql`SELECT pending_id,pending_attempt,pending_from,pending_to FROM seq WHERE singleton=1`;
 	const restores = yield* sql`SELECT proof_id,phase FROM db_restore_requests ORDER BY proof_id`;
@@ -77,7 +105,19 @@ const program = Effect.gen(function* () {
 	const sequence = yield* sql`SELECT next,published_through FROM seq`;
 	const children = yield* sql`SELECT closed FROM child_attempts`;
 	console.log(
-		JSON.stringify({ selected, settings, evidence, original, pending, restores, generationErrors, sequence, children }),
+		JSON.stringify({
+			selected,
+			settings,
+			evidence,
+			migrationState,
+			forwardState,
+			original,
+			pending,
+			restores,
+			generationErrors,
+			sequence,
+			children,
+		}),
 	);
 });
 program.pipe(

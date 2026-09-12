@@ -46,5 +46,38 @@ it("rehearses above pruned app events and boot allocation gaps without changing 
 	expect(await fixture.sql("SELECT * FROM messages WHERE topic='system'")).toEqual(
 		expect.arrayContaining([...originalSystem]),
 	);
-	expect(await fixture.sql("SELECT pending_id FROM seq", "boot.db")).toEqual([{ pending_id: null }]);
+	// The live system mirror may reserve independently after rehearsal returns.
+	// Prove that the observed batch publishes, then require the allocator to settle.
+	const pendingRows = Schema.decodeUnknownSync(
+		Schema.Tuple([Schema.Struct({ pending_id: Schema.NullOr(Schema.String) })]),
+	);
+	const batches = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ id: Schema.String, state: Schema.String })));
+	const observed = pendingRows(await fixture.sql("SELECT pending_id FROM seq", "boot.db"))[0].pending_id;
+	try {
+		await expect
+			.poll(
+				async () => {
+					const pending = pendingRows(await fixture.sql("SELECT pending_id FROM seq", "boot.db"))[0].pending_id;
+					const state =
+						observed === null
+							? "published"
+							: batches(await fixture.sql("SELECT id,state FROM event_batches", "boot.db")).find(
+									(batch) => batch.id === observed,
+								)?.state;
+					return { pending, state };
+				},
+				{ timeout: 5000 },
+			)
+			.toEqual({ pending: null, state: "published" });
+	} catch (cause) {
+		throw new Error(
+			JSON.stringify({
+				observed,
+				allocator: await fixture.sql("SELECT pending_id FROM seq", "boot.db"),
+				batches: await fixture.sql("SELECT id,state FROM event_batches", "boot.db"),
+				outbox: await fixture.sql("SELECT seq,transaction_id,shipped_at FROM outbox"),
+			}),
+			{ cause },
+		);
+	}
 }, 20000);

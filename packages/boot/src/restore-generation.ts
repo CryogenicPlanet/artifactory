@@ -10,7 +10,7 @@ import type { DatabaseRestoreRequest } from "./database-restore-schema.ts";
 import { Events } from "./events.ts";
 import { GenerationPreparation } from "./generation-preparation.ts";
 import { generationSource } from "./generation-source.ts";
-import { Generations } from "./generations.ts";
+import { Generations, type Generation } from "./generations.ts";
 import { copySource, Snapshots, layer as snapshotsLayer } from "./snapshots.ts";
 import { storageHeadroom } from "./storage-headroom.ts";
 import type { Supervisor } from "./supervisor.ts";
@@ -25,12 +25,9 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 	const sql = yield* SqlClient.SqlClient;
 	const generations = yield* Generations;
 	const recovery = yield* AppRecovery;
-	const backup = yield* DbOps;
-	const events = yield* Events;
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const root = recovery.dataDirectory;
-	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const source = (yield* generations.list).find((item) => item.n === record.source_generation && item.good === 1);
 	if (!source) return yield* new ChildError({ code: "restore_snapshot_missing" });
 	yield* snapshotStoreEntry(source, root, yield* recovery.store);
@@ -50,12 +47,31 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 	yield* generations.setSnapshot(candidate.n, snapshot.directory);
 	yield* sql`UPDATE generations SET backup_id=${record.backup} WHERE n=${candidate.n}`;
 	const generation = { ...candidate, snapshot_dir: snapshot.directory, backup_id: record.backup };
-	yield* Effect.scoped(
+	const report = yield* rehearseRestoreGeneration(generation, artifact, record.proof_id, supervisor);
+	yield* generations.rehearsed(generation.n, report);
+	return generation;
+}, Effect.scoped);
+
+/** Exercise the selected immutable source against a private copy before replacing the current store. */
+export const rehearseRestoreGeneration = Effect.fn("rehearseRestoreGeneration")(function* (
+	generation: Generation,
+	artifact: BackupRecord,
+	proofId: string,
+	supervisor: Supervisor,
+) {
+	const recovery = yield* AppRecovery;
+	const backup = yield* DbOps;
+	const events = yield* Events;
+	const fs = yield* FileSystem.FileSystem;
+	const path = yield* Path.Path;
+	const root = recovery.dataDirectory;
+	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
+	return yield* Effect.scoped(
 		Effect.gen(function* () {
 			const temporary = yield* fs.makeTempDirectoryScoped({ directory: root, prefix: ".restore-rehearsal-" });
 			yield* (yield* storageHeadroom(root)).check(Number((yield* fs.stat(artifact.path)).size));
 			// Rehearsal never publishes its private sequence space into boot.
-			const epoch = `restore-rehearsal-${record.proof_id}`;
+			const epoch = `restore-rehearsal-${proofId}`;
 			const report = yield* Effect.acquireUseRelease(
 				backup.rehearsal({ _tag: "file", filename: path.join(temporary, "app.db") }, epoch, artifact),
 				(clone) =>
@@ -80,8 +96,7 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 					}),
 				(clone) => supervisor.assertClosure.pipe(Effect.andThen(clone.dispose), Effect.orDie),
 			);
-			yield* generations.rehearsed(generation.n, report);
+			return report;
 		}),
 	);
-	return generation;
 }, Effect.scoped);

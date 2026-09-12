@@ -8,6 +8,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { Schema } from "effect";
 import { beforeAll, expect, it } from "vitest";
+import { remoteRestoreForward } from "./fixtures/remote-restore-forward.ts";
+import { remoteMigrationChain } from "./fixtures/remote-migration-chain.ts";
 import { repairAuthenticator } from "./fixtures/remote-repair-authenticator.ts";
 
 const Settings = Schema.Struct({
@@ -24,6 +26,8 @@ const Evidence = Schema.Struct({
 	selected: Schema.String,
 	settings: Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String })),
 	evidence: Schema.Unknown,
+	migrationState: Schema.optionalKey(Schema.Unknown),
+	forwardState: Schema.optionalKey(Schema.Unknown),
 	original: Schema.Unknown,
 	pending: Schema.Array(
 		Schema.Struct({
@@ -45,6 +49,8 @@ const scenarios = [
 	"afterselection",
 	"pending",
 	"password",
+	"migration",
+	"restoreforward",
 ] as const;
 
 beforeAll(async () => {
@@ -103,6 +109,8 @@ for (const scenario of scenarios)
 				await closed;
 			};
 			test.onTestFinished(async () => {
+				// Persist current diagnostics even when ownership cleanup cannot finish within the hook budget.
+				for (const save of logs) await save();
 				for (const child of children) await stop(child);
 				for (const save of logs) await save();
 				// Even a passing expected-failure case can own unfinished native resources.
@@ -221,12 +229,34 @@ for (const scenario of scenarios)
 			expect(created.status).toBe(200);
 			const message = Schema.decodeUnknownSync(Message)(await created.json());
 			const backupReply = await first.post("/_boot/db/backup", {}, cookie);
+			if (backupReply.status !== 200)
+				await writeFile(join(root, "backup-failure.json"), await backupReply.clone().text(), { mode: 0o600 });
 			expect(backupReply.status).toBe(200);
 			const backup = Schema.decodeUnknownSync(Schema.Struct({ id: Schema.String, published_through: Schema.Int }))(
 				await backupReply.json(),
 			);
 			await stop(first.child);
 			const before = await operator("inspect");
+			if (scenario === "restoreforward") {
+				await remoteRestoreForward({
+					launch,
+					stop,
+					operator,
+					before,
+					cookie,
+					input,
+					key,
+					message,
+					root,
+					backup: backup.id,
+					assertion: device.assertion,
+				});
+				return;
+			}
+			if (scenario === "migration") {
+				await remoteMigrationChain({ launch, stop, operator, before, cookie, input, key, message, root });
+				return;
+			}
 			if (scenario === "password") {
 				const wrong = `wrong/${randomUUID()}@password?fixture`;
 				const correct = env.DATABASE_URL;

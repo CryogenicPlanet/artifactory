@@ -190,8 +190,8 @@ it("rolls a failed candidate health check back to the fresh safety copy and reco
 	);
 	const snapshot = rows[0]?.snapshot_dir;
 	if (!snapshot) throw Error("Missing retained snapshot");
-	// Only this disposable retained generation gets a health failure for the old
-	// store. The fresh safety copy contains B and passes the actual health probe.
+	// Only the post-rehearsal candidate fails against the old store. The fresh
+	// safety copy contains B and passes the actual health probe.
 	const healthPath = join(snapshot, "kernel/health.ts");
 	const health = await readFile(healthPath, "utf8");
 	const needle = "const sql = yield* SqlClient.SqlClient;";
@@ -201,7 +201,7 @@ it("rolls a failed candidate health check back to the fresh safety copy and reco
 		health.replace(
 			needle,
 			`${needle}
-		if ((yield* sql\`SELECT id FROM messages WHERE body='B before restore'\`).length === 0)
+		if (process.env.STATE === "candidate" && (yield* sql\`SELECT id FROM messages WHERE body='B before restore'\`).length === 0)
 			return yield* new KernelError({ code: "restore_fixture_health_failure" });`,
 		),
 	);
@@ -279,7 +279,10 @@ it("refuses replacement and stays unavailable across restart when the prior owne
 	).toEqual([{ phase: "authorized", has_safety: 1 }]);
 	expect((await fetch(`${app.url}/api/messages?since=0`, { headers: { cookie } })).status).toBe(503);
 	expect((await fetch(`${app.url}/auth/login`)).status).toBe(200);
-	expect(await fixture.sql("SELECT opened,closed FROM child_attempts", "boot.db")).toEqual([{ opened: 1, closed: 0 }]);
+	expect(await fixture.sql("SELECT opened,closed FROM child_attempts ORDER BY closed", "boot.db")).toEqual([
+		{ opened: 1, closed: 0 },
+		{ opened: 1, closed: 1 },
+	]);
 	await app.stop();
 	const resumed = await fixture.launch();
 	await expect
@@ -288,7 +291,10 @@ it("refuses replacement and stays unavailable across restart when the prior owne
 	expect((await fetch(`${resumed.url}/api/messages?since=0`, { headers: { cookie } })).status).toBe(503);
 	expect((await fetch(`${resumed.url}/auth/login`)).status).toBe(200);
 	expect(await fixture.sql("SELECT seq,body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(messages);
-	expect(await fixture.sql("SELECT opened,closed FROM child_attempts", "boot.db")).toEqual([{ opened: 1, closed: 0 }]);
+	expect(await fixture.sql("SELECT opened,closed FROM child_attempts ORDER BY closed", "boot.db")).toEqual([
+		{ opened: 1, closed: 0 },
+		{ opened: 1, closed: 1 },
+	]);
 	expect(
 		await fixture.sql("SELECT COUNT(*) count FROM events WHERE json_extract(event,'$.type')='db.restored'", "boot.db"),
 	).toEqual([{ count: 0 }]);

@@ -1,0 +1,92 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "comms-generation-test-runtime",
+      "dependencies": {
+        "@comms/protocol": "workspace:*",
+        "@comms/storage": "workspace:*",
+        "@effect/platform-bun": "4.0.0-rc.113",
+        "@effect/sql-sqlite-bun": "4.0.0-rc.113",
+        "effect": "4.0.0-rc.113",
+        "highlight.js": "11.12.0",
+        "marked": "18.0.12",
+      },
+    },
+    "protocol": {
+      "name": "@comms/protocol",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "4.0.0-rc.113",
+      },
+    },
+    "storage": {
+      "name": "@comms/storage",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect/sql-mysql2": "4.0.0-rc.113",
+        "@effect/sql-pg": "4.0.0-rc.113",
+        "@effect/sql-sqlite-bun": "4.0.0-rc.113",
+        "effect": "4.0.0-rc.113",
+      },
+      "devDependencies": {
+        "@effect/platform-bun": "4.0.0-rc.113",
+      },
+    },
+  },
+  "patchedDependencies": {
+    "effect@4.0.0-rc.113": "patches/effect@4.0.0-rc.113.patch",
+    "@effect/sql-pg@4.0.0-rc.113": "patches/@effect%2Fsql-pg@4.0.0-rc.113.patch",
+    "@effect/sql-mysql2@4.0.0-rc.113": "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch",
+  },
+  "packages": {
+    "@comms/protocol": ["@comms/protocol@workspace:protocol"],
+
+    "@comms/storage": ["@comms/storage@workspace:storage"],
+
+    "@effect/platform-bun": ["@effect/platform-bun@4.0.0-rc.113", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-rc.113" }, "peerDependencies": { "effect": "^4.0.0-rc.113" } }, "sha512-EOn8doDVaiizfTpdmtRS0SZLAAt19yyHFKg+aV8YXJreNDYqXQLEt+/ThiEOurDimApVYhn2NZW52OJrZlybQw=="],
+
+    "@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-rc.115", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.21.3" }, "peerDependencies": { "effect": "^4.0.0-rc.115" } }, "sha512-rcBwhDIfb82akJoTv7Vwh8K5x9vC/XfuePS7JjOr+z+dORXzsmKqI1BUQF27ARCN9fTAbDh7I6YvBlWhLjnqNg=="],
+
+    "@effect/sql-mysql2": ["@effect/sql-mysql2@4.0.0-rc.113", "", { "dependencies": { "mysql2": "^3.24.3" }, "peerDependencies": { "effect": "^4.0.0-rc.113" } }, "sha512-df5d5fQD/clIHHRi8oYFeJDL4KfFeCUdzrc0Bgx/hScN5eK9fwPjk5B4TAkgGmzqXHdV8U4n8h/Gb5FBWh7uUg=="],
+
+    "@effect/sql-pg": ["@effect/sql-pg@4.0.0-rc.113", "", { "peerDependencies": { "effect": "^4.0.0-rc.113" } }, "sha512-xsAbmxsR5sC6Pc/38nB4/rBi1co4aCC7e4T95sVy8EhWA9NRheimtiN05EyhTKZwX1C0T2gquainQwCuQYuKuA=="],
+
+    "@effect/sql-sqlite-bun": ["@effect/sql-sqlite-bun@4.0.0-rc.113", "", { "peerDependencies": { "effect": "^4.0.0-rc.113" } }, "sha512-gh3k27MMq/MDqPqpQYoNw1BgXgPIxZtQQsF9W321Ml20lbIzEBdOA6LgEEbA1sX7wy8/710bDBgXvDcm27ioAA=="],
+
+    "@types/node": ["@types/node@22.20.2", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-xlvWf4Vs9n1PEVYwP1n4vvG07M6y8WgvJ2t0vbrWTmijsIHp1cS+uJ2kMIRdY3nHZK0nCYKrPeD171+SzF4/zw=="],
+
+    "@types/ws": ["@types/ws@8.18.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg=="],
+
+    "aws-ssl-profiles": ["aws-ssl-profiles@1.1.2", "", {}, "sha512-NZKeq9AfyQvEeNlN0zSYAaWrmBffJh3IELMZfRpJVWgrpEbtEpnjvzqBPf+mxoI287JohRDoa+/nsfqqiZmF6g=="],
+
+    "effect": ["effect@4.0.0-rc.113", "", {}, "sha512-uZ4Bh7KSlw2sdVdNDHPLSNjLGH+MWap7cheIHZoB/1T/ZJ3pvI4KiN3kUp50MpFKXhygOMmReJJOwWMQPwpPAg=="],
+
+    "generate-function": ["generate-function@2.3.1", "", { "dependencies": { "is-property": "^1.0.2" } }, "sha512-eeB5GfMNeevm/GRYq20ShmsaGcmI81kIX2K9XQx5miC8KdHaC6Jm0qQ8ZNeGOi7wYB8OsdxKs+Y2oVuTFuVwKQ=="],
+
+    "highlight.js": ["highlight.js@11.12.0", "", {}, "sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg=="],
+
+    "iconv-lite": ["iconv-lite@0.7.3", "", { "dependencies": { "safer-buffer": ">= 2.1.2 < 3.0.0" } }, "sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ=="],
+
+    "is-property": ["is-property@1.0.2", "", {}, "sha512-Ks/IoX00TtClbGQr4TWXemAnktAQvYB7HzcCxDGqEZU6oCmb2INHuOoKxbtR+HFkmYWBKv/dOZtGRiAjDhj92g=="],
+
+    "long": ["long@5.3.2", "", {}, "sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA=="],
+
+    "lru.min": ["lru.min@1.1.5", "", {}, "sha512-5J9ysMYUpYIg9RF2vJpy9SinEmSviFSe0GyPpCQ4L5QSkLAgeLXlTAOu2ZwWUU5m+0SBl6gUU1R1ZQB3aKypfA=="],
+
+    "marked": ["marked@18.0.12", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-LEm4ga2YeI2T3GVHj9b0BaDPPk93LLTHMFeMyQbNIzPxc8vCI0y/scy0ZA6z6lXKyT9j9Nhl/OC6ZYKYGuFScA=="],
+
+    "mysql2": ["mysql2@3.24.4", "", { "dependencies": { "aws-ssl-profiles": "^1.1.2", "generate-function": "^2.3.1", "iconv-lite": "^0.7.3", "long": "^5.3.2", "lru.min": "^1.1.4", "named-placeholders": "^1.1.6", "sql-escaper": "^1.5.1" }, "peerDependencies": { "@types/node": ">= 8" } }, "sha512-A2olluVlj0mvgyIRRISMEzXc51m+21mRtcMVjJyIpt2GG98+XrC9m9HzsqcMsX2LcnfccJvY5NB22g8fENBnOA=="],
+
+    "named-placeholders": ["named-placeholders@1.1.6", "", { "dependencies": { "lru.min": "^1.1.0" } }, "sha512-Tz09sEL2EEuv5fFowm419c1+a/jSMiBjI9gHxVLrVdbUkkNUUfjsVYs9pVZu5oCon/kmRh9TfLEObFtkVxmY0w=="],
+
+    "safer-buffer": ["safer-buffer@2.1.2", "", {}, "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg=="],
+
+    "sql-escaper": ["sql-escaper@1.5.1", "", {}, "sha512-4toX5E1fQbBrpfXidaHnF0669nkAdETeIPTs2SUjxxD7RRIs9ICG4gtpmfc68JCEKehsdwLFqBu9VlQqZ1P1gg=="],
+
+    "undici-types": ["undici-types@6.21.0", "", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
+
+    "ws": ["ws@8.21.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw=="],
+  }
+}

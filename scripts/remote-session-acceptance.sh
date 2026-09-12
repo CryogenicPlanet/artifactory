@@ -81,6 +81,14 @@ GRANT SELECT ON performance_schema.data_lock_waits TO 'comms_app'@'%';
 GRANT SELECT ON performance_schema.threads TO 'comms_app'@'%';
 GRANT SELECT ON performance_schema.session_account_connect_attrs TO 'comms_app'@'%';
 """
+# Each parity case owns an initially empty app/boot pair; no shared test tables.
+parity_databases=['comms_mutation_app','comms_mutation_boot','comms_read_marks']
+parity_databases += [f'comms_outbox_{mode}_{side}' for mode in ['pending','incomplete','bounded'] for side in ['app','boot']]
+for database in parity_databases:
+ if engine=='pg':
+  sql += f'CREATE DATABASE {database} OWNER comms_app;\n'
+ else:
+  sql += f"CREATE DATABASE {database} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;\nGRANT ALL ON {database}.* TO 'comms_app'@'%';\n"
 (root/'roles.sql').write_text(sql)
 (root/'client.json').write_text(json.dumps(dict(engine=engine,host='127.0.0.1',port=0,database='comms_app',username='comms_app',password=app)))
 (root/'dialect.json').write_text(json.dumps(dict(engine=engine,host='127.0.0.1',port=0,database='comms_shared_store',username='comms_app',password=app)))
@@ -134,6 +142,12 @@ import json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()); d['port']=int(sys.argv[2]); p.write_text(json.dumps(d))
 for database,name in [('comms_collation_boot','collation'),('comms_concurrency_app','concurrency-app'),('comms_concurrency_boot','concurrency-boot'),('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect'),('comms_search_mysql','mysql-search'),('comms_failed_lease','failed-lease'),('comms_read_cleanup','read-cleanup'),('comms_snapshot_boot','snapshot-boot'),('comms_snapshot_app','snapshot-app')]:
  d['database']=database; (p.parent/(name+'.json')).write_text(json.dumps(d))
+for database,name in [('comms_mutation_app','mutation-app'),('comms_mutation_boot','mutation-boot'),('comms_read_marks','read-marks')]:
+ d['database']=database; (p.parent/(name+'.json')).write_text(json.dumps(d))
+for mode in ['pending','incomplete','bounded']:
+ for side in ['app','boot']:
+  d['database']=f'comms_outbox_{mode}_{side}'
+  (p.parent/f"{d['engine']}-outbox-{mode}-{side}.json").write_text(json.dumps(d))
 if d['engine']=='pg':
  for suffix,name in [('', 'upgrade'),('_fresh','fresh'),('_denied','denied')]:
   d['database']='comms_schema_unaccent'+suffix; (p.parent/('unaccent-'+name+'.json')).write_text(json.dumps(d))
@@ -165,6 +179,13 @@ if [ "$attributes" != 32 ]; then
     node node_modules/vitest/vitest.mjs run packages/storage/test/failed-lease.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_TEST_ENGINE="$engine" COMMS_READ_CLEANUP_CONFIG="$private/read-cleanup.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/remote-read-deadline.test.ts --maxWorkers=1 --reporter=verbose
+  COMMS_TEST_ENGINE="$engine" COMMS_MUTATION_APP_CONFIG="$private/mutation-app.json" \
+  COMMS_MUTATION_BOOT_CONFIG="$private/mutation-boot.json" \
+    node node_modules/vitest/vitest.mjs run packages/server/test/kernel/portable-mutation-durability.test.ts --maxWorkers=1 --reporter=verbose
+  COMMS_TEST_ENGINE="$engine" COMMS_OUTBOX_CONFIG_DIR="$private" \
+    node node_modules/vitest/vitest.mjs run packages/server/test/kernel/portable-outbox.test.ts --maxWorkers=1 --reporter=verbose
+  COMMS_READ_MARK_ENGINE="$engine" COMMS_READ_MARK_CONFIG="$private/read-marks.json" \
+    node node_modules/vitest/vitest.mjs run packages/server/test/kernel/portable-read-marks.test.ts --maxWorkers=1 --reporter=verbose -t 'native read marks'
   COMMS_TEST_ENGINE="$engine" COMMS_SNAPSHOT_BOOT_CONFIG="$private/snapshot-boot.json" \
   COMMS_SNAPSHOT_APP_CONFIG="$private/snapshot-app.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/native-read-publication.test.ts --maxWorkers=1 --reporter=verbose

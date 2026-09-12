@@ -16,7 +16,7 @@ import { ChildAttempts } from "./child-attempts.ts";
 import { ChildError } from "./child-process.ts";
 import { DatabaseRestoreRequest, type RestoreSelection } from "./database-restore-schema.ts";
 import { generationSource } from "./generation-source.ts";
-import { prepareRestoreGeneration } from "./restore-generation.ts";
+import { prepareRestoreGeneration, rehearseRestoreGeneration } from "./restore-generation.ts";
 import { SourceFiles } from "./source-files.ts";
 import { EditLock } from "./edit-lock.ts";
 import type { AssertionProof } from "./enrollment.ts";
@@ -413,6 +413,10 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					);
 					if (record.source_generation !== null)
 						yield* prepareRestoreGeneration(yield* read(record.proof_id), target, supervisor).pipe(
+							Effect.provideContext(preparationContext),
+						);
+					else
+						yield* rehearseRestoreGeneration(generation, target, record.proof_id, supervisor).pipe(
 							Effect.provideContext(preparationContext),
 						);
 					yield* supervisor.freeze;

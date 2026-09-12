@@ -53,7 +53,7 @@ operator=pathlib.Path('packages/boot/sql')
 vendor='postgres' if engine=='pg' else 'mysql'
 baseline=(operator/(vendor+'-roles.sql')).read_text()
 scratch=(operator/(vendor+'-scratch-roles.sql')).read_text()
-for scenario in ['missing','foreign','candidate','beforeallocation','afterselection','pending','password','shutdownnormal','shutdownforce','foreigndonor','foreignrecipient']:
+for scenario in ['missing','foreign','candidate','beforeallocation','afterselection','pending','password','migration','restoreforward','shutdownnormal','shutdownforce','foreigndonor','foreignrecipient']:
     boot,app=secrets.token_hex(32),secrets.token_hex(32)
     databases={kind:f'comms_repair_{scenario}_{kind}' for kind in ['boot','app']}
     users={kind:databases[kind] if engine=='pg' else f'cr_{scenario}_{kind[0]}' for kind in databases}
@@ -101,7 +101,7 @@ for attempt in $(seq 1 120); do
   fi
   sleep 1
 done
-for scenario in missing foreign candidate beforeallocation afterselection pending password shutdownnormal shutdownforce foreigndonor foreignrecipient; do
+for scenario in missing foreign candidate beforeallocation afterselection pending password migration restoreforward shutdownnormal shutdownforce foreigndonor foreignrecipient; do
   if [ "$engine" = pg ]; then
     docker exec --env-file "$private/$scenario.env" -i "$server" psql -X -U postgres -v ON_ERROR_STOP=1 \
       < "$private/$scenario.sql" >/dev/null 2>>"$private/provision.log"
@@ -113,17 +113,32 @@ done
 # Use the shipped native client tools with the checked-out source and exact host Node test runtime.
 # The existing board job separately verifies the immutable entrypoint and OS user boundary.
 node_binary=$(node -p 'process.execPath')
-docker run --rm --name "$runner" --init --user "$(id -u):$(id -g)" --network "$network" \
-  --read-only --tmpfs /tmp:exec --cap-drop ALL --workdir /workspace \
-  --mount "type=bind,src=$PWD,dst=/workspace" \
-  --mount "type=bind,src=$private/configs,dst=/fixture,readonly" \
-  --mount "type=bind,src=$node_binary,dst=/usr/local/bin/node,readonly" \
-  --env NODE_ENV=test --env COMMS_ISOLATED=false \
-  --env COMMS_REPAIR_ENGINE="$engine" --env COMMS_REPAIR_CONFIG_DIR=/fixture \
-  --entrypoint /bin/bash "$board_image" -c '
-    set -euo pipefail
-    test "$(node --version)" = v22.22.3
-    test "$(bun --version)" = 1.4.0
-    node node_modules/vitest/vitest.mjs run packages/server/test/remote-selected-store-repair.test.ts packages/server/test/remote-publication-shutdown.test.ts packages/boot/test/remote-foreign-backup-native.test.ts --maxWorkers=1 --reporter=verbose
-  ' > "$private/tests.log" 2>&1
-echo "All seven $engine repair, both publication shutdown and foreign-backup rejection scenarios passed."
+# Retained board roots contain large dependency caches. Each scenario gets a fresh
+# disposable /tmp; do not delete individual roots or reinterpret their closure evidence.
+run_scenario() {
+  local test_file=$1 test_pattern=$2
+  printf '\nNative scenario: %s\n' "$test_pattern" >> "$private/tests.log"
+  docker run --rm --name "$runner" --init --user "$(id -u):$(id -g)" --network "$network" \
+    --read-only --tmpfs /tmp:exec --cap-drop ALL --workdir /workspace \
+    --mount "type=bind,src=$PWD,dst=/workspace" \
+    --mount "type=bind,src=$private/configs,dst=/fixture,readonly" \
+    --mount "type=bind,src=$node_binary,dst=/usr/local/bin/node,readonly" \
+    --env NODE_ENV=test --env COMMS_ISOLATED=false \
+    --env COMMS_REPAIR_ENGINE="$engine" --env COMMS_REPAIR_CONFIG_DIR=/fixture \
+    --env COMMS_NATIVE_TEST_FILE="$test_file" --env COMMS_NATIVE_TEST_PATTERN="$test_pattern" \
+    --entrypoint /bin/bash "$board_image" -c '
+      set -euo pipefail
+      test "$(node --version)" = v22.22.3
+      test "$(bun --version)" = 1.4.0
+      node node_modules/vitest/vitest.mjs run "$COMMS_NATIVE_TEST_FILE" --testNamePattern "$COMMS_NATIVE_TEST_PATTERN" --maxWorkers=1 --reporter=verbose
+    ' >> "$private/tests.log" 2>&1
+}
+for scenario in missing foreign candidate beforeallocation afterselection pending password migration restoreforward; do
+  run_scenario packages/server/test/remote-selected-store-repair.test.ts "^remote selected store repair: ${scenario}$"
+done
+for scenario in shutdownnormal shutdownforce; do
+  run_scenario packages/server/test/remote-publication-shutdown.test.ts "^remote held publication shutdown: ${scenario}$"
+done
+run_scenario packages/boot/test/remote-foreign-backup-native.test.ts '^a genuine foreign native backup cannot replace the adopted recipient$'
+
+echo "All nine $engine repair/migration, both publication shutdown and foreign-backup rejection scenarios passed."

@@ -80,3 +80,18 @@ Every copied ID and body matched. MySQL allocation was sampled after `ANALYZE TA
 | Mutation latency maximum                               |     1,013.1 ms | 1,080.5 ms |
 
 Both dedicated boards passed real passkey setup, messages and native backup/restore before traffic. PostgreSQL traffic resumed its retained board after fixing the benchmark's read route, so that board also contained earlier probe messages. The original PostgreSQL report did not collect refusal codes/retriable flags; its 503s cannot be classified from that report. That original command exited nonzero after saving the fully verified report because the earlier benchmark rejected any refusal; the current tool records refusals as measurements. MySQL ran on a fresh pair and also passed the harness's subsequent restart/authentication check. All acknowledged traffic messages were checked before shutdown; the restart check covers the harness's baseline data, not every traffic message. These are small-message reload measurements, separate from the 10,240,000-byte (9.77 MiB) synthetic native-copy dataset. Full cross-engine transfer downtime remains unmeasured here.
+
+## Larger local native-copy sample
+
+One later sample used **100,000 rows × 1,024 body bytes** (102,400,000 payload bytes, 97.66 MiB) on macOS arm64 with Bun `1.4.0-canary.1+4924862cf`, PostgreSQL/client 18.6 and Oracle MySQL/client 8.4.11. This is the same synthetic single-table workload, not a 100,000-message board. Both reports verify every copied ID and body.
+
+| Native copy, 100,000 × 1,024 bytes |        PostgreSQL |             MySQL |
+| ---------------------------------- | ----------------: | ----------------: |
+| Dump                               |       2,374.48 ms |         363.23 ms |
+| Load                               |         845.65 ms |       1,363.83 ms |
+| Dump plus load                     |       3,220.13 ms |       1,727.06 ms |
+| Artifact                           |  58,858,167 bytes | 103,494,913 bytes |
+| Source database allocation         | 127,325,887 bytes | 118,095,872 bytes |
+| Target database allocation         | 127,342,271 bytes | 118,095,872 bytes |
+
+The source reports are `/tmp/comms-benchmark-100k-pg.json` and `/tmp/comms-benchmark-100k-mysql.json` on the measurement host. They record `transfer_downtime_ms: null`. These times cover native dump/load only; they exclude provisioning, ownership, logical conversion, startup, health and traffic downtime. This single local sample does not establish a managed-server capacity or freeze budget, and no additional HTTP traffic result is implied. The earlier 10,000-row and HTTP samples above remain separate historical evidence.
