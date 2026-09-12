@@ -231,7 +231,7 @@ const make = Effect.fn("Events")(function* (
 				const to = current.next + count - 1;
 				if (!Number.isSafeInteger(to + 2)) return yield* new EventError({ code: "sequence_exhausted" });
 				if (purpose === "mutation") yield* admitReservation;
-				yield* sql`INSERT INTO event_batches VALUES(${transaction},${attempt},${current.next},${to},'pending')`;
+				yield* sql`INSERT INTO event_batches(id,attempt,from_seq,to_seq,state) VALUES(${transaction},${attempt},${current.next},${to},'pending')`;
 				const reserved = encode({
 					seq: to + 1,
 					at: yield* Clock.currentTimeMillis,
