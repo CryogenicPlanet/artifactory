@@ -4,7 +4,7 @@ import type { TransferBinding } from "@comms/storage/store-transfer-schema";
 import { SqlClient } from "effect/unstable/sql";
 import { transferEndpoint } from "./endpoint.ts";
 import { resolveTransferSource, inspectTransferSource } from "./source-preflight.ts";
-import { Effect, FileSystem, Option, Path, Schema } from "effect";
+import { Config, Duration, Effect, FileSystem, Option, Path, Schema } from "effect";
 import {
 	TransferRejected,
 	validateTransferSelection,
@@ -164,7 +164,10 @@ export const recoverSourceSafety = (options: SafetyOptions) =>
 				selection: options.selection,
 				source: { boot: source.configuration.boot, app: source.app },
 				runtime: endpoint.runtime,
-				budgetMs: 120000,
+				budgetMs: yield* Config.Duration("REHEARSAL_COPY_BUDGET").pipe(
+					Config.withDefault(Duration.seconds(120)),
+					Effect.map(Duration.toMillis),
+				),
 			});
 			yield* adapter.recover;
 		}),
@@ -199,7 +202,10 @@ export const ensureSourceSafety = (options: SafetyOptions & { readonly requireEx
 					selection: options.selection,
 					source: remoteSource,
 					runtime: endpoint.runtime,
-					budgetMs: 120000,
+					budgetMs: yield* Config.Duration("REHEARSAL_COPY_BUDGET").pipe(
+						Config.withDefault(Duration.seconds(120)),
+						Effect.map(Duration.toMillis),
+					),
 				});
 				yield* adapter.recover;
 				for (const receipt of receipts) yield* adapter.verify(receipt);
