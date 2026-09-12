@@ -3,6 +3,42 @@ import { SqlClient } from "effect/unstable/sql";
 import { KernelBoot, validateKernelBootId } from "./kernel-boot.ts";
 import { ChildError } from "./child-process.ts";
 
+/** A keeper publishes this file only after local and, when applicable, remote account closure.
+ * Remote callers must also retain the independent root inventory/guardian proof. */
+export const childReceiptClosed = (directory: string, id: string, receipt: string) =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem;
+		const path = yield* Path.Path;
+		const receipts = path.join(directory, "attempts");
+		if (!id || path.basename(id) !== id || id === "." || id === ".." || receipt !== path.join(receipts, `${id}.closed`))
+			return yield* new ChildError({ code: "child_receipt_invalid" });
+		return yield* Effect.gen(function* () {
+			const root = yield* fs.realPath(directory);
+			if ((yield* fs.realPath(receipts)) !== path.join(root, "attempts")) return false;
+			if ((yield* fs.realPath(receipt)) !== path.join(root, "attempts", `${id}.closed`)) return false;
+			const info = yield* fs.stat(receipt);
+			if (info.type !== "File" || info.size !== BigInt(new TextEncoder().encode(id).length)) return false;
+			return (yield* fs.readFileString(receipt)) === id;
+		}).pipe(Effect.orElseSucceed(() => false));
+	});
+
+/** Read-only transfer admission. Unlike local startup, kernel rollover alone is not a
+ * transferable receipt: the destination may use a remote store on the same volume. */
+export const assertChildAttemptsClosed = (sql: SqlClient.SqlClient, directory: string) =>
+	Effect.gen(function* () {
+		const owners = yield* sql`SELECT id,receipt,closed FROM child_attempts WHERE closed<>1 OR closed IS NULL`.pipe(
+			Effect.flatMap(
+				Schema.decodeUnknownEffect(
+					Schema.Array(Schema.Struct({ id: Schema.String, receipt: Schema.String, closed: Schema.Literal(0) })),
+				),
+			),
+			Effect.mapError(() => new ChildError({ code: "child_receipt_invalid" })),
+		);
+		for (const owner of owners)
+			if (!(yield* childReceiptClosed(directory, owner.id, owner.receipt)))
+				return yield* new ChildError({ code: "child_closure_unproven" });
+	});
+
 /** Durable process ownership evidence. A missing receipt is never interpreted as a dead process. */
 const make = (directory: string, remote = false) =>
 	Effect.gen(function* () {
@@ -14,10 +50,13 @@ const make = (directory: string, remote = false) =>
 		const receipts = path.join(directory, "attempts");
 		const closed = (id: string, receipt: string) =>
 			Effect.gen(function* () {
-				const expected = path.join(receipts, `${id}.closed`);
-				if (receipt !== expected) return yield* new ChildError({ code: "child_receipt_invalid" });
-				const content = yield* fs.readFileString(receipt).pipe(Effect.orElseSucceed(() => ""));
-				if (content !== id) return false;
+				if (
+					!(yield* childReceiptClosed(directory, id, receipt).pipe(
+						Effect.provideService(FileSystem.FileSystem, fs),
+						Effect.provideService(Path.Path, path),
+					))
+				)
+					return false;
 				yield* sql`UPDATE child_attempts SET closed=1 WHERE id=${id}`;
 				return true;
 			});

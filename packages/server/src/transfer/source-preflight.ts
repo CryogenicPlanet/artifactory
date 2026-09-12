@@ -1,3 +1,4 @@
+import { assertChildAttemptsClosed } from "@comms/boot";
 import { on } from "@comms/storage/dialect";
 import { withDatabase, type Store } from "@comms/storage/store";
 import {
@@ -76,6 +77,7 @@ const read = (boot: SqlClient, resumeBinding?: TransferBinding) =>
 export const resolveTransferSource = (
 	config: {
 		readonly app: Store;
+		readonly dataDirectory: string;
 		readonly assertActivated?: Effect.Effect<void, TransferRejected, FileSystem.FileSystem | Path.Path>;
 	},
 	boot: SqlClient,
@@ -84,8 +86,9 @@ export const resolveTransferSource = (
 	Effect.gen(function* () {
 		const { adoption, value } = yield* read(boot, resumeBinding);
 		// The app client must not exist until every durable child owner is closed.
-		if ((yield* boot`SELECT 1 FROM child_attempts WHERE closed<>1 LIMIT 1`).length)
-			return yield* pending("child_closure_pending");
+		yield* assertChildAttemptsClosed(boot, config.dataDirectory).pipe(
+			Effect.catch(() => pending("child_closure_pending")),
+		);
 		// Bound by the caller to the actual boot descriptor and held volume; SQL complete alone is insufficient.
 		if (value("transfer_state") !== undefined || value("transfer_journal") !== undefined) {
 			if (!config.assertActivated) return yield* pending("activation_unverified");
@@ -122,10 +125,12 @@ export const inspectTransferSource = (
 	boot: SqlClient,
 	app: SqlClient,
 	selected: Store,
+	dataDirectory: string,
 	resumeBinding?: TransferBinding,
 ) =>
 	Effect.gen(function* () {
 		const { adoption, rows, value } = yield* read(boot, resumeBinding);
+		yield* assertChildAttemptsClosed(boot, dataDirectory).pipe(Effect.catch(() => pending("child_closure_pending")));
 		if (
 			selected._tag === "file"
 				? adoption.filename !== selected.filename
@@ -223,7 +228,6 @@ export const inspectTransferSource = (
 			["source_changes_pending", boot`SELECT 1 FROM source_changes LIMIT 1`],
 			["edit_lock_pending", boot`SELECT 1 FROM edit_lock LIMIT 1`],
 			["staging_pending", boot`SELECT 1 FROM staging LIMIT 1`],
-			["child_closure_pending", boot`SELECT 1 FROM child_attempts WHERE closed<>1 LIMIT 1`],
 			["event_batch_pending", boot`SELECT 1 FROM event_batches WHERE state NOT IN ('published','aborted') LIMIT 1`],
 			["outbox_pending", app`SELECT 1 FROM outbox WHERE shipped_at IS NULL OR seq>${state.published_through} LIMIT 1`],
 			["topic_continuation_pending", app`SELECT 1 FROM topic_page_continuations WHERE completed<>1 LIMIT 1`],

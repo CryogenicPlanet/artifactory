@@ -1,4 +1,9 @@
-import { assertTransferActivation, sqliteTransferSafetyCopy, nativeTransferSafetyCopy } from "@comms/boot";
+import {
+	assertTransferActivation,
+	assertChildAttemptsClosed,
+	sqliteTransferSafetyCopy,
+	nativeTransferSafetyCopy,
+} from "@comms/boot";
 import { withDatabase } from "@comms/storage/store";
 import type { TransferBinding } from "@comms/storage/store-transfer-schema";
 import { SqlClient } from "effect/unstable/sql";
@@ -73,6 +78,7 @@ export const readTransferSource = (options: SourceReadOptions) =>
 			const selected = yield* resolveTransferSource(
 				{
 					app: options.configuration.app,
+					dataDirectory: options.dataDirectory,
 					assertActivated: assertTransferActivation(rows, {
 						dataDirectory: options.dataDirectory,
 						boot: options.configuration.boot,
@@ -100,6 +106,7 @@ export const readTransferSource = (options: SourceReadOptions) =>
 						endpoint.boot,
 						yield* SqlClient.SqlClient,
 						selected,
+						options.dataDirectory,
 						options.resumeBinding,
 					);
 				}),
@@ -142,12 +149,13 @@ const selectedSource = (options: SafetyOptions) =>
 	});
 
 /** Recheck durable local owners with a short read-only boot scope, then close it before opaque copy starts. */
-const assertSqliteClosed = (configuration: Configuration, owner: Owner) =>
+const assertSqliteClosed = (configuration: Configuration, owner: Owner, dataDirectory: string) =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const endpoint = yield* transferEndpoint(configuration, owner, true);
-			if ((yield* endpoint.boot`SELECT 1 FROM child_attempts WHERE closed<>1 LIMIT 1`).length)
-				return yield* new TransferRejected({ code: "transfer_recovery_pending" });
+			yield* assertChildAttemptsClosed(endpoint.boot, dataDirectory).pipe(
+				Effect.mapError(() => new TransferRejected({ code: "transfer_recovery_pending" })),
+			);
 		}),
 	);
 
@@ -186,7 +194,7 @@ export const ensureSourceSafety = (options: SafetyOptions & { readonly requireEx
 				transferId: options.selection.transfer_id,
 				storeId: options.selection.store_id,
 				source: { boot: source.configuration.boot, app: source.app },
-				assertAllClosed: assertSqliteClosed(source.configuration, options.owner),
+				assertAllClosed: assertSqliteClosed(source.configuration, options.owner, options.selection.data_directory),
 			});
 			for (const receipt of receipts) yield* adapter.verify(receipt);
 			const existing = receipts[0];

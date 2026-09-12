@@ -1,5 +1,6 @@
 import {
 	makeTransferBootstrap,
+	assertChildAttemptsClosed,
 	makeTransferKernelInitializer,
 	preflightTransferAppSource,
 	runTransferApp,
@@ -284,8 +285,11 @@ export const runStoreTransferWorker = (configuration: Configuration, owners: typ
 							const assertExclusive = Effect.gen(function* () {
 								// The immutable outer lock and guardians hold the stores stable. Recheck durable
 								// local child ownership as well; no repair or clearing inventories substitutes proof.
-								if ((yield* source.boot`SELECT 1 FROM child_attempts WHERE closed<>1 LIMIT 1`).length)
-									return yield* invalid();
+								yield* assertChildAttemptsClosed(source.boot, dataDirectory).pipe(
+									Effect.provideService(FileSystem.FileSystem, fs),
+									Effect.provideService(Path.Path, path),
+									Effect.mapError(invalid),
+								);
 							});
 							yield* transferStores(prepared.binding, {
 								sourceBoot: source.boot,

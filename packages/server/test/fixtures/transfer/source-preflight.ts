@@ -43,7 +43,7 @@ const main = Effect.gen(function* () {
 		"CREATE TABLE source_changes(batch TEXT)",
 		"CREATE TABLE edit_lock(id TEXT)",
 		"CREATE TABLE staging(path TEXT)",
-		"CREATE TABLE child_attempts(closed INTEGER)",
+		"CREATE TABLE child_attempts(id TEXT,receipt TEXT,closed INTEGER)",
 		"CREATE TABLE event_batches(state TEXT)",
 		"CREATE TABLE outbox(seq INTEGER,shipped_at INTEGER)",
 		"CREATE TABLE topic_page_continuations(completed INTEGER)",
@@ -51,8 +51,8 @@ const main = Effect.gen(function* () {
 	])
 		yield* sql.unsafe(ddl);
 	yield* sql`INSERT INTO generations VALUES(3,'server.ts','/data/snapshots/3',1),(4,'broken.ts',NULL,0)`;
-	assert.deepEqual(yield* resolveTransferSource({ app: file }, sql), file);
-	assert.deepEqual(yield* inspectTransferSource(sql, sql, file), {
+	assert.deepEqual(yield* resolveTransferSource({ app: file, dataDirectory: directory }, sql), file);
+	assert.deepEqual(yield* inspectTransferSource(sql, sql, file, directory), {
 		store_id: id,
 		initialized_at: 123,
 		generation: { n: 3, entry_file: "server.ts", snapshot_dir: "/data/snapshots/3" },
@@ -66,10 +66,10 @@ const main = Effect.gen(function* () {
 				if (Schema.is(TransferRejected)(result.failure)) assert.equal(result.failure.code, code);
 			}
 		});
-	yield* sql`INSERT INTO child_attempts VALUES(0)`;
+	yield* sql`INSERT INTO child_attempts VALUES('missing','missing',0)`;
 	let appOpened = false;
 	yield* refuse(
-		resolveTransferSource({ app: file }, sql).pipe(
+		resolveTransferSource({ app: file, dataDirectory: directory }, sql).pipe(
 			Effect.andThen(
 				Effect.sync(() => {
 					appOpened = true;
@@ -80,7 +80,7 @@ const main = Effect.gen(function* () {
 	);
 	assert.equal(appOpened, false);
 	yield* sql`DELETE FROM child_attempts`;
-	const inspect = inspectTransferSource(sql, sql, file);
+	const inspect = inspectTransferSource(sql, sql, file, directory);
 	yield* set(
 		"app_store_schema",
 		JSON.stringify({ store_id: id, initialized_at: 123, operations: ["one"], next: 0, active: "one" }),
@@ -108,7 +108,7 @@ const main = Effect.gen(function* () {
 		["INSERT INTO source_changes VALUES('b')", "DELETE FROM source_changes"],
 		["INSERT INTO edit_lock VALUES('l')", "DELETE FROM edit_lock"],
 		["INSERT INTO staging VALUES('p')", "DELETE FROM staging"],
-		["INSERT INTO child_attempts VALUES(0)", "DELETE FROM child_attempts"],
+		["INSERT INTO child_attempts VALUES('missing','missing',0)", "DELETE FROM child_attempts"],
 		["INSERT INTO event_batches VALUES('pending')", "DELETE FROM event_batches"],
 		["INSERT INTO outbox VALUES(7,NULL)", "DELETE FROM outbox"],
 		["INSERT INTO topic_page_continuations VALUES(0)", "DELETE FROM topic_page_continuations"],
@@ -124,24 +124,25 @@ const main = Effect.gen(function* () {
 	yield* refuse(inspect, "transfer_identity_mismatch");
 	yield* sql`UPDATE store_identity SET store_id=${id}`;
 	yield* set("app_store_adoption", JSON.stringify({ ...adoption, phase: "pending" }));
-	yield* refuse(resolveTransferSource({ app: file }, sql), "transfer_identity_mismatch");
+	yield* refuse(resolveTransferSource({ app: file, dataDirectory: directory }, sql), "transfer_identity_mismatch");
 	yield* set(
 		"app_store_adoption",
 		JSON.stringify({ store_id: id, initialized_at: 123, phase: "ready", engine: "postgres", database: "selected" }),
 	);
 	yield* set("app_store_database", "selected");
-	const selected = yield* resolveTransferSource({ app: remote }, sql);
+	const selected = yield* resolveTransferSource({ app: remote, dataDirectory: directory }, sql);
 	assert.equal(selected._tag, "postgres");
 	if (selected._tag === "postgres") {
 		assert.equal(selected.database, "selected");
 		assert.equal(Redacted.value(selected.url), "postgres://app:secret@example.test/selected");
 	}
 	yield* set("transfer_state", "complete");
-	yield* refuse(resolveTransferSource({ app: remote }, sql), "transfer_recovery_pending");
+	yield* refuse(resolveTransferSource({ app: remote, dataDirectory: directory }, sql), "transfer_recovery_pending");
 	let activated = false;
 	yield* resolveTransferSource(
 		{
 			app: remote,
+			dataDirectory: directory,
 			assertActivated: Effect.sync(() => {
 				activated = true;
 			}),
@@ -150,10 +151,10 @@ const main = Effect.gen(function* () {
 	);
 	assert.equal(activated, true);
 	yield* set("transfer_state", "in_progress");
-	yield* refuse(resolveTransferSource({ app: remote }, sql), "transfer_recovery_pending");
+	yield* refuse(resolveTransferSource({ app: remote, dataDirectory: directory }, sql), "transfer_recovery_pending");
 	yield* sql`DELETE FROM settings WHERE key='transfer_state'`;
 	yield* set("transferred_to", "other transfer");
-	yield* refuse(resolveTransferSource({ app: remote }, sql), "transfer_source_retired");
+	yield* refuse(resolveTransferSource({ app: remote, dataDirectory: directory }, sql), "transfer_source_retired");
 	yield* sql`DELETE FROM settings WHERE key='transferred_to'`;
 	yield* set("app_store_adoption", JSON.stringify(adoption));
 	yield* sql`DROP TABLE topic_page_continuations`;
@@ -161,7 +162,7 @@ const main = Effect.gen(function* () {
 	assert.equal(missing._tag, "Failure");
 	if (missing._tag === "Failure") assert.equal(Schema.is(TransferRejected)(missing.failure), false);
 	yield* sql`DELETE FROM boot_migrations WHERE migration_id=20`;
-	yield* refuse(resolveTransferSource({ app: remote }, sql), "transfer_protocol_unsupported");
+	yield* refuse(resolveTransferSource({ app: remote, dataDirectory: directory }, sql), "transfer_protocol_unsupported");
 	return { passed: true };
 }).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" })), Effect.scoped, Effect.provide(BunServices.layer));
 main.pipe(
