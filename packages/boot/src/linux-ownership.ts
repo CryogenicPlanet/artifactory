@@ -1,4 +1,5 @@
-import { Redacted } from "effect";
+import { Option, Redacted } from "effect";
+import { authorizeTransferApp } from "./transfer-app-authority.ts";
 import { childStore, parseDescriptor, render } from "@comms/storage/store";
 import type { PlatformError } from "effect/PlatformError";
 import { Effect, FileSystem, Path } from "effect";
@@ -86,16 +87,48 @@ const sharePages = Effect.fn("ownership.pages")(function* (
 	}
 });
 
+/** One fresh output directory; private transfer journals and backups stay inaccessible. */
+const prepareTransfer = Effect.fn("ownership.transfer")(function* (config: typeof ChildConfiguration.Type) {
+	const fs = yield* FileSystem.FileSystem;
+	const store = yield* authorizeTransferApp(config).pipe(Effect.orDie);
+	const parent = yield* regular("/data/rehearsals");
+	if (parent.type !== "Directory" || !Option.contains(parent.uid, 1000) || (parent.mode & 0o777) !== 0o711)
+		return yield* Effect.die("Invalid transfer migration parent");
+	const output = `/data/rehearsals/transfer-${config.attempt}`;
+	const stat = yield* regular(output);
+	if (stat.type !== "Directory" || !Option.contains(stat.uid, 1000) || (stat.mode & 0o077) !== 0)
+		return yield* Effect.die("Invalid transfer migration directory");
+	if ((yield* fs.readDirectory(output)).length !== 0)
+		return yield* Effect.die("Transfer migration output already exists");
+	if (store._tag === "file" && store.filename !== "/data/store/comms.db") {
+		const directory = `/data/rehearsals/transfer-check-${config.env.TRANSFER_ID}`;
+		const scratch = yield* regular(directory);
+		if (
+			scratch.type !== "Directory" ||
+			!Option.contains(scratch.uid, 1000) ||
+			(scratch.mode & 0o007) !== 0 ||
+			((scratch.mode & 0o070) !== 0 && !Option.contains(scratch.gid, 1003))
+		)
+			return yield* Effect.die("Invalid transfer scratch directory");
+		yield* fs.chown(directory, 1000, 1003);
+		yield* fs.chmod(directory, 0o770);
+	}
+	yield* fs.chown(output, 1001, 1003);
+	yield* fs.chmod(output, 0o750);
+	return store;
+});
+
 export const prepareApp = Effect.fn("ownership.app")(function* (
 	config: typeof ChildConfiguration.Type,
 ): Effect.fn.Return<typeof ChildConfiguration.Type, PlatformError, FileSystem.FileSystem | Path.Path> {
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
-	if (!/^\/data\/gen\/\d+\/source$/.test(config.cwd) || !config.entry.startsWith(`${config.cwd}/`))
+	if (!/^\/data\/gen\/\d+\/source(?![\s\S])/.test(config.cwd) || !config.entry.startsWith(`${config.cwd}/`))
 		return yield* Effect.die("Invalid app snapshot");
-	if (!/^[a-f0-9]{64}$/.test(config.attempt) || config.receipt !== `/data/attempts/${config.attempt}.closed`)
+	if (!/^[a-f0-9]{64}(?![\s\S])/.test(config.attempt) || config.receipt !== `/data/attempts/${config.attempt}.closed`)
 		return yield* Effect.die("Invalid app receipt");
 	yield* regular(config.entry);
+	const transfer = config.env.STATE === "transfer" ? yield* prepareTransfer(config) : undefined;
 	// Saved pre-generation dependency stores remain referenced by legacy snapshots.
 	if (yield* fs.exists("/data/prepared")) yield* ownTree("/data/prepared", 1000, 1003, true);
 	yield* ownTree(config.cwd, 1000, 1003, true);
@@ -105,12 +138,16 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 		yield* fs.chmod(directory, 0o750);
 	}
 	if (yield* fs.exists(`${config.cwd}.board`)) yield* ownTree(`${config.cwd}.board`, 1000, 1003, true);
-	if (yield* fs.exists("/data/pages")) yield* sharePages("/data/pages");
+	if (!transfer && (yield* fs.exists("/data/pages"))) yield* sharePages("/data/pages");
 	const descriptor = config.env.APP_STORE;
 	if (!descriptor) return yield* Effect.die("Missing app store descriptor");
 	const parsed = yield* parseDescriptor(descriptor).pipe(Effect.orDie);
 	if (parsed._tag !== "file") {
-		if (!config.remote || config.remote.dataDirectory !== "/data" || config.env.APP_DATABASE !== undefined)
+		if (
+			!config.remote ||
+			(!transfer && config.remote.dataDirectory !== "/data") ||
+			config.env.APP_DATABASE !== undefined
+		)
 			return yield* Effect.die("Invalid remote app configuration");
 		return { ...config, env: { ...config.env, TMPDIR: "/data/runtime", HOME: "/data/runtime" } };
 	}
@@ -118,10 +155,10 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 	const store = yield* childStore(descriptor, config.env.APP_DATABASE).pipe(Effect.orDie);
 	const filename = store.filename;
 	if (config.env.STATE !== "rehearsal") {
-		if (filename !== "/data/store/comms.db") return yield* Effect.die("Invalid live database");
+		if (!transfer && filename !== "/data/store/comms.db") return yield* Effect.die("Invalid live database");
 		// SQLite can create a main file with a stricter mode than the shared directory.
 		// Never create an absent store here: initialized-store loss belongs to recovery.
-		for (const file of [filename, `${filename}-wal`, `${filename}-shm`]) {
+		for (const file of [filename, `${filename}-wal`, `${filename}-shm`, ...(transfer ? [`${filename}-journal`] : [])]) {
 			if (yield* fs.exists(file)) {
 				if ((yield* regular(file)).type !== "File") return yield* Effect.die("Invalid live database");
 				yield* fs.chown(file, 1001, 1003);
