@@ -37,7 +37,7 @@ async function save(filename: string, value: unknown) {
 	await writeFile(temporary, JSON.stringify(value), { mode: 0o600, flag: "wx" });
 	await rename(temporary, filename);
 }
-async function run() {
+async function run(diagnostic: { phase: string; stage: string; path: string; status: number | null }) {
 	const [phase, address, stateFile] = process.argv.slice(2);
 	assert(
 		phase === "seed-source" ||
@@ -48,6 +48,7 @@ async function run() {
 		"Unknown transfer probe phase",
 	);
 	assert(address && stateFile, "Usage: transfer-acceptance-http.ts PHASE URL PRIVATE_STATE_FILE");
+	diagnostic.phase = phase;
 	const url = new URL(address);
 	assert(
 		url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname),
@@ -55,15 +56,21 @@ async function run() {
 	);
 	const origin = process.env.COMMS_TEST_ORIGIN ?? "https://comms.test";
 	let state = await readPrivate(stateFile, State);
-	const request = (path: string, method = "GET", body?: string, headers?: Record<string, string>) =>
-		fetch(new URL(path, url), {
+	const request = async (path: string, method = "GET", body?: string, headers?: Record<string, string>) => {
+		diagnostic.path = new URL(path, url).pathname.replace(/transfer-[a-f0-9-]+/g, "transfer-fixture");
+		diagnostic.status = null;
+		const response = await fetch(new URL(path, url), {
 			method,
 			headers: { origin, cookie: state.cookie, ...headers },
 			...(body === undefined ? {} : { body }),
 			redirect: "error",
 			signal: AbortSignal.timeout(180000),
 		});
+		diagnostic.status = response.status;
+		return response;
+	};
 	const ok = async (response: Response, label: string) => {
+		diagnostic.stage = label;
 		assert.equal(response.status, 200, `${label}: HTTP ${response.status}`);
 		return response;
 	};
@@ -108,6 +115,7 @@ async function run() {
 		// Keep original session in the base receipt: idempotency is scoped to that instance.
 		await save(`${stateFile}.session`, { cookie });
 	}
+	diagnostic.stage = "existing-board-persistence";
 	// Reuse the existing image auth/idempotency verifier, without printing its captured output on failure.
 	try {
 		await promisify(execFile)(
@@ -123,7 +131,7 @@ async function run() {
 			Schema.Struct({
 				child: Schema.Struct({ state: Schema.String }),
 				last_good: Schema.Int,
-				store_identity: Schema.Struct({ expected_store_id: Schema.String, observed_store_id: Schema.String }),
+				store_identity: Schema.Struct({ app_store_id: Schema.String, adoption_phase: Schema.String }),
 			}),
 		)(await (await ok(await request("/_boot/status"), "Status")).json());
 	const history = async (path: string) =>
@@ -147,6 +155,7 @@ async function run() {
 		).items;
 	const evidenceFile = `${stateFile}.transfer`;
 	if (phase === "seed-source") {
+		diagnostic.stage = "seed-source";
 		const unique = crypto.randomUUID();
 		const sourcePath = `app/ext/transfer-${unique}.ts`;
 		const source = `// Retained transfer acceptance source ${unique}\nexport default function () {}\n`;
@@ -156,6 +165,7 @@ async function run() {
 		const reload = Schema.decodeUnknownSync(Schema.Struct({ status: Schema.String }))(
 			await (await json("/api/reload?release=1", {})).json(),
 		);
+		diagnostic.stage = "reload-result";
 		assert.equal(reload.status, "live");
 		const pagePath = `pages/acceptance/transfer-${unique}.md`;
 		const page = `# Transfer page\nPreserved café 🐘 数据 ${unique}\n`;
@@ -163,17 +173,23 @@ async function run() {
 		const pageResult = Schema.decodeUnknownSync(Schema.Struct({ published: Schema.Boolean }))(
 			await (await ok(await request(`/api/fs/${pagePath}?baseVersion=null`, "PUT", page), "Publish page")).json(),
 		);
+		diagnostic.stage = "page-published";
 		assert(pageResult.published);
+		diagnostic.stage = "store-status";
 		const current = await status();
 		assert.equal(current.child.state, "live");
-		assert.equal(current.store_identity.expected_store_id, current.store_identity.observed_store_id);
+		assert.equal(current.store_identity.adoption_phase, "ready", "Store adoption is not ready");
+		diagnostic.stage = "retained-message-event";
 		const event = (await events()).find((row) => row.message_id === state.message.id);
 		assert(event, "Acknowledged message event missing");
+		diagnostic.stage = "source-history";
 		const sourceHistory = await history(sourcePath);
+		diagnostic.stage = "page-history";
 		const pageHistory = await history(pagePath);
 		assert(sourceHistory.length && pageHistory.length, "Published history missing");
+		diagnostic.stage = "save-evidence";
 		await save(evidenceFile, {
-			storeId: current.store_identity.expected_store_id,
+			storeId: current.store_identity.app_store_id,
 			generation: current.last_good,
 			published: await publication(),
 			event,
@@ -186,10 +202,11 @@ async function run() {
 		});
 	} else {
 		const saved = await readPrivate(evidenceFile, Evidence);
+		diagnostic.stage = "store-status";
 		const current = await status();
 		assert.equal(current.child.state, "live");
-		assert.equal(current.store_identity.expected_store_id, saved.storeId);
-		assert.equal(current.store_identity.observed_store_id, saved.storeId);
+		assert.equal(current.store_identity.app_store_id, saved.storeId);
+		assert.equal(current.store_identity.adoption_phase, "ready", "Store adoption is not ready");
 		assert((await publication()) >= saved.published, "Publication cursor regressed");
 		assert.deepEqual(
 			(await events()).find((row) => row.seq === saved.event.seq),
@@ -242,6 +259,7 @@ async function run() {
 			assert(current.last_good >= saved.generation, "Checked source generation regressed");
 			const published = await publication();
 			assert(published >= written.seq, "Checked source write was not published");
+			diagnostic.stage = "save-evidence";
 			await save(evidenceFile, { ...saved, checkedWrite: written, published });
 		} else if (phase === "verify-target") {
 			await json("/api/lock", { note: "post-transfer generation allocation" });
@@ -257,22 +275,36 @@ async function run() {
 			const reload = Schema.decodeUnknownSync(Schema.Struct({ status: Schema.String }))(
 				await (await json("/api/reload?release=1", {})).json(),
 			);
+			diagnostic.stage = "reload-result";
 			assert.equal(reload.status, "live");
 			const after = await status();
 			assert(after.last_good > saved.generation, "Target reused a source generation number");
 			const sourceHistory = await history(saved.sourcePath);
 			assert(sourceHistory.length > saved.sourceHistory.length);
 			assert.deepEqual(sourceHistory.slice(1), saved.sourceHistory);
+			diagnostic.stage = "save-evidence";
 			await save(evidenceFile, { ...saved, source, sourceHistory, generation: after.last_good, written });
 		} else {
 			assert(current.last_good >= saved.generation, "Restart generation regressed");
+			diagnostic.stage = "save-evidence";
 			await save(evidenceFile, { ...saved, written });
 		}
 	}
 	console.log(`Transfer ${phase}: public HTTP acceptance passed`);
 }
-await run().catch(() => {
-	// Schema/HTTP failures may contain challenge or credential material.
-	console.error("Transfer HTTP acceptance failed; response bodies were withheld");
-	process.exitCode = 1;
-});
+async function main() {
+	const diagnostic: { phase: string; stage: string; path: string; status: number | null } = {
+		phase: "arguments",
+		stage: "private-state",
+		path: "none",
+		status: null,
+	};
+	try {
+		await run(diagnostic);
+	} catch {
+		// Only locally selected checkpoints and HTTP metadata; never error messages or response bodies.
+		console.error(`Transfer HTTP acceptance failed: ${JSON.stringify(diagnostic)}`);
+		process.exitCode = 1;
+	}
+}
+await main();
