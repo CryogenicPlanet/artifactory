@@ -1,9 +1,11 @@
 import { BunCrypto } from "@effect/platform-bun";
+import { Buffer } from "node:buffer";
 import { Context, Effect, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { clientLayer } from "../../src/client.ts";
 import { copyTransferTable, scanTransferTable, type TransferTablePlan } from "../../src/transfer-copy.ts";
 import { transferInventory } from "../../src/transfer-inventory.ts";
+import { sqliteTransferPage } from "../../src/transfer-reader.ts";
 
 const root = process.argv[2];
 const mode = process.argv[3];
@@ -19,6 +21,90 @@ await Effect.runPromise(
 			yield* Layer.build(clientLayer({ _tag: "file", filename: `${root}/target.db` })),
 			SqlClient.SqlClient,
 		);
+		if (mode === "composite-key") {
+			for (const sql of [source, target])
+				yield* sql`CREATE TABLE keyed(topic TEXT NOT NULL,position INTEGER NOT NULL,suffix BLOB NOT NULL,payload BLOB NOT NULL,meta TEXT NOT NULL,PRIMARY KEY(topic,position,suffix)) WITHOUT ROWID`;
+			const plan: TransferTablePlan = {
+				name: "keyed",
+				columns: [
+					{ name: "topic", kind: "text", nullable: false },
+					{ name: "position", kind: "integer", nullable: false },
+					{ name: "suffix", kind: "bytes", nullable: false },
+					{ name: "payload", kind: "bytes", nullable: false },
+					{ name: "meta", kind: "json", nullable: false },
+				],
+				key: ["topic", "position", "suffix"],
+				identities: [],
+			};
+			// Deliberately unsorted inserts include UTF-8 vs UTF-16 order, numeric vs textual
+			// integer order, large exact keys, and binary prefix keys including the empty blob.
+			const topics = ["😀", "a", "é", "A", "\ue000", "", "e\u0301"];
+			const positions = [10n, -2n, 9007199254740993n, 2n, -9223372036854775808n, -10n, 0n];
+			const suffixes = [new Uint8Array([255]), new Uint8Array(), new Uint8Array([0, 255]), new Uint8Array([0])];
+			const rows = topics.flatMap((topic, topicIndex) =>
+				positions.flatMap((position, positionIndex) =>
+					suffixes.map((suffix, suffixIndex) => ({
+						topic,
+						position,
+						suffix,
+						payload: new Uint8Array([0, 255, 192, 128, topicIndex, positionIndex, suffixIndex]),
+						meta: `{"n":${position},"topic":${JSON.stringify(topic)}}`,
+					})),
+				),
+			);
+			yield* source.withTransaction(
+				Effect.forEach(
+					rows,
+					(row) =>
+						source`INSERT INTO keyed(topic,position,suffix,payload,meta) VALUES(${row.topic},CAST(${row.position.toString()} AS INTEGER),${row.suffix},${row.payload},${row.meta})`,
+					{ discard: true },
+				),
+			);
+			const shape = (yield* transferInventory(target, [], [{ table: "keyed", column: "meta" }])).tables[0];
+			if (!shape) return yield* Effect.die("Missing composite fixture table");
+			const expected = yield* scanTransferTable(source, plan, shape, "sqlite");
+			const copied = yield* copyTransferTable(source, target, plan, shape, expected);
+			const actual =
+				yield* target`SELECT topic,CAST(position AS TEXT) AS position,hex(suffix) AS suffix,hex(payload) AS payload,meta FROM keyed ORDER BY keyed.topic COLLATE BINARY,keyed.position,keyed.suffix`;
+			const ordered = [...rows]
+				.sort(
+					(left, right) =>
+						Buffer.compare(Buffer.from(left.topic), Buffer.from(right.topic)) ||
+						(left.position < right.position ? -1 : left.position > right.position ? 1 : 0) ||
+						Buffer.compare(left.suffix, right.suffix),
+				)
+				.map((row) => ({
+					topic: row.topic,
+					position: row.position.toString(),
+					suffix: Buffer.from(row.suffix).toString("hex").toUpperCase(),
+					payload: Buffer.from(row.payload).toString("hex").toUpperCase(),
+					meta: row.meta,
+				}));
+			// A normal board text primary key must seek through its index, without sorting each page.
+			yield* source`CREATE TABLE messages(id TEXT NOT NULL PRIMARY KEY,body TEXT NOT NULL)`;
+			const boardPlan: TransferTablePlan = {
+				name: "messages",
+				columns: [
+					{ name: "id", kind: "text", nullable: false },
+					{ name: "body", kind: "text", nullable: false },
+				],
+				key: ["id"],
+				identities: [],
+			};
+			const queryPlan = yield* source`EXPLAIN QUERY PLAN ${sqliteTransferPage(source, boardPlan, [
+				{ kind: "text", value: "A" },
+				{ kind: "text", value: "previous body" },
+			])}`.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ detail: Schema.String })))));
+			process.stdout.write(
+				JSON.stringify({
+					rows: copied.rows,
+					digestMatches: expected.digest === copied.digest,
+					rowsMatch: JSON.stringify(actual) === JSON.stringify(ordered),
+					queryPlan: queryPlan.map((row) => row.detail),
+				}),
+			);
+			return;
+		}
 		const invalidKey = mode === "duplicate-key" || mode === "null-key";
 		if (invalidKey)
 			yield* source`CREATE TABLE items(id INTEGER,exact INTEGER NOT NULL,body TEXT NOT NULL,payload BLOB NOT NULL,meta TEXT,optional TEXT,weight REAL NOT NULL)`;

@@ -48,3 +48,17 @@ it.for(["no-key", "duplicate-key", "null-key"])(
 		expect(await fixture(test, mode)).toMatchObject({ result: { _tag: "Failure" }, count: 0 });
 	},
 );
+
+it("seeks composite text, exact integer and binary keys without skipping or repeating rows", async (test) => {
+	const result = Schema.decodeUnknownSync(
+		Schema.Struct({
+			rows: Schema.Int,
+			digestMatches: Schema.Boolean,
+			rowsMatch: Schema.Boolean,
+			queryPlan: Schema.Array(Schema.String),
+		}),
+	)(await fixture(test, "composite-key"));
+	expect(result).toMatchObject({ rows: 196, digestMatches: true, rowsMatch: true });
+	expect(result.queryPlan.some((detail) => /SEARCH messages USING (?:COVERING )?INDEX/.test(detail))).toBe(true);
+	expect(result.queryPlan.some((detail) => /TEMP B-TREE.*ORDER BY/.test(detail))).toBe(false);
+});
