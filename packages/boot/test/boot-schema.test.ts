@@ -18,13 +18,13 @@ async function fixture(test: TestContext) {
 		).stdout;
 }
 
-it("persists all seventeen named boot receipts and preserves them across process restart", async (test) => {
+it("persists all eighteen named boot receipts and preserves them across process restart", async (test) => {
 	const run = await fixture(test);
 	const fresh = await run("fresh");
 	expect(JSON.parse(await run("fresh"))).toEqual(JSON.parse(fresh));
 });
 
-it("adopts an initialized legacy v17 store without replaying DDL or changing credentials and settings", async (test) => {
+it("adopts an initialized legacy v18 store without replaying DDL or changing credentials and settings", async (test) => {
 	const run = await fixture(test);
 	expect(await run("legacy")).toContain("legacy fixture persisted");
 	const adopted = await run("adopt");

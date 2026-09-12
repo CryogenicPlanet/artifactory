@@ -43,6 +43,11 @@ export const childErrorPolicy = {
 	preparation_install_timeout: source,
 	restore_backup_changed: recovery,
 	restore_backup_invalid: recovery,
+	backup_engine_mismatch: {
+		status: 409,
+		retriable: false,
+		hint: "Choose a backup created by this deployment’s database engine.",
+	},
 	restore_record_missing: recovery,
 	restore_recovery_required: recovery,
 	restore_rehearsal_failed: source,

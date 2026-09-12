@@ -28,6 +28,7 @@ const main = Effect.gen(function* () {
 		"combined_restore",
 		"reset_pin",
 		"store_identity",
+		"backup_engine",
 	];
 	const receipts = sql`SELECT migration_id,name FROM boot_migrations ORDER BY migration_id`;
 	const snapshot = Effect.gen(function* () {
@@ -44,7 +45,7 @@ const main = Effect.gen(function* () {
 		yield* sql`INSERT INTO settings VALUES('retained','not JSON: unchanged')`;
 		yield* sql`INSERT INTO sessions(id,hash,created_at,expires_at,last_seen_at) VALUES('session','credential',123,9000000000000,456)`;
 		yield* sql`DROP TABLE boot_migrations`;
-		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 17 }]);
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 18 }]);
 		return yield* Console.log("legacy fixture persisted");
 	}
 	if (mode === "fresh" || mode === "adopt") {
@@ -53,7 +54,7 @@ const main = Effect.gen(function* () {
 			yield* receipts,
 			names.map((name, index) => ({ migration_id: index + 1, name })),
 		);
-		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 17 }]);
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 18 }]);
 		if (mode === "adopt") {
 			assert.deepEqual(yield* sql`SELECT * FROM settings WHERE key='retained'`, [
 				{ key: "retained", value: "not JSON: unchanged" },
@@ -68,9 +69,9 @@ const main = Effect.gen(function* () {
 	if (mode === "empty") yield* sql`DELETE FROM boot_migrations`;
 	else if (mode === "gap") yield* sql`DELETE FROM boot_migrations WHERE migration_id=9`;
 	else if (mode === "name") yield* sql`UPDATE boot_migrations SET name='wrong_name' WHERE migration_id=9`;
-	else if (mode === "mirror") yield* sql`PRAGMA user_version=16`;
-	else if (mode === "newer-ledger") yield* sql`INSERT INTO boot_migrations(migration_id,name) VALUES(18,'future')`;
-	else if (mode === "newer-version") yield* sql`PRAGMA user_version=18`;
+	else if (mode === "mirror") yield* sql`PRAGMA user_version=17`;
+	else if (mode === "newer-ledger") yield* sql`INSERT INTO boot_migrations(migration_id,name) VALUES(19,'future')`;
+	else if (mode === "newer-version") yield* sql`PRAGMA user_version=19`;
 	else return yield* Effect.die("Unknown fixture mode");
 	const before = yield* snapshot;
 	const result = yield* initializeBootSchema.pipe(Effect.result);

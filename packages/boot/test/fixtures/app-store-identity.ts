@@ -6,17 +6,17 @@ import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { appStoreIdentity, verifyAppIdentity } from "../../src/app-store-identity.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../src/app-recovery.ts";
 import { layer as eventsLayer } from "../../src/events.ts";
-import { AppBackup, layer as backupLayer } from "../../src/app-backup.ts";
+import { DbOps, layer as backupLayer } from "../../src/db-ops.ts";
 
 const root = process.argv[2];
 if (!root) throw Error("Missing root");
 const mode = process.argv[3];
-const filename = `${root}/comms.db`;
+const filename = `${root}/${process.argv[4] ?? "comms.db"}`;
 const pause = Console.log("PAUSED").pipe(Effect.andThen(Effect.never));
 const main = Effect.gen(function* () {
 	yield* initializeBootSchema;
-	const identity = yield* appStoreIdentity(filename);
-	if (mode === "sweep") yield* (yield* AppBackup).recoverStaging;
+	const identity = yield* appStoreIdentity(filename, root);
+	if (mode === "sweep") yield* (yield* DbOps).recoverStaging;
 	if (mode === "reserve" || mode === "stamp") {
 		const adoption = yield* identity.reserve;
 		if (mode === "stamp")
@@ -32,22 +32,30 @@ const main = Effect.gen(function* () {
 	if (mode === "restore" || mode === "restore-pause") {
 		yield* identity.reserve;
 		const sql = yield* SqlClient.SqlClient;
-		const rows = yield* sql`SELECT path,legacy_store_id FROM backups WHERE id='saved'`.pipe(
+		const rows = yield* sql`SELECT path,legacy_store_id,engine FROM backups WHERE id='saved'`.pipe(
 			Effect.flatMap(
 				Schema.decodeUnknownEffect(
-					Schema.Array(Schema.Struct({ path: Schema.String, legacy_store_id: Schema.NullOr(Schema.String) })),
+					Schema.Array(
+						Schema.Struct({
+							path: Schema.String,
+							legacy_store_id: Schema.NullOr(Schema.String),
+							engine: Schema.Literals(["sqlite", "pg", "mysql"]),
+						}),
+					),
 				),
 			),
 		);
 		if (!rows[0]) return yield* Effect.die("Missing backup");
-		yield* (yield* AppBackup).restore(rows[0]);
+		yield* (yield* DbOps).restoreInto(rows[0]);
 		if (mode === "restore-pause") return yield* pause;
 	}
 	yield* (yield* AppRecovery).prepare("next-epoch");
 	return "ready";
 }).pipe(
 	Effect.provide(
-		Layer.mergeAll(recoveryLayer(filename), backupLayer(filename)).pipe(Layer.provideMerge(eventsLayer(Effect.void))),
+		Layer.mergeAll(recoveryLayer(filename, root), backupLayer({ _tag: "file", filename }, root)).pipe(
+			Layer.provideMerge(eventsLayer(Effect.void)),
+		),
 	),
 	Effect.result,
 	Effect.flatMap((result) => Console.log(JSON.stringify(result))),

@@ -189,6 +189,7 @@ it("adopts an older boot store with an empty grant projection without guessing f
 		await app.sql(`ALTER TABLE db_restore_requests DROP COLUMN ${column}`);
 	await app.sql("ALTER TABLE backups DROP COLUMN legacy_store_id");
 	await app.sql("DROP TABLE IF EXISTS boot_migrations");
+	await app.sql("ALTER TABLE backups DROP COLUMN engine");
 	await app.sql("PRAGMA user_version=13");
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
 	expect(await app.sql("SELECT * FROM public_paths")).toEqual([]);

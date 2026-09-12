@@ -6,9 +6,10 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it, type TestContext } from "vitest";
 
-async function fixture(test: TestContext, productionCrash = false) {
+async function fixture(test: TestContext, productionCrash = false, liveFile = "comms.db") {
 	const root = await mkdtemp(join(tmpdir(), "comms-identity-"));
 	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
+	await mkdir(join(root, liveFile, ".."), { recursive: true });
 	let script = join(import.meta.dirname, "fixtures/app-store-identity.ts");
 	if (productionCrash) {
 		const boot = join(root, "packages/boot");
@@ -30,7 +31,7 @@ async function fixture(test: TestContext, productionCrash = false) {
 ${needle}`,
 			),
 		);
-		const backup = join(boot, "src/app-backup.ts");
+		const backup = join(boot, "src/db-ops.ts");
 		const backupSource = await readFile(backup, "utf8");
 		const copied = "yield* fs.copyFile(backup.path, temporary);";
 		expect(backupSource.split(copied)).toHaveLength(2);
@@ -44,17 +45,23 @@ if (yield* fs.exists(${JSON.stringify(join(root, "restore-armed"))})) { yield* E
 		);
 	}
 	const execute = promisify(execFile);
-	const run = async (mode = "prepare") => (await execute("bun", [script, root, mode])).stdout;
+	const run = async (mode = "prepare") => (await execute("bun", [script, root, mode, liveFile])).stdout;
 	const sql = async (statement: string, file = "boot.db") => {
 		let result: unknown = [];
 		for (const query of statement.split(";").filter((part) => part.trim()))
 			result = JSON.parse(
-				(await execute("bun", [join(import.meta.dirname, "fixtures/store.ts"), join(root, file), query])).stdout,
+				(
+					await execute("bun", [
+						join(import.meta.dirname, "fixtures/store.ts"),
+						join(root, file === "comms.db" ? liveFile : file),
+						query,
+					])
+				).stdout,
 			);
 		return result;
 	};
 	const crash = async (mode: string) => {
-		const child = spawn("bun", [script, root, mode], { stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn("bun", [script, root, mode, liveFile], { stdio: ["ignore", "pipe", "pipe"] });
 		test.onTestFinished(() => {
 			child.kill("SIGKILL");
 		});
@@ -142,27 +149,30 @@ it("restores only catalog-authorized legacy copies, retaining original bytes acr
 	expect(await app.sql("SELECT body FROM messages", "comms.db")).toEqual([{ body: "acknowledged after restore" }]);
 });
 
-it("permits a validated nonisolated journal replacement when the initialized main file is missing", async (test) => {
-	const app = await fixture(test);
-	await app.legacy();
-	await mkdir(join(app.root, "backups"));
-	const target = join(app.root, "backups/saved.db");
-	await app.sql(`VACUUM INTO '${target}'`, "comms.db");
-	await app.sql(
-		`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through) VALUES('saved','${target}','pre-flip',100,1,0)`,
-	);
-	expect(await app.run()).toContain('"Success"');
-	await rm(join(app.root, "comms.db"));
-	expect(await app.run()).toContain("app_store_missing");
-	await app.sql(
-		"INSERT INTO cutover(singleton,candidate,backup,lock_id,family,phase) VALUES(1,1,'saved','lock','family','restoring')",
-	);
-	// Reservation alone cannot initialize the absent app store, even with a valid selected backup.
-	expect(await app.run()).toContain("app_store_missing");
-	await expect(readFile(join(app.root, "comms.db"))).rejects.toThrow();
-	expect(await app.run("restore")).toContain('"Success"');
-	expect(await app.sql("SELECT body FROM messages", "comms.db")).toEqual([{ body: "retained" }]);
-});
+it.for(["comms.db", "store/comms.db"])(
+	"permits a validated journal replacement for missing %s",
+	async (liveFile, test) => {
+		const app = await fixture(test, false, liveFile);
+		await app.legacy();
+		await mkdir(join(app.root, "backups"));
+		const target = join(app.root, "backups/saved.db");
+		await app.sql(`VACUUM INTO '${target}'`, "comms.db");
+		await app.sql(
+			`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through) VALUES('saved','${target}','pre-flip',100,1,0)`,
+		);
+		expect(await app.run()).toContain('"Success"');
+		await rm(join(app.root, liveFile));
+		expect(await app.run()).toContain("app_store_missing");
+		await app.sql(
+			"INSERT INTO cutover(singleton,candidate,backup,lock_id,family,phase) VALUES(1,1,'saved','lock','family','restoring')",
+		);
+		// Reservation alone cannot initialize the absent app store, even with a valid selected backup.
+		expect(await app.run()).toContain("app_store_missing");
+		await expect(readFile(join(app.root, liveFile))).rejects.toThrow();
+		expect(await app.run("restore")).toContain('"Success"');
+		expect(await app.sql("SELECT body FROM messages", "comms.db")).toEqual([{ body: "retained" }]);
+	},
+);
 
 it("refuses foreign and malformed backup identity without replacing the live store", async (test) => {
 	const app = await fixture(test);
@@ -303,3 +313,40 @@ it.for(["cutover", "restore"])(
 		expect(await app.sql("SELECT name FROM pragma_table_info('backups') WHERE name='legacy_store_id'")).toEqual([]);
 	},
 );
+
+it.for(["pg", "mysql"])("refuses a %s selected backup as authority to adopt a missing store", async (engine, test) => {
+	const app = await fixture(test);
+	await app.legacy();
+	await mkdir(join(app.root, "backups"));
+	const target = join(app.root, "backups/saved.db");
+	await app.sql(`VACUUM INTO '${target}'`, "comms.db");
+	await app.sql(
+		`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,engine) VALUES('saved','${target}','pre-flip',100,1,0,'${engine}')`,
+	);
+	await app.sql(
+		"INSERT INTO cutover(singleton,candidate,backup,lock_id,family,phase) VALUES(1,1,'saved','lock','family','restoring')",
+	);
+	await rm(join(app.root, "comms.db"));
+	const before = await readFile(target);
+	expect(await app.run("restore")).toContain("app_store_missing");
+	expect(await app.sql("SELECT key FROM settings WHERE key IN ('app_store_adoption','app_store_id')")).toEqual([]);
+	expect(await app.sql("SELECT legacy_store_id FROM backups WHERE id='saved'")).toEqual([{ legacy_store_id: null }]);
+	await expect(readFile(join(app.root, "comms.db"))).rejects.toThrow();
+	expect(await readFile(target)).toEqual(before);
+});
+
+it("stamps legacy provenance only for SQLite backups during adoption", async (test) => {
+	const app = await fixture(test);
+	await app.legacy();
+	await app.sql(
+		"INSERT INTO backups(id,path,reason,bytes,taken_at,engine) VALUES('sqlite','/unopened/sqlite.db','pre-flip',100,1,'sqlite'),('pg','/unopened/pg','pre-flip',100,1,'pg'),('mysql','/unopened/mysql','pre-flip',100,1,'mysql')",
+	);
+	expect(await app.run()).toContain('"Success"');
+	expect(await app.sql("SELECT id,legacy_store_id FROM backups WHERE engine!='sqlite' ORDER BY id")).toEqual([
+		{ id: "mysql", legacy_store_id: null },
+		{ id: "pg", legacy_store_id: null },
+	]);
+	expect(await app.sql("SELECT legacy_store_id AS id FROM backups WHERE engine='sqlite'")).toEqual(
+		await app.sql("SELECT value AS id FROM settings WHERE key='app_store_id'"),
+	);
+});

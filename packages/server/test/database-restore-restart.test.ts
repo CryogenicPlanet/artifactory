@@ -15,7 +15,7 @@ it.for(["restoring", "working", "restored", "legacy-restoring"] as const)(
 		const reached = join(fixture.root, "restore-crash-reached");
 		const needle =
 			phase === "restoring"
-				? "yield* backup.restore(target);"
+				? "yield* backup.restoreInto(target);"
 				: phase === "working"
 					? 'yield* candidate.process.health.pipe(Effect.timeout("5 seconds"));'
 					: 'yield* supervisor.activate(candidate, "live").pipe(Effect.provideContext(context));';

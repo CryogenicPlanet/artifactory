@@ -1,3 +1,4 @@
+import { ChildError } from "./child-process.ts";
 import { appStoreIdentity, verifyAppIdentity } from "./app-store-identity.ts";
 import type { BackupRecord } from "./backup-metadata.ts";
 import { clientLayer } from "@comms/storage/client";
@@ -8,14 +9,14 @@ import { SqlClient } from "effect/unstable/sql";
 import { storageHeadroom } from "./storage-headroom.ts";
 
 /** SQLite online copies include committed WAL pages. Call restore only after proving all owners closed. */
-const make = (filename: string) =>
+const make = (store: FileStore, dataDirectory: string) =>
 	Effect.gen(function* () {
 		const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
 		const fs = yield* FileSystem.FileSystem;
-		const identity = yield* appStoreIdentity(filename);
-		const store: FileStore = { _tag: "file", filename };
+		const filename = store.filename;
+		const identity = yield* appStoreIdentity(filename, dataDirectory);
 		const path = yield* Path.Path;
-		const headroom = yield* storageHeadroom(path.dirname(filename));
+		const headroom = yield* storageHeadroom(dataDirectory);
 		const estimatedBytes = Effect.scoped(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -32,28 +33,29 @@ const make = (filename: string) =>
 		return {
 			recoverStaging: fs.remove(`${filename}.restore-staging`, { recursive: true, force: true }),
 			estimatedBytes,
-			clone: (destination: string) =>
+			clone: (destination: FileStore) =>
 				Effect.scoped(
 					Effect.gen(function* () {
 						yield* headroom.check(yield* estimatedBytes);
 						const sql = yield* SqlClient.SqlClient;
 						yield* sql`PRAGMA busy_timeout = 2000`;
-						yield* sql`VACUUM INTO ${destination}`;
-						yield* sync(destination);
-						yield* sync(path.dirname(destination));
-						return (yield* fs.stat(destination)).size;
+						yield* sql`VACUUM INTO ${destination.filename}`;
+						yield* sync(destination.filename);
+						yield* sync(path.dirname(destination.filename));
+						return (yield* fs.stat(destination.filename)).size;
 					}).pipe(Effect.provide(clientLayer(store))),
 				),
-			prepareClone: (clone: string, epoch: string) =>
+			prepareClone: (clone: FileStore, epoch: string) =>
 				Effect.scoped(
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
 						yield* sql`UPDATE kernel_writer SET epoch=${epoch} WHERE singleton=1`;
-					}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: clone }))),
+					}).pipe(Effect.provide(clientLayer(clone))),
 				),
-			restore: (backup: Pick<BackupRecord, "path" | "legacy_store_id">) =>
+			restoreInto: (backup: Pick<BackupRecord, "path" | "legacy_store_id" | "engine">) =>
 				Effect.scoped(
 					Effect.gen(function* () {
+						if (backup.engine !== "sqlite") return yield* new ChildError({ code: "backup_engine_mismatch" });
 						// Serialized restore owns this disposable path after positive owner closure.
 						// Remove the entire prior copy, including a killed SQLite transaction's sidecars.
 						const directory = `${filename}.restore-staging`;
@@ -80,7 +82,5 @@ const make = (filename: string) =>
 				),
 		};
 	});
-export class AppBackup extends Context.Service<AppBackup, Effect.Success<ReturnType<typeof make>>>()(
-	"comms/boot/AppBackup",
-) {}
-export const layer = (filename: string) => Layer.effect(AppBackup, make(filename));
+export class DbOps extends Context.Service<DbOps, Effect.Success<ReturnType<typeof make>>>()("comms/boot/DbOps") {}
+export const layer = (store: FileStore, dataDirectory: string) => Layer.effect(DbOps, make(store, dataDirectory));

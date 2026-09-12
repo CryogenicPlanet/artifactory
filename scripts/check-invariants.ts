@@ -10,7 +10,7 @@ function checkInvariants() {
 	// These are shared recovery records, not editable product tables. Keep exceptions table- and file-specific.
 	const recoveryAccess: Readonly<Record<string, ReadonlyArray<string>>> = {
 		"app-recovery.ts": ["kernel_writer", "mutation_batches", "outbox"],
-		"app-backup.ts": ["kernel_writer"],
+		"db-ops.ts": ["kernel_writer"],
 	};
 
 	function workspace(path: string) {

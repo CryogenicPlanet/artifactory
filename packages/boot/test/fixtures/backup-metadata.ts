@@ -9,6 +9,24 @@ import { BackupRecord } from "../../src/backup-metadata.ts";
 const main = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	yield* initializeBootSchema;
+	if (process.argv[3] === "v17") {
+		yield* sql`ALTER TABLE backups DROP COLUMN engine`;
+		yield* sql`PRAGMA user_version=17`;
+		yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation,legacy_store_id)
+			VALUES('retained','/retained/exact.db','pre-flip',4096,123,42,7,'adopted-store')`;
+		const before = yield* sql`SELECT * FROM backups`;
+		yield* initializeBootSchema;
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 18 }]);
+		const migrated = yield* sql`SELECT * FROM backups`;
+		assert.deepEqual(
+			migrated,
+			before.map((row) => ({ ...row, engine: "sqlite" })),
+		);
+		yield* initializeBootSchema;
+		assert.deepEqual(yield* sql`SELECT * FROM backups`, migrated);
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 18 }]);
+		return yield* Console.log("v17 backup provenance preserved");
+	}
 	yield* sql`ALTER TABLE child_attempts DROP COLUMN boot_id`;
 	yield* sql`ALTER TABLE backups DROP COLUMN published_through`;
 	yield* sql`ALTER TABLE backups DROP COLUMN generation`;
@@ -34,6 +52,7 @@ const main = Effect.gen(function* () {
 	yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
 	yield* sql`ALTER TABLE backups DROP COLUMN legacy_store_id`;
 	yield* sql`DROP TABLE IF EXISTS boot_migrations`;
+	yield* sql`ALTER TABLE backups DROP COLUMN engine`;
 	yield* sql`PRAGMA user_version=11`;
 	yield* sql`INSERT INTO backups VALUES('legacy','/retained/legacy.db','pre-flip',1234,99)`;
 	yield* initializeBootSchema;
@@ -51,9 +70,10 @@ const main = Effect.gen(function* () {
 			published_through: null,
 			generation: null,
 			legacy_store_id: null,
+			engine: "sqlite",
 		},
 	]);
-	assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 17 }]);
+	assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 18 }]);
 	yield* Console.log("backup metadata preserved");
 }).pipe(
 	Effect.scoped,

@@ -325,10 +325,11 @@ describe("durable edit ownership and staging", () => {
 		await env.sql("ALTER TABLE edit_lock DROP COLUMN reset_pin");
 		await env.sql("ALTER TABLE backups DROP COLUMN legacy_store_id");
 		await env.sql("DROP TABLE IF EXISTS boot_migrations");
+		await env.sql("ALTER TABLE backups DROP COLUMN engine");
 		await env.sql("PRAGMA user_version=15");
 		const before = await env.sql("SELECT * FROM staging");
 		await env.call({ op: "init" });
-		expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 17 }]);
+		expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 18 }]);
 		expect(await env.call({ op: "inspect" })).toMatchObject({
 			value: { id: lock.id, cutover_in_flight: 1, reset_pin: 0 },
 		});

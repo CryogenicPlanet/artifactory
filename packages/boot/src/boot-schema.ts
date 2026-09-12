@@ -35,7 +35,7 @@ export const initializeBootSchema = Effect.gen(function* () {
 	);
 	const version = (yield* readVersion)[0]?.user_version;
 	if (version === undefined) return yield* Effect.die("Missing boot schema version");
-	if (version > 17) return yield* new BootSchemaTooNew({ found: version, supported: 17 });
+	if (version > 18) return yield* new BootSchemaTooNew({ found: version, supported: 18 });
 	// Refuse before schema or journal-mode changes so the previous image can finish recovery.
 	if (version >= 9 && version < 17) {
 		const cutovers = yield* sql`SELECT singleton FROM cutover WHERE phase!='accepted' LIMIT 1`;
@@ -53,7 +53,7 @@ export const initializeBootSchema = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const currentVersion = (yield* readVersion)[0]?.user_version;
 			if (currentVersion === undefined) return yield* Effect.die("Missing schema version");
-			if (currentVersion > 17) return yield* new BootSchemaTooNew({ found: currentVersion, supported: 17 });
+			if (currentVersion > 18) return yield* new BootSchemaTooNew({ found: currentVersion, supported: 18 });
 			yield* migrate(sql, "boot_migrations", currentVersion, [
 				{
 					id: 1,
@@ -213,8 +213,15 @@ export const initializeBootSchema = Effect.gen(function* () {
 						yield* sql`ALTER TABLE backups ADD COLUMN legacy_store_id TEXT`;
 					}),
 				},
+				{
+					id: 18,
+					name: "backup_engine",
+					run: Effect.gen(function* () {
+						yield* sql`ALTER TABLE backups ADD COLUMN engine TEXT NOT NULL DEFAULT 'sqlite' CHECK(engine IN ('sqlite','pg','mysql'))`;
+					}),
+				},
 			]);
-			yield* sql`PRAGMA user_version = 17`;
+			yield* sql`PRAGMA user_version = 18`;
 		}),
 	);
 });

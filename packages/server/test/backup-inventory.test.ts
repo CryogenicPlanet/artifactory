@@ -63,8 +63,24 @@ it("lists backup metadata with a human session and rejects every Authorization h
 	expect(response.headers.get("x-comms-token-expires")).toMatch(/^\d+$/);
 	expect(await response.json()).toEqual({
 		items: [
-			{ id: "new", reason: "hourly", bytes: 4096, taken_at: 20, published_through: 123, generation: 7 },
-			{ id: "legacy", reason: "pre-flip", bytes: 2048, taken_at: 10, published_through: null, generation: null },
+			{
+				id: "new",
+				engine: "sqlite",
+				reason: "hourly",
+				bytes: 4096,
+				taken_at: 20,
+				published_through: 123,
+				generation: 7,
+			},
+			{
+				id: "legacy",
+				engine: "sqlite",
+				reason: "pre-flip",
+				bytes: 2048,
+				taken_at: 10,
+				published_through: null,
+				generation: null,
+			},
 		],
 		next: null,
 	});

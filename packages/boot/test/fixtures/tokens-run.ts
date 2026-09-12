@@ -296,7 +296,7 @@ const run = Effect.gen(function* () {
 					yield* sql.unsafe(`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : "*"} FROM ${table}`),
 				);
 			assert.deepEqual(after, before);
-			assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 17 }]);
+			assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 18 }]);
 			yield* auth.refreshTokens(original.refresh);
 		}
 	});

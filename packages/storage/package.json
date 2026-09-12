@@ -6,7 +6,8 @@
 	"exports": {
 		"./store": "./src/store.ts",
 		"./client": "./src/client.ts",
-		"./migrations": "./src/migrations.ts"
+		"./migrations": "./src/migrations.ts",
+		"./descendant": "./src/descendant.ts"
 	},
 	"scripts": {
 		"check": "tsc --noEmit"

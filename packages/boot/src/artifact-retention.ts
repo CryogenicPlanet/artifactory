@@ -157,6 +157,7 @@ export const artifactRetention = (directory: string) =>
 						if (limit === null || backupBytes + requiredBackupBytes <= limit) break;
 						if (
 							protectedBackups.has(backup.id) ||
+							backup.engine !== "sqlite" ||
 							backup.published_through === null ||
 							backup.generation === null ||
 							(backup.reason !== "hourly" &&
