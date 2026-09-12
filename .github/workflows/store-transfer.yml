@@ -35,6 +35,12 @@ jobs:
           - source: sqlite
             target: mysql
             mode: activation-crash
+          - source: sqlite
+            target: pg
+            mode: copy-crash
+          - source: sqlite
+            target: mysql
+            mode: copy-crash
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

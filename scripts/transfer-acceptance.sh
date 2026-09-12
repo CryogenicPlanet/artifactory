@@ -7,7 +7,7 @@ target_engine=${2:?target engine}
 board_image=${3:-comms:transfer-acceptance}
 acceptance=${4:-normal}
 case "$acceptance:$source_engine:$target_engine" in
-  normal:*|activation-crash:sqlite:pg|activation-crash:sqlite:mysql) ;;
+  normal:*|activation-crash:sqlite:pg|activation-crash:sqlite:mysql|copy-crash:sqlite:pg|copy-crash:sqlite:mysql) ;;
   *) echo "Unsupported transfer acceptance mode." >&2; exit 2 ;;
 esac
 case "$source_engine:$target_engine" in
@@ -181,6 +181,8 @@ run_transfer() {
   local mount_wrapper=()
   if [ "$expectation" = crash ]; then
     mount_wrapper=(--mount "type=bind,src=$private/activation-crash.js,dst=/opt/comms/packages/server/dist/store-transfer.js,readonly")
+  elif [ "$expectation" = copy-crash ]; then
+    mount_wrapper=(--mount "type=bind,src=$private/copy-crash.js,dst=/opt/comms/packages/server/dist/store-transfer-worker.js,readonly")
   fi
   docker run --rm --network none --read-only --user 0:0 --entrypoint /bin/sh \
     --mount "type=bind,src=$private,dst=/input,readonly" \
@@ -195,6 +197,10 @@ run_transfer() {
     if [ "$expectation" = crash ]; then
       [ "$exit_code" = 137 ]
       grep -q '^Instrumented outer checkpoint: final activation rename$' "$private/$mode.errors"
+    elif [ "$expectation" = copy-crash ]; then
+      [ "$exit_code" = 1 ]
+      grep -q '^Instrumented worker checkpoint: messages table committed$' "$private/$mode.errors"
+      [ ! -s "$private/$mode-output" ]
     else
       [ "$exit_code" = 1 ]
       [ ! -s "$private/$mode-output" ]
@@ -244,6 +250,10 @@ docker start "$board" >/dev/null
 wait_for_board "$board"
 bun scripts/transfer-acceptance-http.ts verify-checked-source http://localhost:8080 "$private/state.json"
 stop_board "$board" source-checked
+if [ "$acceptance" = copy-crash ]; then
+  source scripts/transfer-acceptance-copy.sh
+  exit 0
+fi
 if [ "$acceptance" = activation-crash ]; then
   # This deliberately instruments only the outer activation boundary; normal resume uses the real CLI.
   source scripts/transfer-acceptance-activation.sh
