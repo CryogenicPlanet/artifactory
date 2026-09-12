@@ -124,7 +124,7 @@ await Effect.runPromise(
 		]);
 		const receipt = yield* sql`SELECT ${sql("key")},key_hash,outcome FROM idempotency`;
 		assert.deepEqual(receipt, [{ key, key_hash: createHash("sha256").update(key).digest("hex"), outcome: "original" }]);
-		assert.equal((yield* sql`SELECT body FROM messages`)[0]?.body, body);
+		assert.equal((yield* sql`SELECT body FROM messages WHERE id='m_probe'`)[0]?.body, body);
 		const current = yield* settings.engine === "pg"
 			? sql`SELECT id FROM messages WHERE body_tsv @@ plainto_tsquery('simple','alpha')`
 			: sql`SELECT id FROM messages WHERE MATCH(body) AGAINST ('+ALPHA +resume' IN BOOLEAN MODE)`;
@@ -151,9 +151,36 @@ await Effect.runPromise(
 	Effect.gen(function* () {
 		const sql = yield* SqlClient;
 		yield* initializeRemoteCore(sql, "core-probe");
-		assert.equal((yield* sql`SELECT body FROM messages`)[0]?.body, "résumé ALPHA " + "large ".repeat(15000));
+		assert.equal(
+			(yield* sql`SELECT body FROM messages WHERE id='m_probe'`)[0]?.body,
+			"résumé ALPHA " + "large ".repeat(15000),
+		);
 		assert.deepEqual(yield* sql`SELECT outcome FROM idempotency`, [{ outcome: "original" }]);
 		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 12);
+		for (const [id, seq] of [
+			["Case", 2],
+			["case", 3],
+		] as const) {
+			yield* sql`INSERT INTO messages(id,seq,topic,agent,instance,body,tags,meta,created_at) VALUES (${id},${seq},'test','probe','probe','case probe','[]','{}',1)`;
+			assert.deepEqual(yield* sql`SELECT id FROM messages WHERE id=${id}`, [{ id }]);
+		}
+		// Extensions may add columns/indexes; only the core identifier contract is fixed.
+		yield* sql`ALTER TABLE messages ADD COLUMN extension_note TEXT`;
+		yield* sql`CREATE INDEX extension_message_note ON messages(seq,created_at)`;
+		yield* initializeRemoteCore(sql, "core-probe");
+		if (settings.engine === "mysql") {
+			yield* sql`ALTER TABLE messages MODIFY topic VARCHAR(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL`;
+			const refused = yield* initializeRemoteCore(sql, "core-probe").pipe(Effect.result);
+			assert.equal(refused._tag, "Failure");
+			if (refused._tag === "Failure") {
+				assert.ok("code" in refused.failure);
+				assert.equal(refused.failure.code, "app_schema_unsupported");
+			}
+			assert.equal(
+				(yield* sql`SELECT body FROM messages WHERE id='m_probe'`)[0]?.body,
+				"résumé ALPHA " + "large ".repeat(15000),
+			);
+		}
 	}).pipe(Effect.scoped, Effect.provide(layer)),
 );
 process.stdout.write("core native defaults, long values, receipt hashes, search and reconnect durability passed\n");

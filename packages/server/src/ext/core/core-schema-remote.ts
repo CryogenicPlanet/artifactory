@@ -1,3 +1,4 @@
+import { assertCoreIdentifierCollations } from "./core-identifier-schema.ts";
 import { on } from "@comms/storage/dialect";
 import { indexShape, remoteMigrate, tableShape, type RemoteStep } from "@comms/storage/remote-migrations";
 import { Effect, Schema } from "effect";
@@ -323,6 +324,7 @@ export const initializeRemoteCore = (sql: SqlClient, epoch: string) =>
 	).pipe(
 		Effect.andThen(
 			Effect.gen(function* () {
+				yield* assertCoreIdentifierCollations(sql);
 				if (on(sql, { sqlite: () => false, pg: () => true, mysql: () => false })) {
 					if (!(yield* postgresSearchShape(sql))) return yield* new KernelError({ code: "app_schema_unsupported" });
 					if ((yield* postgresSearchMode(sql)) === "plain")
