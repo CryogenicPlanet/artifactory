@@ -1,7 +1,8 @@
+import { authorizeTransferDump, type TransferDumpReference } from "./transfer-dump-authority.ts";
 import { guardianClientLayer } from "@comms/storage/remote-client";
 import { sanitized, failure, type RemoteSession } from "@comms/storage/remote-session";
 import { asBoot, connectionOf, render, StoreError, type RemoteStore } from "@comms/storage/store";
-import { Config, Context, Effect, Exit, Layer, Redacted, Schema, Scope } from "effect";
+import { Config, Context, Effect, Exit, type FileSystem, Layer, type Path, Redacted, Schema, Scope } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
 import type { databaseConfiguration } from "./database-configuration.ts";
@@ -28,6 +29,7 @@ export const remoteRuntime = (
 			"remote_configuration_invalid",
 		);
 		const client = yield* HttpClient.HttpClient;
+		const files = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
 		const request = (body: typeof RemoteRootRequest.Type, status = 204) =>
 			sanitized(
 				Effect.gen(function* () {
@@ -86,13 +88,33 @@ export const remoteRuntime = (
 						),
 				);
 			});
-		const reserveOwner = (store: RemoteStore, childAttempt: string, scope: "database" | "account" = "database") =>
+		const reserveOwner = (
+			store: RemoteStore,
+			childAttempt: string,
+			scope: "database" | "account" = "database",
+			transferDump?: typeof TransferDumpReference.Type,
+		) =>
 			Effect.gen(function* () {
-				yield* asBoot(store, configuration.boot);
+				if (transferDump) {
+					if (scope !== "account") return yield* new StoreError({ code: "store_descriptor_mismatch" });
+					yield* authorizeTransferDump(dataDirectory, configuration.boot, store, transferDump, "ready").pipe(
+						Effect.provideContext(files),
+					);
+				} else yield* asBoot(store, configuration.boot);
 				const child = yield* connectionOf(store, connection.tls);
-				if (child.username === connection.username) return yield* new StoreError({ code: "store_descriptor_mismatch" });
+				if (
+					child.username === connection.username ||
+					(transferDump && child.username === configuration.appConnection.username)
+				)
+					return yield* new StoreError({ code: "store_descriptor_mismatch" });
 				const reserved = yield* request(
-					{ action: "reserve-owner", store: Redacted.value(yield* render(store)), attempt: childAttempt, scope },
+					{
+						action: "reserve-owner",
+						store: Redacted.value(yield* render(store)),
+						attempt: childAttempt,
+						scope,
+						...(transferDump ? { transferDump } : {}),
+					},
 					200,
 				).pipe(
 					Effect.flatMap((response) => response.json),
@@ -103,12 +125,29 @@ export const remoteRuntime = (
 					return yield* failure("remote_configuration_invalid");
 				return reserved;
 			});
-		const assertAccountClosed = (_resourceId: string, store: RemoteStore) =>
+		const assertAccountClosed = (
+			_resourceId: string,
+			store: RemoteStore,
+			transferDump?: typeof TransferDumpReference.Type,
+		) =>
 			Effect.gen(function* () {
-				yield* asBoot(store, configuration.boot);
+				if (transferDump) {
+					if (_resourceId !== transferDump.resourceId) return yield* failure("remote_configuration_invalid");
+					yield* authorizeTransferDump(dataDirectory, configuration.boot, store, transferDump, "cleanup").pipe(
+						Effect.provideContext(files),
+					);
+				} else yield* asBoot(store, configuration.boot);
 				const account = yield* connectionOf(store, connection.tls);
-				if (account.username === connection.username) return yield* failure("remote_configuration_invalid");
-				yield* request({ action: "assert-principal-closed", store: Redacted.value(yield* render(store)) });
+				if (
+					account.username === connection.username ||
+					(transferDump && account.username === configuration.appConnection.username)
+				)
+					return yield* failure("remote_configuration_invalid");
+				yield* request({
+					action: "assert-principal-closed",
+					store: Redacted.value(yield* render(store)),
+					...(transferDump ? { transferDump } : {}),
+				});
 			});
 		return { bootSql, withStore, reserveOwner, assertAccountClosed, rootAttempt: attempt };
 	});

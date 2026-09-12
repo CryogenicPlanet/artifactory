@@ -1,3 +1,4 @@
+import { authorizeTransferDump } from "./transfer-dump-authority.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { RemoteInspector, remoteOwnerInspectorLayer } from "@comms/storage/remote-inspector";
 import { dumpRemote, loadRemote } from "@comms/storage/remote-copy";
@@ -29,7 +30,10 @@ const keeper = Effect.gen(function* () {
 	const store = yield* parseDescriptor(config.store);
 	const boot = yield* parseDescriptor(config.remote.bootStore);
 	if (store._tag === "file" || boot._tag === "file") return yield* rejected();
-	yield* asBoot(store, boot);
+	if (config.remote.transferDump) {
+		if (config.operation !== "dump") return yield* rejected();
+		yield* authorizeTransferDump(config.remote.dataDirectory, boot, store, config.remote.transferDump, "ready");
+	} else yield* asBoot(store, boot);
 	const connection = yield* connectionOf(store, config.remote.tls);
 	const bootConnection = yield* connectionOf(boot, config.remote.tls);
 	yield* admitRemoteOwner(config.remote, config.id);

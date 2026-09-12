@@ -1,3 +1,4 @@
+import { TransferDumpReference } from "./transfer-dump-authority.ts";
 import { Cause, Effect, Schema } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { StoreError } from "@comms/storage/store";
@@ -37,9 +38,14 @@ export const RemoteRootRequest = Schema.Union([
 		store: Schema.String,
 		attempt: Schema.String,
 		scope: Schema.Literals(["database", "account"]),
+		transferDump: Schema.optionalKey(TransferDumpReference),
 	}),
 	Schema.Struct({ action: Schema.Literal("admit-owner"), attempt: Schema.String }),
-	Schema.Struct({ action: Schema.Literal("assert-principal-closed"), store: Schema.String }),
+	Schema.Struct({
+		action: Schema.Literal("assert-principal-closed"),
+		store: Schema.String,
+		transferDump: Schema.optionalKey(TransferDumpReference),
+	}),
 ]);
 
 /** Admission must precede owner-file creation, inspector connections and native spawning. */

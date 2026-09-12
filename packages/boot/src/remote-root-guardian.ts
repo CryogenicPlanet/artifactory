@@ -1,3 +1,4 @@
+import { authorizeTransferDump, type TransferDumpReference } from "./transfer-dump-authority.ts";
 // oxlint-disable-next-line effecttsgo/node-builtin-import -- Effect Crypto has no constant-time comparison.
 import { timingSafeEqual } from "node:crypto";
 import { BunHttpServer } from "@effect/platform-bun";
@@ -67,13 +68,22 @@ export const remoteRootGuardian = (configuration: Configuration, dataDirectory: 
 		let closing = false;
 		let guardianUrl = "";
 		const failure = () => new StoreError({ code: "store_descriptor_mismatch" });
-		const selectedConnection = (descriptor: string) =>
+		const selectedConnection = (
+			descriptor: string,
+			transferDump?: typeof TransferDumpReference.Type,
+			phase: "ready" | "cleanup" = "ready",
+		) =>
 			Effect.gen(function* () {
 				const store = yield* parseDescriptor(descriptor);
 				if (store._tag === "file") return yield* failure();
-				yield* asBoot(store, configuration.boot);
+				if (transferDump) yield* authorizeTransferDump(dataDirectory, configuration.boot, store, transferDump, phase);
+				else yield* asBoot(store, configuration.boot);
 				const selected = yield* connectionOf(store, connection.tls);
-				if (selected.username === connection.username) return yield* failure();
+				if (
+					selected.username === connection.username ||
+					(transferDump && selected.username === configuration.appConnection.username)
+				)
+					return yield* failure();
 				return selected;
 			});
 		const dispatch = (input: typeof RemoteRootRequest.Type) =>
@@ -103,7 +113,8 @@ export const remoteRootGuardian = (configuration: Configuration, dataDirectory: 
 							return HttpServerResponse.empty({ status: 204 });
 						}
 						case "reserve-owner": {
-							const selected = yield* selectedConnection(input.store);
+							if (input.transferDump && input.scope !== "account") return yield* failure();
+							const selected = yield* selectedConnection(input.store, input.transferDump);
 							const child: RemoteOwnerIntent = {
 								attempt: input.attempt,
 								root: attempt,
@@ -125,13 +136,14 @@ export const remoteRootGuardian = (configuration: Configuration, dataDirectory: 
 								bootStore: Redacted.value(yield* render(configuration.boot)),
 								tls: connection.tls,
 								guardian: { url: guardianUrl, secret, attempt },
+								...(input.transferDump ? { transferDump: input.transferDump } : {}),
 							});
 						}
 						case "admit-owner":
 							yield* admission.admit(input.attempt);
 							return HttpServerResponse.empty({ status: 204 });
 						case "assert-principal-closed": {
-							const selected = yield* selectedConnection(input.store);
+							const selected = yield* selectedConnection(input.store, input.transferDump, "cleanup");
 							const expected = yield* inventory.snapshot;
 							yield* assertRemotePrincipalClosed(dataDirectory, expected, attempt, selected);
 							return HttpServerResponse.empty({ status: 204 });

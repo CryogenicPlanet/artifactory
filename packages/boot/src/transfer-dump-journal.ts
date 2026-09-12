@@ -3,7 +3,7 @@ import { selectionText, TransferSelection, validateTransferSelection } from "@co
 import { Crypto, Effect, FileSystem, Path, Redacted, Schema, Semaphore } from "effect";
 import { RemoteDatabaseError, type RemoteDatabaseRecord } from "./remote-database-journal.ts";
 
-const Saved = Schema.Struct({
+export const TransferDumpRecord = Schema.Struct({
 	selection: TransferSelection,
 	store: Schema.Literals(["boot", "app"]),
 	id: Schema.String,
@@ -11,7 +11,7 @@ const Saved = Schema.Struct({
 	finished: Schema.Boolean,
 	password: Schema.NullOr(Schema.String),
 });
-const Encoded = Schema.fromJsonString(Saved);
+const Encoded = Schema.fromJsonString(TransferDumpRecord);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const invalid = () => new RemoteDatabaseError({ code: "remote_database_invalid" });
 
@@ -61,7 +61,7 @@ export const transferDumpJournal = (selection: TransferSelection, source: { boot
 			yield* sync(path.dirname(parent));
 		}
 		const filename = (id: string) => path.join(directory, `${id}.json`);
-		const validate = (saved: typeof Saved.Type, id: string) => {
+		const validate = (saved: typeof TransferDumpRecord.Type, id: string) => {
 			if (
 				!uuid.test(id) ||
 				saved.id !== id ||
@@ -87,7 +87,7 @@ export const transferDumpJournal = (selection: TransferSelection, source: { boot
 					Effect.flatMap((saved) => validate(saved, id)),
 				);
 			});
-		const record = (saved: typeof Saved.Type): RemoteDatabaseRecord => ({
+		const record = (saved: typeof TransferDumpRecord.Type): RemoteDatabaseRecord => ({
 			id: saved.id,
 			kind: "dump",
 			endpoint: `${source[saved.store]._tag}://${selection.source.endpoint}`,
@@ -95,7 +95,7 @@ export const transferDumpJournal = (selection: TransferSelection, source: { boot
 			principal: `comms_t_${saved.id.replaceAll("-", "").slice(0, 24)}`,
 			phase: saved.phase,
 		});
-		const write = (saved: typeof Saved.Type) =>
+		const write = (saved: typeof TransferDumpRecord.Type) =>
 			Effect.gen(function* () {
 				yield* checked(directory, "Directory");
 				const pending = path.join(directory, `${saved.id}.${yield* crypto.randomUUIDv4}.pending`);
@@ -109,7 +109,7 @@ export const transferDumpJournal = (selection: TransferSelection, source: { boot
 			gate.withPermit(
 				Effect.gen(function* () {
 					const id = yield* crypto.randomUUIDv4;
-					const saved: typeof Saved.Type = {
+					const saved: typeof TransferDumpRecord.Type = {
 						selection,
 						store,
 						id,

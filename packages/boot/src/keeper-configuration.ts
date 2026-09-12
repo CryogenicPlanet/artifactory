@@ -1,3 +1,4 @@
+import { TransferDumpReference } from "./transfer-dump-authority.ts";
 import { Schema } from "effect";
 import { RemoteRootConfiguration } from "./remote-root-protocol.ts";
 
@@ -7,6 +8,7 @@ export const RemoteChildConfiguration = Schema.Struct({
 	bootStore: Schema.String,
 	tls: Schema.Boolean,
 	guardian: RemoteRootConfiguration,
+	transferDump: Schema.optionalKey(TransferDumpReference),
 });
 
 /** Immutable keeper wire contracts shared by each sender and receiver. */

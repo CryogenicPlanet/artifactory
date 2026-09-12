@@ -63,14 +63,17 @@ export const nativeTransferSafetyCopy = (options: {
 			Effect.gen(function* () {
 				const credential = yield* journal.credential(record.id);
 				// Closure includes historical keeper receipts. No root-principal exemption is introduced.
-				yield* options.runtime.assertAccountClosed(record.id, credential);
+				yield* options.runtime.assertAccountClosed(
+					record.id,
+					credential,
+					record.database === options.source.boot.database
+						? { transferId: options.selection.transfer_id, resourceId: record.id }
+						: undefined,
+				);
 				yield* journal.close(record.id);
 				const closed = yield* journal.read(record.id);
 				const source = yield* sourceOf(closed);
-				yield* withSource(
-					source,
-					selected.pipe(Effect.flatMap((service) => service.revokeDump(closed))),
-				);
+				yield* withSource(source, selected.pipe(Effect.flatMap((service) => service.revokeDump(closed))));
 				yield* provision.dropPrincipal(closed);
 				yield* journal.finish(closed.id);
 			});
@@ -138,6 +141,9 @@ export const nativeTransferSafetyCopy = (options: {
 				const filename = yield* journal.pathFor(record.id);
 				const copied = yield* native({
 					operation: "dump",
+					...(store === "boot"
+						? { transferDump: { transferId: options.selection.transfer_id, resourceId: record.id } }
+						: {}),
 					resourceId: record.id,
 					store: credential,
 					path: filename,
