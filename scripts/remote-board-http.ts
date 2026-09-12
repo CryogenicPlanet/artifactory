@@ -40,6 +40,18 @@ async function run() {
 		});
 	const ok = async (response: Response, label: string) => {
 		// Do not print bodies: authentication failures can contain challenge material.
+		const filename = process.env.COMMS_TEST_DIAGNOSTICS_FILE;
+		if (response.status !== 200 && filename)
+			await writeFile(
+				`${filename}.http`,
+				JSON.stringify({
+					label,
+					path: new URL(response.url).pathname,
+					status: response.status,
+					body: await response.clone().text(),
+				}),
+				{ mode: 0o600 },
+			);
 		assert.equal(response.status, 200, `${label}: HTTP ${response.status}`);
 		return response;
 	};
