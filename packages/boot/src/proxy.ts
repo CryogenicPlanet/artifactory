@@ -1,4 +1,3 @@
-import { redactHex } from "./auth-primitives.ts";
 import { recoveryRoute } from "./recovery-http.ts";
 import { settingsRoute } from "./settings-http.ts";
 import { recoveryManifest } from "./route-discovery.ts";
@@ -237,7 +236,11 @@ export const proxy = Effect.gen(function* () {
 
 				let destination = yield* Ref.get(child.traffic.route);
 				const state = yield* Ref.get(child.status);
-				const safeState = { ...state, stderr: redactHex(state.stderr) };
+				const safeState = {
+					...state,
+					error: state.error === null ? null : child.redact(state.error),
+					stderr: child.redact(state.stderr),
+				};
 				const generations = yield* Ref.get(child.generations);
 				const lastGood = generations.find((generation) => generation.good === 1)?.n ?? null;
 				if (path === "/_boot/status" && request.method === "GET") {
@@ -246,14 +249,25 @@ export const proxy = Effect.gen(function* () {
 							mode: "local-development",
 							authenticated: true,
 							child: safeState,
-							source_recovery_error: yield* Ref.get(child.sourceError),
+							source_recovery_error: yield* Ref.get(child.sourceError).pipe(
+								Effect.map((error) => (error === null ? null : child.redact(error))),
+							),
 							traffic: yield* child.traffic.state,
 							last_good: lastGood,
 						}),
 					);
 				}
 				if ((path === "/_boot/generations" || path === "/api/generations") && request.method === "GET") {
-					return expires(HttpServerResponse.jsonUnsafe({ items: generations, last_good: lastGood }));
+					return expires(
+						HttpServerResponse.jsonUnsafe({
+							items: generations.map((generation) => ({
+								...generation,
+								error: generation.error === null ? null : child.redact(generation.error),
+								stderr: generation.stderr === null ? null : child.redact(generation.stderr),
+							})),
+							last_good: lastGood,
+						}),
+					);
 				}
 				if (
 					path === "/_boot" ||

@@ -1,6 +1,5 @@
 import { lockBootWrite } from "./boot-write-lock.ts";
 import { backupPath, BackupRecord } from "./backup-metadata.ts";
-import { redactHex } from "./auth-primitives.ts";
 import { acceptSourceRevert } from "./source-revert.ts";
 import { seedSource } from "./seed-source.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
@@ -396,11 +395,11 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					Schema.is(ChildError)(failure.success) &&
 					failure.success.code === "incompatible_schema";
 				const error =
-					redactHex(Cause.pretty(result.cause)) +
+					supervisor.child.redact(Cause.pretty(result.cause)) +
 					(incompatibleSeed ? "; image seed is incompatible with current data; apply a forward source fix" : "");
 				const persisted = yield* read;
 				const { generation: failedGeneration, candidate: failedCandidate } = rollback;
-				const stderr = redactHex(
+				const stderr = supervisor.child.redact(
 					failure._tag === "Success" && Schema.is(ChildError)(failure.success)
 						? (failure.success.stderr ?? "")
 						: failedCandidate

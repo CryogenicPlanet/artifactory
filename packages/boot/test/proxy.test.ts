@@ -1,3 +1,6 @@
+import { execFile } from "node:child_process";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { once } from "node:events";
 import { request } from "node:http";
 import { gunzipSync } from "node:zlib";
@@ -213,3 +216,40 @@ describe("real Bun boot proxy", () => {
 			.toBe(true);
 	});
 });
+
+it("scrubs historical generation diagnostics when the proxy exposes refreshed history", async (test) => {
+	const app = await launch(test);
+	await expect.poll(async () => (await app.state()).state).toBe("live");
+	const original = await app.state();
+	await promisify(execFile)("bun", [
+		join(import.meta.dirname, "fixtures/store.ts"),
+		join(app.data, "boot.db"),
+		"INSERT INTO generations(n,entry_file,status,started_at,error,stderr) VALUES(999,'retained.ts','failed',1,'Connection refused mysql://old:historic-password@db.example/board','postgres://old:historic-stderr@db.example/board migration failed at retained.ts:12')",
+	]);
+	await app.fetch(`${app.url}/crash`);
+	await expect
+		.poll(
+			async () => {
+				const current = await app.state();
+				return current.state === "live" && current.pid !== original.pid;
+			},
+			{ timeout: 9000 },
+		)
+		.toBe(true);
+	for (const route of ["/_boot/generations", "/api/generations"]) {
+		const response = await app.fetch(`${app.url}${route}`);
+		expect(response.status).toBe(200);
+		const body = await response.json();
+		expect(body).toMatchObject({
+			items: expect.arrayContaining([
+				expect.objectContaining({
+					n: 999,
+					error: "Connection refused mysql://[redacted]@db.example/board",
+					stderr: "postgres://[redacted]@db.example/board migration failed at retained.ts:12",
+				}),
+			]),
+		});
+		expect(JSON.stringify(body)).not.toContain("historic-password");
+		expect(JSON.stringify(body)).not.toContain("historic-stderr");
+	}
+}, 15000);

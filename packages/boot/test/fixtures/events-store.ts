@@ -1,3 +1,4 @@
+import { logRedactor } from "../../src/log-redaction.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect, FileSystem, Layer, Schema } from "effect";
@@ -5,6 +6,7 @@ import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { Events, layer as eventsLayer, Batch, EventRecord } from "../../src/events.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../src/app-recovery.ts";
 const Input = Schema.Struct({
+	redactions: Schema.optionalKey(Schema.Array(Schema.String)),
 	op: Schema.Literals(["init", "reserve", "append", "abort", "boot", "query", "diagnostics", "recover", "state"]),
 	epoch: Schema.optionalKey(Schema.String),
 	transaction: Schema.optionalKey(Schema.String),
@@ -65,7 +67,11 @@ const main = Effect.gen(function* () {
 					return "ok";
 			}
 		}).pipe(
-			Effect.provide(recoveryLayer(`${root}/comms.db`).pipe(Layer.provideMerge(eventsLayer(Effect.void)))),
+			Effect.provide(
+				recoveryLayer(`${root}/comms.db`).pipe(
+					Layer.provideMerge(eventsLayer(Effect.void, logRedactor(input.redactions ?? []))),
+				),
+			),
 			Effect.result,
 		);
 		yield* Console.log(

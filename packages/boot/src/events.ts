@@ -1,5 +1,5 @@
 import { distinctFrom, isDescendant, jsonInt, lockRow, on, plannerHint, replacePrefix } from "@comms/storage/dialect";
-import { redactHex } from "./auth-primitives.ts";
+import { logRedactor } from "./log-redaction.ts";
 import { decodeRows } from "./decode-rows.ts";
 import { Clock, Context, Deferred, Effect, Layer, Ref, Schema } from "effect";
 import { SqlClient, type Statement } from "effect/unstable/sql";
@@ -86,6 +86,7 @@ export const eventsSchema = Effect.gen(function* () {
 
 const make = Effect.fn("Events")(function* (
 	admitReservation: Effect.Effect<void, StorageRejected | EventStorageRejected>,
+	redact: (text: string) => string,
 ) {
 	const sql = yield* SqlClient.SqlClient;
 	const readState = (write: boolean) =>
@@ -310,8 +311,8 @@ const make = Effect.fn("Events")(function* (
 									? {}
 									: {
 											current_failure: {
-												error: redactHex(row.error).slice(-2048),
-												stderr: redactHex(row.stderr ?? "").slice(-2048),
+												error: redact(row.error).slice(-2048),
+												stderr: redact(row.stderr ?? "").slice(-2048),
 											},
 										}),
 							})),
@@ -396,5 +397,7 @@ const make = Effect.fn("Events")(function* (
 	};
 });
 export class Events extends Context.Service<Events, Effect.Success<ReturnType<typeof make>>>()("comms/boot/Events") {}
-export const layer = (admitReservation: Effect.Effect<void, StorageRejected | EventStorageRejected>) =>
-	Layer.effect(Events, make(admitReservation));
+export const layer = (
+	admitReservation: Effect.Effect<void, StorageRejected | EventStorageRejected>,
+	redact: (text: string) => string = logRedactor([]),
+) => Layer.effect(Events, make(admitReservation, redact));
