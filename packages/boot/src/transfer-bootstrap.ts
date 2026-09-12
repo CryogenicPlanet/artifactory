@@ -4,7 +4,7 @@ import {
 	selectionText,
 	transferProtocol,
 	TransferRejected,
-	type TransferPreparation,
+	TransferPreparation,
 } from "@comms/storage/store-transfer-schema";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -16,8 +16,8 @@ import { assertTransferSentinel, reserveTransferSentinel } from "./transfer-sent
 
 const rejected = () => new TransferRejected({ code: "transfer_journal_conflict" });
 
-/** Capture guarded boot SQL. The caller writes the pending FS journal before invoking this helper;
- * markReady must atomically persist its ready variant before this helper can create ANY boot table. */
+/** Capture guarded boot SQL. Verify the shared durable preparation before target DDL,
+ * and its ready transition before this helper can create any boot table. */
 export const makeTransferBootstrap = (stores: { readonly appStore: Store; readonly bootStore: Store }) =>
 	Effect.gen(function* () {
 		const boot = yield* SqlClient.SqlClient;
@@ -33,6 +33,30 @@ export const makeTransferBootstrap = (stores: { readonly appStore: Store; readon
 				);
 				if (preparation.phase !== "preparing" || !["pending", "ready"].includes(preparation.sentinel))
 					return yield* rejected();
+				const fs = yield* FileSystem.FileSystem;
+				const path = yield* Path.Path;
+				const receipt = (sentinel: TransferPreparation["sentinel"]) =>
+					Effect.gen(function* () {
+						const directory = path.join(selection.data_directory, "transfers", selection.transfer_id);
+						const filename = path.join(directory, "journal.json");
+						for (const name of [selection.data_directory, directory, filename])
+							if ((yield* fs.realPath(name)) !== name) return yield* rejected();
+						if ((yield* fs.stat(filename)).type !== "File") return yield* rejected();
+						const saved = yield* fs
+							.readFileString(filename)
+							.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(TransferPreparation))));
+						if (
+							selectionText(saved.selection) !== selectionText(selection) ||
+							saved.epoch !== preparation.epoch ||
+							saved.initialized_at !== preparation.initialized_at ||
+							saved.sentinel !== sentinel
+						)
+							return yield* rejected();
+						// The readback is an acknowledged durable prerequisite, not a staged .next file.
+						for (const name of [filename, directory, path.dirname(directory), selection.data_directory])
+							yield* Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
+					}).pipe(Effect.mapError(rejected));
+				yield* receipt(preparation.sentinel);
 				const read = Effect.gen(function* () {
 					const exists = yield* on(boot, {
 						sqlite: () => boot`SELECT name FROM sqlite_master WHERE name='settings' AND type='table'`,
@@ -69,13 +93,12 @@ export const makeTransferBootstrap = (stores: { readonly appStore: Store; readon
 				} else {
 					yield* reserveTransferSentinel(app, credentials.principal, selection, preparation);
 					if (appStore._tag === "file") {
-						const fs = yield* FileSystem.FileSystem;
-						const path = yield* Path.Path;
 						for (const name of [appStore.filename, path.dirname(appStore.filename)])
 							yield* Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
 					}
 					if (preparation.sentinel === "pending") yield* markReady;
 				}
+				yield* receipt("ready");
 				// Sentinel CREATE and INSERT have committed, and the durable preparing receipt is ready.
 				yield* initializeBootSchema.pipe(Effect.provideService(SqlClient.SqlClient, boot));
 				yield* boot.withTransaction(

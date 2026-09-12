@@ -41,10 +41,39 @@ await Effect.runPromise(
 			recursive: true,
 			mode: 0o700,
 		});
-		yield* writeTransferReceipt(preparation);
 		const bootstrap = yield* makeTransferBootstrap({ appStore, bootStore }).pipe(
 			Effect.provideService(SqlClient.SqlClient, boot),
 		);
+		const fs = yield* FileSystem.FileSystem;
+		const filename = `${directory}/transfers/${preparation.selection.transfer_id}/journal.json`;
+		const refuse = Effect.gen(function* () {
+			const result = yield* bootstrap(preparation, Effect.void).pipe(
+				Effect.provideService(SqlClient.SqlClient, app),
+				Effect.result,
+			);
+			assert.equal(result._tag, "Failure");
+			if (result._tag === "Failure") assert(Schema.is(TransferRejected)(result.failure));
+			assert.equal((yield* boot`SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`).length, 0);
+		});
+		yield* refuse; // Missing receipt cannot create a sentinel.
+		assert.equal((yield* app`SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`).length, 0);
+		yield* fs.writeFileString(`${filename}.next`, JSON.stringify(preparation));
+		yield* refuse; // A staged-only receipt is not acknowledged authority.
+		yield* fs.remove(`${filename}.next`);
+		for (const mismatch of [
+			{ ...preparation, epoch: "b".repeat(64) },
+			{ ...preparation, initialized_at: preparation.initialized_at + 1 },
+			{ ...preparation, sentinel: "ready" },
+			{ ...preparation, selection: { ...preparation.selection, store_id: "33333333-3333-4333-8333-333333333333" } },
+			{ phase: "in_progress", binding: { ...preparation.selection, manifest: "a".repeat(64) } },
+		]) {
+			yield* fs.writeFileString(filename, JSON.stringify(mismatch));
+			yield* refuse;
+			assert.equal((yield* app`SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`).length, 0);
+		}
+		yield* fs.remove(filename);
+		yield* writeTransferReceipt(preparation);
+		yield* refuse; // A no-op markReady cannot permit boot DDL.
 		const beforeBoot = Effect.gen(function* () {
 			assert.equal((yield* boot`SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`).length, 0);
 			assert.deepEqual(yield* app`SELECT transferred_to FROM store_identity`, [
