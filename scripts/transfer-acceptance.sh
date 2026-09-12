@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# Disposable whole-image transfer acceptance. Board rows are created through public HTTP.
+set -euo pipefail
+umask 077
+source_engine=${1:?source engine}
+target_engine=${2:?target engine}
+board_image=${3:-comms:transfer-acceptance}
+case "$source_engine:$target_engine" in
+  sqlite:pg|sqlite:mysql|pg:sqlite|pg:mysql|mysql:sqlite|mysql:pg) ;;
+  *) echo 'Expected two distinct supported engines.' >&2; exit 2 ;;
+esac
+private=$(mktemp -d)
+prefix="comms-transfer-${source_engine}-${target_engine}-${RANDOM}-${RANDOM}"
+network="$prefix-network"
+volume="$prefix-data"
+configuration="$prefix-configuration"
+board="$prefix-source"
+target_board="$prefix-target"
+refused_board="$prefix-refused"
+transfer="$prefix-command"
+cleanup() {
+  result=$?
+  trap - EXIT
+  if [ "$result" -ne 0 ]; then
+    for container in "$board" "$target_board" "$refused_board" "$transfer"; do
+      docker logs --tail 60 "$container" > "$private/$(basename "$container").errors" 2>&1 || true
+    done
+    # Only bounded, redacted diagnostics leave the private fixture directory.
+    python3 - "$private" <<'PY'
+import pathlib,re,sys
+root=pathlib.Path(sys.argv[1])
+for path in root.glob('*.errors'):
+    text=path.read_text(errors='replace')[-16384:]
+    text=re.sub(r'(?i)(?:postgres(?:ql)?|mysql)://[^\s]+','[DATABASE URL]',text)
+    text=re.sub(r'(?i)code\s+\S+','code [REDACTED]',text)
+    text=re.sub(r'(?i)\b[a-f0-9]{32,}\b','[SECRET]',text)
+    print(path.name+':\n'+text,file=sys.stderr)
+PY
+  fi
+  docker rm -f "$board" "$target_board" "$refused_board" "$transfer" \
+    "$prefix-source-database" "$prefix-target-database" >/dev/null 2>&1 || true
+  docker volume rm "$volume" "$configuration" >/dev/null 2>&1 || true
+  docker network rm "$network" >/dev/null 2>&1 || true
+  rm -rf "$private"
+  exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+python3 - "$private" "$source_engine" "$target_engine" <<'PY'
+import json,pathlib,secrets,sys,uuid
+root=pathlib.Path(sys.argv[1]); pairs={}
+for side,engine in [('source',sys.argv[2]),('target',sys.argv[3])]:
+    directory=root/side; directory.mkdir(mode=0o700)
+    env='RP_ID=localhost\nPUBLIC_ORIGIN=http://localhost:8080\nDATABASE_TLS=false\n'
+    if engine=='sqlite':
+        pairs[side]={'boot':'file:/data/boot.db','app':'file:/data/store/comms.db'}
+    else:
+        admin,boot,app=(secrets.token_hex(32) for _ in range(3))
+        (directory/'admin-password').write_text(admin)
+        (directory/'admin.cnf').write_text('[client]\nuser=root\npassword='+admin+'\n')
+        (directory/'operator.env').write_text('COMMS_BOOT_PASSWORD='+boot+'\nCOMMS_APP_PASSWORD='+app+'\n')
+        (directory/'mysql-passwords.sql').write_text("SET @boot_password='"+boot+"', @app_password='"+app+"';\n")
+        scheme,port=('postgres','5432') if engine=='pg' else ('mysql','3306')
+        pairs[side]={'boot':f'{scheme}://comms_boot:{boot}@{side}-database:{port}/comms_boot',
+                     'app':f'{scheme}://comms_app:{app}@{side}-database:{port}/comms_app'}
+    env+='DATABASE_URL='+pairs[side]['app']+'\nBOOT_DATABASE_URL='+pairs[side]['boot']+'\n'
+    (directory/'board.env').write_text(env)
+    for path in directory.iterdir(): path.chmod(0o600)
+(root/'transfer.json').write_text(json.dumps({'version':1,'transfer_id':str(uuid.uuid4()),'mode':'transfer',
+    'source':pairs['source'],'target':pairs['target'],'tls':False}))
+(root/'transfer.json').chmod(0o600)
+PY
+docker network create "$network" >/dev/null
+docker volume create "$volume" >/dev/null
+docker volume create "$configuration" >/dev/null
+provision() {
+  local side=$1 engine=$2 database="$prefix-$1-database"
+  [ "$engine" != sqlite ] || return 0
+  if [ "$engine" = pg ]; then
+    docker run --detach --name "$database" --network "$network" --network-alias "$side-database" \
+      --mount "type=bind,src=$private/$side,dst=/run/secrets,readonly" \
+      --env POSTGRES_PASSWORD_FILE=/run/secrets/admin-password \
+      'postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0' >/dev/null
+  else
+    docker run --detach --name "$database" --network "$network" --network-alias "$side-database" \
+      --mount "type=bind,src=$private/$side,dst=/run/secrets,readonly" \
+      --env MYSQL_ROOT_PASSWORD_FILE=/run/secrets/admin-password --env MYSQL_ROOT_HOST=127.0.0.1 \
+      'mysql:8.4.11@sha256:3466ba4a4828aa8d46fb7c3bc16b67b781c98413cf4ea0fac6feaa6e881faa26' \
+      --performance-schema-session-connect-attrs-size=2048 >/dev/null
+  fi
+  local ready=false
+  for attempt in $(seq 1 120); do
+    if [ "$engine" = pg ]; then
+      if docker exec "$database" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>"$private/$side-readiness.errors"; then ready=true; break; fi
+    elif docker exec "$database" mysql --defaults-extra-file=/run/secrets/admin.cnf --host=127.0.0.1 \
+      -e 'SELECT 1' >/dev/null 2>"$private/$side-readiness.errors"; then ready=true; break; fi
+    [ "$(docker inspect --format '{{.State.Running}}' "$database")" = true ] || return 1
+    sleep 1
+  done
+  [ "$ready" = true ] || return 1
+  if [ "$engine" = pg ]; then
+    docker exec --env-file "$private/$side/operator.env" -i "$database" psql -X -U postgres -v ON_ERROR_STOP=1 \
+      < packages/boot/sql/postgres-roles.sql >/dev/null 2>"$private/$side-provision.errors"
+    docker exec -i "$database" psql -X -U postgres -v ON_ERROR_STOP=1 \
+      < packages/boot/sql/postgres-scratch-roles.sql >/dev/null 2>>"$private/$side-provision.errors"
+  else
+    cat "$private/$side/mysql-passwords.sql" packages/boot/sql/mysql-roles.sql |
+      docker exec -i "$database" mysql --defaults-extra-file=/run/secrets/admin.cnf --batch \
+        >/dev/null 2>"$private/$side-provision.errors"
+    docker exec -i "$database" mysql --defaults-extra-file=/run/secrets/admin.cnf --batch \
+      < packages/boot/sql/mysql-scratch-roles.sql >/dev/null 2>>"$private/$side-provision.errors"
+  fi
+}
+provision source "$source_engine"
+provision target "$target_engine"
+capabilities=(--cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER
+  --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SETPCAP)
+launch_board() {
+  docker run --detach --name "$1" --network "$network" --read-only --tmpfs /tmp \
+    "${capabilities[@]}" --mount "type=volume,src=$volume,dst=/data" \
+    --env-file "$private/$2/board.env" --publish 127.0.0.1:8080:8080 "$board_image" >/dev/null
+}
+wait_for_board() {
+  for attempt in $(seq 1 240); do
+    if curl --fail --silent --max-time 2 http://localhost:8080/init >/dev/null; then return 0; fi
+    [ "$(docker inspect --format '{{.State.Running}}' "$1")" = true ] || return 1
+    sleep 1
+  done
+  echo 'Board readiness deadline exceeded.' >&2
+  return 1
+}
+launch_board "$board" source
+wait_for_board "$board"
+docker logs "$board" > "$private/setup-output" 2>&1
+python3 - "$private" <<'PY'
+import pathlib,re,sys
+root=pathlib.Path(sys.argv[1]); text=(root/'setup-output').read_text()
+match=re.search(r'code\s+([A-Fa-f0-9-]{8,})',text)
+if not match: raise SystemExit('Setup code absent from board output')
+(root/'setup-code').write_text(match[1]); (root/'setup-code').chmod(0o600)
+PY
+export COMMS_TEST_ORIGIN=http://localhost:8080
+export COMMS_SETUP_CODE_FILE="$private/setup-code"
+export COMMS_TEST_DIAGNOSTICS_FILE="$private/http-diagnostics"
+bun scripts/remote-board-http.ts prepare http://localhost:8080 "$private/state.json"
+bun scripts/transfer-acceptance-http.ts seed-source http://localhost:8080 "$private/state.json"
+docker stop --time 30 "$board" >/dev/null
+[ "$(docker inspect --format '{{.State.ExitCode}}' "$board")" = 0 ]
+# The real wrapper requires a root-owned, non-writable ancestor chain. Host runner UID
+# ownership is not enough; copy the private config into a root-owned disposable volume.
+docker run --rm --network none --read-only --user 0:0 --entrypoint /bin/sh \
+  --mount "type=bind,src=$private,dst=/input,readonly" \
+  --mount "type=volume,src=$configuration,dst=/run/secrets" "$board_image" \
+  -c 'chmod 0700 /run/secrets; cp /input/transfer.json /run/secrets/transfer.json; chown 0:0 /run/secrets/transfer.json; chmod 0600 /run/secrets/transfer.json'
+docker run --name "$transfer" --network "$network" --read-only --tmpfs /tmp "${capabilities[@]}" \
+  --mount "type=volume,src=$volume,dst=/data" \
+  --mount "type=volume,src=$configuration,dst=/run/secrets,readonly" \
+  "$board_image" store-transfer --config /run/secrets/transfer.json \
+  > "$private/transfer-output" 2> "$private/transfer.errors"
+python3 - "$private" "$source_engine" "$target_engine" <<'PY'
+import json,pathlib,re,sys
+root=pathlib.Path(sys.argv[1]); config=json.loads((root/'transfer.json').read_text())
+result=json.loads((root/'transfer-output').read_text())
+assert result['transfer_id']==config['transfer_id'] and result['status']=='complete', 'CLI completion receipt missing'
+assert result['source']['engine']==sys.argv[2] and result['target']['engine']==sys.argv[3], 'Wrong transfer engines'
+assert re.fullmatch('[a-f0-9]{64}',result['manifest']), 'Verified manifest missing'
+assert '://' not in json.dumps(result), 'Public CLI output contains a connection URL'
+PY
+launch_board "$refused_board" source
+for attempt in $(seq 1 60); do
+  [ "$(docker inspect --format '{{.State.Running}}' "$refused_board")" = true ] || break
+  if curl --silent --max-time 1 http://localhost:8080/health >/dev/null; then
+    bun scripts/transfer-acceptance-http.ts verify-source-refused http://localhost:8080 "$private/state.json"
+    break
+  fi
+  sleep 1
+done
+if [ "$(docker inspect --format '{{.State.Running}}' "$refused_board")" != true ]; then
+  [ "$(docker inspect --format '{{.State.ExitCode}}' "$refused_board")" != 0 ]
+  docker logs "$refused_board" > "$private/source-refusal" 2>&1
+  grep -q 'store_transferred' "$private/source-refusal"
+else
+  # A live listener must demonstrate the typed refusal, not just fail a readiness probe.
+  bun scripts/transfer-acceptance-http.ts verify-source-refused http://localhost:8080 "$private/state.json"
+  docker stop --time 30 "$refused_board" >/dev/null
+fi
+launch_board "$target_board" target
+wait_for_board "$target_board"
+bun scripts/transfer-acceptance-http.ts verify-target http://localhost:8080 "$private/state.json"
+docker restart --time 30 "$target_board" >/dev/null
+wait_for_board "$target_board"
+bun scripts/transfer-acceptance-http.ts verify-restarted http://localhost:8080 "$private/state.json"
+docker stop --time 30 "$target_board" >/dev/null
+[ "$(docker inspect --format '{{.State.ExitCode}}' "$target_board")" = 0 ]
+echo "Actual image transfer $source_engine -> $target_engine passed persisted board and restart checks."
