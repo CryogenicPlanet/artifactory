@@ -30,5 +30,18 @@ it("reports SQL classification without raw messages, statements or credential va
 			errno: 1142,
 		},
 		{ event: "store_transfer_failure", stage: "source_inspection", code: "sql_error", reason: "AuthorizationError" },
+		{ event: "store_transfer_failure", stage: "catalog_app", code: "transfer_object_unsupported", object: "unaccent" },
+		{
+			event: "store_transfer_failure",
+			stage: "catalog_app",
+			code: "transfer_object_unsupported",
+			object: "non_simple_identifier",
+		},
+		{
+			event: "store_transfer_failure",
+			stage: "catalog_app",
+			code: "transfer_object_unsupported",
+			object: "non_simple_identifier",
+		},
 	]);
 });

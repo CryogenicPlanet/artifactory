@@ -6,7 +6,7 @@ import {
 	runTransferApp,
 	snapshotStoreEntry,
 } from "@comms/boot";
-import { transferInventory } from "@comms/storage/transfer-inventory";
+import { TransferInventoryError, transferInventory } from "@comms/storage/transfer-inventory";
 import { writeTransferReceipt } from "@comms/storage/store-transfer-receipt";
 import {
 	bindingText,
@@ -37,6 +37,18 @@ export const transferStage = (stage: string) =>
 		const failure = Cause.findErrorOption(cause);
 		const error = Option.isSome(failure) ? failure.value : undefined;
 		const code = Schema.is(TransferRejected)(error) ? error.code : "transfer_operation_failed";
+		if (Schema.is(TransferInventoryError)(error)) {
+			return Console.error(
+				JSON.stringify({
+					event: "store_transfer_failure",
+					stage,
+					code: error.code,
+					object: /^[A-Za-z_][A-Za-z0-9_.]{0,127}(?![\s\S])/.test(error.object)
+						? error.object
+						: "non_simple_identifier",
+				}),
+			);
+		}
 		if (Schema.is(SqlError.SqlError)(error)) {
 			const driver = error.reason.cause;
 			const state =

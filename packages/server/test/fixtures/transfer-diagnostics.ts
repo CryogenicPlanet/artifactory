@@ -1,6 +1,7 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Console, Effect } from "effect";
 import { SqlError } from "effect/unstable/sql";
+import { TransferInventoryError } from "@comms/storage/transfer-inventory";
 import { transferStage } from "../../src/transfer/worker.ts";
 const main = Effect.gen(function* () {
 	for (const driver of [
@@ -11,6 +12,11 @@ const main = Effect.gen(function* () {
 		yield* Effect.fail(
 			new SqlError.SqlError({ reason: new SqlError.AuthorizationError({ cause: driver, message: "fixture-secret" }) }),
 		).pipe(transferStage("source_inspection"), Effect.exit);
+	for (const object of ["unaccent", "mysql://user:fixture-secret@host/db", "unaccent\n"])
+		yield* new TransferInventoryError({ code: "transfer_object_unsupported", object }).pipe(
+			transferStage("catalog_app"),
+			Effect.exit,
+		);
 	yield* Console.log("Safe SQL diagnostics verified");
 });
 BunRuntime.runMain(main.pipe(Effect.provide(BunServices.layer)));
