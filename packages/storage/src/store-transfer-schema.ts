@@ -33,6 +33,13 @@ export type TransferPhase = typeof TransferPhase.Type;
 export const TransferJournal = Schema.Struct({ binding: TransferBinding, phase: TransferPhase });
 export type TransferJournal = typeof TransferJournal.Type;
 
+/** Written by the immutable outer command only after all store owners have closed. */
+export const TransferReceipt = Schema.Struct({
+	binding: TransferBinding,
+	phase: Schema.Literals(["in_progress", "complete"]),
+});
+export type TransferReceipt = typeof TransferReceipt.Type;
+
 export class TransferRejected extends Schema.TaggedError<TransferRejected>()("TransferRejected", {
 	code: Schema.Literals([
 		"transfer_binding_invalid",

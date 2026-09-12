@@ -1,8 +1,13 @@
 import { lockRow, on } from "@comms/storage/dialect";
 import { Effect, Option, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { bindingText, TransferJournal, TransferRejected, validateTransferBinding } from "./store-transfer-schema.ts";
-import type { TransferBinding, TransferPhase } from "./store-transfer-schema.ts";
+import {
+	bindingText,
+	TransferJournal,
+	TransferRejected,
+	validateTransferBinding,
+} from "@comms/storage/store-transfer-schema";
+import type { TransferBinding, TransferPhase } from "@comms/storage/store-transfer-schema";
 
 const Settings = Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String }));
 const readSettings = (sql: SqlClient) =>

@@ -4,7 +4,7 @@ import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
 import { transferStores } from "../../src/store-transfer-coordinator.ts";
-import type { TransferBinding } from "../../src/store-transfer-schema.ts";
+import type { TransferBinding } from "@comms/storage/store-transfer-schema";
 
 const directory = process.argv[2];
 const mode = process.argv[3];
