@@ -22,7 +22,8 @@ export async function launch(test: TestContext, mode = "normal", actualServer = 
 			...process.env,
 			ENTRY: actualServer ? join(import.meta.dirname, "../../../server/src/server.ts") : entry,
 			DATA_DIR: join(directory, "data"),
-			BOOT_DATABASE_URL: "must-not-reach-child",
+			DATABASE_URL: `file:${join(directory, "data", "comms.db")}`,
+			BOOT_DATABASE_URL: `file:${join(directory, "data", "boot.db")}`,
 		},
 		stdio: ["ignore", "pipe", "pipe"],
 	});
