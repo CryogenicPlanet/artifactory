@@ -1,19 +1,41 @@
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
 for (const ledger of ["boot_migrations", "core_migrations"]) {
-	for (const mode of ["success", "empty", "failure", "gap", "wrong-name", "mirror", "newer-ledger", "newer-version"]) {
+	for (const mode of [
+		"success",
+		"empty",
+		"failure",
+		"gap",
+		"wrong-name",
+		"mirror",
+		"newer-ledger",
+		"newer-version",
+		"invalid-mirror",
+		"ahead",
+		"future",
+		"steps",
+		"object",
+		"shape",
+	]) {
 		it(`${ledger}: ${mode} preserves data and validates the complete migration prefix`, async () => {
 			const directory = await mkdtemp(join(tmpdir(), "comms-ledger-"));
 			const args = [`${import.meta.dirname}/fixtures/migrations.ts`, join(directory, "store.db")];
 			try {
 				await promisify(execFile)("bun", [...args, "seed", ledger]);
 				await promisify(execFile)("bun", [...args, mode, ledger]);
+				if (mode === "success") {
+					const before = await readFile(join(directory, "store.db"));
+					const walBefore = await readFile(join(directory, "store.db-wal")).catch(() => null);
+					await promisify(execFile)("bun", [...args, mode, ledger]);
+					expect(await readFile(join(directory, "store.db"))).toEqual(before);
+					expect(await readFile(join(directory, "store.db-wal")).catch(() => null)).toEqual(walBefore);
+				}
 			} finally {
 				await rm(directory, { recursive: true, force: true });
 			}
