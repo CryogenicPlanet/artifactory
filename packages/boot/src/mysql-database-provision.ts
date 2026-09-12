@@ -85,6 +85,9 @@ export const mysqlDatabaseProvision = <E, R>(receipts: MysqlDatabaseReceipts<E, 
 				yield* execute(
 					`CREATE USER ${account(record.principal)} IDENTIFIED BY '${password}' ATTRIBUTE '{"comms_resource":"${record.id}"}'`,
 				);
+				yield* execute(
+					`GRANT SELECT ON performance_schema.session_account_connect_attrs TO ${account(record.principal)}`,
+				);
 			});
 		const createDatabase = (record: RemoteDatabaseRecord) =>
 			Effect.gen(function* () {
