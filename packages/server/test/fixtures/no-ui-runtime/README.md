@@ -1,0 +1,3 @@
+This frozen package fixture supports the two generation-revert tests that exercise real dependency preparation. It installs the server's imported modules and editable protocol/storage workspaces, without the unused React/Vite build graph or browser page assets. These tests do not build UI or request `/page-assets`.
+
+Keep the exact Effect versions and patch paths aligned with `packages/server/runtime/package.json`. To regenerate `bun.lock`, copy this manifest, the protocol/storage workspace manifests, and the repository patches into a temporary directory with the same layout, then run the pinned Bun installer. Tests still perform a real frozen install, copy independent dependency files, and fsync the retained tree; no installer or durability boundary is mocked.

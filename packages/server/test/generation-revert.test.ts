@@ -11,8 +11,8 @@ it("restores a retained generation's whole source and manifest through cutover w
 	const fixture = await conversation(test);
 	const seed = join(fixture.root, "seed");
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
-	const manifest = await readFile(join(import.meta.dirname, "../runtime/package.json"), "utf8");
-	const lockfile = await readFile(join(import.meta.dirname, "../runtime/bun.lock"), "utf8");
+	const manifest = await readFile(join(import.meta.dirname, "fixtures/no-ui-runtime/package.json"), "utf8");
+	const lockfile = await readFile(join(import.meta.dirname, "fixtures/no-ui-runtime/bun.lock"), "utf8");
 	await writeFile(join(seed, "package.json"), manifest);
 	await writeFile(join(seed, "bun.lock"), lockfile);
 	// Keep the frozen manifest and its required installer patch together.
@@ -24,7 +24,7 @@ it("restores a retained generation's whole source and manifest through cutover w
 	]) {
 		await cp(join(import.meta.dirname, "../../../patches", patch), join(seed, "patches", patch));
 	}
-	// Match the runtime manifest's editable workspaces, just like stage-runtime.
+	// Keep real editable workspaces; this no-UI fixture installs only its actual server imports.
 	for (const workspace of ["protocol", "storage"]) {
 		await mkdir(join(seed, workspace));
 		for (const file of ["src", "docs", "package.json"])
@@ -295,8 +295,8 @@ it("keeps source and live writes intact when generation dependency preparation f
 	const fixture = await conversation(test);
 	const seed = join(fixture.root, "preparation-seed");
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
-	const manifest = await readFile(join(import.meta.dirname, "../runtime/package.json"), "utf8");
-	const lockfile = await readFile(join(import.meta.dirname, "../runtime/bun.lock"), "utf8");
+	const manifest = await readFile(join(import.meta.dirname, "fixtures/no-ui-runtime/package.json"), "utf8");
+	const lockfile = await readFile(join(import.meta.dirname, "fixtures/no-ui-runtime/bun.lock"), "utf8");
 	await writeFile(join(seed, "package.json"), manifest);
 	await writeFile(join(seed, "bun.lock"), lockfile);
 	// Keep the frozen manifest and its required installer patch together.
@@ -308,7 +308,7 @@ it("keeps source and live writes intact when generation dependency preparation f
 	]) {
 		await cp(join(import.meta.dirname, "../../../patches", patch), join(seed, "patches", patch));
 	}
-	// Match the runtime manifest's editable workspaces, just like stage-runtime.
+	// Keep real editable workspaces; this no-UI fixture installs only its actual server imports.
 	for (const workspace of ["protocol", "storage"]) {
 		await mkdir(join(seed, workspace));
 		for (const file of ["src", "docs", "package.json"])
