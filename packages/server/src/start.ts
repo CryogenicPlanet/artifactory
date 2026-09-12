@@ -20,7 +20,7 @@ export const startServer = (browserOrigin?: string) =>
 		const parent = yield* Config.Redacted("COMMS_REMOTE_ROOT_CONFIG").pipe(Config.withDefault(undefined));
 		if (selected._tag === "remote" && parent === undefined) {
 			yield* (yield* FileSystem.FileSystem).makeDirectory(absoluteData, { recursive: true, mode: 0o700 });
-			return yield* launchRemoteRoot(selected, {
+			const exitCode = yield* launchRemoteRoot(selected, {
 				dataDirectory: absoluteData,
 				entry: yield* path.fromFileUrl(
 					new URL(import.meta.url.endsWith(".ts") ? "./main.ts" : "./main.js", import.meta.url),
@@ -29,6 +29,8 @@ export const startServer = (browserOrigin?: string) =>
 					? { PUBLIC_ORIGIN: yield* Config.String("PUBLIC_ORIGIN").pipe(Config.withDefault(browserOrigin)) }
 					: {},
 			});
+			if (exitCode !== 0) return yield* Effect.die("Remote boot worker failed");
+			return;
 		}
 		const fetchOptions: RequestInit & { decompress: boolean } = { redirect: "manual", decompress: false };
 		const port = yield* Config.Port("PORT").pipe(Config.withDefault(8080));
