@@ -26,7 +26,7 @@ export const makeTopics = (sql: SqlClient.SqlClient, read: Messages["Service"]["
    COALESCE((SELECT MAX(m.seq) FROM visible_messages m WHERE m.seq<=${ceiling} AND (m.topic=t.path OR ${isDescendant(sql, sql("m.topic"), sql("t.path"))})),0) AS last_seq,
    (SELECT COUNT(*) FROM visible_messages m WHERE m.deleted_at IS NULL AND m.seq<=${ceiling} AND (m.topic=t.path OR ${isDescendant(sql, sql("m.topic"), sql("t.path"))})
     AND NOT EXISTS(SELECT 1 FROM visible_topics a WHERE a.archived_at IS NOT NULL AND (m.topic=a.path OR ${isDescendant(sql, sql("m.topic"), sql("a.path"))}))
-    AND m.seq>COALESCE((SELECT MAX(r.seq) FROM reads r WHERE r.instance=${identity.instance} AND (r.topic='' OR r.topic=m.topic OR ${isDescendant(sql, sql("m.topic"), sql("r.topic"))})),0)) AS unread
+    AND m.seq>COALESCE((SELECT MAX(r.seq) FROM ${sql("reads")} r WHERE r.instance=${identity.instance} AND (r.topic='' OR r.topic=m.topic OR ${isDescendant(sql, sql("m.topic"), sql("r.topic"))})),0)) AS unread
    FROM visible_topics t WHERE NOT EXISTS(SELECT 1 FROM visible_topics a WHERE a.deleted_at IS NOT NULL AND (t.path=a.path OR ${isDescendant(sql, sql("t.path"), sql("a.path"))})) AND (${path}='' OR t.path=${path} OR ${isDescendant(sql, sql("t.path"), path)})
    AND (${archived ? 1 : 0}=1 OR t.path=${path} OR NOT EXISTS(SELECT 1 FROM visible_topics a WHERE a.archived_at IS NOT NULL AND (t.path=a.path OR ${isDescendant(sql, sql("t.path"), sql("a.path"))})))
    ORDER BY last_seq DESC,t.path`.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(StoredTopic))));

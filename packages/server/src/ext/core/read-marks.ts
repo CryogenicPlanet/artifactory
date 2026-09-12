@@ -11,7 +11,7 @@ export const markRead = (sql: SqlClient, mutate: Mutate, identity: Identity, inp
 	mutate({
 		body: () =>
 			Effect.gen(function* () {
-				yield* sql`INSERT INTO reads(instance,topic,seq) VALUES(${identity.instance},${input.topic},${input.seq}) ${on(sql, { sqlite: () => sql`ON CONFLICT(instance,topic) DO UPDATE SET seq=excluded.seq WHERE reads.seq<excluded.seq`, pg: () => sql`ON CONFLICT(instance,topic) DO UPDATE SET seq=excluded.seq WHERE reads.seq<excluded.seq`, mysql: () => sql`ON DUPLICATE KEY UPDATE seq=GREATEST(seq,${input.seq})` })}`;
+				yield* sql`INSERT INTO ${sql("reads")}(instance,topic,seq) VALUES(${identity.instance},${input.topic},${input.seq}) ${on(sql, { sqlite: () => sql`ON CONFLICT(instance,topic) DO UPDATE SET seq=excluded.seq WHERE reads.seq<excluded.seq`, pg: () => sql`ON CONFLICT(instance,topic) DO UPDATE SET seq=excluded.seq WHERE reads.seq<excluded.seq`, mysql: () => sql`ON DUPLICATE KEY UPDATE seq=GREATEST(seq,${input.seq})` })}`;
 				return { outcome: undefined, events: [] };
 			}),
 	});
