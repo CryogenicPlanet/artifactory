@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -67,7 +67,12 @@ for (const mode of ["leases", "reject", "pending", "stream", "restart", "prepare
 						{ timeout: 30000 },
 					)
 					.toBe(true);
-				await writeFile(`${journal}.restarted`, "ready");
+				const enginePort = process.env.COMMS_REMOTE_TEST_ENGINE === "pg" ? "5432/tcp" : "3306/tcp";
+				const published = await promisify(execFile)("docker", ["port", container, enginePort]);
+				const port = Number(published.stdout.trim().split(":").at(-1));
+				if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid published database port");
+				await writeFile(`${journal}.restarted.tmp`, String(port));
+				await rename(`${journal}.restarted.tmp`, `${journal}.restarted`);
 			}
 			await exited;
 			expect(child.exitCode, output).toBe(0);
