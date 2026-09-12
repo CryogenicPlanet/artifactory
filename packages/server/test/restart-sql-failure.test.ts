@@ -83,6 +83,23 @@ async function failingRestart(test: TestContext, boundary: "backup" | "accepted"
 			),
 		);
 	}
+	const supervisor = join(fixture.boot, "src/supervisor.ts");
+	const supervised = await readFile(supervisor, "utf8");
+	const withdrawalLog = join(fixture.root, "withdrawn-status");
+	const boundaryMarker = "const tried = yield* Ref.make<Readonly<Record<number, number>>>({});";
+	expect(supervised.split(boundaryMarker)).toHaveLength(2);
+	await writeFile(
+		supervisor,
+		supervised.replace("const withdraw =", "const withdrawBase =").replace(
+			boundaryMarker,
+			`
+	const withdraw = withdrawBase.pipe(Effect.andThen(Effect.gen(function* () {
+		const observed = yield* Ref.get(status);
+		yield* fs.writeFileString(${JSON.stringify(withdrawalLog)}, observed.state + ":" + observed.pid + ":" + observed.port + "\\n", { flag: "a" });
+	})));
+	${boundaryMarker}`,
+		),
+	);
 	const app = await fixture.launch();
 	await app.setup();
 	const cookie = await app.login();
@@ -126,6 +143,10 @@ async function failingRestart(test: TestContext, boundary: "backup" | "accepted"
 			});
 		}
 		expect(response.status, evidence).toBe(200);
+		const withdrawals = (await readFile(withdrawalLog, "utf8")).trim().split("\n");
+		expect(withdrawals.some((state) => state.startsWith("live:"))).toBe(false);
+		for (const state of withdrawals.filter((state) => state.startsWith("starting:")))
+			expect(state).toBe("starting:null:null");
 	};
 	return { fixture, app, cookie, expectMutation };
 }
