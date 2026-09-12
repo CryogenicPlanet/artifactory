@@ -43,3 +43,36 @@ jobs:
         run: bash scripts/remote-tls-acceptance.sh '${{ matrix.engine }}' comms:remote-board
       - name: Exercise board against native database
         run: bash scripts/remote-board-acceptance.sh '${{ matrix.engine }}' comms:remote-board
+
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [pg, mysql]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.22.3
+      - name: Install pinned Bun
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl --fail --location --silent --show-error --retry 3 --output bun.zip \
+            https://github.com/oven-sh/bun/releases/download/bun-v1.4.0/bun-linux-x64.zip
+          printf '%s\n' '2d03fb5fb83ac8b567aca0a281b2ce1a1a19d488f56c2968d88c3f25e92fe452  bun.zip' | sha256sum --check -
+          unzip -q bun.zip
+          printf '%s\n' "$RUNNER_TEMP/bun-linux-x64" >> "$GITHUB_PATH"
+      - name: Install locked probe dependencies
+        run: |
+          test "$(node --version)" = v22.22.3
+          test "$(bun --version)" = 1.4.0
+          bun install --frozen-lockfile
+      - name: Build actual immutable board image
+        run: docker build --platform linux/amd64 --tag comms:remote-board .
+      - name: Verify damaged-store repair with real guarded boards
+        run: bash scripts/remote-repair-acceptance.sh '${{ matrix.engine }}' comms:remote-board

@@ -58,6 +58,7 @@ import { StoreError } from "@comms/storage/store";
 import { failure as remoteFailure } from "@comms/storage/remote-session";
 
 export { failedRemoteRestoreBlocksStartup } from "./remote-restore-selection.ts";
+export { remoteRuntime } from "./remote-runtime.ts";
 export { launchRemoteRoot } from "./remote-root-launcher.ts";
 export { databaseConfiguration } from "./database-configuration.ts";
 
