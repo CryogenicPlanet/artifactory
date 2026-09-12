@@ -2,7 +2,7 @@ import { ChildError } from "./child-process.ts";
 import { appStoreIdentity, verifyAppIdentity } from "./app-store-identity.ts";
 import type { BackupRecord } from "./backup-metadata.ts";
 import { clientLayer } from "@comms/storage/client";
-import type { FileStore } from "@comms/storage/store";
+import type { FileStore, Store } from "@comms/storage/store";
 import { Config, Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
@@ -97,5 +97,23 @@ const make = (store: FileStore, dataDirectory: string) =>
 				}),
 		};
 	});
-export class DbOps extends Context.Service<DbOps, Effect.Success<ReturnType<typeof make>>>()("comms/boot/DbOps") {}
+type Operations = Effect.Success<ReturnType<typeof make>>;
+type Restore = ReturnType<Operations["restoreInto"]>;
+type Rehearsal = ReturnType<Operations["rehearsal"]>;
+/** Coordinators select stores; the SQLite implementation retains file-specific mechanics internally. */
+export interface DbOpsService extends Omit<Operations, "engine" | "restoreInto" | "rehearsal"> {
+	readonly engine: "sqlite" | "pg" | "mysql";
+	readonly restoreInto: (
+		artifact: Parameters<Operations["restoreInto"]>[0],
+	) => Effect.Effect<Store, Effect.Error<Restore>, Effect.Services<Restore>>;
+	readonly rehearsal: (...args: Parameters<Operations["rehearsal"]>) => Effect.Effect<
+		{
+			readonly store: Store;
+			readonly dispose: Effect.Effect<void, Effect.Error<Rehearsal>, Effect.Services<Rehearsal>>;
+		},
+		Effect.Error<Rehearsal>,
+		Effect.Services<Rehearsal>
+	>;
+}
+export class DbOps extends Context.Service<DbOps, DbOpsService>()("comms/boot/DbOps") {}
 export const layer = (store: FileStore, dataDirectory: string) => Layer.effect(DbOps, make(store, dataDirectory));
