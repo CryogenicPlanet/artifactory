@@ -368,3 +368,21 @@ it.for(["cutover", "restore"])("refuses a v17 %s upgrade before stamping backup 
 	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 17 }]);
 	expect(await app.sql("SELECT name FROM pragma_table_info('backups') WHERE name='engine'")).toEqual([]);
 });
+
+it.for(["cutover", "restore"])("refuses a v18 %s upgrade before enabling copy-owner recovery", async (kind, test) => {
+	const app = await fixture(test);
+	expect(await app.run()).toContain('"Success"');
+	await app.sql("PRAGMA user_version=18");
+	if (kind === "cutover")
+		await app.sql(
+			"INSERT INTO cutover(singleton,candidate,backup,lock_id,family,phase) VALUES(1,1,'saved','lock','family','restoring')",
+		);
+	else
+		await app.sql(
+			"INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES('proof','hash','session','saved','restoring',0)",
+		);
+	const before = await readFile(join(app.root, "boot.db"));
+	expect(await app.run()).toContain("BootIdentityUpgradePending");
+	expect(await readFile(join(app.root, "boot.db"))).toEqual(before);
+	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 18 }]);
+});

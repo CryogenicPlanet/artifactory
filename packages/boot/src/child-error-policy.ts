@@ -18,6 +18,14 @@ const unavailable = {
 /** Exhaustive child failures shared by boot HTTP boundaries; recovery evidence is never a retry loop. */
 export const childErrorPolicy = {
 	accepted_snapshot_missing: recovery,
+	sqlite_copy_failed: recovery,
+	sqlite_copy_invalid: recovery,
+	sqlite_copy_closure_unproven: recovery,
+	rehearsal_copy_timeout: {
+		status: 409,
+		retriable: false,
+		hint: "Increase REHEARSAL_COPY_BUDGET for this store size, then retry. The copy exceeded its budget; this is not an edited-source health failure.",
+	},
 	backup_live_child_required: unavailable,
 	boot_shutting_down: unavailable,
 	child_closure_unproven: recovery,

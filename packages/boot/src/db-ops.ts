@@ -1,3 +1,4 @@
+import { sqliteCopyProcess } from "./sqlite-copy-process.ts";
 import { ChildError } from "./child-process.ts";
 import { appStoreIdentity, verifyAppIdentity } from "./app-store-identity.ts";
 import type { BackupRecord } from "./backup-metadata.ts";
@@ -17,6 +18,7 @@ const make = (store: FileStore, dataDirectory: string) =>
 		const identity = yield* appStoreIdentity(filename, dataDirectory);
 		const path = yield* Path.Path;
 		const headroom = yield* storageHeadroom(dataDirectory);
+		const copying = yield* sqliteCopyProcess(filename, dataDirectory);
 		const estimatedBytes = Effect.scoped(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -32,19 +34,16 @@ const make = (store: FileStore, dataDirectory: string) =>
 		const sync = (name: string) => Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
 		return {
 			dialect: "sqlite" as const,
-			recoverStaging: fs.remove(`${filename}.restore-staging`, { recursive: true, force: true }),
+			recoverStaging: copying.recover.pipe(
+				Effect.andThen(fs.remove(`${filename}.restore-staging`, { recursive: true, force: true })),
+			),
 			estimatedBytes,
+			recoverCopy: copying.recover,
 			clone: (destination: FileStore) =>
-				Effect.scoped(
-					Effect.gen(function* () {
-						yield* headroom.check(yield* estimatedBytes);
-						const sql = yield* SqlClient.SqlClient;
-						yield* sql`PRAGMA busy_timeout = 2000`;
-						yield* sql`VACUUM INTO ${destination.filename}`;
-						yield* sync(destination.filename);
-						yield* sync(path.dirname(destination.filename));
-						return (yield* fs.stat(destination.filename)).size;
-					}).pipe(Effect.provide(clientLayer(store))),
+				copying.recover.pipe(
+					Effect.andThen(estimatedBytes),
+					Effect.flatMap((bytes) => headroom.check(bytes)),
+					Effect.andThen(copying.copy(destination.filename)),
 				),
 			prepareClone: (clone: FileStore, epoch: string) =>
 				Effect.scoped(
@@ -57,6 +56,7 @@ const make = (store: FileStore, dataDirectory: string) =>
 				Effect.scoped(
 					Effect.gen(function* () {
 						if (backup.engine !== "sqlite") return yield* new ChildError({ code: "backup_engine_mismatch" });
+						yield* copying.recover;
 						// Serialized restore owns this disposable path after positive owner closure.
 						// Remove the entire prior copy, including a killed SQLite transaction's sidecars.
 						const directory = `${filename}.restore-staging`;

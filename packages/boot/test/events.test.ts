@@ -155,7 +155,7 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 		"SELECT batch,path,hex(before) AS before_bytes,before_mode,hex(desired) AS desired_bytes,desired_mode FROM source_changes",
 	);
 	expect(await app.run({ op: "init" })).toMatchObject({ _tag: "Success" });
-	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 18 }]);
+	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 19 }]);
 	expect(await app.sql("SELECT value FROM settings WHERE key='preserved'")).toEqual([{ value: "value" }]);
 	expect(
 		await app.sql(

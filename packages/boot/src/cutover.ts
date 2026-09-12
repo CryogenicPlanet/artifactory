@@ -123,6 +123,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 				route.epoch !== current.attempt.epoch
 			)
 				return;
+			yield* backup.recoverCopy;
 			yield* supervisor.assertClosure;
 			if (
 				record.phase !== "accepted" ||
@@ -306,7 +307,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 								yield* sql`INSERT INTO cutover VALUES(1,${generation.n},${prior?.generation.n ?? null},${id},${owner.id},${owner.family},'working',${candidate.attempt.epoch})`;
 							}),
 						);
-					}).pipe(Effect.timeout("30 seconds"));
+					});
 					yield* Effect.gen(function* () {
 						yield* recovery.prepare(candidate.attempt.epoch);
 						yield* supervisor.recordAttempt(candidate, "starting");
@@ -348,6 +349,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					yield* refresh;
 					return { ...result.value, lock: (yield* lock.inspect).value };
 				}
+				yield* backup.recoverCopy;
 				const failure = Cause.findError(result.cause);
 				const incompatibleSeed =
 					request.trustedSource !== undefined &&
@@ -422,7 +424,8 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					failure._tag === "Success" &&
 					(Schema.is(FreezeTimeout)(failure.success) ||
 						Schema.is(StorageRejected)(failure.success) ||
-						Schema.is(ArtifactRetentionRejected)(failure.success))
+						Schema.is(ArtifactRetentionRejected)(failure.success) ||
+						(Schema.is(ChildError)(failure.success) && failure.success.code === "rehearsal_copy_timeout"))
 				)
 					return yield* failure.success;
 				return {
