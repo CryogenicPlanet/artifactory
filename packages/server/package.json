@@ -8,14 +8,22 @@
 	},
 	"scripts": {
 		"check": "tsc --noEmit",
-		"test": "vitest run --passWithNoTests --root ../.. --dir packages/server/test",
-		"dev": "bun src/main.ts",
-		"start": "bun src/main.ts",
-		"build": "bun build src/main.ts src/start.ts src/server.ts --target=bun --packages=external --outdir=dist"
+		"test": "vitest run --root ../.. packages/server/test",
+		"dev": "bun stage-runtime.ts && bun src/main.ts",
+		"start": "bun stage-runtime.ts && bun src/main.ts",
+		"build": "bun build src/main.ts src/start.ts src/server.ts --target=bun --packages=external --outdir=dist && bun build src/ext/core.ts src/ext/standup.ts --target=bun --packages=external --outdir=dist/ext && bun build src/kernel/sql-read-worker.ts --target=bun --packages=external --outfile=dist/kernel/sql-read-worker.js && bun stage-runtime.ts && bun stage-migrations.ts",
+		"stage:runtime": "bun stage-runtime.ts"
 	},
 	"dependencies": {
 		"@comms/boot": "workspace:*",
+		"@comms/protocol": "workspace:*",
 		"@effect/platform-bun": "4.0.0-rc.113",
-		"effect": "4.0.0-rc.113"
+		"@effect/sql-sqlite-bun": "4.0.0-rc.113",
+		"@tailwindcss/browser": "4.3.3",
+		"effect": "4.0.0-rc.113",
+		"github-markdown-css": "5.9.0",
+		"highlight.js": "11.12.0",
+		"marked": "18.0.12",
+		"mermaid": "12.0.0"
 	}
 }

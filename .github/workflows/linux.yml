@@ -1,0 +1,78 @@
+name: Linux
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.22.3
+      - name: Install declared Bun release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl --fail --location --silent --show-error --retry 3 --output bun.zip \
+            https://github.com/oven-sh/bun/releases/download/bun-v1.4.0/bun-linux-x64.zip
+          printf '%s\n' '2d03fb5fb83ac8b567aca0a281b2ce1a1a19d488f56c2968d88c3f25e92fe452  bun.zip' | sha256sum --check -
+          unzip -q bun.zip
+          printf '%s\n' "$RUNNER_TEMP/bun-linux-x64" >> "$GITHUB_PATH"
+      - name: Verify runtimes
+        run: |
+          test "$(node --version)" = 'v22.22.3'
+          test "$(bun --revision)" = '1.4.0+34cbb9a40'
+          node --version
+          bun --revision
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Check
+        run: bun run check
+      - name: Build
+        run: bun run build
+      - name: Serial Linux startup diagnostics
+        if: matrix.shard == 1
+        continue-on-error: true
+        run: >-
+          bun run test
+          packages/boot/test/proxy.test.ts
+          packages/boot/test/auth-http.test.ts
+          packages/boot/test/source-files.test.ts
+          --maxWorkers=1 --reporter=verbose
+          -t 'forwards upload chunks before the request finishes|creates a passkey and a protected session, forwards verified identity, and logs out|recovers process death at replacement boundary 0 idempotently from its own journal'
+      - name: Boot and server recovery tests
+        # Each file launches Bun processes; four workers exceeded measured fixture budgets on this runner.
+        run: bun run test packages/boot/test packages/server/test --maxWorkers=2 --shard=${{ matrix.shard }}/2 --reporter=verbose
+
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build isolated runtime image
+        run: docker build --tag comms:acceptance .
+      - name: Linux privileged keeper closure acceptance
+        run: sh scripts/linux-keeper-acceptance.sh comms:acceptance
+      - name: Linux UID and persistence acceptance
+        run: sh scripts/smoke-image.sh comms:acceptance

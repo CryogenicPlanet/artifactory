@@ -7,6 +7,17 @@
 	},
 	"overrides": [
 		{
+			"files": ["packages/*/test/**/*.ts"],
+			"rules": {
+				"effecttsgo/async-function": "off",
+				"effecttsgo/global-fetch": "off",
+				"effecttsgo/global-timers": "off",
+				"effecttsgo/new-promise": "off",
+				"effecttsgo/node-builtin-import": "off",
+				"effecttsgo/process-env": "off"
+			}
+		},
+		{
 			"files": ["scripts/**/*.ts"],
 			"rules": {
 				"effecttsgo/global-console": "off",

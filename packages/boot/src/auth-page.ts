@@ -1,0 +1,97 @@
+/** Immutable boot UI: it remains usable when editable app code cannot start. */
+export const authPage = (setup: boolean) => `<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${setup ? "Set up" : "Sign in to"} comms</title>
+<style>body{font:17px/1.6 system-ui,sans-serif;max-width:28rem;margin:12vh auto;padding:1.5rem;color:#20251f;background:#f5f5ef}h1{line-height:1.2}label,input,button{display:block}input,button{font:inherit;padding:.7rem;width:100%;box-sizing:border-box;margin:.7rem 0}button{border:0;background:#244933;color:white;border-radius:.35rem;cursor:pointer}button:disabled{opacity:.5}a{color:#244933}#status{min-height:3em}</style>
+<main><p>comms</p><h1>${setup ? "Create your passkey" : "Welcome back"}</h1>
+<p>${setup ? "Enter the setup code from the bootloader logs. Your password manager will save a passkey for this board." : "Use your passkey to sign in to your board."}</p>
+<form id="auth" data-mode="${setup ? "setup" : "login"}">${setup ? '<label for="code">Setup code</label><input id="code" name="code" required autocomplete="off" spellcheck="false">' : ""}
+<button type="submit">${setup ? "Create passkey" : "Sign in with passkey"}</button></form>
+<p id="status" role="status" aria-live="polite"></p><a href="/_boot">Recovery help</a></main>
+<script src="/_boot/auth/client.js" defer></script></html>`;
+
+// Kept as static JavaScript so source and bundled boot use the same immutable asset.
+export const authClient = `(() => {
+ const form = document.getElementById("auth");
+ const status = document.getElementById("status");
+ const button = form.querySelector("button");
+ const decode = value => Uint8Array.from(atob(value.replace(/-/g,"+").replace(/_/g,"/")), c => c.charCodeAt(0));
+ const encode = value => btoa(String.fromCharCode(...new Uint8Array(value))).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");
+ let stage = "browser", requestId = "", errorCode = "";
+ const rawNext = new URLSearchParams(window.location.search).get("next");
+ const next = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
+ const progress = (value, message) => { stage = value; status.textContent = message; };
+ const post = async (path, body, step) => {
+  requestId = ""; errorCode = "";
+  progress(step + " request", step === "options" ? "Requesting passkey options…" : "Verifying your passkey…");
+  let response;
+  try { response = await fetch(path, {method:"POST", redirect:"manual", headers:{"content-type":"application/json"}, body:JSON.stringify(body)}); }
+  catch { throw new Error("The authentication request could not reach the board. Check your connection and sharing-service sign-in."); }
+  const id = response.headers.get("x-comms-request-id");
+  requestId = /^[a-f0-9]{32}$/.test(id || "") ? id : "";
+  progress(step + " response", "Reading the authentication response…");
+  if (response.type === "opaqueredirect" || response.redirected || (response.status >= 300 && response.status < 400))
+   throw new Error("Authentication was redirected. Open this board directly and complete any sharing-service sign-in.");
+  let result;
+  try { result = await response.json(); }
+  catch { throw new Error("The board or sharing proxy returned an unreadable response (HTTP " + response.status + "). Check the connection and sign-in page."); }
+  if (!result || typeof result !== "object") throw new Error("The board returned an invalid authentication response.");
+  if (!response.ok) {
+   const messages = {setup_code_invalid:"That setup code is incorrect. Check the latest code in the bootloader logs.", setup_closed:"Setup is complete. Open /auth/login to sign in.", setup_required:"Create your first passkey at /setup.", challenge_invalid:"This passkey request expired or was already used. Try again.", origin_invalid:"This address does not match the configured public origin.", authentication_invalid:"The passkey could not be verified. Try again.", registration_invalid:"The passkey could not be registered. Try again.", boot_unavailable:"The boot authentication store is unavailable. Check the bootloader logs."};
+   const code = result.error?.code;
+   errorCode = typeof code === "string" && /^[a-z_]{1,64}$/.test(code) ? code : "";
+   throw new Error((Object.hasOwn(messages, errorCode) ? messages[errorCode] : null) || "Authentication was refused (HTTP " + response.status + "). Check the board configuration or sign in again.");
+  }
+  return result;
+ };
+ const serialize = credential => {
+  const response = credential.response;
+  const value = {id:credential.id, rawId:encode(credential.rawId), type:credential.type, clientExtensionResults:credential.getClientExtensionResults(), response:{clientDataJSON:encode(response.clientDataJSON)}};
+  if (response instanceof AuthenticatorAttestationResponse) {
+   value.response.attestationObject = encode(response.attestationObject);
+   if (response.getTransports) value.response.transports = response.getTransports();
+  }
+  else {
+   value.response.authenticatorData = encode(response.authenticatorData);
+   value.response.signature = encode(response.signature);
+   if (response.userHandle) value.response.userHandle = encode(response.userHandle);
+  }
+  return value;
+ };
+ form.addEventListener("submit", async event => {
+  event.preventDefault(); button.disabled = true;
+  requestId = ""; errorCode = "";
+  progress("browser", "Checking passkey support…");
+  try {
+   if (!window.isSecureContext || !navigator.credentials) throw new Error("Passkeys require HTTPS or http://localhost.");
+   const setup = form.dataset.mode === "setup";
+   const path = "/_boot/auth/" + (setup ? "setup" : "login");
+   const input = setup ? {code:document.getElementById("code").value.trim()} : {};
+   const started = await post(path + "/options", input, "options");
+   progress("options decode", "Preparing the passkey request…");
+   const options = started.options;
+   options.challenge = decode(options.challenge);
+   if (setup) {
+    options.user.id = decode(options.user.id);
+    options.excludeCredentials = (options.excludeCredentials || []).map(item => ({...item,id:decode(item.id)}));
+   } else options.allowCredentials = (options.allowCredentials || []).map(item => ({...item,id:decode(item.id)}));
+   progress(setup ? "credential create" : "credential get", setup ? "Waiting for your browser to create a passkey…" : "Waiting for your browser to unlock your passkey…");
+   const credential = await navigator.credentials[setup ? "create" : "get"]({publicKey:options});
+   if (!credential) throw new Error("No passkey was returned. Try again.");
+   progress("credential encode", "Preparing passkey verification…");
+   await post(path + "/verify", {id:started.id, response:serialize(credential)}, "verify");
+   window.location.assign(setup ? "/auth/login" + (next === "/" ? "" : "?next=" + encodeURIComponent(next)) : next);
+  } catch (error) {
+   const names = ["NotAllowedError", "SecurityError", "InvalidStateError", "NotSupportedError", "AbortError", "TypeError", "UnknownError", "Error", "InvalidCharacterError"];
+   const name = names.includes(error?.name) ? error.name : "Error";
+   const native = stage === "credential create" || stage === "credential get";
+   const message = native
+    ? "Your browser could not complete the passkey request. Check your password manager and this site's passkey permissions. This browser failure is not visible to the server."
+    : stage === "options decode" || stage === "credential encode"
+     ? "The passkey data could not be prepared. Reload the page and try again."
+     : error instanceof Error ? error.message : "Authentication failed. Reload the page and try again.";
+   status.textContent = message + " Stage: " + stage + "; " + name + (errorCode ? "; code: " + errorCode : "") + (requestId ? "; request: " + requestId : "; no board request ID received") + ".";
+  }
+  finally { button.disabled = false; }
+ });
+})();`;

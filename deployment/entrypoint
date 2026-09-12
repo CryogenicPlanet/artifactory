@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+umask 002
+/usr/local/bin/bun /opt/comms/packages/boot/dist/deployment-layout.js
+exec /usr/bin/setpriv --reuid=1000 --regid=1000 --groups=1003 --inh-caps=-all --ambient-caps=-all /usr/local/bin/bun /opt/comms/packages/server/dist/main.js

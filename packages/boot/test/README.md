@@ -1,6 +1,15 @@
-# boot tests
+# Boot tests
 
-No tests exist yet. Put tests here mirroring `src/`, using Vitest and `@effect/vitest` for Effect programs.
+Boot tests exercise authentication, source editing, generation recovery and storage durability. Integration fixtures launch real Bun processes and inspect SQLite stores; WebAuthn fixtures sign credentials and use the production verifier.
 
-From the repo root: `bun run test packages/boot/test/example.test.ts`.
-The root test command explicitly permits an empty suite while this is a scaffold; remove that allowance with the first tests.
+From the repository root, with Node **22.22.3** and Bun on `PATH`:
+
+```sh
+node node_modules/vitest/vitest.mjs run packages/boot/test --maxWorkers=2
+# Or run one file while iterating:
+node node_modules/vitest/vitest.mjs run packages/boot/test/auth.test.ts --maxWorkers=2
+```
+
+Keep test resources inside each test lifecycle. For changes to recovery or authentication, exercise failure, concurrent requests and restart persistence—not just the successful response. Inject faults through test-owned adapters; production routes must not gain test bypasses. Cross-store cutover and restore scenarios also live in [server tests](../../server/test/README.md).
+
+Process-crash tests do not prove physical power-loss safety. See [deployment validation](../../../docs/deployment.md) for Linux isolation and reboot checks, and the [build plan](../../../docs/build-plan.md) for recorded acceptance results.

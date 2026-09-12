@@ -1,14 +1,23 @@
 # Working in comms
 
+- Keep it simple. Build the smallest working slice that meets the current requirement. Do not add speculative abstractions, configuration, packages, fallback paths, or frameworks for hypothetical future needs.
+- Prefer direct code and existing Effect services. Extract an abstraction only for a concrete shared need or a safety boundary; do not wrap every function in a service or invent a repository layer over SQL.
+- Avoid process-global and module-level mutable state, including mutable containers behind `const`. Own runtime state inside an explicit service instance or scope (for example, `Ref`), and test resources inside each test lifecycle. Keep shared constants readonly; document any unavoidable exception. Ordinary function-local mutation is fine.
+- Keep optional product features in extensions. Simplicity must not weaken bootloader recovery, authentication, or data durability guarantees.
+- Test in proportion to failure cost, not coverage targets. Bootloader hardening needs strong failure, concurrency, restart, and real-process integration tests, especially for lost writes, broken edits, auth boundaries, and restore.
+- Test server transactions, outbox delivery, cursors, and authorization with focused behavior tests. Keep UI testing minimal: a few critical user-flow smoke checks and visual inspection; no blanket component snapshots or tests of styling, trivial glue, or framework behavior.
+- Use subagents for bounded build, discovery, and review work. Parallelize independent work with explicit file ownership; use isolated worktrees for concurrent writers. In one checkout, use one writer at a time and parallel read-only scouts/reviewers.
+- The lead agent owns integration and acceptance. Keep shared interfaces small, review meaningful changes with a fresh agent, and remove unnecessary complexity before calling a slice done. Track build groups and dependencies in docs/build-plan.md.
 - Read SPEC.md and docs/tech.md; read each file in full before editing and the package docs/README.md before package work.
-- This is a base scaffold. Do not infer implemented behavior from planned documentation.
+- Distinguish implemented behavior from planned documentation. Check the current code and build plan before claiming a feature is available.
 - Run `bun run check` after code changes. Tests are separate; run relevant tests when adding behavior.
 - Keep direct dependencies exact; use Bun workspaces, never Turbo.
 - Use Effect v4 and its platform services for runtime I/O. Wire layers in main.ts or server.ts.
-- Use strict, erasable TypeScript. No any, unchecked casts, ts-ignore, namespace, enum, parameter properties, or inline dynamic imports.
+- Use strict, erasable TypeScript. No any, unchecked casts, ts-ignore, namespace, enum, or parameter properties. Runtime dynamic imports are allowed in the extension and editable migration loaders specified in SPEC.md; ordinary dependencies should use static imports.
 - Keep one concept per file, approximately 400 lines maximum. No generic utils/helpers/lib directories.
 - Keep tests in packages/<name>/test/ mirroring src/. No barrel exports except package entry points.
 - Workspace dependency direction is ui launcher -> server -> boot. Boot never imports server. Browser source never imports server or boot.
+- Server test fixtures may import boot source/test internals to exercise the real cross-store recovery boundary. This exception applies only under packages/server/test/fixtures/; production import rules stay strict.
 - server/src/main.ts launches boot; server/src/server.ts is the child entry. Keep these separate to prevent recursive spawning.
 - Pages are content in packages/server/pages/, not a package. Add a protocol package only when shared schemas are needed.
 - Services use Context.Service with a layer export in the same file. Every HttpApi endpoint needs a description.

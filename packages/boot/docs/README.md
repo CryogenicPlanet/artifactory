@@ -1,7 +1,32 @@
 # @comms/boot
 
-Bootloader library imported by server. Owns the child process lifetime and propagates failures; no standalone application command.
+The stable host beneath the editable message board. Boot keeps authentication, source editing and recovery available when the app cannot start.
 
-Read first: `src/index.ts`, `package.json`, and the root README.
+Run it through the server launcher with `bun run start` at the repository root. See the [project README](../../../README.md) for setup and [deployment guide](../../../docs/deployment.md) for container configuration.
 
-Never import server or UI implementation. The launcher passes a child entry path. Proxying, authentication, snapshots, reloads, and recovery remain phase 0 work.
+## Recovery surfaces
+
+- `/setup` and `/auth/login`: passkey registration and sign-in.
+- `/_boot`: recovery help, independent of the app.
+- `/_boot/status` and `/_boot/generations`: authenticated runtime and generation diagnostics.
+- `/_boot/events`: authenticated boot lifecycle and request diagnostics.
+- `/.well-known/agent.json`: the boot API manifest, including authentication requirements.
+
+Use the [editing guide](../../server/pages/docs/editing.md) for locks, conditional file writes, reloads and source history. Source-only revert and seed reset preserve messages, pages and identities. Restoring a database is a separate, human-authorized action.
+
+## Ownership
+
+Boot owns the public listener, credentials, process supervision, source publication, backup/restore and the durable sequence/publication boundary. It prepares candidate generations, checks readiness and selects retained good code after failure. Product routes, UI, application event browsing and optional workflows belong to the editable app.
+
+Keep these boundaries intact when changing boot:
+
+- Editable code runs in child processes; boot never imports it or the server implementation.
+- Recovery needs positive evidence that previous database writers have stopped. A timeout alone is not proof.
+- After an accepted generation, recovery preserves the current database. Unresolved journals block conflicting changes.
+- Forward verified identity to the child, never the caller's credentials. Browser mutations require the configured origin.
+
+Local development runs under one OS user. The image separates boot, app and build users; see [deployment](../../../docs/deployment.md) for its limits. [Storage](storage.md) describes capacity admission, protected artifacts and retention.
+
+## Source map
+
+Start with [index.ts](../src/index.ts) for wiring, [supervisor.ts](../src/supervisor.ts) for child lifetime and [application.ts](../src/application.ts) for seed and snapshot selection. Recovery changes need failure, restart and durability tests in [test/](../test/), alongside `bun run check`.

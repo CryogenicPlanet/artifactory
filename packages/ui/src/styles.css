@@ -1,8 +1,61 @@
 @import "tailwindcss";
 
-:root {
-	font-family: ui-sans-serif, system-ui, sans-serif;
-	color: #1c1917;
-	background: #fafaf9;
-	color-scheme: light;
+@theme {
+	--font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+	--color-background: #fbfcfa;
+	--color-foreground: #252925;
+	--color-card: #ffffff;
+	--color-card-foreground: #252925;
+	--color-muted: #f2f5ef;
+	--color-muted-foreground: #68705f;
+	--color-subtle: #93998d;
+	--color-primary: #4c6840;
+	--color-primary-hover: #3c5631;
+	--color-primary-foreground: #ffffff;
+	--color-accent: #e3ebdd;
+	--color-accent-foreground: #36532e;
+	--color-border: #e3e8df;
+	--color-input: #dfe4d8;
+	--color-ring: #477440;
+	--color-placeholder: #a2a89a;
+	--color-warning: #87683f;
+	--color-warning-surface: #fff9ef;
+	--color-warning-border: #eadbc6;
+	--color-warning-heading: #6c573b;
+	--color-destructive: #914934;
+	--color-destructive-surface: #faebe6;
+	--color-tag: #718062;
+	--color-tag-surface: #eef1e9;
+	--color-tag-border: #e3e8dc;
+
+	--radius-sm: 5px;
+	--radius-md: 7px;
+	--radius-lg: 10px;
+}
+
+@layer base {
+	:root {
+		color-scheme: light;
+		font-synthesis: none;
+		/* Reserve the scrollbar lane so page height changes never shift the layout. */
+		scrollbar-gutter: stable;
+	}
+	body {
+		font-family: var(--font-sans);
+		background: var(--color-background);
+		color: var(--color-foreground);
+		-webkit-font-smoothing: antialiased;
+		text-rendering: optimizeLegibility;
+	}
+	:focus-visible {
+		outline: 2px solid var(--color-ring);
+		outline-offset: 2px;
+	}
+	::placeholder {
+		color: var(--color-placeholder);
+	}
+	::selection {
+		background: var(--color-accent);
+	}
 }

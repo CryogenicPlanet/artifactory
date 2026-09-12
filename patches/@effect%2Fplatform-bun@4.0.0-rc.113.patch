@@ -1,0 +1,56 @@
+diff --git a/src/BunHttpServer.ts b/src/BunHttpServer.ts
+--- a/src/BunHttpServer.ts
++++ b/src/BunHttpServer.ts
+@@ -162,13 +162,18 @@
+       }
+     })
+ 
+-    const shutdown = yield* Effect.promise(() => server.stop()).pipe(
+-      Effect.cached
+-    )
+-    const preemptiveShutdown = options.disablePreemptiveShutdown ? Effect.void : Effect.timeoutOrElse(shutdown, {
+-      duration: options.gracefulShutdownTimeout ?? Duration.seconds(20),
+-      orElse: () => Effect.void
+-    })
++    // Bun cannot escalate stop(false) to stop(true) while an unread response is buffered.
++    // Drain before stopping, then close sockets once so scope cleanup has a bounded lifetime.
++    const shutdown = yield* Effect.gen(function*() {
++      yield* Effect.gen(function*() {
++        while (server.pendingRequests > 0 || server.pendingWebSockets > 0) yield* Effect.sleep("10 millis")
++      }).pipe(Effect.timeoutOrElse({
++        duration: options.gracefulShutdownTimeout ?? Duration.seconds(20),
++        orElse: () => Effect.void
++      }))
++      yield* Effect.promise(() => server.stop(true))
++    }).pipe(Effect.cached)
++    const preemptiveShutdown = options.disablePreemptiveShutdown ? Effect.void : shutdown
+ 
+     yield* Scope.addFinalizer(scope, shutdown)
+ 
+diff --git a/dist/BunHttpServer.js b/dist/BunHttpServer.js
+--- a/dist/BunHttpServer.js
++++ b/dist/BunHttpServer.js
+@@ -94,11 +94,18 @@
+       }
+     }
+   });
+-  const shutdown = yield* Effect.promise(() => server.stop()).pipe(Effect.cached);
+-  const preemptiveShutdown = options.disablePreemptiveShutdown ? Effect.void : Effect.timeoutOrElse(shutdown, {
+-    duration: options.gracefulShutdownTimeout ?? Duration.seconds(20),
+-    orElse: () => Effect.void
+-  });
++  // Bun cannot escalate stop(false) to stop(true) while an unread response is buffered.
++  // Drain before stopping, then close sockets once so scope cleanup has a bounded lifetime.
++  const shutdown = yield* Effect.gen(function* () {
++    yield* Effect.gen(function* () {
++      while (server.pendingRequests > 0 || server.pendingWebSockets > 0) yield* Effect.sleep("10 millis");
++    }).pipe(Effect.timeoutOrElse({
++      duration: options.gracefulShutdownTimeout ?? Duration.seconds(20),
++      orElse: () => Effect.void
++    }));
++    yield* Effect.promise(() => server.stop(true));
++  }).pipe(Effect.cached);
++  const preemptiveShutdown = options.disablePreemptiveShutdown ? Effect.void : shutdown;
+   yield* Scope.addFinalizer(scope, shutdown);
+   const address = "unix" in options && options.unix !== undefined ? NetAddress.unixPathAddress(options.unix) : yield* Effect.fromResult(NetAddress.inetAddressFromIpString(server.hostname, server.port)).pipe(Effect.mapError(cause => new Error.ServeError({
+     cause

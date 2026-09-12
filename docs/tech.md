@@ -113,21 +113,22 @@ The spec's invariant is "a SQL database is the only state". Both stores, boot st
 | `DATABASE_URL` | Backend | When |
 | --- | --- | --- |
 | unset | `@effect/sql-sqlite-bun`, two files under `/data` | Default. Single box, zero setup. |
-| `postgres://…` | `@effect/sql-pg` | Railway/Fly Postgres for durable state, multi-container hosting, or "I want Postgres". |
-| `mysql://…` | `@effect/sql-mysql2` | Because someone will. |
+| `postgres://…` | `@effect/sql-pg` | Railway/Fly Postgres for durable state, or "I want Postgres". Still exactly one comms container: multi-container is unsupported (`docs/database.md` §9.6). |
+| `mysql://…` | `@effect/sql-mysql2` | Shipped and tested; weaker guarantees compensated per `docs/database.md`. |
 
-Both stores can be pointed at the same server; they live in separate schemas (`boot`, `app`) with separate roles. `BOOT_DATABASE_URL` overrides the boot store alone, so a deployment can keep boot state in local SQLite and put app state in Postgres, which is the combination I'd run.
+One engine per deployment for both stores (SPEC §12, decided 2026-09-10): unset means SQLite files under `/data`; set, both stores move to one Postgres or MySQL server as two databases with two roles, `DATABASE_URL` for the app's role and `BOOT_DATABASE_URL` for boot's, and setting only one is a configuration error. A deployment never mixes engines. `DbOps` gains `capacity()` (reported as unknown on a remote engine) and `cloneForRehearsal` returns a store descriptor, not a path. Full design in `docs/pr-1/database-interoperability.md`.
 
 What changes per backend is isolated in one service, `DbOps`, with three implementations:
 
 | Operation | SQLite | Postgres | MySQL |
 | --- | --- | --- | --- |
-| `snapshot()` for backups | `VACUUM INTO 'file'` | `pg_dump -Fc` to a file, or `CREATE DATABASE … TEMPLATE` when the source is quiescent | `mysqldump` |
-| `cloneForRehearsal()` | copy the file | `pg_dump | psql` into `app_rehearsal_<gen>` (template copy is refused while the source has connections, which it always does) | `mysqldump | mysql` into a scratch schema |
-| `restore(backup)` | replace the file, reopen | `pg_restore` into a fresh database, then swap the app's connection string | same with `mysql` |
-| `dropClone()` | delete the file | `DROP DATABASE` | `DROP SCHEMA` |
-| isolation of boot state from the app | file ownership, OS user split (spec §7.9) | separate schema, separate role, app role has no grant on `boot` | same |
-| migrations | `Migrator` from `effect/unstable/sql`, backend-specific SQL where dialects differ (FTS, JSON) | same | same |
+| `backup()` | `VACUUM INTO 'file'` | `pg_dump -Fc` to a file on the volume, after the freeze and drain | `mysqldump --single-transaction --no-tablespaces --set-gtid-purged=OFF --triggers` to a file |
+| `cloneForRehearsal()` | copy the file | dump and load into `comms_rehearsal_<label>`, a scratch database `comms_boot` creates and drops (never `CREATE DATABASE … TEMPLATE`: it needs zero source connections, which the live store never has) | dump and load into a scratch database likewise |
+| `restoreInto(backup)` | replace the file under closure evidence, reopen | `pg_restore` into a fresh database, journal its name in boot's `settings`, return the new descriptor | same with `mysql` |
+| `dropClone()` / `reapClones()` | delete the file | `DROP DATABASE` | `DROP DATABASE` |
+| `capacity()` | `df`/`stat -f` on the volume | `pg_database_size`, total unknown | `information_schema` size, total unknown |
+| isolation of boot state from the app | file ownership, OS user split (spec §7.9) | two databases, two roles; `comms_boot` is a member of `comms_app` and reaches the app store with its own credential; the app role has no grant on `comms_boot` | two databases, two users; MySQL has no ownership protection inside a database, so boot's tables live only in boot's database |
+| migrations | `Migrator` from `effect/unstable/sql`, ledger created with `CREATE TABLE IF NOT EXISTS` before any outer transaction, backend-specific SQL through `onDialect` (FTS, JSON, identity columns) | same | same, with the non-transactional-DDL compensation in `docs/database.md` §14.4 |
 
 Two consequences the spec now states explicitly: with a remote database, `/_boot/*` depends on the database being reachable, which is the tradeoff the user accepts for durability; and FTS is a per-backend concern (SQLite FTS5, Postgres `tsvector`, MySQL `FULLTEXT`) implemented behind one `Search` service. The write freeze, the lock, versions, generations, and events are all plain tables and work the same everywhere.
 
@@ -135,7 +136,7 @@ Rehearsal on Postgres costs a dump and load instead of a file copy. For a person
 
 ## 5. HTTP
 
-- **App**: `HttpApi` from `contract`, implemented with `HttpApiBuilder`, served by `BunHttpServer` on the internal port. `HttpApiScalar` mounts interactive docs at `/api/docs` for humans; `OpenApi.fromApi` produces the document behind `GET /api` and `/.well-known/agent.json`. Auth is a `HttpApiMiddleware` that reads the identity headers the bootloader forwarded (spec §4.3) and never touches a credential. Errors are `HttpApiError` schemas with `code`, `message`, `hint`, `retriable`, so the LLM-readable hint is part of the type.
+- **App**: `HttpApi` from `contract`, implemented with `HttpApiBuilder` and handled with `.handle()` so the declared payload, query and success schemas are the parser, never documentation (SPEC §12, 2026-09-10; raw handling is reserved for streaming bodies and still decodes through the same schemas), served by `BunHttpServer` on the internal port. `HttpApiScalar` mounts interactive docs at `/api/docs` for humans; `OpenApi.fromApi` produces the document behind `GET /api` and `/.well-known/agent.json`. Auth is a `HttpApiMiddleware` that reads the identity headers the bootloader forwarded (spec §4.3) and never touches a credential. Errors are `HttpApiError` schemas with `code`, `message`, `hint`, `retriable`, so the LLM-readable hint is part of the type.
 - **Bootloader**: `HttpRouter` with hand-declared routes for `/_boot/*` and their aliases, a reverse-proxy handler that forwards everything else to the current generation with `HttpClient` streaming both directions (SSE passes through untouched), and the write-freeze queue as an `Effect.Queue` the proxy handler enqueues into when a swap is in flight.
 - **Long-poll**: implemented once as a `Stream` that emits whitespace heartbeats every 10s and completes on the first matching event or the deadline, so the body is valid JSON either way and the response carries `cursor`.
 
@@ -156,10 +157,10 @@ No Elysia, no Hono. The Effect HTTP stack covers every surface the spec has.
 
 Every request is one wide event. The source of truth is the spec's event log; nothing leaves the box unless an extension sends it.
 
-- The bootloader's proxy opens a root span per request. The app continues it (trace headers forwarded with the identity headers). Handlers annotate the span: agent, topic, message id, extension, lock state, generation. A custom `Tracer` exporter in both processes turns each finished root span into one `http.request` event with the accumulated annotations. That is the wide event.
+- The bootloader records one bounded `http.request` per request it answers or forwards: verified identity, request id, method, path, status, duration, redacted. The app continues the request id (forwarded with the identity headers), annotates its own span (agent, topic, message id, extension, lock state, generation) and exports it through its own `Tracer` exporter as its own `http.request` event. Two records sharing a request id; boot never parses the child's annotations (decided 2026-09-11, SPEC §12).
 - `Logger` output goes to the same exporter as `log` events at their level, and to stderr as NDJSON, which the bootloader captures per generation.
 - **evlog**: its concepts (wide events, `log.set()` accumulation, structured errors with `why` and `fix`) are exactly what the above implements, and its `createError` shape maps onto the spec's `{code, message, hint}`. Adopting the library itself would add a second logging API next to Effect's `Logger` and `Tracer`. Recommendation: borrow the shape, not the package. Ship a `pages/tooling/evlog-sink.ts` extension that drains the event log to evlog's NDJSON file format so anyone who wants evlog's ecosystem of sinks can plug it in. Open question for Rahul below.
-- Metrics: `effect/Metric` counters and histograms (requests, swap time, queue depth, lock waits) exposed at `/_boot/metrics` in Prometheus text format via `effect/unstable/observability` `PrometheusMetrics`, which is a formatter, not an external dependency.
+- Metrics: none in boot. `/_boot/status` reports the operational numbers (generation, candidate, lock, queue depth, in-flight mutations, disk budget). Counters and Prometheus text, if anyone wants them, are an extension over `effect/Metric` (decided 2026-09-11).
 
 ## 9. Auth
 
@@ -172,6 +173,8 @@ FROM oven/bun:1.4 AS build
   pnpm install --frozen-lockfile; turbo build
 FROM oven/bun:1.4
   apt-get install util-linux            # setpriv for the OS user split
+  apt-get install postgresql-client     # pg_dump, pg_restore, psql for DbOps on Postgres (docs/database.md §5.5)
+  apt-get install mysql-client          # mysqldump, mysql for DbOps on MySQL; credentials via MYSQL_PWD, never -p
   useradd boot; useradd app
   COPY --from=build packages/boot/dist/boot.js /boot.js
   COPY --from=build seed/ /seed          # app + pages + built ui
@@ -225,6 +228,6 @@ The same file, minus the git section, ships as `/data/app/AGENTS.md` on the box,
 
 - bun workspaces, `bun run --filter`, no turbo.
 - Effect v4 rc, churn accepted. React 19.2 minimum accepted.
-- Boot state stays in local SQLite by default even when the app store is on Postgres or MySQL; `BOOT_DATABASE_URL` opts it out.
+- Both stores share one engine per deployment; SQLite is the default and the reference implementation; Postgres and MySQL are both shipped and a deployment can swap between all three (SPEC §12, 2026-09-10; design in `docs/database.md`).
 - Observability: wide events come from Effect's own `Tracer` spans and land in the event log; no evlog package in the core. The reason is not only fewer concepts for editing agents, though that is real: an extension author calls `ctx.log` and annotates the current span, and never chooses a logger. The deeper reason is that Effect already owns the request's span, fiber, and error channel, so the wide event's fields (agent, topic, generation, lock state, the typed error with its hint) are already in hand; a second logger would have to be told all of that again. evlog's ergonomics (`log.set`, `createError({why, fix})`) are worth copying as the shape of `ctx.log` and of `HttpApiError`, and an evlog-format NDJSON drain ships as an extension for anyone who wants its sinks.
 - Still open: `effect/unstable/eventlog` as the event log implementation, decided by a one-day spike in phase 1.

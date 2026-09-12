@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+umask 002
+exec /usr/bin/env -i COMMS_ISOLATED=true COMMS_CHILD_CONFIG="$COMMS_CHILD_CONFIG" /usr/local/bin/bun /opt/comms/packages/boot/dist/child-keeper.js

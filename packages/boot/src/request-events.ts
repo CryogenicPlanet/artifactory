@@ -1,0 +1,75 @@
+import { Cause, Clock, Effect, Queue } from "effect";
+import type { VerifiedIdentity } from "./enrollment.ts";
+import type { EventRecord, Events } from "./events.ts";
+
+/** Boot-scoped diagnostic writer. Request finalizers never acquire the SQL connection;
+ * a blocked store can lose diagnostics, but cannot retain traffic admission. */
+export const requestEvents = (events: Events["Service"]) =>
+	Effect.gen(function* () {
+		const pending = yield* Queue.dropping<Omit<typeof EventRecord.Type, "seq">>(256);
+		yield* Effect.gen(function* () {
+			const event = yield* Queue.take(pending);
+			yield* events.writeBoot(event).pipe(
+				// Do not retry an uncertain commit or include request/error contents in stderr.
+				Effect.catchCauseIf(
+					(cause) => !Cause.hasInterruptsOnly(cause),
+					() => Effect.logError("http.request event write failed"),
+				),
+			);
+		}).pipe(Effect.forever, Effect.forkScoped);
+		return (input: {
+			readonly started: bigint;
+			readonly method: string;
+			readonly path: string;
+			readonly identity: VerifiedIdentity | null;
+			readonly generation: number;
+			readonly requestId: string;
+		}) =>
+			Effect.gen(function* () {
+				const span = yield* Effect.makeSpan("http.request", { root: true });
+				let status = 503;
+				let identity = input.identity;
+				let generation = input.generation;
+				yield* Effect.addFinalizer((exit) =>
+					Effect.gen(function* () {
+						span.end(yield* Clock.monotonicTimeNanos, exit);
+						const interrupted = exit._tag === "Failure" && Cause.hasInterruptsOnly(exit.cause);
+						const queued = yield* Queue.offer(pending, {
+							at: yield* Clock.currentTimeMillis,
+							type: "http.request",
+							level: status >= 500 || exit._tag === "Failure" ? "error" : "info",
+							actor: identity?.agent ?? "boot",
+							instance: identity?.id ?? null,
+							generation,
+							request_id: input.requestId,
+							topic: null,
+							message_id: null,
+							payload: {
+								trace_id: span.traceId,
+								span_id: span.spanId,
+								method: input.method,
+								path: input.path.slice(0, 2048),
+								status,
+								duration_ms: Number((yield* Clock.monotonicTimeNanos) - input.started) / 1_000_000,
+								outcome: interrupted ? "interrupted" : exit._tag === "Failure" ? "failed" : "completed",
+							},
+						});
+						if (!queued) yield* Effect.logError("http.request event queue full");
+					}),
+				);
+				return {
+					span,
+					trace: `00-${span.traceId}-${span.spanId}-01`,
+					attribute: (verified: VerifiedIdentity | null, selectedGeneration: number) =>
+						Effect.sync(() => {
+							identity = verified;
+							generation = selectedGeneration;
+						}),
+					status: (value: number) =>
+						Effect.sync(() => {
+							status = value;
+						}),
+				};
+			});
+	});
+export type RequestEvents = Effect.Success<ReturnType<typeof requestEvents>>;
