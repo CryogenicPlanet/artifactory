@@ -1,10 +1,17 @@
+import { mysqlIndexedParts, type MysqlSearchConfig } from "./mysql-search-config.ts";
 import { on } from "@comms/storage/dialect";
 import { Effect } from "effect";
 import type { Constructor } from "effect/unstable/sql/Statement";
 import { KernelError } from "../../kernel/boot-channel.ts";
 
 /** Parse once; caller text remains bound data, never SQL or search operators. */
-export const searchMessages = (sql: Constructor, query: string, ceiling: number, folding = false) =>
+export const searchMessages = (
+	sql: Constructor,
+	query: string,
+	ceiling: number,
+	folding = false,
+	mysql: MysqlSearchConfig | null = null,
+) =>
 	Effect.gen(function* () {
 		const parts = query.trim().match(/"[^"]*"|[^\s"]+/gu) ?? [];
 		if (
@@ -17,6 +24,8 @@ export const searchMessages = (sql: Constructor, query: string, ceiling: number,
 		)
 			return yield* new KernelError({ code: "query_invalid" });
 
+		const sanitized = parts.map((part) => part.replace(/[+\-><()~*"@]/gu, " ").trim());
+		const indexed = mysql ? yield* mysqlIndexedParts(sql, sanitized, mysql) : sanitized;
 		return on(sql, {
 			sqlite: () => {
 				const expression = parts.map((part) => `"${part.replaceAll('"', "")}"`).join(" AND ");
@@ -43,7 +52,8 @@ export const searchMessages = (sql: Constructor, query: string, ceiling: number,
 			mysql: () => {
 				// Keep phrase words intact: MySQL uses excluded internal words during phrase verification.
 				// Quoting each sanitized part also prevents punctuation from becoming Boolean syntax.
-				const expression = parts.map((part) => `+"${part.replace(/[+\-><()~*"@]/gu, " ").trim()}"`).join(" ");
+				if (indexed.length === 0) return sql`1=1`;
+				const expression = indexed.map((part) => `+"${part}"`).join(" ");
 				return sql`id IN (SELECT id FROM messages WHERE
 				 (updated_seq<=${ceiling} AND MATCH(body) AGAINST (${expression} IN BOOLEAN MODE)) OR
 				 (updated_seq>${ceiling} AND MATCH(previous_body) AGAINST (${expression} IN BOOLEAN MODE)))`;

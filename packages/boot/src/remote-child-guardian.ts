@@ -4,7 +4,8 @@ import type { RemoteChildConfiguration } from "./keeper-configuration.ts";
 import { BunHttpServer } from "@effect/platform-bun";
 import { RemoteInspector, remoteOwnerInspectorLayer } from "@comms/storage/remote-inspector";
 import { asBoot, connectionOf, parseDescriptor, StoreError } from "@comms/storage/store";
-import { Context, Crypto, Effect, Layer, Schema } from "effect";
+import { Cause, Context, Crypto, Effect, Exit, Layer, Schema, Scope } from "effect";
+import { RemoteAuthenticationRejected } from "@comms/storage/remote-session";
 import {
 	HttpIncomingMessage,
 	HttpRouter,
@@ -56,14 +57,25 @@ export const remoteChildGuardian = (
 			},
 			isolated ? { uid: 1000, gid: 1000 } : undefined,
 		);
-		const services = yield* Layer.build(
-			remoteOwnerInspectorLayer({
-				connection,
-				attempt,
-				...(connection.engine === "mysql" ? { mysqlBootConnection: bootConnection } : {}),
-			}),
-		);
-		const inspector = Context.get(services, RemoteInspector);
+		const inspectorScope = yield* Scope.fork(yield* Effect.scope);
+		const acquired = yield* Scope.provide(
+			Layer.build(
+				remoteOwnerInspectorLayer({
+					connection,
+					attempt,
+					...(connection.engine === "mysql" ? { mysqlBootConnection: bootConnection } : {}),
+				}),
+			),
+			inspectorScope,
+		).pipe(Effect.exit);
+		if (Exit.isFailure(acquired)) {
+			yield* Scope.close(inspectorScope, acquired);
+			const reason = acquired.cause.reasons.length === 1 ? acquired.cause.reasons[0] : undefined;
+			if (reason && Cause.isFailReason(reason) && Schema.is(RemoteAuthenticationRejected)(reason.error))
+				yield* owner.authenticationRejected(reason.error);
+			return yield* Effect.failCause(acquired.cause);
+		}
+		const inspector = Context.get(acquired.value, RemoteInspector);
 		yield* owner.bindInspector(inspector.server);
 		const secret = Buffer.from(yield* (yield* Crypto.Crypto).randomBytes(32)).toString("hex");
 		const register = Effect.gen(function* () {

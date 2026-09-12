@@ -1,4 +1,5 @@
-import { Effect } from "effect";
+import { KernelError } from "../../../src/kernel/boot-channel.ts";
+import { Effect, Schema } from "effect";
 import { Statement } from "effect/unstable/sql";
 import { expect, it } from "vitest";
 import { searchMessages } from "../../../src/ext/core/search.ts";
@@ -64,6 +65,29 @@ it("rejects invalid search syntax before any engine receives a query", async () 
 		]) {
 			const result = await Effect.runPromise(searchMessages(constructor(name), query, 1).pipe(Effect.result));
 			expect(result._tag).toBe("Failure");
-			if (result._tag === "Failure") expect(result.failure.code).toBe("query_invalid");
+			if (result._tag === "Failure") {
+				expect(Schema.is(KernelError)(result.failure)).toBe(true);
+				if (Schema.is(KernelError)(result.failure)) expect(result.failure.code).toBe("query_invalid");
+			}
 		}
+});
+
+it("drops wholly unindexed MySQL parts while preserving AND and phrase words", async () => {
+	const sql = constructor("mysql");
+	const config = { minimum: 4, maximum: 84, stopwords: [], characterSet: "utf8mb4", collation: "utf8mb4_0900_ai_ci" };
+	for (const [query, expression] of [
+		["the deploy alpha", '+"deploy" +"alpha"'],
+		['"the deploy" alpha', '+"the deploy" +"alpha"'],
+		["ok deploy", '+"deploy"'],
+	]) {
+		const fragment = await Effect.runPromise(searchMessages(sql, query ?? "", 42, false, config));
+		const [text, values] = sql`SELECT id FROM visible_messages WHERE ${fragment}`.compile();
+		expect(values).toContain(expression);
+		expect(values.filter((value) => value === 42)).toHaveLength(2);
+		expect(text).toContain("MATCH(previous_body)");
+	}
+	const allExcluded = await Effect.runPromise(searchMessages(sql, "the ok", 42, false, config));
+	const [text] = sql`SELECT id FROM visible_messages WHERE ${allExcluded}`.compile();
+	expect(text).toContain("1=1");
+	expect(text).not.toContain("MATCH");
 });

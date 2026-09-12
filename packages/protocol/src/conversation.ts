@@ -31,7 +31,7 @@ const conversationGroup = HttpApiGroup.make("conversation").add(
 	),
 	HttpApiEndpoint.get("messages", "/api/messages", { error: errorSchemas, query, success: Envelope }).annotate(
 		OpenApi.Description,
-		"Read published messages. since is exclusive and defaults to now; since=0 reads history. newest=1 returns latest limit in ascending sequence order. topic/subtree OR comma-list mentions selects addressed messages; other filters combine with AND. q accepts literal terms and quoted phrases. MySQL applies its full-text token-size and stopword rules; searches with no indexed terms return no matches. PostgreSQL simple search does not fold accents. exclude_self=1 and waits exclude this instance. cursor is considered-through, including empty results. Views mark highest returned seq at topic or root; mark=0 peeks. wait up to60 seconds sends whitespace heartbeats and drains on swap.",
+		"Read published messages. since is exclusive and defaults to now; since=0 reads history. newest=1 returns latest limit in ascending sequence order. topic/subtree OR comma-list mentions selects addressed messages; other filters combine with AND. q accepts literal terms and quoted phrases. MySQL drops unindexed short terms and stopwords, so remaining indexed terms decide the result; if none remain, q adds no constraint. PostgreSQL folds accents only when unaccent is available. exclude_self=1 and waits exclude this instance. cursor is considered-through, including empty results. Views mark highest returned seq at topic or root; mark=0 peeks. wait up to60 seconds sends whitespace heartbeats and drains on swap.",
 	),
 );
 

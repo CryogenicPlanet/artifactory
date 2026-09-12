@@ -1,5 +1,5 @@
 import { Effect, FileSystem, Path, Schema, Semaphore } from "effect";
-import { type RemoteSession } from "@comms/storage/remote-session";
+import { RemoteAuthenticationRejected, type RemoteSession } from "@comms/storage/remote-session";
 
 const Session = Schema.Struct({
 	engine: Schema.Literals(["pg", "mysql"]),
@@ -29,7 +29,8 @@ export const RemoteAdmission = Schema.Struct({
 const Owner = Schema.Struct({
 	...RemoteOwnerIntent.fields,
 	inspector: Schema.NullOr(Session),
-	state: Schema.Literals(["pending", "closed", "never-opened"]),
+	state: Schema.Literals(["pending", "closed", "never-opened", "authentication-rejected"]),
+	authentication: Schema.optionalKey(Schema.Literals(["28P01", "1045"])),
 	sessions: Schema.Array(Session),
 });
 
@@ -66,6 +67,8 @@ const inspectorMatches = (owner: RemoteOwnerIntent, session: RemoteSession) =>
 	session.tag === `inspect:${Buffer.from(owner.attempt, "hex").toString("base64url")}` &&
 	(session.username === owner.username ||
 		(owner.engine === "mysql" && session.username.startsWith(`${owner.username}@`)));
+const rejectionMatches = (owner: RemoteOwnerIntent, code: string) =>
+	code === (owner.engine === "pg" ? "28P01" : "1045");
 const registrationMatches = (owner: RemoteOwnerIntent, inspector: RemoteSession, session: RemoteSession) =>
 	session.engine === owner.engine &&
 	session.database.length > 0 &&
@@ -114,9 +117,10 @@ const checkRemoteOwners = (
 				.readFileString(intentPath)
 				.pipe(Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Owner))), Effect.mapError(invalid));
 			const encode = Schema.encodeSync(Schema.fromJsonString(Owner));
+			const { authentication, ...identity } = owner;
 			if (
 				encode(intent) !== encode({ ...selected, state: "pending", sessions: [], inspector: null }) ||
-				encode(intent) !== encode({ ...owner, state: "pending", sessions: [], inspector: null })
+				encode(intent) !== encode({ ...identity, state: "pending", sessions: [], inspector: null })
 			)
 				return yield* invalid();
 			if (
@@ -136,7 +140,16 @@ const checkRemoteOwners = (
 					new Set(owner.sessions.map((session) => session.connectionId)).size !== owner.sessions.length)
 			)
 				return yield* invalid();
-			if (owner.state === "never-opened") {
+			if (owner.state === "authentication-rejected") {
+				if (
+					!authentication ||
+					!rejectionMatches(owner, authentication) ||
+					owner.inspector !== null ||
+					owner.sessions.length
+				)
+					return yield* invalid();
+			} else if (authentication !== undefined) return yield* invalid();
+			else if (owner.state === "never-opened") {
 				if (owner.inspector !== null || owner.sessions.length !== 0) return yield* invalid();
 				yield* proveNeverOpened(dataDirectory, selected);
 			} else if (owner.state !== "closed" && requireClosed(owner))
@@ -235,6 +248,24 @@ export const remoteOwner = (
 				current = next;
 			});
 		return {
+			/** Only an initial native authentication rejection, after its acquisition scope closes. */
+			authenticationRejected: (proof: RemoteAuthenticationRejected) =>
+				gate.withPermit(
+					Effect.gen(function* () {
+						if (
+							closing ||
+							current.state !== "pending" ||
+							current.inspector ||
+							current.sessions.length ||
+							!Schema.is(RemoteAuthenticationRejected)(proof) ||
+							proof.engine !== selected.engine ||
+							!rejectionMatches(selected, proof.code)
+						)
+							return yield* invalid();
+						closing = true;
+						yield* save({ ...current, state: "authentication-rejected", authentication: proof.code });
+					}),
+				),
 			/** Reserved but denied keeper: durable closed admission and worker closure are mandatory. */
 			neverOpened: gate.withPermit(
 				Effect.gen(function* () {

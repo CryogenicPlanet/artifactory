@@ -47,7 +47,16 @@ const keeper = Effect.gen(function* () {
 	if (prepared.remote && (prepared.env.APP_DATABASE !== undefined || !prepared.env.APP_STORE))
 		return yield* Effect.die("Invalid remote app configuration");
 	const guardian = prepared.remote
-		? yield* remoteChildGuardian(prepared.remote, prepared.env.APP_STORE ?? "", prepared.attempt, isolated)
+		? yield* remoteChildGuardian(prepared.remote, prepared.env.APP_STORE ?? "", prepared.attempt, isolated).pipe(
+				Effect.catchTag("RemoteAuthenticationRejected", () =>
+					// Guardian persisted the terminal rejection after closing its initial acquisition scope.
+					// No editable process or registration endpoint has been created on this branch.
+					Console.error("remote_authentication_rejected").pipe(
+						Effect.andThen(receipt),
+						Effect.andThen(Effect.die("remote_authentication_rejected")),
+					),
+				),
+			)
 		: undefined;
 	const config = guardian ? { ...prepared, env: { ...prepared.env, ...guardian.env } } : prepared;
 	if (guardian)

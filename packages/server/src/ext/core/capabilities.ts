@@ -1,3 +1,4 @@
+import { mysqlSearchConfig } from "./mysql-search-config.ts";
 import type { ExtensionCapabilities } from "../../kernel/extension-capabilities.ts";
 import { markRead } from "./read-marks.ts";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -22,6 +23,7 @@ export const extensionCapabilities = Effect.gen(function* () {
 	const pages = yield* Pages;
 	const crypto = yield* Crypto.Crypto;
 	const lifecycle = yield* Lifecycle;
+	const mysql = yield* mysqlSearchConfig(sql);
 	return (extension: string, who?: Identity, writable = true): ExtensionCapabilities => {
 		const caller = who ?? { agent: "system", instance: `extension:${extension}`, request: "", kind: "agent" };
 		const write = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -81,7 +83,7 @@ export const extensionCapabilities = Effect.gen(function* () {
 					});
 				}),
 			);
-		const messages = makeMessages(sql, { read, mutate }, boot, crypto);
+		const messages = makeMessages(sql, { read, mutate }, boot, crypto, mysql);
 		const topics = makeTopics(sql, read, pages);
 		return {
 			generation: boot.generation,

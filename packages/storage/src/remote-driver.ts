@@ -1,12 +1,18 @@
 import { postgresTypes, mysqlTypeCast } from "./remote-values.ts";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import * as MysqlClient from "@effect/sql-mysql2/MysqlClient";
-import { Effect, Schema, type Scope } from "effect";
+import { Cause, Effect, Schema, type Scope } from "effect";
 import type { Reactivity } from "effect/unstable/reactivity/Reactivity";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import type { Connection } from "effect/unstable/sql/SqlConnection";
-import { type RemoteConnection, type RemoteSession, failure, sanitized } from "./remote-session.ts";
+import {
+	type RemoteConnection,
+	type RemoteSession,
+	failure,
+	sanitized,
+	RemoteAuthenticationRejected,
+} from "./remote-session.ts";
 
 export const open = (options: RemoteConnection, tag: string) => {
 	const common = {
@@ -33,6 +39,71 @@ export const open = (options: RemoteConnection, tag: string) => {
 				});
 	return sanitized(client, "remote_connection_failed");
 };
+/** Classify only at the first physical login boundary, before any successful connection.
+ * AuthenticationError alone also covers unsupported auth and failed server SCRAM proof. */
+export const initialInspectorFailure = (engine: RemoteConnection["engine"], error: unknown) => {
+	if (isSqlError(error) && error.reason._tag === "AuthenticationError" && error.reason.operation === "connect") {
+		const cause = error.reason.cause;
+		if (typeof cause === "object" && cause !== null) {
+			if (engine === "pg" && "code" in cause && cause.code === "28P01")
+				return new RemoteAuthenticationRejected({ engine, code: "28P01" });
+			if (
+				engine === "mysql" &&
+				"errno" in cause &&
+				cause.errno === 1045 &&
+				"sqlState" in cause &&
+				cause.sqlState === "28000"
+			)
+				return new RemoteAuthenticationRejected({ engine, code: "1045" });
+		}
+	}
+	return failure("remote_connection_failed");
+};
+
+/** Inspector-only: PG uses one physical session without pool/reconnection. MySQL's first
+ * make performs exactly its initial SELECT 1; later reserve/identify failures are never auth proof.
+ * The owner must close the failed acquisition scope before publishing a rejection receipt. */
+export const openInspector = (options: RemoteConnection, tag: string) => {
+	const common = {
+		host: options.host,
+		port: options.port,
+		database: options.database,
+		username: options.username,
+		password: options.password,
+	};
+	const client: Effect.Effect<SqlClient, SqlError, Scope.Scope | Reactivity> =
+		options.engine === "pg"
+			? PgClient.makeClient({
+					...common,
+					ssl: options.tls,
+					applicationName: tag,
+					multiplex: false,
+					types: postgresTypes(),
+				})
+			: MysqlClient.make({
+					...common,
+					maxConnections: 1,
+					poolConfig: {
+						...(options.tls ? { ssl: { rejectUnauthorized: true, verifyIdentity: true } } : {}),
+						connectAttributes: { comms_attempt: tag },
+						bigNumberStrings: true,
+						typeCast: mysqlTypeCast,
+						jsonStrings: true,
+					},
+				});
+	return client.pipe(
+		Effect.catchCause((cause) => {
+			if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
+			const only = cause.reasons.length === 1 ? cause.reasons[0] : undefined;
+			return Effect.fail(
+				only && Cause.isFailReason(only)
+					? initialInspectorFailure(options.engine, only.error)
+					: failure("remote_connection_failed"),
+			);
+		}),
+	);
+};
+
 export const compiler = (engine: RemoteConnection["engine"]) =>
 	engine === "pg" ? PgClient.makeCompiler() : MysqlClient.makeCompiler();
 
