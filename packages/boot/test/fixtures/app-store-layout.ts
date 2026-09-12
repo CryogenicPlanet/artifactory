@@ -13,7 +13,12 @@ if (operation === "wal") {
 		"PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE records(value TEXT); INSERT INTO records VALUES('committed WAL')",
 	);
 	console.log("ready");
-	await new Promise(() => {});
+	// Keep the database handle reachable until the parent kills this process.
+	// An idle unresolved promise lets Bun collect it and checkpoint the WAL.
+	while (true) {
+		await Bun.sleep(1000);
+		db.query("SELECT value FROM records").get();
+	}
 } else {
 	const migration = Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;

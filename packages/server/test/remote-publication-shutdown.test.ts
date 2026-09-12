@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { Schema } from "effect";
 import { beforeAll, expect, it } from "vitest";
+import { shutdownFailureCodes } from "./fixtures/shutdown-failure-codes.ts";
 import { repairAuthenticator } from "./fixtures/remote-repair-authenticator.ts";
 
 const Settings = Schema.Struct({
@@ -189,12 +190,24 @@ for (const scenario of scenarios)
 					try {
 						await expect.poll(async () => (await status(cookie)).child.state, { timeout }).toBe(desired);
 					} catch (error) {
-						for (const surface of ["status", "generations"])
-							await writeFile(
-								`${logFile}.${surface}.json`,
-								await (await fetch(`${url}/_boot/${surface}`, { headers: { cookie } })).text(),
-								{ mode: 0o600 },
+						for (const surface of ["status", "generations"]) {
+							const detail = await (await fetch(`${url}/_boot/${surface}`, { headers: { cookie } })).text();
+							await writeFile(`${logFile}.${surface}.json`, detail, { mode: 0o600 });
+							console.error(
+								JSON.stringify({
+									event: "native_shutdown_startup_failure",
+									surface,
+									codes: shutdownFailureCodes(detail),
+								}),
 							);
+						}
+						console.error(
+							JSON.stringify({
+								event: "native_shutdown_startup_failure",
+								surface: "launcher",
+								codes: shutdownFailureCodes(output),
+							}),
+						);
 						throw error;
 					}
 				};

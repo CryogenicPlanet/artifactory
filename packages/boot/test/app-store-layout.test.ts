@@ -67,8 +67,10 @@ describe("separate app store layout", () => {
 		});
 		await expect.poll(() => output, { timeout: 5000 }).toContain("ready");
 		expect((await stat(join(root, "comms.db-wal"))).size).toBeGreaterThan(0);
-		child.kill("SIGKILL");
-		await exited;
+		expect(child.exitCode).toBeNull();
+		expect(child.signalCode).toBeNull();
+		expect(child.kill("SIGKILL")).toBe(true);
+		expect(await exited).toEqual([null, "SIGKILL"]);
 		expect(await run(root)).toMatchObject({ result: "Success" });
 		expect(sql(join(root, "store/comms.db"), "SELECT value FROM records")).toEqual([{ value: "committed WAL" }]);
 		expect((await stat(join(root, "store/comms.db"))).mode & 0o777).toBe(0o660);

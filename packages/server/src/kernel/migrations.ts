@@ -50,9 +50,18 @@ export const migrate = (directory: string, epoch: string) =>
 						const first = exported(loaded) ? loaded.default : loaded;
 						const effect = exported(first) ? first.default : first;
 						return Effect.isEffect(effect)
-							? preserveMigrationState(
-									sql,
-									warnings ? observeMigrationDialect(sql, effect, () => unbranched.push(`${id}_${name}`)) : effect,
+							? on<ReturnType<typeof writerGate> | typeof Effect.void>(sql, {
+									sqlite: () => Effect.void,
+									pg: () => Effect.void,
+									// DDL releases MySQL's batch fence; reject stale ownership before capturing the next baseline.
+									mysql: () => writerGate(sql, epoch),
+								}).pipe(
+									Effect.andThen(
+										preserveMigrationState(
+											sql,
+											warnings ? observeMigrationDialect(sql, effect, () => unbranched.push(`${id}_${name}`)) : effect,
+										),
+									),
 								)
 							: loaded;
 					}),
