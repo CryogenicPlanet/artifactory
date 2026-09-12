@@ -156,11 +156,11 @@ export interface RemoteRecoveryOptions {
 
 export const remoteRecovery = (options: RemoteRecoveryOptions) =>
 	Effect.gen(function* () {
-		const identity = yield* remoteAppStoreIdentity(options.appStore);
+		const remoteIdentity = yield* remoteAppStoreIdentity(options.appStore);
 		const events = yield* Events;
 		const prepare = (epoch: string, rejectedAttempt?: string) =>
 			Effect.gen(function* () {
-				const adoption = yield* identity.reserve;
+				const adoption = yield* remoteIdentity.reserve;
 				const store = yield* withDatabase(options.appStore, adoption.database);
 				yield* options.authorizeStoreAccess(store);
 				const bootView = yield* asBoot(store, options.bootStore);
@@ -187,7 +187,7 @@ export const remoteRecovery = (options: RemoteRecoveryOptions) =>
 					}),
 				);
 				// The guarded app scope has closed and proved its registered sessions gone before boot finalizes.
-				yield* identity.complete(adoption);
+				yield* remoteIdentity.complete(adoption);
 				if (evidence._tag === "Failure") return yield* evidence.failure;
 				if (evidence.success && pending.pending_attempt === rejectedAttempt)
 					return yield* new EventError({ code: "candidate_probe_committed" });
@@ -197,8 +197,8 @@ export const remoteRecovery = (options: RemoteRecoveryOptions) =>
 				}
 			});
 		return {
-			store: identity.store,
-			reserveIdentity: identity.reserve,
+			store: remoteIdentity.store,
+			reserveIdentity: remoteIdentity.reserve,
 			filename: undefined,
 			dataDirectory: options.dataDirectory,
 			prepare,
