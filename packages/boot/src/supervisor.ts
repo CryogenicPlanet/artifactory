@@ -3,7 +3,7 @@ import { Redacted } from "effect";
 import { recoveryIntents } from "./recovery-intents.ts";
 import { SqlClient } from "effect/unstable/sql";
 import { render, StoreError, type Store } from "@comms/storage/store";
-import { redactHex } from "./auth-primitives.ts";
+import { logRedactor } from "./log-redaction.ts";
 import { Cause, Config, Crypto, Effect, FileSystem, Path, Queue, Ref, Schema, Scope, Semaphore } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import { prepareGeneration, snapshotEntry, type ApplicationSource } from "./application.ts";
@@ -26,6 +26,7 @@ export interface ChildStatus {
 	readonly stderr: string;
 }
 export interface ActiveChild {
+	readonly store: Store;
 	readonly process: RunningChild;
 	readonly attempt: Attempt;
 	readonly generation: Generation;
@@ -33,6 +34,7 @@ export interface ActiveChild {
 	readonly receipt: string;
 }
 export interface SupervisedChild {
+	readonly redact: (text: string) => string;
 	readonly status: Ref.Ref<ChildStatus>;
 	readonly generations: Ref.Ref<readonly Generation[]>;
 	readonly attempts: Ref.Ref<readonly Attempt[]>;
@@ -42,7 +44,11 @@ export interface SupervisedChild {
 }
 
 /** Supervisor owns process recovery; the cutover coordinator shares its one operation gate. */
-export const supervise = Effect.fn("supervise")(function* (options: ApplicationSource, remote?: RemoteRuntime) {
+export const supervise = Effect.fn("supervise")(function* (
+	options: ApplicationSource,
+	remote?: RemoteRuntime,
+	redact = logRedactor([]),
+) {
 	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
 	const crypto = yield* Crypto.Crypto;
 	const path = yield* Path.Path;
@@ -98,6 +104,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 	const history = yield* Ref.make<readonly Generation[]>([]);
 	const sourceError = yield* Ref.make<string | null>(null);
 	const child = {
+		redact,
 		status,
 		attempts,
 		channelGate,
@@ -109,8 +116,8 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		Ref.update(status, (state): ChildStatus => ({
 			...state,
 			state: "failed",
-			error: redactHex(Cause.pretty(cause)),
-			stderr: redactHex(state.stderr),
+			error: redact(Cause.pretty(cause)),
+			stderr: redact(state.stderr),
 		}));
 	const launch = (
 		generation: Generation,
@@ -172,7 +179,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 					),
 				),
 			);
-			return { process, attempt, generation, ...owner } satisfies ActiveChild;
+			return { process, attempt, generation, store, ...owner } satisfies ActiveChild;
 		});
 	const recordAttempt = (value: ActiveChild, state: Attempt["state"]) =>
 		channelGate.withPermit(
@@ -262,7 +269,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 				pid: value.process.pid,
 				port: value.process.port,
 				error: null,
-				stderr: redactHex(yield* Ref.get(value.process.stderr)),
+				stderr: redact(yield* Ref.get(value.process.stderr)),
 			});
 			// Every newly activated lifetime is monitored independently of the recovery
 			// operation gate, including the accepted-to-live cutover window.
@@ -332,8 +339,8 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 				});
 				const result = yield* start(generation).pipe(Effect.result);
 				if (result._tag === "Success") return;
-				const stderr = Schema.is(ChildError)(result.failure) ? redactHex(result.failure.stderr ?? "") : "";
-				yield* generations.failed(generation.n, redactHex(String(result.failure)), stderr, attempt);
+				const stderr = Schema.is(ChildError)(result.failure) ? redact(result.failure.stderr ?? "") : "";
+				yield* generations.failed(generation.n, redact(String(result.failure)), stderr, attempt);
 				yield* Ref.update(status, (value) => ({ ...value, stderr }));
 				yield* fail(Cause.fail(result.failure));
 				yield* assertClosure;
@@ -379,7 +386,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 							if ((yield* Ref.get(current))?.attempt.epoch !== active.attempt.epoch) return;
 							yield* Ref.set(current, null);
 							yield* Ref.set(routing.route, null);
-							const stderr = redactHex(yield* Ref.get(active.process.stderr));
+							const stderr = redact(yield* Ref.get(active.process.stderr));
 							const unresponsive = (yield* Ref.get(status)).error === "child_unresponsive";
 							yield* Ref.update(status, (value): ChildStatus => ({
 								...value,
@@ -391,7 +398,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 							yield* (yield* Generations).failed(
 								active.generation.n,
 								unresponsive ? "child_unresponsive" : "Child exited",
-								redactHex(yield* Ref.get(active.process.stderr)),
+								redact(yield* Ref.get(active.process.stderr)),
 							);
 							yield* Effect.sleep((yield* Ref.get(tried))[active.generation.n] === 1 ? "250 millis" : "500 millis");
 							yield* requestRecovery;

@@ -57,6 +57,7 @@ const main = Effect.gen(function* () {
 			state: "live",
 		} satisfies ActiveChild["attempt"];
 		const active: ActiveChild = {
+			store: { _tag: "file", filename },
 			id: "owner",
 			receipt: "fixture",
 			generation,
@@ -112,6 +113,7 @@ const main = Effect.gen(function* () {
 			}),
 			fail: () => Effect.void,
 			child: {
+				redact: (text: string) => text,
 				traffic: routing,
 				sourceError: yield* Ref.make<string | null>(null),
 				channelGate: yield* Semaphore.make(1),
