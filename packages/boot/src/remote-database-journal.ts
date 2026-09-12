@@ -149,7 +149,7 @@ export const remoteDatabaseJournal = (bootStore: RemoteStore, dataDirectory: str
 			});
 		const list = Effect.gen(function* () {
 			const rows =
-				yield* sql`SELECT ${sql("key")} AS key,value FROM settings WHERE ${sql("key")} LIKE ${"remote^_database:%"} ESCAPE '^'`.pipe(
+				yield* sql`SELECT ${sql("key")},value FROM settings WHERE ${sql("key")} LIKE ${"remote^_database:%"} ESCAPE '^'`.pipe(
 					Effect.flatMap(
 						Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String }))),
 					),
