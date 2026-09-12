@@ -3,18 +3,21 @@ import { fileURLToPath } from "node:url";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { on } from "@comms/storage/dialect";
 import { withDatabase } from "@comms/storage/store";
-import { Console, Effect, FileSystem, Layer, Redacted, Schema } from "effect";
+import { Cause, Console, Effect, FileSystem, Layer, Redacted, Schema } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
 import { remoteAppKernelSchema } from "../../src/app-kernel-schema.ts";
 import { remoteAppStoreIdentity, verifyRemoteAppIdentity } from "../../src/app-store-identity.ts";
 import { EventError } from "../../src/events.ts";
-import { remoteDatabaseJournal } from "../../src/remote-database-journal.ts";
+import { RemoteDatabaseError, remoteDatabaseJournal } from "../../src/remote-database-journal.ts";
 import { remoteDbOps } from "../../src/remote-db-ops.ts";
 import { remoteNativeCopy } from "../../src/remote-native-copy.ts";
 import { launchRemoteRoot } from "../../src/remote-root-launcher.ts";
 import { remoteRuntime } from "../../src/remote-runtime.ts";
 import { configuration } from "./remote-keeper-config.ts";
+import { NativeCopyRejected } from "../../src/native-copy-configuration.ts";
+import { StorageRejected, storageHeadroom } from "../../src/storage-headroom.ts";
+import { RemoteCopyError } from "@comms/storage/remote-copy";
 
 const Donor = Schema.fromJsonString(
 	Schema.Struct({ storeId: Schema.String, body: Schema.String, bytes: Schema.String }),
@@ -119,11 +122,31 @@ const main = Effect.gen(function* () {
 		bootStore: config.boot,
 		dataDirectory: root,
 		withStore: runtime.withStore,
-		withNative: native,
+		withNative: (request) =>
+			Console.error(`foreign-backup:native-${request.operation}:start`).pipe(
+				Effect.andThen(
+					native(request).pipe(
+						Effect.tapError((error) =>
+							Schema.is(NativeCopyRejected)(error) || Schema.is(RemoteCopyError)(error)
+								? Console.error(`foreign-backup:native:${error.code}`)
+								: Effect.void,
+						),
+					),
+				),
+				Effect.tap(() => Console.error(`foreign-backup:native-${request.operation}:closed`)),
+			),
 		assertAccountClosed: runtime.assertAccountClosed,
 	}).pipe(Effect.provideService(SqlClient.SqlClient, boot));
 	if (phase === "donor") {
 		yield* Console.error("foreign-backup:dump");
+		const headroom = yield* storageHeadroom(root);
+		const volume = yield* headroom.sample;
+		const required = yield* service.estimatedBytes;
+		yield* Console.error(
+			volume.status === "available"
+				? `foreign-backup:storage:capacity=${volume.capacity_bytes}:available=${volume.available_bytes}:required=${required}`
+				: `foreign-backup:storage:${volume.reason}`,
+		);
 		assert.ok((yield* service.clone({ _tag: "file", filename: `${root}/foreign.backup` })) > 0n);
 		yield* fs.writeFileString(
 			`${root}/donor.json`,
@@ -176,6 +199,22 @@ const main = Effect.gen(function* () {
 main.pipe(
 	Effect.scoped,
 	Effect.provide(Layer.mergeAll(BunServices.layer, FetchHttpClient.layer)),
-	Effect.catchCause(() => Effect.die("Foreign native backup acceptance failed; credentials omitted")),
+	Effect.catchCause((cause) =>
+		Effect.gen(function* () {
+			const reason = Cause.findError(cause);
+			if (reason._tag === "Success") {
+				const error = reason.success;
+				if (
+					Schema.is(EventError)(error) ||
+					Schema.is(RemoteDatabaseError)(error) ||
+					Schema.is(NativeCopyRejected)(error) ||
+					Schema.is(StorageRejected)(error) ||
+					Schema.is(RemoteCopyError)(error)
+				)
+					yield* Console.error(`foreign-backup:failure:${error._tag}:${error.code}`);
+			}
+			return yield* Effect.die("Foreign native backup acceptance failed; credentials omitted");
+		}),
+	),
 	BunRuntime.runMain,
 );
