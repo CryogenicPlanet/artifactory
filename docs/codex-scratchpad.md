@@ -10,9 +10,9 @@ The user explicitly resumed the database stack after PR #1 merged as `dd733fe`, 
 | --- | --- |
 | PR #2: SQLite descriptors | `1ef641e` includes the `/init` heading and long-poll fixture corrections. |
 | PR #3: store identity | `f4f1dca` adds the withdrawn-child status fix to completed-adoption provenance and restore-staging recovery. |
-| PR #4: SQLite DbOps | Updated stack includes the identity/status fixes; exact pushed head must be checked before CI acceptance. |
-| PR #5: migration ledgers | `aaf6396`, stacked on PR #4; push/CI acceptance pending at this checkpoint. |
-| Remote foundations | Integrated with the preceding corrections in tree `f315610`; PR #6 preparation continues. Guarded native PostgreSQL and MySQL client tests pass four cases each, but the clients remain unwired to board startup/recovery. |
+| PR #4: SQLite DbOps | Pushed `7d47607` includes the identity/status fixes; exact-head CI acceptance remains separate. |
+| [PR #7: migration ledgers](https://github.com/CryogenicPlanet/artifactory/pull/7) | Pushed `aaf6396`, stacked on PR #4; CI acceptance remains separate. |
+| [PR #8: remote foundations](https://github.com/CryogenicPlanet/artifactory/pull/8) | Pushed `83e312d` includes the preceding corrections from tree `f315610`. Guarded native PostgreSQL and MySQL client tests pass four cases each, but the clients remain unwired to board startup/recovery. |
 
 The combined suite at `cda128d` finished **839 passed, nine failed and eight skipped in 618.22s**, with actual Node 22.22.3 and two workers. Corrections are integrated in tree `f315610`: missing `APP_STORE`/layer initialization in the long-poll fixture (`de7450b`) and missing installer patch in generation fixtures (`4776313`) pass their three exact cases in 86.93s; redundant SQLite version-mirror writes (`e130233`) pass 31/31 ledger and byte-preservation tests; stale live status after withdrawing a child was a production defect (`9e7848e`), corrected with 6/6 focused passes in 19.69s. These results address the nine failures; **the corrected combined full suite has not run**. Focused counts overlap and do not establish exact-head Linux/image/recovery acceptance.
 
