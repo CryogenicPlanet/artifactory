@@ -131,9 +131,30 @@ const program = Effect.gen(function* () {
 		const record = yield* journal.allocate("boot");
 		yield* provision.createPrincipal(record, yield* journal.credential(record.id));
 		yield* withSource(config.boot, selected.pipe(Effect.flatMap((service) => service.grantDump(record))));
-		assert.equal((yield* journal.read(record.id)).phase, "allocated");
+		if (config.boot._tag === "postgres") {
+			const privileges = yield* runtime.bootSql`SELECT
+                has_table_privilege(${record.principal}, 'public.transfer_safety_evidence', 'SELECT') AS readable,
+                has_table_privilege(${record.principal}, 'public.transfer_safety_evidence', 'INSERT') AS insertable,
+                has_table_privilege(${record.principal}, 'public.transfer_safety_evidence', 'UPDATE') AS updatable,
+                has_table_privilege(${record.principal}, 'public.transfer_safety_evidence', 'DELETE') AS deletable,
+                has_schema_privilege(${record.principal}, 'public', 'CREATE') AS creatable`;
+			assert.deepEqual(privileges, [
+				{ readable: true, insertable: false, updatable: false, deletable: false, creatable: false },
+			]);
+		}
+		yield* journal.ready(record.id);
+		const dumpReference = { transferId: selection.transfer_id, resourceId: record.id };
+		const dumpCredential = yield* journal.credential(record.id);
+		for (const reservation of [
+			runtime.reserveOwner(dumpCredential, "a".repeat(64), "account"),
+			runtime.reserveOwner(config.boot, "b".repeat(64), "account", dumpReference),
+			runtime.reserveOwner(config.app, "c".repeat(64), "account", dumpReference),
+			runtime.reserveOwner(dumpCredential, "d".repeat(64), "database", dumpReference),
+		])
+			assert.equal((yield* reservation.pipe(Effect.result))._tag, "Failure");
+		assert.equal((yield* journal.read(record.id)).phase, "ready");
 		assert.equal(yield* principalExists(record.principal), true);
-		// Exit with a fully journaled principal/grant, before ready/native keeper admission.
+		// Exit with a ready principal/grant, before native keeper admission.
 		return;
 	}
 	const before = yield* fs
@@ -144,7 +165,7 @@ const program = Effect.gen(function* () {
 	assert.equal(pending.length, 1);
 	const interrupted = pending[0];
 	assert.ok(interrupted);
-	assert.equal(interrupted.phase, "allocated");
+	assert.ok(interrupted.phase === "allocated" || interrupted.phase === "ready");
 	assert.equal(yield* principalExists(interrupted.principal), true);
 	const safety = yield* nativeTransferSafetyCopy({ selection, source, runtime, budgetMs: 30000 });
 	yield* Console.error("stage:recover-provisioned-dump");
