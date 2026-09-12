@@ -82,7 +82,8 @@ const project = (row: Row, selection: TransferSelection, initializedAt: number) 
 				key:
 					authority.some((key) => key === row.key) ||
 					isTransferControl(row.key) ||
-					row.key.startsWith("remote_database:")
+					row.key.startsWith("remote_database:") ||
+					row.key.startsWith("restore-remote-before:")
 						? `${prefix}${row.key}`
 						: row.key,
 				value: row.value,

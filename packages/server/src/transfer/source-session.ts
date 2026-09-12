@@ -3,8 +3,9 @@ import {
 	assertChildAttemptsClosed,
 	sqliteTransferSafetyCopy,
 	nativeTransferSafetyCopy,
+	failedRemoteRestoreBlocksStartup,
 } from "@comms/boot";
-import { withDatabase } from "@comms/storage/store";
+import { withDatabase, type Store } from "@comms/storage/store";
 import type { TransferBinding } from "@comms/storage/store-transfer-schema";
 import { SqlClient } from "effect/unstable/sql";
 import { transferEndpoint } from "./endpoint.ts";
@@ -57,6 +58,19 @@ export interface SourceReadOptions {
 	readonly resumeBinding?: TransferBinding;
 }
 
+/** A failed repair of the still-selected original must refuse before opening that app store.
+ * Use the same boot-only predicate as normal startup; transfer cannot erase its recovery block.
+ */
+export const assertTransferSourceRepair = (boot: SqlClient.SqlClient, selected: Store, storeId: string) =>
+	selected._tag === "file"
+		? Effect.void
+		: failedRemoteRestoreBlocksStartup(boot, selected, storeId).pipe(
+				Effect.mapError(() => new TransferRejected({ code: "transfer_recovery_pending" })),
+				Effect.flatMap((blocked) =>
+					blocked ? Effect.fail(new TransferRejected({ code: "transfer_recovery_pending" })) : Effect.void,
+				),
+			);
+
 /** Materialized evidence only: all inspection pools close before the caller may take opaque safety copies. */
 export const readTransferSource = (options: SourceReadOptions) =>
 	Effect.scoped(
@@ -87,6 +101,9 @@ export const readTransferSource = (options: SourceReadOptions) =>
 				endpoint.boot,
 				options.resumeBinding,
 			);
+			const storeId = rows.find((row) => row.key === "app_store_id")?.value;
+			if (!storeId) return yield* invalid();
+			yield* assertTransferSourceRepair(endpoint.boot, selected, storeId);
 			if (bootStore._tag === "file" && selected._tag === "file") {
 				const bootStat = yield* fs.stat(bootStore.filename);
 				const appStat = yield* fs.stat(selected.filename);
