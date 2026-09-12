@@ -1,4 +1,4 @@
-import { Effect, Exit, Redacted, Stream } from "effect";
+import { Cause, Effect, Exit, Redacted, Stream } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
 import { SqlError, UnknownError } from "effect/unstable/sql/SqlError";
 import { SqlClient, Statement } from "effect/unstable/sql";
@@ -265,6 +265,9 @@ it("reports a static provisioning stage without retaining driver credentials", a
 				expect(result.failure.code).toBe("remote_database_provision_failed");
 				expect(result.failure.stage).toBe("create_principal");
 				expect(JSON.stringify(result.failure)).not.toContain(secret);
+				const diagnostic = Cause.pretty(Cause.fail(result.failure));
+				expect(diagnostic).toContain("remote_database_provision_failed: create_principal");
+				expect(diagnostic).not.toContain(secret);
 			}
 		}),
 	));

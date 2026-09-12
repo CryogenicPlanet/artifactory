@@ -24,7 +24,11 @@ export class RemoteDatabaseError extends Schema.TaggedError<RemoteDatabaseError>
 		"mysql_clone_objects_unsupported",
 	]),
 	stage: Schema.optionalKey(MysqlProvisionStage),
-}) {}
+}) {
+	get message() {
+		return this.stage === undefined ? this.code : `${this.code}: ${this.stage}`;
+	}
+}
 const Record = Schema.Struct({
 	id: Schema.String,
 	kind: Schema.Literals(["dump", "rehearsal", "restore"]),
