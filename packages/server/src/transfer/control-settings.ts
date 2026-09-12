@@ -1,5 +1,7 @@
 import { on } from "@comms/storage/dialect";
 import { TransferRejected, type TransferSelection } from "@comms/storage/store-transfer-schema";
+import { readTransferRows } from "@comms/storage/transfer-reader";
+import type { TransferTablePlan } from "@comms/storage/transfer-copy";
 import { makeTransferDigest } from "@comms/storage/transfer-values";
 import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
@@ -82,24 +84,17 @@ const project = (row: Row, selection: TransferSelection, initializedAt: number) 
 		];
 	});
 
+const settingsPlan: TransferTablePlan = {
+	name: "settings",
+	columns: [
+		{ name: "key", kind: "text", nullable: false },
+		{ name: "value", kind: "text", nullable: false },
+	],
+	key: ["key"],
+	identities: [],
+};
 const scan = <E, R>(sql: SqlClient, consume: (row: Row) => Effect.Effect<void, E, R>) =>
-	Effect.gen(function* () {
-		const order = on(sql, {
-			sqlite: () => sql`${sql("key")} COLLATE BINARY`,
-			pg: () => sql`${sql("key")} COLLATE "C"`,
-			mysql: () => sql`BINARY ${sql("key")}`,
-		});
-		let offset = 0;
-		while (true) {
-			const batch =
-				yield* sql`SELECT ${sql("key")},value FROM settings ORDER BY ${order} LIMIT 1 OFFSET ${offset}`.pipe(
-					Effect.flatMap(rows),
-				);
-			if (!batch[0]) return;
-			yield* consume(batch[0]);
-			offset++;
-		}
-	});
+	readTransferRows(sql, settingsPlan, (raw) => Schema.decodeUnknownEffect(Row)(raw).pipe(Effect.flatMap(consume)));
 
 /** Caller holds all four offline owners throughout preparation, copy and verification. */
 export const prepareControlSettings = (

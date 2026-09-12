@@ -20,7 +20,7 @@ await Effect.runPromise(
 		const targetApp = yield* open(`${root}/store/comms.db`);
 		const id = "12345678-1234-4123-8123-123456789abc";
 		const transferId = "98765432-1234-4123-8123-123456789abc";
-		const epoch = "a".repeat(64);
+		const epoch = "a".repeat(64) + (mode === "newline-epoch" ? "\n" : "");
 		const selection: TransferSelection = {
 			version: 1,
 			transfer_id: transferId,
@@ -46,6 +46,16 @@ await Effect.runPromise(
 		yield* sourceBoot`INSERT INTO settings VALUES('app_store_adoption',${JSON.stringify({ store_id: id, initialized_at: 123, filename: selection.source.app, mode: "fresh", phase: "ready" })})`;
 		yield* sourceBoot`INSERT INTO settings VALUES('remote_database:old',${JSON.stringify({ id: "old", phase: "closed", database: "old_destination" })})`;
 		yield* targetBoot`INSERT INTO settings VALUES('transfer_state','in_progress'),('transfer_journal','current journal bytes'),('transfer_prepare','current preparation'),('transfer_kernel','current kernel'),('app_store_schema','target schema bytes')`;
+		if (mode === "history") {
+			yield* sourceBoot.withTransaction(
+				Effect.gen(function* () {
+					const prefixes = ["A", "a", "é", "e\u0301", "😀", "日本語"];
+					for (let index = 0; index < 513; index++) {
+						yield* sourceBoot`INSERT INTO settings VALUES(${`receipt:history:${prefixes[index % prefixes.length] ?? ""}:${index.toString().padStart(4, "0")}`},${`${index}:` + "日本語😀".repeat(1024)})`;
+					}
+				}),
+			);
+		}
 		if (mode === "publication-gap") yield* sourceBoot`UPDATE seq SET published_through=87`;
 		if (mode === "malformed-receipt")
 			yield* sourceBoot`INSERT INTO settings VALUES('source-revert-result:x','{"outcome":false}')`;
@@ -81,8 +91,11 @@ await Effect.runPromise(
 		const archived =
 			yield* targetBoot`SELECT key,value FROM settings WHERE key LIKE ${`transfer-history:${transferId}:%`} ORDER BY key`;
 		const activeRemote = yield* targetBoot`SELECT key FROM settings WHERE key LIKE 'remote_database:%'`;
+		const history = yield* targetBoot`SELECT COUNT(*) AS count FROM settings WHERE key LIKE 'receipt:history:%'`;
 		const receipt = yield* targetBoot`SELECT value FROM settings WHERE key='receipt:example'`;
 		const watcher = yield* targetBoot`SELECT value FROM settings WHERE key='source.watcher_baseline'`;
-		console.log(JSON.stringify({ result, targetSequence, controls, archived, activeRemote, watcher, receipt }));
+		console.log(
+			JSON.stringify({ result, targetSequence, controls, archived, activeRemote, watcher, receipt, history }),
+		);
 	}).pipe(Effect.scoped, Effect.provide(BunCrypto.layer)),
 );

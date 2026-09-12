@@ -51,7 +51,7 @@ export const prepareControlTransfer = (options: {
 	Effect.gen(function* () {
 		const { sourceBoot, sourceApp, targetBoot, targetApp, initializedAt, epoch } = options;
 		const selection = yield* validateTransferSelection(options.selection);
-		if (!Number.isSafeInteger(initializedAt) || initializedAt < 0 || !/^[0-9a-f]{64}$/.test(epoch))
+		if (!Number.isSafeInteger(initializedAt) || initializedAt < 0 || !/^[0-9a-f]{64}(?![\s\S])/.test(epoch))
 			return yield* invalid();
 		const sourceRows = yield* readSequence(sourceBoot);
 		const source = sourceRows[0];

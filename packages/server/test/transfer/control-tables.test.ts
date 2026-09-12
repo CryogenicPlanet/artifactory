@@ -40,6 +40,7 @@ it.for([
 	"wrong-identity",
 	"publication-gap",
 	"malformed-receipt",
+	"newline-epoch",
 ])("refuses %s during read-only preparation", async (mode, test) => {
 	expect(await fixture(test, mode)).toMatchObject({
 		result: { _tag: "Failure" },
@@ -52,5 +53,12 @@ it("refuses conflicting target settings without replacing them", async (test) =>
 		result: { _tag: "Failure" },
 		controls: expect.arrayContaining([{ key: "transfer_state", value: "in_progress" }]),
 		receipt: [{ value: "newer target bytes" }],
+	});
+});
+
+it("copies and verifies large receipt history through the shared bounded reader", async (test) => {
+	expect(await fixture(test, "history")).toMatchObject({
+		result: { _tag: "Success", value: { unchanged: true, corruptionDetected: true } },
+		history: [{ count: 513 }],
 	});
 });

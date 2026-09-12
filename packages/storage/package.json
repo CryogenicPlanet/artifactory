@@ -17,6 +17,7 @@
 		"./remote-copy": "./src/remote-copy.ts",
 		"./transfer-inventory": "./src/transfer-inventory.ts",
 		"./transfer-values": "./src/transfer-values.ts",
+		"./transfer-reader": "./src/transfer-reader.ts",
 		"./transfer-copy": "./src/transfer-copy.ts"
 	},
 	"scripts": {
