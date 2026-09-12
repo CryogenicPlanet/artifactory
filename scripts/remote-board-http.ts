@@ -2,7 +2,7 @@
 // The harness owns Docker lifecycle; this probe never touches either database directly.
 /* oxlint-disable effecttsgo/async-function, effecttsgo/global-fetch, effecttsgo/process-env, effecttsgo/prefer-schema-over-json */
 import assert from "node:assert/strict";
-import { readFile, writeFile, stat } from "node:fs/promises";
+import { readFile, writeFile, stat, rename } from "node:fs/promises";
 import { setTimeout } from "node:timers/promises";
 import { Schema } from "effect";
 import { authenticator } from "../packages/boot/test/fixtures/authenticator.ts";
@@ -199,9 +199,13 @@ async function run() {
 	const code = (await readFile(setupFile, "utf8")).trim();
 	const device = authenticator();
 	let counter = 0;
-	const saveAuthenticator = () =>
-		writeFile(`${stateFile}.authenticator`, JSON.stringify({ ...device.state, counter }), { mode: 0o600 });
-	await saveAuthenticator();
+	const authenticatorFile = `${stateFile}.authenticator`;
+	await writeFile(authenticatorFile, JSON.stringify({ ...device.state, counter }), { mode: 0o600, flag: "wx" });
+	const saveAuthenticator = async () => {
+		const temporary = `${authenticatorFile}.tmp`;
+		await writeFile(temporary, JSON.stringify({ ...device.state, counter }), { mode: 0o600, flag: "wx" });
+		await rename(temporary, authenticatorFile);
+	};
 	const setup = Schema.decodeUnknownSync(ceremony)(
 		await (await ok(await request("/_boot/auth/setup/options", { code }), "Setup options")).json(),
 	);

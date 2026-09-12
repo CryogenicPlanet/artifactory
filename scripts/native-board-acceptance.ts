@@ -42,9 +42,18 @@ async function run() {
 	await once(listener, "listening");
 	const address = listener.address();
 	assert(address && typeof address !== "string");
-	const port = existingOrigin ? Number(new URL(existingOrigin).port) : address.port;
 	await new Promise<void>((resolve, reject) => listener.close((error) => (error ? reject(error) : resolve())));
-	const origin = existingOrigin ?? `http://localhost:${port}`;
+	const savedOrigin = existingRoot ? (await readFile(join(root, "origin"), "utf8")).trim() : undefined;
+	if (savedOrigin && existingOrigin)
+		assert.equal(existingOrigin, savedOrigin, "Resume origin conflicts with retained board");
+	const origin = savedOrigin ?? existingOrigin ?? `http://localhost:${address.port}`;
+	const parsedOrigin = new URL(origin);
+	assert(
+		parsedOrigin.protocol === "http:" && parsedOrigin.hostname === "localhost" && parsedOrigin.port,
+		"Expected loopback test origin",
+	);
+	const port = Number(parsedOrigin.port);
+	if (!existingRoot) await writeFile(join(root, "origin"), origin, { mode: 0o600, flag: "wx" });
 	const setupFile = join(root, "setup-code");
 	const stateFile = join(root, "state.json");
 	let output = "";
@@ -82,8 +91,11 @@ async function run() {
 		return { child, closed };
 	};
 	let running = launch();
+	let closureVerified = false;
 	const stop = async () => {
-		if (running.child.exitCode === null && running.child.signalCode === null) running.child.kill("SIGTERM");
+		if (closureVerified) return;
+		const requested = running.child.exitCode === null && running.child.signalCode === null;
+		if (requested) running.child.kill("SIGTERM");
 		const deadline = new AbortController();
 		try {
 			await Promise.race([
@@ -92,13 +104,7 @@ async function run() {
 					throw new Error("Server closure unproven; retained private journals");
 				}),
 			]);
-			assert(
-				running.child.exitCode === 0 ||
-					running.child.exitCode === 1 ||
-					running.child.exitCode === 143 ||
-					running.child.signalCode === "SIGTERM",
-				"Unexpected server closure status; retained private journals",
-			);
+			if (!requested) assert.equal(running.child.exitCode, 0, "Server exited before requested shutdown");
 			await promisify(execFile)(
 				"bun",
 				[
@@ -108,6 +114,7 @@ async function run() {
 				],
 				{ timeout: 10000 },
 			);
+			closureVerified = true;
 		} finally {
 			deadline.abort();
 		}
@@ -165,6 +172,7 @@ async function run() {
 
 		output = "";
 		running = launch();
+		closureVerified = false;
 		phase = "actual server restart";
 		await ready(false);
 		phase = "post-restart authenticated persistence and fresh writes";
