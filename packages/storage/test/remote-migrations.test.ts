@@ -47,3 +47,20 @@ it.skipIf(!process.env.COMMS_REMOTE_MIGRATION_TEST_CONFIG)(
 		}
 	},
 );
+
+it.skipIf(!process.env.COMMS_REMOTE_MIGRATION_TEST_CONFIG)(
+	"serializes competing native initializers before reading the receipt prefix",
+	async () => {
+		const run = (mode: string) =>
+			promisify(execFile)("bun", [`${import.meta.dirname}/fixtures/remote-migrations.ts`, mode]);
+		await run("reset");
+		try {
+			const results = await Promise.all([run("initialize-only"), run("initialize-only")]);
+			for (const result of results) expect(result.stdout).toContain("MIGRATION_INITIALIZED");
+			expect((await run("resume")).stdout).toContain("MIGRATION_VERIFIED");
+		} finally {
+			await run("reset");
+		}
+	},
+	30000,
+);

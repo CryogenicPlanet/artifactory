@@ -54,7 +54,7 @@ async function main() {
 									});
 									if (mode === "crash") {
 										yield* Effect.sync(() => process.stdout.write("DDL_APPLIED\n"));
-										yield* Effect.never;
+										return yield* Effect.never;
 									}
 								}),
 							},
@@ -105,6 +105,10 @@ async function main() {
 					return;
 				}
 				yield* remoteMigrate(sql, "boot_migrations", steps);
+				if (mode === "initialize-only") {
+					process.stdout.write("MIGRATION_INITIALIZED\n");
+					return;
+				}
 				phase = "retained-write";
 				const before = yield* sql`SELECT id,body FROM migration_probe ORDER BY id`;
 				if (before.length === 0) yield* sql`INSERT INTO migration_probe(id,body) VALUES(1,'retained after DDL')`;
