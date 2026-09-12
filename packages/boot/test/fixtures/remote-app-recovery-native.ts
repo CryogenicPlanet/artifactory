@@ -130,14 +130,22 @@ const main = Effect.gen(function* () {
 			yield* reset;
 			yield* recovery.prepare("before-refusal");
 			if (kind === "missing") yield* app`DELETE FROM store_identity`;
-			if (kind === "foreign") yield* app`UPDATE store_identity SET store_id='foreign'`;
+			if (kind === "foreign") yield* app`UPDATE store_identity SET store_id='11111111-1111-4111-8111-111111111111'`;
 			if (kind === "transferred") yield* app`UPDATE store_identity SET transferred_to='target'`;
 			if (kind === "missing-table") yield* app`DROP TABLE store_identity`;
 			const refused = yield* recovery.prepare("must-not-fence").pipe(Effect.result);
 			assert.equal(refused._tag, "Failure");
 			assert(refused._tag === "Failure" && Schema.is(EventError)(refused.failure));
-			assert.equal(refused.failure.code, kind === "transferred" ? "store_transferred" : "app_store_missing");
+			assert.equal(
+				refused.failure.code,
+				kind === "transferred" ? "store_transferred" : kind === "foreign" ? "app_store_mismatch" : "app_store_missing",
+			);
 			assert.equal((yield* app`SELECT epoch FROM kernel_writer`)[0]?.epoch, "before-refusal");
+			if (kind === "foreign")
+				assert.equal(
+					(yield* app`SELECT store_id FROM store_identity`)[0]?.store_id,
+					"11111111-1111-4111-8111-111111111111",
+				);
 		}
 		yield* reset;
 		yield* recovery.prepare("same-epoch");

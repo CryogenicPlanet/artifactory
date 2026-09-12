@@ -26,7 +26,9 @@ for (const dialect of ["pg", "mysql"])
 	});
 for (const scenario of [
 	"foreign",
+	"mysql-foreign",
 	"missing",
+	"mysql-missing",
 	"transferred",
 	"pending-missing-writer",
 	"denied",
@@ -37,11 +39,19 @@ for (const scenario of [
 		const result = Schema.decodeUnknownSync(
 			Schema.Struct({
 				commands: Schema.Array(Schema.String),
-				result: Schema.Struct({ _tag: Schema.Literal("Failure") }),
+				result: Schema.Struct({ _tag: Schema.Literal("Failure"), failure: Schema.Struct({ code: Schema.String }) }),
 				committedWriter: Schema.optionalKey(Schema.String),
 			}),
 		)(await run(scenario));
 		expect(result.committedWriter).toBeUndefined();
+		if (scenario.endsWith("foreign") || scenario === "missing" || scenario === "mysql-missing") {
+			expect(result.result.failure.code).toBe(
+				scenario.endsWith("foreign") ? "app_store_mismatch" : "app_store_missing",
+			);
+			expect(
+				result.commands.some((command) => /^(?:INSERT INTO|UPDATE|DELETE FROM) store_identity/.test(command)),
+			).toBe(false);
+		}
 		expect(result.commands.some((command) => command.startsWith("UPDATE kernel_writer"))).toBe(false);
 		if (["denied", "boot-transfer", "journal-mismatch"].includes(scenario))
 			expect(result.commands.some((command) => command.startsWith("open:"))).toBe(false);

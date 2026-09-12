@@ -56,7 +56,12 @@ const main = Effect.gen(function* () {
 		writer = "old";
 	}
 	if (scenario.includes("foreign"))
-		appIdentity = { singleton: 1, store_id: "foreign", initialized_at: adoption.initialized_at, transferred_to: null };
+		appIdentity = {
+			singleton: 1,
+			store_id: "11111111-1111-4111-8111-111111111111",
+			initialized_at: adoption.initialized_at,
+			transferred_to: null,
+		};
 	if (scenario.includes("missing")) appIdentity = undefined;
 	if (scenario.includes("transferred"))
 		appIdentity = {

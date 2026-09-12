@@ -336,7 +336,7 @@ export const verifyRemoteAppIdentity = (adoption: RemoteAdoption) =>
 		if (!row) return yield* new EventError({ code: "app_store_missing" });
 		if (rows.length !== 1 || row.singleton !== 1 || row.initialized_at < 0) return yield* invalid();
 		if (row.transferred_to !== null) return yield* new EventError({ code: "store_transferred" });
-		if (row.store_id !== adoption.store_id) return yield* new EventError({ code: "app_store_missing" });
+		if (row.store_id !== adoption.store_id) return yield* new EventError({ code: "app_store_mismatch" });
 		if (row.initialized_at !== adoption.initialized_at) return yield* invalid();
 		return false;
 	});
