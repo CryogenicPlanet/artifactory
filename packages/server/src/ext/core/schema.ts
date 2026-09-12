@@ -22,7 +22,7 @@ export const initialize = Effect.gen(function* () {
 				yield* sql`SELECT path,parent,name,meta,last_seq,created_at,archived_at,updated_seq,previous,deleted_at FROM topics LIMIT 1`;
 				yield* sql`SELECT id,seq,topic,agent,instance,body,tags,meta,created_at,edited_at,deleted_at,updated_seq,previous,mentions,previous_mentions FROM messages LIMIT 1`;
 				yield* sql`SELECT instance,${sql("key")},kind,input_hash,outcome,expires_at FROM idempotency LIMIT 1`;
-				yield* sql`SELECT instance,topic,seq FROM reads LIMIT 1`;
+				yield* sql`SELECT instance,topic,seq FROM ${sql("reads")} LIMIT 1`;
 				yield* sql`SELECT ns,${sql("key")},value,updated_seq,previous FROM kv LIMIT 1`;
 				yield* sql`SELECT seq,from_path,to_path,marker,completed FROM topic_page_continuations LIMIT 1`;
 				yield* on(sql, {
