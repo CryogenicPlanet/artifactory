@@ -46,7 +46,7 @@ await Effect.runPromise(
 		assert.equal((yield* fs.stat(first.path)).mode & 0o777, 0o600);
 		assert.deepEqual(yield* verify(first.path), first.receipt);
 		const copied = first.path.replace(/receipt.json$/, "boot.db-wal");
-		assert.deepEqual(yield* fs.readFile(copied), opaqueWal);
+		assert.deepEqual(new Uint8Array(yield* fs.readFile(copied)), opaqueWal);
 		const appCopy = first.path.replace(/receipt.json$/, "app.db");
 		const restored = new Database(appCopy, { readonly: true });
 		assert.deepEqual(restored.query("SELECT value FROM evidence").get(), { value: new Uint8Array([0, 255, 128, 42]) });
@@ -58,7 +58,7 @@ await Effect.runPromise(
 		const second = yield* capture;
 		assert.notEqual(second.path, first.path);
 		assert.equal(yield* fs.exists(first.path), true, "Failed/tampered artifacts are retained");
-		assert.deepEqual(yield* fs.readFile(`${root}/boot.db-wal`), opaqueWal);
+		assert.deepEqual(new Uint8Array(yield* fs.readFile(`${root}/boot.db-wal`)), opaqueWal);
 		const foreign = yield* sqliteTransferSafetyCopy({
 			...options,
 			storeId: "33333333-3333-4333-8333-333333333333",
