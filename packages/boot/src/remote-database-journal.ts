@@ -7,6 +7,8 @@ export class RemoteDatabaseError extends Schema.TaggedError<RemoteDatabaseError>
 		"remote_database_invalid",
 		"remote_database_provision_failed",
 		"remote_database_cleanup_required",
+		"scratch_limit",
+		"mysql_clone_objects_unsupported",
 	]),
 }) {}
 const Record = Schema.Struct({
@@ -16,6 +18,7 @@ const Record = Schema.Struct({
 	database: Schema.String,
 	principal: Schema.String,
 	phase: Schema.Literals(["allocated", "ready", "closed"]),
+	database_created: Schema.optionalKey(Schema.Literal(true)),
 });
 export type RemoteDatabaseRecord = typeof Record.Type;
 const Encoded = Schema.fromJsonString(Record);
@@ -98,7 +101,6 @@ export const remoteDatabaseJournal = (bootStore: RemoteStore, dataDirectory: str
 		const credential = (id: string) =>
 			Effect.gen(function* () {
 				const record = yield* read(id);
-				if (record.phase === "closed") return yield* invalid();
 				const file = filename(id);
 				const info = yield* fs.stat(file);
 				if (
@@ -160,5 +162,30 @@ export const remoteDatabaseJournal = (bootStore: RemoteStore, dataDirectory: str
 				),
 			);
 		});
-		return { allocate, read, list, credential, phase, forget };
+		const created = (record: RemoteDatabaseRecord, _resource: "database") =>
+			Effect.gen(function* () {
+				if (Option.isSome(yield* Effect.serviceOption(sql.transactionService))) return yield* invalid();
+				yield* sql.withTransaction(
+					Effect.gen(function* () {
+						yield* sql`SELECT value FROM settings WHERE ${sql("key")}=${key(record.id)} FOR UPDATE`;
+						const saved = yield* read(record.id);
+						if (
+							saved.phase !== "allocated" ||
+							saved.kind === "dump" ||
+							saved.database !== record.database ||
+							saved.endpoint !== record.endpoint
+						)
+							return yield* invalid();
+						yield* sql`UPDATE settings SET value=${yield* Schema.encodeEffect(Encoded)({ ...saved, database_created: true })} WHERE ${sql("key")}=${key(saved.id)}`;
+					}),
+				);
+			});
+		const owns = (record: RemoteDatabaseRecord, _resource: "database") =>
+			read(record.id).pipe(
+				Effect.map(
+					(saved) =>
+						saved.database === record.database && saved.endpoint === record.endpoint && saved.database_created === true,
+				),
+			);
+		return { allocate, read, list, credential, phase, forget, created, owns };
 	});

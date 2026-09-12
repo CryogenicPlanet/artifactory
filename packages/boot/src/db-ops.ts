@@ -1,3 +1,6 @@
+import type { RemoteDatabaseError } from "./remote-database-journal.ts";
+import type { RemoteCopyError } from "@comms/storage/remote-copy";
+import type { EventError } from "./events.ts";
 import { ChildError } from "./child-process.ts";
 import { appStoreIdentity, verifyAppIdentity } from "./app-store-identity.ts";
 import type { BackupRecord } from "./backup-metadata.ts";
@@ -98,22 +101,26 @@ const make = (store: FileStore, dataDirectory: string) =>
 		};
 	});
 type Operations = Effect.Success<ReturnType<typeof make>>;
-type Restore = ReturnType<Operations["restoreInto"]>;
+type RemoteFailure = RemoteDatabaseError | RemoteCopyError | EventError;
+type Result<A, T extends Effect.Effect<unknown, unknown, unknown>> = Effect.Effect<
+	A,
+	Effect.Error<T> | RemoteFailure,
+	Effect.Services<T>
+>;
 type Rehearsal = ReturnType<Operations["rehearsal"]>;
-/** Coordinators select stores; the SQLite implementation retains file-specific mechanics internally. */
-export interface DbOpsService extends Omit<Operations, "engine" | "restoreInto" | "rehearsal"> {
+/** A common effect shape keeps the coordinator independent of native versus file mechanics. */
+export interface DbOpsService {
 	readonly engine: "sqlite" | "pg" | "mysql";
+	readonly estimatedBytes: Result<number, Operations["estimatedBytes"]>;
+	readonly recoverStaging: Result<void, Operations["recoverStaging"]>;
+	readonly clone: (destination: FileStore) => Result<bigint, ReturnType<Operations["clone"]>>;
+	readonly prepareClone: (clone: FileStore, epoch: string) => Result<void, ReturnType<Operations["prepareClone"]>>;
 	readonly restoreInto: (
 		artifact: Parameters<Operations["restoreInto"]>[0],
-	) => Effect.Effect<Store, Effect.Error<Restore>, Effect.Services<Restore>>;
-	readonly rehearsal: (...args: Parameters<Operations["rehearsal"]>) => Effect.Effect<
-		{
-			readonly store: Store;
-			readonly dispose: Effect.Effect<void, Effect.Error<Rehearsal>, Effect.Services<Rehearsal>>;
-		},
-		Effect.Error<Rehearsal>,
-		Effect.Services<Rehearsal>
-	>;
+	) => Result<Store, ReturnType<Operations["restoreInto"]>>;
+	readonly rehearsal: (
+		...args: Parameters<Operations["rehearsal"]>
+	) => Result<{ readonly store: Store; readonly dispose: Result<void, Rehearsal> }, Rehearsal>;
 }
 export class DbOps extends Context.Service<DbOps, DbOpsService>()("comms/boot/DbOps") {}
 export const layer = (store: FileStore, dataDirectory: string) => Layer.effect(DbOps, make(store, dataDirectory));

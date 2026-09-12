@@ -12,6 +12,7 @@ function checkInvariants() {
 		"app-recovery.ts": ["kernel_writer", "mutation_batches", "outbox"],
 		"app-kernel-schema.ts": ["kernel_writer", "mutation_batches", "outbox"],
 		"db-ops.ts": ["kernel_writer"],
+		"remote-db-ops.ts": ["kernel_writer"],
 	};
 
 	function workspace(path: string) {
