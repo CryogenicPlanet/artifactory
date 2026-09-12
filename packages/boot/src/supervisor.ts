@@ -74,7 +74,6 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 	const routing = yield* traffic;
 	// Only lifecycle operations withdraw routing or reopen admission. A missing route
 	// is not evidence that the authoritative store is safe to resume.
-	const withdraw = Ref.set(routing.route, null).pipe(Effect.andThen(Ref.set(current, null)));
 	const release = routing.requests.release.pipe(Effect.andThen(routing.release));
 	const status = yield* Ref.make<ChildStatus>({
 		state: "starting",
@@ -86,6 +85,14 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		error: null,
 		stderr: "",
 	});
+	const withdraw = Ref.set(routing.route, null).pipe(
+		Effect.andThen(Ref.set(current, null)),
+		Effect.andThen(
+			Ref.update(status, (value): ChildStatus =>
+				value.state === "live" ? { ...value, state: "starting", pid: null, port: null } : value,
+			),
+		),
+	);
 	const tried = yield* Ref.make<Readonly<Record<number, number>>>({});
 	const history = yield* Ref.make<readonly Generation[]>([]);
 	const sourceError = yield* Ref.make<string | null>(null);
