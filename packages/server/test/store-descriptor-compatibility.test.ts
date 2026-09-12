@@ -13,10 +13,10 @@ it("restarts a retained APP_DATABASE-only generation after a candidate corrupts 
 	// This saved generation has the pre-descriptor environment contract and opens
 	// real SQLite through the complete server, including migrations and writes.
 	const legacy = channel
-		.replace('import { childStore } from "@comms/storage/store";\n', "")
+		.replace('import { childStore, parseDescriptor, StoreError } from "@comms/storage/store";\n', "")
 		.replace(
-			/\tconst descriptor = yield\* Config.Redacted\("APP_STORE"\);[\s\S]*?\tconst filename = store.filename;/,
-			'\tconst filename = yield* Config.String("APP_DATABASE");',
+			/\tconst descriptor = yield\* Config.Redacted\("APP_STORE"\);[\s\S]*?\tconst filename = store._tag === "file" \? store.filename : null;/,
+			'\tconst filename = yield* Config.String("APP_DATABASE");\n\tconst store = { _tag: "file" as const, filename };',
 		);
 	expect(legacy).not.toContain("APP_STORE");
 	expect(legacy).not.toBe(channel);

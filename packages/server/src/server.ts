@@ -5,7 +5,8 @@ import { extensionCapabilities } from "./ext/core/capabilities.ts";
 // oxlint-disable-next-line effecttsgo/node-builtin-import -- Effect Crypto has no constant-time comparison.
 import { timingSafeEqual } from "node:crypto";
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
-import { clientLayer } from "@comms/storage/client";
+import { databaseLayer } from "./kernel/remote-database.ts";
+import { initializeRemoteKernelSchema } from "./kernel/schema.ts";
 import {
 	Config,
 	Context,
@@ -39,7 +40,7 @@ import { type Messages, layer as messagesLayer } from "./ext/core/messages.ts";
 import { probeHealth } from "./kernel/health.ts";
 import { Lifecycle, RequestMutation, layer as lifecycleLayer } from "./kernel/lifecycle.ts";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
-import type { SqlClient } from "effect/unstable/sql/SqlClient";
+import { SqlClient } from "effect/unstable/sql/SqlClient";
 import { type Pages, layer as pagesLayer } from "./ext/core/pages.ts";
 import { routes as boardRoutes } from "./board-http.ts";
 import { routes as pageRoutes } from "./pages-http.ts";
@@ -98,6 +99,7 @@ const server = Effect.gen(function* () {
 		const application = Effect.gen(function* () {
 			yield* Deferred.await(go);
 			return yield* Effect.gen(function* () {
+				yield* initializeRemoteKernelSchema(yield* SqlClient, boot.epoch);
 				yield* initialize;
 				yield* migrate(`${import.meta.dirname}/migrations`, boot.epoch);
 				return yield* Effect.gen(function* () {
@@ -234,7 +236,7 @@ const server = Effect.gen(function* () {
 						),
 					),
 				);
-			}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: boot.filename })));
+			}).pipe(Effect.provide(databaseLayer(boot.store)));
 		});
 		yield* application.pipe(
 			Effect.catchCause((cause) =>

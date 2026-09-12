@@ -20,8 +20,9 @@ const program = Effect.gen(function* () {
 			let reserveCalls = 0;
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
 			const pause = Console.log("PAUSED").pipe(Effect.andThen(Effect.never));
-			const channel: BootChannel["Service"] = {
+			const channel: BootChannel["Service"] & { readonly filename: string } = {
 				epoch,
+				store: { _tag: "file", filename: `${root}/comms.db` },
 				filename: `${root}/comms.db`,
 				generation: 2,
 				backup: Effect.void,

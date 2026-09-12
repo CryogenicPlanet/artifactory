@@ -28,8 +28,9 @@ const program = Effect.gen(function* () {
 			const entered = yield* Deferred.make<void>();
 			const release = yield* Deferred.make<void>();
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
-			const channel: BootChannel["Service"] = {
+			const channel: BootChannel["Service"] & { readonly filename: string } = {
 				epoch,
+				store: { _tag: "file", filename: `${root}/comms.db` },
 				filename: `${root}/comms.db`,
 				generation: 1,
 				backup: Effect.void,

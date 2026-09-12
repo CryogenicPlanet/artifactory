@@ -21,8 +21,9 @@ const program = Effect.gen(function* () {
 	const published: Batch[] = [];
 	let grants: readonly string[] = [];
 	const ranges = new Map<string, { transaction: string; from: number; to: number }>();
-	const channel = (epoch: string): BootChannel["Service"] => ({
+	const channel = (epoch: string): BootChannel["Service"] & { readonly filename: string } => ({
 		epoch,
+		store: { _tag: "file", filename: `${root}/app.db` },
 		filename: `${root}/app.db`,
 		generation: 1,
 		backup: Effect.void,

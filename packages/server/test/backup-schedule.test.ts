@@ -22,7 +22,13 @@ it.effect("requests only on live UTC hours, skips startup catchup, and survives 
 		yield* backupSchedule.pipe(
 			Effect.provide(
 				Layer.merge(
-					Layer.mock(BootChannel, { epoch: "test", filename: "unused.db", generation: 1, backup }),
+					Layer.mock(BootChannel, {
+						epoch: "test",
+						store: { _tag: "file", filename: "unused.db" },
+						filename: "unused.db",
+						generation: 1,
+						backup,
+					}),
 					Layer.succeed(Lifecycle, lifecycle),
 				),
 			),
@@ -62,7 +68,13 @@ it.effect("permits freeze during a pending request and interrupts it when the ap
 		yield* backupSchedule.pipe(
 			Effect.provide(
 				Layer.merge(
-					Layer.mock(BootChannel, { epoch: "test", filename: "unused.db", generation: 1, backup }),
+					Layer.mock(BootChannel, {
+						epoch: "test",
+						store: { _tag: "file", filename: "unused.db" },
+						filename: "unused.db",
+						generation: 1,
+						backup,
+					}),
 					Layer.succeed(Lifecycle, lifecycle),
 				),
 			),

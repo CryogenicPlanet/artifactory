@@ -1,4 +1,4 @@
-import { childStore } from "@comms/storage/store";
+import { childStore, parseDescriptor, StoreError } from "@comms/storage/store";
 import { EventRecord, EventPage } from "@comms/protocol/events";
 import { KernelErrorCode } from "@comms/protocol/error-code";
 import { Config, Context, Deferred, Effect, Layer, Redacted, Ref, Schema, Semaphore } from "effect";
@@ -32,8 +32,10 @@ const make = Effect.gen(function* () {
 	const epoch = yield* Config.String("WRITER_EPOCH");
 	const descriptor = yield* Config.Redacted("APP_STORE");
 	const legacy = yield* Config.String("APP_DATABASE").pipe(Config.withDefault(undefined));
-	const store = yield* childStore(Redacted.value(descriptor), legacy);
-	const filename = store.filename;
+	const store = yield* parseDescriptor(Redacted.value(descriptor));
+	if (store._tag === "file") yield* childStore(Redacted.value(descriptor), legacy);
+	else if (legacy !== undefined) return yield* new StoreError({ code: "store_descriptor_mismatch" });
+	const filename = store._tag === "file" ? store.filename : null;
 	const generation = yield* Config.Int("GENERATION");
 	const state = yield* Config.String("STATE").pipe(Config.withDefault("candidate"));
 	if (state === "rehearsal") {
@@ -42,6 +44,7 @@ const make = Effect.gen(function* () {
 		const next = yield* Ref.make(initial);
 		return {
 			epoch,
+			store,
 			filename,
 			generation,
 			backup: Effect.fail(new KernelError({ code: "generation_not_live" })),
@@ -206,6 +209,7 @@ const make = Effect.gen(function* () {
 		});
 	return {
 		epoch,
+		store,
 		filename,
 		generation,
 		backup: request("/_boot/db/backup", Schema.Struct({ id: Schema.String }), {}, 20_000).pipe(Effect.asVoid),

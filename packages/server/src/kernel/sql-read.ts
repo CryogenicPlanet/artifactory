@@ -11,6 +11,7 @@ const inspectSql = (input: typeof SqlInput.Type, allowRead: boolean) =>
 		Effect.gen(function* () {
 			yield* sqlInput(input);
 			const boot = yield* BootChannel;
+			if (boot.filename === null) return yield* new KernelError({ code: "sql_unsupported" });
 			const path = yield* Path.Path;
 			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 			const relative = import.meta.url.endsWith(".ts") ? "./sql-read-worker.ts" : "./kernel/sql-read-worker.js";

@@ -35,8 +35,9 @@ const program = Effect.gen(function* () {
 			let aborts = 0;
 			let cachedFence: number | undefined;
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
-			const channel: BootChannel["Service"] = {
+			const channel: BootChannel["Service"] & { readonly filename: string } = {
 				epoch,
+				store: { _tag: "file", filename: `${root}/comms.db` },
 				filename: `${root}/comms.db`,
 				generation: mode === "recover" ? 3 : 2,
 				backup: Effect.void,

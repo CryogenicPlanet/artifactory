@@ -84,6 +84,7 @@ const run = Effect.gen(function* () {
 	Effect.scoped,
 	Effect.provideService(BootChannel, {
 		epoch: "test",
+		store: { _tag: "file", filename: ":memory:" },
 		filename: ":memory:",
 		generation: 1,
 		backup: Effect.void,
