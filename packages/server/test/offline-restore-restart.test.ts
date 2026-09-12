@@ -18,7 +18,7 @@ for (const checkpoint of ["before-record", "restoring", "working", "hot-journal"
 				checkpoint === "before-record"
 					? "yield* beforeImage.record(record.proof_id, preserved);"
 					: checkpoint === "restoring"
-						? "yield* backup.restore(target);"
+						? "yield* backup.restoreInto(target);"
 						: 'yield* candidate.process.health.pipe(Effect.timeout("5 seconds"));';
 			expect(source.split(needle)).toHaveLength(2);
 			await writeFile(
