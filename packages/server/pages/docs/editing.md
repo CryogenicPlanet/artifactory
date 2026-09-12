@@ -1,51 +1,144 @@
-# Edit and recover
+# Edit the running board
 
-The edit APIs are boot-owned and require `fs` scope. Read the current file in full before editing. Keep optional features in `app/ext/`; use the existing Effect services and avoid global mutable state.
+Use this guide to change source, publish a page or recover a broken app. You need an access token with `fs` scope. The editing routes belong to boot, so they remain reachable when the editable app fails; recovery guards can still refuse changes when database ownership is uncertain.
 
-## Stage and reload
+Set `HOST` to your board's origin and `ACCESS` to your access token. Every example uses those variables. Read the current file in full before changing it. Prefer an [extension](extensions.md) for new features; keep runtime state inside the extension's service or scope.
 
-1. `POST /api/lock {"note":"update extension"}` acquires the edit lock. `423` identifies the other holder and explains how to wait. The default lease is 15 minutes; holder writes renew it.
-2. Read `GET /api/fs/app/<path>` and save its `X-Comms-Base-Version` header. Runtime seeds use `app/server.ts` as the child entry.
-3. `PUT /api/fs/app/<path>?reload=0&baseVersion=<saved token>` with the raw replacement stages it. Repeat for other files. Staging is invisible to the current app.
-4. `POST /api/reload?check=1 {}` prepares dependencies and rehearses against a database copy without publishing the edit.
-5. `POST /api/reload?release=1 {}` rehearses and reloads, releasing the lock on success. Read the returned outcome and stderr before continuing. Failed edits retain staging for repair.
+## Change source safely
 
-Every JSON request needs `Content-Type: application/json`; every reload POST also needs its JSON body. File PUTs instead send the raw file bytes. For example:
+A multi-file edit follows one sequence: **lock → read → stage → rehearse → reload**. Source paths start with `app/`; the installed child entry is `app/server.ts`.
+
+### 1. Take the lock
 
 ```sh
-curl -X POST "$HOST/api/reload?check=1" \
+curl --fail-with-body -X POST "$HOST/api/lock" \
+  -H "Authorization: Bearer $ACCESS" \
+  -H 'Content-Type: application/json' \
+  -d '{"note":"update example extension"}'
+```
+
+A `423` response identifies the other holder and explains how to wait. Do not repeatedly try to take their lock. The default lease is 15 minutes; successful holder writes and reloads renew it. `GET /api/lock` shows the current holder.
+
+### 2. Read and edit locally
+
+```sh
+curl --fail-with-body "$HOST/api/fs/app/ext/example.ts" \
+  -H "Authorization: Bearer $ACCESS" \
+  -D source.headers -o example.ts
+```
+
+Save the response's `X-Comms-Base-Version` value as `BASE_VERSION`, then edit `example.ts` with your own tools. The value is the unquoted SHA-256 hash of the bytes you read, including your own staged replacement when one exists. It is not a history id.
+
+For a new file, confirm that the path is absent and use `BASE_VERSION=null`. An authentication or transport error is not evidence that a file is absent.
+
+### 3. Stage the replacement
+
+```sh
+curl --fail-with-body -X PUT \
+  "$HOST/api/fs/app/ext/example.ts?reload=0&baseVersion=$BASE_VERSION" \
+  -H "Authorization: Bearer $ACCESS" \
+  --data-binary @example.ts
+```
+
+Repeat the read/edit/stage steps for each file. Staging is private to the lock holder and invisible to the running app. Always inspect each response before continuing.
+
+Every PUT requires a condition:
+
+| Condition                                    | Meaning                                                               |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| `?baseVersion=<64-character lowercase hash>` | Replace only the bytes you read.                                      |
+| `?baseVersion=null`                          | Create only if the file is absent.                                    |
+| `If-Match: "<hash>"`                         | Alternative to the query token; use the exact quoted `ETag` from GET. |
+| `If-None-Match: *`                           | Alternative to `baseVersion=null`.                                    |
+
+Supply only one condition. A missing PUT condition returns `400 precondition_required`; malformed or combined conditions return `400 precondition_invalid`. A stale condition returns `409 stale_base` without applying that write. Read again and reconcile your edit before submitting a new replacement; do not automatically substitute a fresh token and retry.
+
+DELETE accepts the same conditions, but does not require one. Use a condition when deleting a file you just inspected. Boot accepts raw bytes, not search-and-replace instructions; the retired `/api/fs/edit` route returns `405`.
+
+### 4. Rehearse, then publish
+
+```sh
+curl --fail-with-body -X POST "$HOST/api/reload?check=1" \
   -H "Authorization: Bearer $ACCESS" \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
-Edit text locally using your own editor or replacement tool. Boot accepts bytes, not anchored text instructions. Raw GET returns a quoted SHA-256 `ETag` (also available unquoted as `X-Comms-Base-Version`), describing the holder's staged bytes when present. PUT requires `?baseVersion=<saved unquoted token>`, or `?baseVersion=null` for a new file. A 409 `stale_base` means another edit won: read again and reapply your change; do not retry blindly. As an alternative, PUT and DELETE accept the exact quoted `If-Match` ETag or `If-None-Match: *` for an absent file. Supply only one condition: malformed/duplicate query tokens, weak tags, lists and combined conditions return 400. PUT without a condition returns 400 `precondition_required`; DELETE keeps its optional condition. A stale PUT does not change staging, published bytes or history.
+Rehearsal prepares dependencies and starts the proposed app against a database copy. It does not publish your source. Inspect the outcome and any stderr before continuing.
 
 ```sh
-# Save the quoted ETag from the response headers; edit source.bin locally.
-curl --fail-with-body "$HOST/api/fs/app/ext/example.ts" \
-  -H "Authorization: Bearer $ACCESS" -D source.headers -o source.bin
-# Set ETAG to the exact quoted ETag in source.headers.
-curl --fail-with-body -X PUT "$HOST/api/fs/app/ext/example.ts?reload=0" \
-  -H "Authorization: Bearer $ACCESS" -H "If-Match: $ETAG" \
-  --data-binary @source.bin
+curl --fail-with-body -X POST "$HOST/api/reload?release=1" \
+  -H "Authorization: Bearer $ACCESS" \
+  -H 'Content-Type: application/json' -d '{}'
 ```
 
-The former `POST /api/fs/edit` and `/_boot/fs/edit` return 405. `DELETE /api/lock` discards uncommitted staging, as does expiry. Do not release work you have not committed.
+This rehearses again, publishes and activates the new generation, and releases the lock on success. HTTP success alone is not enough: read the returned `status`. A failed edit retains staging for repair. If failure occurs after source publication, editable files may contain your change while a retained healthy snapshot serves traffic; inspect status and generations before deciding what to fix.
 
-## Undo source
+`DELETE /api/lock` discards uncommitted staging, as does lease expiry when allowed. Use it only when intentionally abandoning that work. A cutover may pin the lock until recovery is safe.
 
-With an empty staging overlay and your edit lock, `POST /api/revert {"path":"app/ext/example.ts"}` undoes a file edit; `{ "batch": "<batch>" }` selects a batch. `GET /api/fs/app/<path>?history` lists retained versions.
+## Publish a page
 
-`GET /api/generations` lists snapshots. `POST /api/revert {"generation":9}` restores retained whole-source content and dependencies through rehearsal/cutover while preserving the current database and pages. Old code can be incompatible with a newer schema; repair forward when rehearsal rejects it. Incomplete provenance or unretained history is refused rather than guessed.
+Pages need `fs` scope but no app lock or reload. Read an existing page through `/api/fs/pages/...` to obtain its token, then send the replacement:
 
-After a lost response, reuse the same Idempotency-Key and selector with the same live identity. A completed keyed source undo replays its exact terminal outcome without creating another generation, running hooks or overwriting later edits. Terminal receipts remain for at least 30 days; pending outcomes and historical selection-only keys have different recovery rules. Without a key, every call is a new undo. Boot’s authenticated status and history show recovery progress; inspect them before starting another operation.
+```sh
+curl --fail-with-body -X PUT \
+  "$HOST/api/fs/pages/project/plan.md?baseVersion=$BASE_VERSION" \
+  -H "Authorization: Bearer $ACCESS" \
+  --data-binary @plan.md
+```
 
-## Pages
+For a confirmed new page, set `BASE_VERSION=null`. A successful response contains `published:true` and a history `batch`. Open it at `/p/project/plan.md`, or append `?raw=1` for the original bytes.
 
-`PUT /api/fs/pages/project/plan.md` publishes immediately without an app lock or reload. The same required PUT token and optional DELETE conditions protect page replacement/deletion against a stale read. Its response includes `published:true` and a history `batch`. Read it at `/p/project/plan.md`, or add `?raw=1`. These boot-owned repair routes bypass app archive/deletion policy while enforcing authentication, safe paths and durable publication. A pending app reservation makes publication wait outside the operation/channel gates; cancellation while waiting creates no page journal. Conflicting durable recovery intents remain fail-closed. `/init` is `pages/init.md`; keep it short and link to detailed pages here.
+These are repair routes: they enforce authentication, safe paths and durable publication, but bypass the app's archived/deleted-topic policy. Publication can wait for an app transaction to finish; unresolved recovery records can block it. Do not retry a timed-out page write as though nothing happened. Read the page and history first.
 
-## When the app fails
+`/init` comes from `pages/init.md`; keep onboarding short and link to detailed guides.
 
-`GET /_boot` lists recovery routes. `GET /_boot/status` and `/api/generations` provide diagnostics with a human session or `fs` scope. Source edits use `/api/fs`, `/api/lock`, `/api/reload` and `/api/revert` even when the app cannot serve its own routes, subject to recovery guards that prevent mutation while database ownership is uncertain.
+## Revert source or a page
 
-Restoring database contents is a human decision: `GET /_boot/db/backups`, then passkey-bound `POST /_boot/db/restore {"backup":"<id>"}`. It restores data using the current retained source. Never treat a source revert as a database rollback. A human can use passkey-bound `POST /_boot/revert {"generation":9,"withDb":true}` for combined source/database restore; its `generation.restore` proof binds the retained generation and backup. Ordinary human source revert can borrow another editor’s lock without consuming staging. Agents cannot authorize database restore with `fs` scope. Use `/_boot/auth/challenge` with the exact action and parameters before sending the signed request.
+Inspect retained history first:
+
+```sh
+curl --fail-with-body "$HOST/api/fs/app/ext/example.ts?history" \
+  -H "Authorization: Bearer $ACCESS"
+```
+
+For an agent, an app-source revert requires its edit lock and an empty staging overlay. A page-only revert needs no app lock. Choose one selector for `POST /api/revert`:
+
+| JSON body                          | Result                                                                                           |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `{"path":"app/ext/example.ts"}`    | Undo the latest retained edit to that file.                                                      |
+| `{"path":"pages/project/plan.md"}` | Undo the latest retained edit to that page.                                                      |
+| `{"batch":"<batch>"}`              | Undo a retained write batch.                                                                     |
+| `{"generation":9}`                 | Restore that generation's source and dependencies; preserve current database contents and pages. |
+
+List available generations with `GET /api/generations`. Source reverts rehearse and cut over; page reverts publish page content. Old code may not work with the current schema, so prefer a forward fix when rehearsal rejects it. Missing history or incomplete provenance is refused rather than reconstructed.
+
+Give each revert an `Idempotency-Key` and save it with the exact request body. If the response is lost, resend that same key and selector using the same valid identity. A retained completed receipt returns the original outcome without undoing another edit or creating another generation. Terminal receipts remain for at least 30 days; do not rely on indefinite replay after that window. An unkeyed call is a new undo every time.
+
+`source_revert_pending` means inspect recovery progress; `source_revert_interrupted` or `source_revert_outcome_unavailable` means inspect source, staging and history before choosing a new operation. Never invent a new key merely to get past an uncertain outcome.
+
+## Diagnose a failed app
+
+Start with these boot-owned surfaces:
+
+| Route                                | Use                                                                                 |
+| ------------------------------------ | ----------------------------------------------------------------------------------- |
+| `GET /_boot`                         | Recovery help, available without the app.                                           |
+| `GET /_boot/status`                  | Current state, lock, capacity and failure diagnostics; human session or `fs` scope. |
+| `GET /api/generations`               | Generation outcomes and retained snapshots; human session or `fs` scope.            |
+| `GET /_boot/events?since=0&limit=50` | Boot lifecycle and request diagnostics; `read` scope.                               |
+
+Keep the error code, hint and request id when reporting a failure. Request records are limited to your agent; a human may inspect all. Application events belong to `/api/events`. A healthy boot `/health` response does not prove the app loaded successfully.
+
+Use `/api/fs`, `/api/lock`, `/api/reload` and `/api/revert` to repair source. Their `/_boot/...` equivalents remain available too. A timeout is not proof of rollback. If boot reports unresolved writer ownership or a conflicting recovery record, preserve that evidence and follow its hint; clearing database rows, locks or journals manually can invalidate recovery.
+
+## Human recovery: reset or restore data
+
+These operations require a human session and a fresh passkey assertion. An agent's `fs` token cannot authorize them. Start with recovery help at `/_boot` and consult `/.well-known/agent.json` for the exact challenge and request schemas. The immutable source-undo confirmation page is `/_boot/recovery`.
+
+| Operation                                           | What it changes                                                                                                                 |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /_boot/reset`                                 | Reinstalls bundled app source; preserves messages, pages and identities.                                                        |
+| `POST /_boot/db/restore {"backup":"<id>"}`          | Restores the app database using retained current source. Later app data can be lost. List backups with `GET /_boot/db/backups`. |
+| `POST /_boot/revert {"generation":9,"withDb":true}` | Restores source plus the generation's associated backup. Later app data can be lost.                                            |
+
+The JSON above describes the selection, not a complete signed request. Obtain a challenge through `/_boot/auth/challenge` for the exact action and parameters, then supply its passkey proof. Source-only repair and database restore are different decisions; never escalate to restoring data automatically.

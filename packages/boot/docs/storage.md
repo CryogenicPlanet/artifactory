@@ -1,17 +1,90 @@
-# Storage admission and retention
+# Manage storage
 
-New event reservations, non-deletion source staging/publication, source/dependency copies, and new database copies check caller-available volume space against a 5% floor. A known copy must fit above that floor before copying. Source and dependency traversal counts bytes as it copies; publication budgets before/after journal and history images, and materialization rechecks overlays after the base copy. Install/build admission checks current headroom, but cannot predict arbitrary generated output. Linux and macOS use the bounded volume probe; unavailable measurements refuse new growth. Source refusal is HTTP 507 with a free-space hint.
+Boot checks disk capacity before admitting ordinary growth and prunes eligible events and backups. It preserves the records and artifacts needed for authentication, publication and recovery. This is an admission safeguard, not an operating-system quota: concurrent writes and arbitrary extension/build output can still fill a volume.
 
-Reservation admission reads a boot-scoped volume sample refreshed once per second; missing, failed or more-than-five-second-old samples refuse growth with retriable HTTP 503. The timer owns the subprocess probe, so ordinary sequence reservations do not spawn a process while holding their SQL transaction. Known filesystem copies retain fresh checks. Persisted headroom policy is read for each admission.
+This guide describes the current SQLite implementation. Start with authenticated `GET /_boot/status` when a write reports a capacity error. See [deployment](../../../docs/deployment.md) for the data layout and [editing and recovery](../../server/pages/docs/editing.md) before changing source or restoring a database.
 
-Reservation admission runs after existing pending-reservation replay/conflict decisions. Successful app receipt retries bypass new reservation creation. Boot-authenticated starting attempts may allocate and abort their rolled-back health probe. Before routing, an authenticated accepted target may reserve one event to reconstruct its public-page grant snapshot; only a singleton pages.public first append is allowed in that completion window. Already-routed accepted/live attempts use ordinary admission. Saved-good startup and replacement-store grant reconstruction therefore remain available at low space, before live jobs or public routing. Boot authentication, diagnostic reads, completed receipt replay, append/abort, source journal recovery, page deletion, app deletion staging and already-selected database restore/rollback remain available at low space. Deploying an app deletion still needs the ordinary rehearsal/snapshot copies and their admission checks. Zero-event app metadata writes and arbitrary direct extension SQL do not pass through sequence reservation; these are outside this admission check.
+## Budgets and settings
 
-This is a sample-based admission safeguard, not an operating-system disk quota or a reservation against concurrent external writes. Estimates count known logical bytes; filesystem allocation metadata, SQLite write amplification, concurrent app growth and arbitrary extension/build output can still consume the margin. Boot has no volume allocation walker. Event maintenance conservatively charges active event-table/index B-tree pages, all shared freelist pages, any retained main-file tail beyond the logical database size, and the physical WAL file against 10% of volume capacity (or the validated event percentage in settings). Shared free/WAL bytes cannot be attributed reliably to one table, so the entire overhead is charged; live non-event database pages are reported separately and are not claimed as event allocation. This is not an absolute whole-boot-store cap. Protected recovery and identity state may exceed the event budget.
+| Setting            | Default | What it controls                                                                     |
+| ------------------ | ------- | ------------------------------------------------------------------------------------ |
+| `headroom_percent` | 5%      | Caller-available free space that ordinary growth must leave. Cannot be set below 5%. |
+| `event_percent`    | 10%     | Physically accounted event storage, including shared free/WAL overhead.              |
+| `backup_percent`   | 20%     | Catalogued app-store backup bytes plus a planned new copy.                           |
 
-A pass deletes at most 2,048 oldest published events in bounded transactions, never unpublished rows or durable batch receipts. Each of its nine iterations also attempts a passive checkpoint, reclaims at most 256 free pages with incremental vacuum, and attempts WAL truncation with SQLite busy waiting temporarily disabled on the exclusively borrowed adapter connection. SQLite checkpoint I/O itself has no hard byte or wall-time bound; the limits bound pass iterations and incremental vacuum work, not arbitrary checkpoint latency. A busy reader can leave WAL pressure outstanding; new ordinary reservations remain refused until a later measurement succeeds within budget. Maintenance runs independently of app liveness every minute. Fresh stores enable incremental auto-vacuum before creating tables. There is no calendar-based event deletion. Neither deletion nor checkpoint success is treated as proof that physical bytes were released: the next measurement checks free pages and WAL again. Admission and status re-read the storage policy: a changed event percentage or unavailable accounting triggers fresh physical measurement against the current sampled capacity. This accounting-only refresh never checkpoints or prunes inside a reservation transaction. Raised budgets can admit immediately when measured usage fits; lowering below usage still refuses until bounded maintenance reclaims eligible events. Malformed policy and unavailable measurement fail closed with retriable HTTP 503; actual headroom or budget excess remains non-retriable HTTP 507. Missing or failed measurements refuse ordinary growth; startup completion, authentication, already reserved publication/abort, and recovery exemptions remain available.
+A signed-in human can read current settings through `GET /_boot/settings`. A human changes them with a fresh passkey assertion; use the Account UI or the schemas in `/.well-known/agent.json`. Each percentage must be greater than zero and less than 100, and their sum must be below 100. Settings use a revision to detect concurrent changes.
 
-Legacy stores created without incremental auto-vacuum cannot reclaim their shared free pages this way. They report `reclaim_unavailable` and keep ordinary reservation admission closed if retained physical pressure exceeds the budget. Conversion is explicit offline maintenance: stop boot and its supervised children, retain a verified restorable copy of boot state, ensure enough temporary free space for SQLite's full database rewrite plus the reserved headroom, then run `PRAGMA auto_vacuum=INCREMENTAL; VACUUM;` against that closed boot database using the deployment's SQLite tooling. Verify integrity and auto-vacuum mode before restarting. Never attempt this full rewrite automatically on a nearly full volume; expand storage first when necessary. Legacy conversion has no automated low-space acceptance path in this change.
+There is **no calendar-based event deletion** and no event-retention-days setting. Old settings rows are ignored; retained signed receipts can still replay their historical result without applying that retired setting.
 
-Under the supervisor operation gate, reload and database-copy admission prune catalogue-known artifacts. Catalogue backup bytes plus the planned copy must fit within 20% of volume capacity. Oldest eligible hourly copies go first, then unreferenced manual copies, followed by old unprotected pre-flip/pre-restore copies. Five newest good generations, current/starting owners identified by unclosed keeper attempts and generations/backups referenced by unfinished cutover or restore are protected. Each operation also explicitly retains its prior/current generation until completion, including after retiring its process for a backup or cutover. Historical generation status labels do not pin artifacts indefinitely. Manual/hourly copies are not pinned merely because their source generation remains live. Terminal restore receipts remain as replay evidence but do not pin unreferenced backup files. Legacy unknown provenance and noncanonical locations are retained; insufficient reclaimable capacity refuses a new backup.
+## Respond to a capacity refusal
 
-Deletion uses canonical boot-owned catalogue paths and rejects symlink ancestors. Files are removed and their parent directory synced before clearing catalogue links. Interrupted deletion is reconciled on retry. Generation rows, failure history, keeper closure evidence, source journals/history, restore receipts and event/mutation batch reconciliation evidence are preserved. Prepared dependency/UI caches and uncatalogued files are deliberately not pruned: they lack a durable ownership/reference catalogue. Saved fallback selection excludes pruned snapshot links. Expand the volume or remove independently verified disposable artifacts if protected storage exhausts the budget.
+| Response                            | Meaning                                                                        | Next step                                                                                                              |
+| ----------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| Retriable `503`                     | Capacity information is missing, failed or stale, or stored policy is invalid. | Inspect the hint and status; restore valid measurement or configuration before retrying.                               |
+| Non-retriable `507`                 | Measured free space or the configured budget is insufficient.                  | Expand storage or reclaim independently verified disposable artifacts; repeating the same write will not create space. |
+| `reclaim_unavailable` in accounting | The store cannot incrementally reclaim its free pages.                         | Consider the offline conversion below after creating enough temporary space.                                           |
+
+Do not delete `boot.db`, its WAL, recovery journals, source history or catalogued backups directly to clear an error. A retained backup or snapshot may still be needed by an interrupted operation. Do not treat a timeout or successful SQL DELETE as evidence that physical disk space was released.
+
+At low space, boot keeps authentication, diagnostic reads, completed receipt replay, already-reserved publication/abort and recovery paths available. Page deletion and app deletion staging remain possible; deploying staged app deletions still requires the normal rehearsal and snapshot copies. These paths still require their usual authorization and recovery checks, and cannot guarantee success on an already exhausted filesystem.
+
+## How growth admission works
+
+New event reservations, non-deletion source changes, source/dependency copies and new database copies check headroom. Known copies must fit above the floor; source publication includes before/after journal and history images. Install/build admission checks current headroom but cannot predict arbitrary generated output.
+
+Event reservations use a boot-scoped sample refreshed once per second. Missing, failed or more-than-five-second-old samples refuse ordinary growth. Known filesystem copies perform fresh checks. Ordinary reservation transactions do not launch disk-probe subprocesses.
+
+Retries of completed app receipts do not create a new reservation. Starting health checks and the narrow accepted-generation public-page grant reconstruction have recovery exemptions before routing. Zero-event app metadata writes and direct extension SQL do not allocate sequences, so they are outside this reservation check. The guard is not a cap on all app writes.
+
+## What event maintenance removes
+
+The event charge includes active event-table/index B-tree pages, shared freelist pages, any retained main-file tail beyond logical size, and the physical WAL. Shared overhead cannot reliably be assigned to one table, so it is charged in full. Live non-event database pages are reported separately. This is not a whole-boot-store cap; protected identity and recovery state may exceed the event budget.
+
+Maintenance runs every minute, independently of app liveness. A pass deletes at most 2,048 oldest **published** events in bounded transactions. It never removes unpublished events or durable event-batch receipts. Each of nine bounded iterations also attempts a passive checkpoint, incremental reclamation of at most 256 free pages and WAL truncation with SQLite busy waiting disabled for that operation.
+
+Those limits bound iterations and incremental vacuum work, not checkpoint latency. A busy reader may keep WAL pressure high. The next physical measurement, rather than deletion/checkpoint success alone, determines whether reservations can resume.
+
+Admission re-reads policy. Raising a budget can admit writes once measured usage fits; lowering it below current usage refuses growth until maintenance reclaims enough eligible storage. Accounting refresh inside admission only measures; it does not prune or checkpoint inside a reservation transaction.
+
+## What backup and snapshot pruning preserves
+
+Before reload or a database copy, boot prunes catalogued artifacts under the supervisor's operation gate. Oldest eligible hourly backups go first, then unreferenced manual backups, then old unprotected pre-flip/pre-restore backups.
+
+The following stay protected:
+
+- The five newest good generations and current/starting owners whose keeper attempts are not closed.
+- Generations and backups referenced by unfinished cutover or restore operations.
+- The operation's prior/current generation until completion, even after its process has retired.
+- Artifacts with unknown legacy provenance or noncanonical locations.
+
+Historical status labels alone do not retain artifacts forever. Manual/hourly backups are not pinned merely because their source generation is live. A terminal restore receipt preserves replay evidence but does not pin an otherwise unreferenced backup file.
+
+Deletion uses canonical boot-owned paths, rejects symlink ancestors, syncs the parent directory and only then clears catalogue links. Interrupted deletion is reconciled on retry. Generation rows, failure history, keeper closure evidence, source journals/history and batch reconciliation evidence remain.
+
+Prepared dependency/UI caches and uncatalogued files are not automatically pruned: boot lacks a durable reference catalogue for them. Expand storage or remove only artifacts whose disposability you have independently established.
+
+## Receipt retention is separate from event retention
+
+Event pruning does not remove durable batch receipts. Keyed source-revert terminal outcomes have a separate retention policy: they remain for at least 30 days, then an hourly bounded scan may remove them. Pending outcomes and unresolved journal bindings remain; unfinished cutover/publication prevents this pruning. Historical terminal receipts without a trustworthy timestamp receive a new full window when observed. Historical selection-only keys are preserved rather than replayed as new undo operations.
+
+Do not promise indefinite source-revert replay after the retention window, and do not infer success or rollback from an old receipt's age.
+
+## Convert a legacy SQLite store for reclamation
+
+Fresh stores enable incremental auto-vacuum before creating tables. Older stores without it cannot reclaim shared free pages incrementally; ordinary reservations remain refused if physical pressure exceeds the event budget.
+
+Conversion requires an explicit offline database rewrite:
+
+1. Stop boot and all supervised children.
+2. Retain a verified restorable copy of boot state.
+3. Ensure sufficient temporary space for a full rewrite **plus** reserved headroom; expand the volume first if necessary.
+4. Against the closed boot database, use the deployment's SQLite tooling to run:
+
+   ```sql
+   PRAGMA auto_vacuum=INCREMENTAL;
+   VACUUM;
+   ```
+
+5. Verify database integrity and the resulting auto-vacuum mode before restarting.
+
+Never run this rewrite automatically on a nearly full volume. There is no automated low-space conversion path.
