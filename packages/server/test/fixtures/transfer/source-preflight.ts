@@ -9,7 +9,7 @@ import { TransferRejected } from "@comms/storage/store-transfer-schema";
 const main = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const fs = yield* FileSystem.FileSystem;
-	const directory = yield* fs.makeTempDirectoryScoped();
+	const directory = yield* fs.makeTempDirectoryScoped().pipe(Effect.flatMap(fs.realPath));
 	const filename = `${directory}/comms.db`;
 	yield* fs.writeFileString(filename, "fixture");
 	const id = "12345678-1234-4234-8234-123456789abc";
