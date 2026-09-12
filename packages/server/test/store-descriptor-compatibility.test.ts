@@ -15,7 +15,7 @@ it("restarts a retained APP_DATABASE-only generation after a candidate corrupts 
 	const legacy = channel
 		.replace('import { childStore, parseDescriptor, StoreError } from "@comms/storage/store";\n', "")
 		.replace(
-			/\tconst descriptor = yield\* Config.Redacted\("APP_STORE"\);[\s\S]*?\tconst filename = store._tag === "file" \? store.filename : null;/,
+			/\tconst descriptor = yield\* Config.Redacted\("APP_STORE"\)\.pipe\(Config.withDefault\(undefined\)\);[\s\S]*?\tconst filename = store._tag === "file" \? store.filename : null;/,
 			'\tconst filename = yield* Config.String("APP_DATABASE");\n\tconst store = { _tag: "file" as const, filename };',
 		);
 	expect(legacy).not.toContain("APP_STORE");

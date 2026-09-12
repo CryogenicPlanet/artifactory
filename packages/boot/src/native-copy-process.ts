@@ -29,7 +29,7 @@ export const nativeCopyRunner = Effect.gen(function* () {
 			const remote = operation.remote;
 			const configuration = Schema.encodeSync(Schema.fromJsonString(NativeCopyConfiguration))({
 				id: operation.id,
-				store: Redacted.value(render(operation.store)),
+				store: Redacted.value(yield* render(operation.store)),
 				remote,
 				operation: operation.operation,
 				path: operation.operation === "dump" ? operation.path : operation.artifact.path,

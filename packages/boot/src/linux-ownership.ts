@@ -140,7 +140,7 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 		...config,
 		env: {
 			...config.env,
-			APP_STORE: Redacted.value(render({ _tag: "file", filename: `${directory}/comms.db` })),
+			APP_STORE: Redacted.value(yield* render({ _tag: "file", filename: `${directory}/comms.db` }).pipe(Effect.orDie)),
 			APP_DATABASE: `${directory}/comms.db`,
 		},
 	};

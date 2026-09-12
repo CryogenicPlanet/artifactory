@@ -142,6 +142,7 @@ export const supervise = Effect.fn("supervise")(function* (
 			const board = (yield* fs.exists(`${generation.snapshot_dir}.board`))
 				? `${generation.snapshot_dir}.board`
 				: path.join(generation.snapshot_dir ?? "", "board");
+			const descriptor = yield* render(store);
 			const owner = yield* owners.reserve(generation.n);
 			const remoteConfiguration =
 				store._tag === "file"
@@ -161,7 +162,7 @@ export const supervise = Effect.fn("supervise")(function* (
 						BOOT_SECRET: secret,
 						WRITER_EPOCH: epoch,
 						GENERATION: String(generation.n),
-						APP_STORE: Redacted.value(render(store)),
+						APP_STORE: Redacted.value(descriptor),
 						...(store._tag === "file" ? { APP_DATABASE: store.filename } : {}),
 						PAGES_DIRECTORY: path.resolve(options.dataDirectory, "pages"),
 						BOARD_DIRECTORY: board,

@@ -30,11 +30,17 @@ const HandlerFailure = Schema.Struct({
 const Range = Schema.Struct({ transaction: Schema.String, from: Schema.Int, to: Schema.Int });
 const make = Effect.gen(function* () {
 	const epoch = yield* Config.String("WRITER_EPOCH");
-	const descriptor = yield* Config.Redacted("APP_STORE");
+	const descriptor = yield* Config.Redacted("APP_STORE").pipe(Config.withDefault(undefined));
 	const legacy = yield* Config.String("APP_DATABASE").pipe(Config.withDefault(undefined));
-	const store = yield* parseDescriptor(Redacted.value(descriptor));
-	if (store._tag === "file") yield* childStore(Redacted.value(descriptor), legacy);
-	else if (legacy !== undefined) return yield* new StoreError({ code: "store_descriptor_mismatch" });
+	const store = yield* descriptor === undefined
+		? childStore(undefined, legacy)
+		: parseDescriptor(Redacted.value(descriptor)).pipe(
+				Effect.mapError((error) => new StoreError({ code: error.code, variable: "APP_STORE" })),
+			);
+	if (store._tag === "file") {
+		if (descriptor !== undefined) yield* childStore(Redacted.value(descriptor), legacy);
+	} else if (legacy !== undefined)
+		return yield* new StoreError({ code: "store_descriptor_mismatch", variable: "APP_DATABASE" });
 	const filename = store._tag === "file" ? store.filename : null;
 	const generation = yield* Config.Int("GENERATION");
 	const state = yield* Config.String("STATE").pipe(Config.withDefault("candidate"));

@@ -122,7 +122,7 @@ export const remoteRootGuardian = (configuration: Configuration, dataDirectory: 
 							return HttpServerResponse.jsonUnsafe({
 								root: attempt,
 								dataDirectory,
-								bootStore: Redacted.value(render(configuration.boot)),
+								bootStore: Redacted.value(yield* render(configuration.boot)),
 								tls: connection.tls,
 								guardian: { url: guardianUrl, secret, attempt },
 							});
