@@ -34,7 +34,7 @@ export const initializeTransferApp = (
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
-		if (!/^[0-9a-f]{64}$/.test(epoch))
+		if (!/^[0-9a-f]{64}(?![\s\S])/.test(epoch))
 			return yield* new TransferAppInitializationError({ code: "transfer_epoch_invalid" });
 		const ownSource = yield* fs.realPath(path.resolve(import.meta.dirname, ".."));
 		if (sourceDirectory !== ownSource || (yield* fs.realPath(sourceDirectory)) !== sourceDirectory)

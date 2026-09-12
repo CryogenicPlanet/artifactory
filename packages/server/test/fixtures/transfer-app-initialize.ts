@@ -4,7 +4,7 @@ import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect, FileSystem, Path } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { initializeTransferApp } from "../../src/kernel/transfer-app-initialize.ts";
+import { initializeTransferApp, TransferAppInitializationError } from "../../src/kernel/transfer-app-initialize.ts";
 
 const program = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -12,6 +12,14 @@ const program = Effect.gen(function* () {
 	const path = yield* Path.Path;
 	const source = yield* fs.realPath(path.resolve(import.meta.dirname, "../../src"));
 	const epoch = "a".repeat(64);
+	for (const suffix of ["\n", "\r", "\r\n", "\u2028", "\u2029"]) {
+		const invalid = yield* initializeTransferApp(sql, epoch + suffix, source).pipe(Effect.result);
+		assert.equal(invalid._tag, "Failure");
+		assert.ok(invalid._tag === "Failure" && invalid.failure instanceof TransferAppInitializationError);
+		assert.equal(invalid.failure.code, "transfer_epoch_invalid");
+		assert.deepEqual(yield* sql`SELECT name FROM sqlite_schema`, []);
+		assert.deepEqual(yield* sql`SELECT total_changes() AS changes`, [{ changes: 0 }]);
+	}
 	yield* sql`CREATE TABLE kernel_writer(singleton INTEGER PRIMARY KEY,epoch TEXT NOT NULL)`;
 	yield* sql`INSERT INTO kernel_writer VALUES(1,${epoch})`;
 	yield* sql`CREATE TABLE mutation_batches(id TEXT PRIMARY KEY,from_seq INTEGER NOT NULL,to_seq INTEGER NOT NULL,count INTEGER NOT NULL)`;
