@@ -27,3 +27,7 @@ it("the actual transfer entry reports a static error without printing malformed 
 	expect(result.output).toContain("Store transfer failed;");
 	expect(result.output).not.toContain("fixture-secret-never-log");
 });
+it("replays a completed transfer without reopening source, and refuses check mode for that completed ID", async () => {
+	const result = await execute("bun", [join(import.meta.dirname, "fixtures/transfer-outer-complete.ts")]);
+	expect(result.stdout).toContain("Completed transfer replay and check refusal verified");
+});
