@@ -24,6 +24,9 @@ const foreignSchema = Schema.Array(
 		table: Schema.String,
 		from: Schema.String,
 		to: Schema.NullOr(Schema.String),
+		on_update: Schema.String,
+		on_delete: Schema.String,
+		match: Schema.String,
 	}),
 );
 const unsupported = (object: string) => new TransferInventoryError({ code: "transfer_object_unsupported", object });
@@ -135,7 +138,7 @@ export const sqliteTransferInventory = (
 			});
 			foreign.push({
 				table: table.name,
-				rows: yield* sql`SELECT id,seq,"table","from","to" FROM pragma_foreign_key_list(${table.name},'main') ORDER BY id,seq`.pipe(
+				rows: yield* sql`SELECT id,seq,"table","from","to",on_update,on_delete,match FROM pragma_foreign_key_list(${table.name},'main') ORDER BY id,seq`.pipe(
 					Effect.flatMap(Schema.decodeUnknownEffect(foreignSchema)),
 				),
 			});
@@ -143,11 +146,21 @@ export const sqliteTransferInventory = (
 		const completed: TransferTable[] = [];
 		for (const table of result) {
 			const rows = foreign.find((entry) => entry.table === table.name)?.rows ?? [];
+			// PRAGMA omits declared deferrability and SQLite ignores MATCH clauses. Refuse
+			// such declarations conservatively, including ambiguous quoted/comment occurrences.
+			if (rows.length && /\b(?:DEFERRABLE|MATCH)\b/i.test(table.definition ?? ""))
+				return yield* unsupported(table.name);
 			const keys = [];
 			for (const id of new Set(rows.map((row) => row.id))) {
 				const parts = rows.filter((row) => row.id === id);
 				const first = parts[0];
 				if (!first) return yield* invalid(table.name);
+				if (
+					first.match !== "NONE" ||
+					!["NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"].includes(first.on_update) ||
+					!["NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"].includes(first.on_delete)
+				)
+					return yield* unsupported(table.name);
 				const target = result.find((entry) => entry.name === first.table);
 				if (!target) return yield* unsupported(first.table);
 				const targets: string[] = [];
@@ -157,7 +170,14 @@ export const sqliteTransferInventory = (
 						return yield* invalid(table.name);
 					targets.push(name);
 				}
-				keys.push({ name: String(id), columns: parts.map((part) => part.from), table: first.table, targets });
+				keys.push({
+					name: String(id),
+					columns: parts.map((part) => part.from),
+					table: first.table,
+					targets,
+					onUpdate: first.on_update,
+					onDelete: first.on_delete,
+				});
 			}
 			completed.push({ ...table, foreignKeys: keys });
 		}

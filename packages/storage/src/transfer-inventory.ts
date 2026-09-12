@@ -20,6 +20,9 @@ const foreignRows = Schema.Array(
 		target: Schema.String,
 		position: Schema.Int,
 		local: Schema.Int,
+		on_update: Schema.Literals(["NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"]),
+		on_delete: Schema.Literals(["NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"]),
+		immediate_simple: Schema.Int,
 	}),
 );
 const invalid = (object: string) => new TransferInventoryError({ code: "transfer_catalog_invalid", object });
@@ -134,9 +137,9 @@ export const transferInventory = (
 			const foreign = yield* on(sql, {
 				sqlite: () => sql`SELECT 1 WHERE 0`,
 				pg: () =>
-					sql`SELECT c.conname AS name,a.attname AS "column",target.relname AS "table",ta.attname AS target,k.position::integer AS position,CASE WHEN tn.nspname='public' AND c.convalidated THEN 1 ELSE 0 END AS local FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class t ON t.oid=c.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace JOIN pg_catalog.pg_class target ON target.oid=c.confrelid JOIN pg_catalog.pg_namespace tn ON tn.oid=target.relnamespace JOIN LATERAL unnest(c.conkey,c.confkey) WITH ORDINALITY k(source,target,position) ON true JOIN pg_catalog.pg_attribute a ON a.attrelid=t.oid AND a.attnum=k.source JOIN pg_catalog.pg_attribute ta ON ta.attrelid=target.oid AND ta.attnum=k.target WHERE n.nspname='public' AND t.relname=${table.name} AND c.contype='f' ORDER BY c.conname,k.position`,
+					sql`SELECT c.conname AS name,CASE c.confupdtype WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END AS on_update,CASE c.confdeltype WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END AS on_delete,CASE WHEN NOT c.condeferrable AND NOT c.condeferred AND c.confmatchtype='s' AND c.confdelsetcols IS NULL THEN 1 ELSE 0 END AS immediate_simple,a.attname AS "column",target.relname AS "table",ta.attname AS target,k.position::integer AS position,CASE WHEN tn.nspname='public' AND c.convalidated THEN 1 ELSE 0 END AS local FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class t ON t.oid=c.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace JOIN pg_catalog.pg_class target ON target.oid=c.confrelid JOIN pg_catalog.pg_namespace tn ON tn.oid=target.relnamespace JOIN LATERAL unnest(c.conkey,c.confkey) WITH ORDINALITY k(source,target,position) ON true JOIN pg_catalog.pg_attribute a ON a.attrelid=t.oid AND a.attnum=k.source JOIN pg_catalog.pg_attribute ta ON ta.attrelid=target.oid AND ta.attnum=k.target WHERE n.nspname='public' AND t.relname=${table.name} AND c.contype='f' ORDER BY c.conname,k.position`,
 				mysql: () =>
-					sql`SELECT CONSTRAINT_NAME AS name,COLUMN_NAME AS ${sql("column")},REFERENCED_TABLE_NAME AS ${sql("table")},REFERENCED_COLUMN_NAME AS target,ORDINAL_POSITION AS position,CASE WHEN REFERENCED_TABLE_SCHEMA=DATABASE() THEN 1 ELSE 0 END AS ${sql("local")} FROM information_schema.key_column_usage WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=${table.name} AND REFERENCED_TABLE_NAME IS NOT NULL ORDER BY CONSTRAINT_NAME,ORDINAL_POSITION`,
+					sql`SELECT k.CONSTRAINT_NAME AS name,r.UPDATE_RULE AS on_update,r.DELETE_RULE AS on_delete,CASE WHEN r.MATCH_OPTION='NONE' THEN 1 ELSE 0 END AS immediate_simple,COLUMN_NAME AS ${sql("column")},k.REFERENCED_TABLE_NAME AS ${sql("table")},REFERENCED_COLUMN_NAME AS target,ORDINAL_POSITION AS position,CASE WHEN REFERENCED_TABLE_SCHEMA=DATABASE() THEN 1 ELSE 0 END AS ${sql("local")} FROM information_schema.key_column_usage k JOIN information_schema.referential_constraints r ON r.CONSTRAINT_SCHEMA=k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME=k.CONSTRAINT_NAME AND r.TABLE_NAME=k.TABLE_NAME WHERE k.TABLE_SCHEMA=DATABASE() AND k.TABLE_NAME=${table.name} AND k.REFERENCED_TABLE_NAME IS NOT NULL ORDER BY k.CONSTRAINT_NAME,ORDINAL_POSITION`,
 			}).pipe(Effect.flatMap(Schema.decodeUnknownEffect(foreignRows)));
 			const foreignKeys = [];
 			for (const name of new Set(foreign.map((row) => row.name))) {
@@ -144,7 +147,15 @@ export const transferInventory = (
 				const first = parts[0];
 				if (
 					!first ||
-					parts.some((part, index) => part.local !== 1 || part.table !== first.table || part.position !== index + 1)
+					parts.some(
+						(part, index) =>
+							part.local !== 1 ||
+							part.immediate_simple !== 1 ||
+							part.on_update !== first.on_update ||
+							part.on_delete !== first.on_delete ||
+							part.table !== first.table ||
+							part.position !== index + 1,
+					)
 				)
 					return yield* unsupported(`${table.name}.${name}`);
 				foreignKeys.push({
@@ -152,6 +163,8 @@ export const transferInventory = (
 					table: first.table,
 					columns: parts.map((part) => part.column),
 					targets: parts.map((part) => part.target),
+					onUpdate: first.on_update,
+					onDelete: first.on_delete,
 				});
 			}
 			result.push({ name: table.name, columns, primaryKey: keys.map((key) => key.name), foreignKeys });

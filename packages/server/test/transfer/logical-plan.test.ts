@@ -89,7 +89,16 @@ it("orders allocator and foreign-key parents first and retains meaningful target
 			[column("id", "integer", { identity: true }), column("batch"), column("content", "bytes")],
 			["id"],
 		),
-		foreignKeys: [{ name: "source_fk", columns: ["batch"], table: "batches", targets: ["id"] }],
+		foreignKeys: [
+			{
+				name: "source_fk",
+				columns: ["batch"],
+				table: "batches",
+				targets: ["id"],
+				onUpdate: "NO ACTION",
+				onDelete: "CASCADE",
+			},
+		],
 	};
 	const target = { ...versions, foreignKeys: [{ ...versions.foreignKeys[0]!, name: "different_name" }] };
 	const { tables: plans } = await Effect.runPromise(
@@ -192,7 +201,12 @@ it("refuses missing tables, keyless tables, cycles and arbitrary derived exclusi
 		logicalTransferPlan({ store: "boot", source: side("sqlite", [keyless]), target: side("sqlite", [keyless]) }),
 		"value",
 	);
-	const cycle = { ...value, foreignKeys: [{ name: "cycle", columns: ["id"], table: "value", targets: ["id"] }] };
+	const cycle = {
+		...value,
+		foreignKeys: [
+			{ name: "cycle", columns: ["id"], table: "value", targets: ["id"], onUpdate: "NO ACTION", onDelete: "CASCADE" },
+		],
+	};
 	await rejects(
 		logicalTransferPlan({ store: "boot", source: side("sqlite", [cycle]), target: side("sqlite", [cycle]) }),
 		"foreign_key_cycle",
@@ -252,5 +266,58 @@ it("separates regenerated ledger timestamps from required migration identity com
 	await rejects(
 		logicalTransferPlan({ store: "boot", source: side("sqlite", [source]), target: side("pg", [changed]) }),
 		"boot_migrations",
+	);
+});
+
+it("refuses changed foreign-key delete and update behavior despite matching columns", async () => {
+	const parent = table("parent", [column("id")], ["id"]);
+	const source = {
+		...table("child", [column("id"), column("parent")], ["id"]),
+		foreignKeys: [
+			{
+				name: "child_parent",
+				columns: ["parent"],
+				table: "parent",
+				targets: ["id"],
+				onDelete: "CASCADE",
+				onUpdate: "NO ACTION",
+			},
+		],
+	};
+	for (const change of [{ onDelete: "RESTRICT" }, { onUpdate: "CASCADE" }, { onUpdate: "RESTRICT" }]) {
+		const target = { ...source, foreignKeys: source.foreignKeys.map((key) => ({ ...key, ...change })) };
+		await rejects(
+			logicalTransferPlan({
+				store: "boot",
+				source: side("sqlite", [parent, source]),
+				target: side("pg", [parent, target]),
+			}),
+			"child.foreign_keys",
+		);
+	}
+});
+
+it("refuses SET DEFAULT even when both catalogs name the same action", async () => {
+	const parent = table("parent", [column("id")], ["id"]);
+	const child = {
+		...table("child", [column("id"), column("parent")], ["id"]),
+		foreignKeys: [
+			{
+				name: "fk",
+				columns: ["parent"],
+				table: "parent",
+				targets: ["id"],
+				onDelete: "SET DEFAULT",
+				onUpdate: "NO ACTION",
+			},
+		],
+	};
+	await rejects(
+		logicalTransferPlan({
+			store: "boot",
+			source: side("sqlite", [parent, child]),
+			target: side("pg", [parent, child]),
+		}),
+		"child.foreign_keys",
 	);
 });

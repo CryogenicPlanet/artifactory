@@ -34,7 +34,9 @@ it("discovers custom tables, ordered composite keys, generated columns and rowid
 						{ name: "payload", kind: "bytes" },
 						{ name: "derived", generated: true },
 					],
-					foreignKeys: [{ columns: ["a", "b"], table: "parent", targets: ["a", "b"] }],
+					foreignKeys: [
+						{ columns: ["a", "b"], table: "parent", targets: ["a", "b"], onUpdate: "CASCADE", onDelete: "RESTRICT" },
+					],
 				},
 				{ name: "parent", primaryKey: ["a", "b"] },
 			],
@@ -49,7 +51,7 @@ it("excludes only validated FTS tables and catalog-identified shadows, retaining
 	});
 	expect(result.success.derived).toContain("search_data");
 });
-it.for(["untrusted-fts", "trigger", "view", "expression"])(
+it.for(["untrusted-fts", "trigger", "view", "expression", "deferred", "match"])(
 	"refuses unsupported %s without omitting data",
 	async (mode, test) => {
 		expect(await fixture(test, mode)).toMatchObject({

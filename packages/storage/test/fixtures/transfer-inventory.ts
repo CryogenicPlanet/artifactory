@@ -11,7 +11,12 @@ await Effect.runPromise(
 		const sql = yield* SqlClient.SqlClient;
 		if (mode === "custom") {
 			yield* sql`CREATE TABLE parent(a TEXT,b INTEGER,PRIMARY KEY(a,b)) WITHOUT ROWID`;
-			yield* sql`CREATE TABLE custom(id INTEGER PRIMARY KEY AUTOINCREMENT,a TEXT,b INTEGER,payload BLOB,derived TEXT GENERATED ALWAYS AS (a || b) STORED,FOREIGN KEY(a,b) REFERENCES parent(a,b))`;
+			yield* sql`CREATE TABLE custom(id INTEGER PRIMARY KEY AUTOINCREMENT,a TEXT,b INTEGER,payload BLOB,derived TEXT GENERATED ALWAYS AS (a || b) STORED,FOREIGN KEY(a,b) REFERENCES parent(a,b) ON UPDATE CASCADE ON DELETE RESTRICT)`;
+		} else if (mode === "deferred" || mode === "match") {
+			yield* sql`CREATE TABLE parent(id INTEGER PRIMARY KEY)`;
+			if (mode === "deferred")
+				yield* sql`CREATE TABLE custom(id INTEGER PRIMARY KEY,parent INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)`;
+			else yield* sql`CREATE TABLE custom(id INTEGER PRIMARY KEY,parent INTEGER REFERENCES parent(id) MATCH FULL)`;
 		} else if (mode === "fts" || mode === "untrusted-fts") {
 			yield* sql`CREATE TABLE messages(id TEXT PRIMARY KEY,body TEXT)`;
 			yield* sql`CREATE VIRTUAL TABLE search USING fts5(body)`;

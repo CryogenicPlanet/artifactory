@@ -216,9 +216,13 @@ export const logicalTransferPlan = (options: {
 				columns.push({ name: column.name, kind: column.kind, nullable: destination.nullable });
 			}
 			const foreign = (table: TransferTable) =>
-				table.foreignKeys.map((key) => JSON.stringify([key.columns, key.table, key.targets])).sort();
+				table.foreignKeys
+					.map((key) => JSON.stringify([key.columns, key.table, key.targets, key.onUpdate, key.onDelete]))
+					.sort();
 			if (!same(foreign(sourceTable), foreign(targetTable))) return yield* mismatch(`${name}.foreign_keys`);
 			for (const constraint of sourceTable.foreignKeys) {
+				if (constraint.onUpdate === "SET DEFAULT" || constraint.onDelete === "SET DEFAULT")
+					return yield* unsupported(`${name}.foreign_keys`);
 				const referenced = source.inventory.tables.find((table) => table.name === constraint.table);
 				if (!referenced || !constraint.columns.every((column) => columns.some((entry) => entry.name === column)))
 					return yield* unsupported(`${name}.foreign_keys`);
