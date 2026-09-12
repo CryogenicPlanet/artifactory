@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 /* oxlint-disable effecttsgo/global-date -- Opt-in real-process acceptance measures monotonic HTTP latency. */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -111,7 +112,7 @@ it.skipIf(process.env.COMMS_CUTOVER_ACCEPTANCE !== "1")(
 				["repair", source],
 			] as const) {
 				phase = name;
-				const staged = await fetch(`${app.url}/_boot/fs/app/server.ts?reload=0`, {
+				const staged = await sourcePut(`${app.url}/_boot/fs/app/server.ts?reload=0`, {
 					method: "PUT",
 					headers: { cookie, origin: "https://comms.test" },
 					body: content,

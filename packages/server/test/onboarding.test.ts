@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -90,7 +91,7 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	expect(personal.headers.get("x-comms-init-stale")).toBeNull();
 	expect(await personal.text()).toContain("You are <code>rahul@human</code>");
 	const generations = await fixture.sql("SELECT n,status FROM generations", "boot.db");
-	const edited = await fetch(app.url + "/api/fs/pages/init.md", {
+	const edited = await sourcePut(app.url + "/api/fs/pages/init.md", {
 		method: "PUT",
 		headers: { cookie: first, origin: "https://comms.test" },
 		body: "# Updated\n\nNew live instructions.\n",
@@ -103,7 +104,7 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	expect(await fixture.sql("SELECT n,status FROM generations", "boot.db")).toEqual(generations);
 	const beforeExtension = changed.headers.get("x-comms-init-version");
 	expect((await app.post("/api/lock", {}, first)).status).toBe(200);
-	const loaded = await fetch(app.url + "/api/fs/app/ext/orientation.ts", {
+	const loaded = await sourcePut(app.url + "/api/fs/app/ext/orientation.ts", {
 		method: "PUT",
 		headers: { cookie: first, origin: "https://comms.test" },
 		body: 'export default api => api.route("GET", "/api/orientation-example", {description:"Orientation example",scope:"read",handler:async()=>Response.json({ok:true})});',

@@ -77,13 +77,13 @@ const routes = [
 		"put",
 		["/_boot/fs/{path}", "/api/fs/{path}"],
 		"fs",
-		"Write raw source bytes. Optional If-Match: quoted SHA-256 ETag or If-None-Match: *; mismatch returns 412. app/ requires your edit lock; ?reload=0 stages, ?check=1 rehearses, ?release=1 releases after success. pages/ publishes without the app lock.",
+		"Write raw source bytes with required ?baseVersion=<SHA-256 from GET>, or baseVersion=null for a new file. Single If-Match: quoted ETag or If-None-Match: * aliases are accepted instead. Missing/combined/invalid conditions return 400; stale bytes return 409 stale_base. app/ requires your edit lock; ?reload=0 stages, ?check=1 rehearses, ?release=1 releases after success. pages/ publishes without the app lock.",
 	],
 	[
 		"delete",
 		["/_boot/fs/{path}", "/api/fs/{path}"],
 		"fs",
-		"Delete source. Optional If-Match: quoted SHA-256 ETag or If-None-Match: *; mismatch returns 412. app/ requires your edit lock and follows reload semantics; pages/ publishes directly.",
+		"Delete source. Optional If-Match: quoted SHA-256 ETag or If-None-Match: *; mismatch returns 409 stale_base. app/ requires your edit lock and follows reload semantics; pages/ publishes directly.",
 	],
 	["get", ["/_boot/lock", "/api/lock"], "fs", "Inspect the current source edit lock."],
 	[

@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { request } from "node:http";
 import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -15,7 +16,7 @@ it("stages, rehearses and accepts an edit, rejects broken source, and repairs it
 	const lock = await app.post("/api/lock", {}, cookie);
 	expect(lock.status).toBe(200);
 	const put = (source: string) =>
-		fetch(`${app.url}/api/fs/app/server.ts?reload=0`, {
+		sourcePut(`${app.url}/api/fs/app/server.ts?reload=0`, {
 			method: "PUT",
 			headers: { cookie, origin: "https://comms.test" },
 			body: source,
@@ -79,7 +80,7 @@ it("restores a pre-flip backup when candidate-only initialization changes live d
 if (process.env.STATE === "candidate") { yield* sql\`DELETE FROM messages\`; return yield* Effect.die("candidate migration failed"); }`,
 	);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const edited = await fetch(`${app.url}/api/fs/app/ext/core/schema.ts`, {
+	const edited = await sourcePut(`${app.url}/api/fs/app/ext/core/schema.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: changed,
@@ -112,7 +113,7 @@ for (const accepted of [false, true])
 				);
 		expect(changed).not.toBe(source);
 		expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-		const reload = fetch(`${app.url}/api/fs/app/server.ts`, {
+		const reload = sourcePut(`${app.url}/api/fs/app/server.ts`, {
 			method: "PUT",
 			headers: { cookie, origin: "https://comms.test" },
 			body: changed,
@@ -151,7 +152,7 @@ it("repairs a broken first seed through boot editing without an available app", 
 		.poll(async () => (await (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json()).child.state)
 		.toBe("failed");
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const repaired = await fetch(`${app.url}/api/fs/app/server.ts?release=1`, {
+	const repaired = await sourcePut(`${app.url}/api/fs/app/server.ts?release=1`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: await readFile(join(import.meta.dirname, "../src/server.ts"), "utf8"),
@@ -194,7 +195,7 @@ it("drains admitted slow bodies and reauthenticates queued mutations before forw
 	const source = await readFile(join(import.meta.dirname, "../src/server.ts"), "utf8");
 	expect(
 		(
-			await fetch(`${app.url}/api/fs/app/server.ts?reload=0`, {
+			await sourcePut(`${app.url}/api/fs/app/server.ts?reload=0`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: source,

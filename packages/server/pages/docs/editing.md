@@ -5,8 +5,8 @@ The edit APIs are boot-owned and require `fs` scope. Read the current file in fu
 ## Stage and reload
 
 1. `POST /api/lock {"note":"update extension"}` acquires the edit lock. `423` identifies the other holder and explains how to wait. The default lease is 15 minutes; holder writes renew it.
-2. Read `GET /api/fs/app/<path>` and save its `ETag` header. Runtime seeds use `app/server.ts` as the child entry.
-3. `PUT /api/fs/app/<path>?reload=0` with the raw replacement and `If-Match: <saved ETag>` stages it. Repeat for other files. Staging is invisible to the current app.
+2. Read `GET /api/fs/app/<path>` and save its `X-Comms-Base-Version` header. Runtime seeds use `app/server.ts` as the child entry.
+3. `PUT /api/fs/app/<path>?reload=0&baseVersion=<saved token>` with the raw replacement stages it. Repeat for other files. Staging is invisible to the current app.
 4. `POST /api/reload?check=1 {}` prepares dependencies and rehearses against a database copy without publishing the edit.
 5. `POST /api/reload?release=1 {}` rehearses and reloads, releasing the lock on success. Read the returned outcome and stderr before continuing. Failed edits retain staging for repair.
 
@@ -18,7 +18,7 @@ curl -X POST "$HOST/api/reload?check=1" \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
-Edit text locally using your own editor or replacement tool. Boot accepts bytes, not anchored text instructions. Raw GET returns a quoted SHA-256 `ETag` (also available unquoted as `X-Comms-Base-Version`), describing the holder's staged bytes when present. Send that exact quoted value as `If-Match` on PUT or DELETE. A 412 `stale_base` means another edit won: read again and reapply your change; do not retry blindly. For a file that does not exist, use `If-None-Match: *`. Only these single-condition forms are supported; weak tags, lists and combined conditions return 400. Omitting conditions performs an unconditional write.
+Edit text locally using your own editor or replacement tool. Boot accepts bytes, not anchored text instructions. Raw GET returns a quoted SHA-256 `ETag` (also available unquoted as `X-Comms-Base-Version`), describing the holder's staged bytes when present. PUT requires `?baseVersion=<saved unquoted token>`, or `?baseVersion=null` for a new file. A 409 `stale_base` means another edit won: read again and reapply your change; do not retry blindly. As an alternative, PUT and DELETE accept the exact quoted `If-Match` ETag or `If-None-Match: *` for an absent file. Supply only one condition: malformed/duplicate query tokens, weak tags, lists and combined conditions return 400. PUT without a condition returns 400 `precondition_required`; DELETE keeps its optional condition. A stale PUT does not change staging, published bytes or history.
 
 ```sh
 # Save the quoted ETag from the response headers; edit source.bin locally.
@@ -42,7 +42,7 @@ After a lost response, reuse the same Idempotency-Key and selector with the same
 
 ## Pages
 
-`PUT /api/fs/pages/project/plan.md` publishes immediately without an app lock or reload. The same conditional headers protect page replacement/deletion against a stale read. Its response includes `published:true` and a history `batch`. Read it at `/p/project/plan.md`, or add `?raw=1`. These boot-owned repair routes bypass app archive/deletion policy while enforcing authentication, safe paths and durable publication. A pending app reservation makes publication wait outside the operation/channel gates; cancellation while waiting creates no page journal. Conflicting durable recovery intents remain fail-closed. `/init` is `pages/init.md`; keep it short and link to detailed pages here.
+`PUT /api/fs/pages/project/plan.md` publishes immediately without an app lock or reload. The same required PUT token and optional DELETE conditions protect page replacement/deletion against a stale read. Its response includes `published:true` and a history `batch`. Read it at `/p/project/plan.md`, or add `?raw=1`. These boot-owned repair routes bypass app archive/deletion policy while enforcing authentication, safe paths and durable publication. A pending app reservation makes publication wait outside the operation/channel gates; cancellation while waiting creates no page journal. Conflicting durable recovery intents remain fail-closed. `/init` is `pages/init.md`; keep it short and link to detailed pages here.
 
 ## When the app fails
 

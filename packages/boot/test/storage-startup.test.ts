@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -163,7 +164,7 @@ it.for([false, true, "configured"] as const)(
 		expect(await refused.json()).toMatchObject({ error: { code: "storage_headroom" } });
 		if (clearGrants === "configured") {
 			const page = `${restarted.url}/api/fs/pages/saved/readme.md`;
-			const deniedPage = await restarted.request(page, { method: "PUT", body: "must preserve page" });
+			const deniedPage = await sourcePut(page, { method: "PUT", body: "must preserve page" }, restarted.request);
 			expect(deniedPage.status).toBe(507);
 			expect(await deniedPage.json()).toMatchObject({ error: { code: "storage_headroom" } });
 			expect(await (await restarted.request(page)).text()).toContain("Saved public page");
@@ -186,7 +187,7 @@ it.for([false, true, "configured"] as const)(
 					? undefined
 					: JSON.stringify({ response: (await admitted.clone().text()).slice(0, 4096), boot: restarted.diagnostic() }),
 			).toBe(200);
-			const send = () => restarted.request(page, { method: "PUT", body: "after policy change" });
+			const send = () => sourcePut(page, { method: "PUT", body: "after policy change" }, restarted.request);
 			const pending = Schema.Struct({
 				error: Schema.Struct({ code: Schema.Literals(["publication_pending"]), retriable: Schema.Literals([true]) }),
 			});

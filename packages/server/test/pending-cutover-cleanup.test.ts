@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it, type TestContext } from "vitest";
@@ -54,7 +55,7 @@ async function pendingCleanup(test: TestContext, conflict: boolean) {
 			);
 	expect(changed).not.toBe(original);
 	const stage = (body: string) =>
-		fetch(`${app.url}/api/fs/app/${file}?reload=0`, {
+		sourcePut(`${app.url}/api/fs/app/${file}?reload=0`, {
 			method: "PUT",
 			headers: { cookie, origin: "https://comms.test" },
 			body,

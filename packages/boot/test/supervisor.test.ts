@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { execFile, spawn } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -129,10 +130,14 @@ it(
 		const source = await readFile(join(seed, "server.ts"), "utf8");
 		expect(
 			(
-				await authenticated(`${app.url}/api/fs/app/server.ts?reload=0`, {
-					method: "PUT",
-					body: `${source}\n// staged repair`,
-				})
+				await sourcePut(
+					`${app.url}/api/fs/app/server.ts?reload=0`,
+					{
+						method: "PUT",
+						body: `${source}\n// staged repair`,
+					},
+					authenticated,
+				)
 			).status,
 		).toBe(200);
 		const reload = await authenticated(`${app.url}/api/reload`, { method: "POST", body: "{}" });

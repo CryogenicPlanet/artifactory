@@ -74,7 +74,7 @@ const policy = {
 	invalid_path: invalid,
 	path_conflict: conflict,
 	external_conflict: conflict,
-	stale_base: { ...conflict, status: 412 },
+	stale_base: conflict,
 	idempotency_conflict: conflict,
 	invalid_text: invalid,
 	version_unavailable: invalid,
@@ -112,9 +112,13 @@ const policy = {
 	revert_selection_invalid: invalid,
 	idempotency_key_invalid: invalid,
 	query_invalid: invalid,
+	precondition_required: {
+		...invalid,
+		hint: "PUT requires ?baseVersion=<SHA-256 from GET>, or ?baseVersion=null for a new file. Read current bytes before editing.",
+	},
 	precondition_invalid: {
 		...invalid,
-		hint: "Use one quoted SHA-256 If-Match value from GET ETag, or If-None-Match: * for an absent file.",
+		hint: "Supply one baseVersion query value: the SHA-256 token from GET or null for an absent file. Alternatively use one quoted If-Match ETag or If-None-Match: *; do not combine conditions.",
 	},
 	file_not_found: {
 		status: 404,

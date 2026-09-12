@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -76,10 +77,14 @@ it("retries Failed keeper recovery from human source repair without losing data 
 	const original = await readFile(join(env.root, "data/app/child.ts"), "utf8");
 	expect(
 		(
-			await first.call(`${first.url}/_boot/fs/app/child.ts`, {
-				method: "PUT",
-				body: original.replace("'original'", "'changed'"),
-			})
+			await sourcePut(
+				`${first.url}/_boot/fs/app/child.ts`,
+				{
+					method: "PUT",
+					body: original.replace("'original'", "'changed'"),
+				},
+				first.call,
+			)
 		).status,
 	).toBe(200);
 	await env.sql("CREATE TABLE preserved_message(body TEXT)", "comms.db");

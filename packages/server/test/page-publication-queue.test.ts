@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -14,8 +15,13 @@ it.for(["append", "crash", "logout", "cancel"] as const)(
 		await app.ready(cookie);
 		const target = `${app.url}/api/fs/pages/queued.md`;
 		const headers = { cookie, origin: "https://comms.test" };
-		expect((await fetch(target, { method: "PUT", headers, body: "original" })).status).toBe(200);
+		expect((await sourcePut(target, { method: "PUT", headers, body: "original" })).status).toBe(200);
 		const history = await fixture.sql("SELECT * FROM source_batches ORDER BY id", "boot.db");
+		const current = await fetch(target, { headers });
+		expect(current.status).toBe(200);
+		const baseVersion = current.headers.get("x-comms-base-version");
+		if (!baseVersion) throw Error("Missing source base version");
+		await current.arrayBuffer();
 		await fixture.hold();
 		const mutation = app.post("/api/messages", { topic: "queue", body: "held mutation" }, cookie).then(
 			(response) => response.status,
@@ -27,7 +33,12 @@ it.for(["append", "crash", "logout", "cancel"] as const)(
 		const controller = new AbortController();
 		test.onTestFinished(() => controller.abort());
 		let completed = false;
-		const page = fetch(target, { method: "PUT", headers, body: "queued update", signal: controller.signal }).then(
+		const page = fetch(`${target}?baseVersion=${encodeURIComponent(baseVersion)}`, {
+			method: "PUT",
+			headers,
+			body: "queued update",
+			signal: controller.signal,
+		}).then(
 			(response) => {
 				completed = true;
 				return response.status;
@@ -66,7 +77,7 @@ it.for(["append", "crash", "logout", "cancel"] as const)(
 			]);
 		const again = mode === "logout" ? await app.login() : cookie;
 		expect(
-			(await fetch(target, { method: "PUT", headers: { ...headers, cookie: again }, body: "next editor" })).status,
+			(await sourcePut(target, { method: "PUT", headers: { ...headers, cookie: again }, body: "next editor" })).status,
 		).toBe(200);
 		// A late canceled fiber must not leave an intermediate version behind the next editor.
 		expect(await fixture.sql("SELECT COUNT(*) count FROM versions WHERE path='pages/queued.md'", "boot.db")).toEqual([

@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { request } from "node:http";
 import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -32,7 +33,7 @@ for (const expires of [false, true])
 		if (!expires) expect(changed).not.toBe(source);
 		expect(
 			(
-				await fetch(`${app.url}/api/fs/app/server.ts?reload=0`, {
+				await sourcePut(`${app.url}/api/fs/app/server.ts?reload=0`, {
 					method: "PUT",
 					headers: { cookie, origin: "https://comms.test" },
 					body: changed,

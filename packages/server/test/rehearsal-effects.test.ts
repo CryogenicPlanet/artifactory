@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { createServer } from "node:http";
 import { cp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -49,7 +50,7 @@ export default api => {
 	await app.ready(cookie);
 	await expect.poll(() => received.length).toBe(3);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const result = await fetch(`${app.url}/api/fs/app/rehearsal-marker.ts`, {
+	const result = await sourcePut(`${app.url}/api/fs/app/rehearsal-marker.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: "export const marker = 1;",

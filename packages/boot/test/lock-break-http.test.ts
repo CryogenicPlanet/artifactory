@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -133,7 +134,8 @@ it("requires a fresh human proof bound to the observed lock and preserves a repl
 	const lock = await acquire();
 	const staged = `${app.url}/api/fs/app/pending.txt`;
 	expect(
-		(await fetch(`${staged}?reload=0`, { method: "PUT", headers: bearer, body: "unpublished edits" })).status,
+		(await sourcePut(`${staged}?reload=0`, { method: "PUT", headers: bearer, body: "unpublished edits" }, fetch))
+			.status,
 	).toBe(200);
 	const breakLock = (id: string, headers: Readonly<Record<string, string>>, path = "/_boot/lock?break=1") =>
 		fetch(`${app.url}${path}`, { method: "DELETE", headers, body: JSON.stringify({ id }) });

@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -208,7 +209,7 @@ it("hides deleted page ancestry at the published fence while retaining raw files
 	).toBe(200);
 	const get = (path: string) => fetch(app.url + path, { headers: { cookie } });
 	const write = (path: string, method: string, signal?: AbortSignal) =>
-		fetch(app.url + path, {
+		(method === "PUT" ? sourcePut : fetch)(app.url + path, {
 			method,
 			...(signal ? { signal } : {}),
 			headers: { cookie, origin: "https://comms.test" },
@@ -221,6 +222,11 @@ it("hides deleted page ancestry at the published fence while retaining raw files
 	expect((await get("/p/gone/deep/readme.md?raw=1")).status).toBe(200);
 	const controller = new AbortController();
 	test.onTestFinished(() => controller.abort());
+	const current = await get("/api/fs/pages/gone/deep/readme.md");
+	expect(current.status).toBe(200);
+	const baseVersion = current.headers.get("x-comms-base-version");
+	if (!baseVersion) throw Error("Missing source base version");
+	await current.arrayBuffer();
 	await fixture.hold();
 	const mutation = app.post("/api/messages", { topic: "publication-held", body: "held publication" }, cookie).then(
 		(response) => response.status,
@@ -228,7 +234,12 @@ it("hides deleted page ancestry at the published fence while retaining raw files
 	);
 	await expect.poll(fixture.reserved).not.toBe("");
 	let completed = false;
-	const pending = write("/api/fs/pages/gone/deep/readme.md", "PUT", controller.signal).then(
+	const pending = fetch(`${app.url}/api/fs/pages/gone/deep/readme.md?baseVersion=${encodeURIComponent(baseVersion)}`, {
+		method: "PUT",
+		signal: controller.signal,
+		headers: { cookie, origin: "https://comms.test" },
+		body: "replacement",
+	}).then(
 		(response) => {
 			completed = true;
 			return response.status;

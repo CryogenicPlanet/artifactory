@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -30,7 +31,7 @@ it("serves anonymous GET and HEAD while a source reload holds its operation gate
 	);
 	expect(
 		(
-			await fetch(`${app.url}/api/fs/app/server.ts?reload=0`, {
+			await sourcePut(`${app.url}/api/fs/app/server.ts?reload=0`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: edited,

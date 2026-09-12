@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -69,7 +70,7 @@ it("preserves a published background message after boot dies immediately after r
 		`${initialize}
 if (process.env.STATE === "candidate") { yield* Effect.sleep("1500 millis"); return yield* Effect.die("candidate failed"); }`,
 	);
-	const reload = fetch(`${app.url}/api/fs/app/ext/core/schema.ts`, {
+	const reload = sourcePut(`${app.url}/api/fs/app/ext/core/schema.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: failed,

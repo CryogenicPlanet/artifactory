@@ -275,12 +275,17 @@ export const editRoute = (
 					(id) => perform(id).pipe(Effect.catchCause(editFailure)),
 				);
 			}
-			if ([...url.searchParams.keys()].some((key) => !["reload", "check", "release", "history"].includes(key)))
+			if (
+				[...url.searchParams.keys()].some(
+					(key) => !["reload", "check", "release", "history", "baseVersion"].includes(key),
+				)
+			)
 				return errorResponse("unsupported_query", 400);
 			for (const key of ["reload", "check", "release"])
 				if (url.searchParams.has(key) && !["0", "1"].includes(url.searchParams.get(key) ?? ""))
 					return errorResponse("query_invalid", 400);
 			if (route === "/_boot/reload") {
+				if (url.searchParams.has("baseVersion")) return errorResponse("unsupported_query", 400);
 				if (request.method !== "POST") return errorResponse("method_invalid", 405);
 				yield* body(Schema.Struct({}));
 				return HttpServerResponse.jsonUnsafe(
@@ -297,6 +302,7 @@ export const editRoute = (
 				catch: () => new SourceRejected({ code: "invalid_path", path: route }),
 			});
 			if (request.method === "GET") {
+				if (url.searchParams.has("baseVersion")) return errorResponse("unsupported_query", 400);
 				if (url.searchParams.has("history"))
 					return HttpServerResponse.jsonUnsafe({ items: yield* editing.source.history(name) });
 				const directory = name.endsWith("/") ? name.slice(0, -1) : name;
@@ -319,15 +325,24 @@ export const editRoute = (
 			if (request.method !== "PUT" && request.method !== "DELETE") return errorResponse("method_invalid", 405);
 			const match = request.headers["if-match"];
 			const absent = request.headers["if-none-match"];
+			const tokens = url.searchParams.getAll("baseVersion");
+			const token = tokens[0];
 			if (
 				(match !== undefined && (absent !== undefined || !/^"[a-f0-9]{64}"$/.test(match))) ||
-				(absent !== undefined && absent !== "*")
+				(absent !== undefined && absent !== "*") ||
+				tokens.length > 1 ||
+				(token !== undefined && (match !== undefined || absent !== undefined || !/^(?:[a-f0-9]{64}|null)$/.test(token)))
 			)
 				return errorResponse("precondition_invalid", 400);
-			const baseVersion = match !== undefined ? match.slice(1, -1) : absent === "*" ? null : undefined;
+			const baseVersion =
+				token === "null"
+					? null
+					: (token ?? (match !== undefined ? match.slice(1, -1) : absent === "*" ? null : undefined));
+			if (request.method === "PUT" && baseVersion === undefined) return errorResponse("precondition_required", 400);
 			if (name.startsWith("pages/")) {
 				if (request.method !== "PUT" && request.method !== "DELETE") return errorResponse("method_invalid", 405);
-				if (url.search) return errorResponse("unsupported_query", 400);
+				if ([...url.searchParams.keys()].some((key) => key !== "baseVersion"))
+					return errorResponse("unsupported_query", 400);
 				const content = request.method === "PUT" ? yield* readBytes(request, name) : null;
 				return yield* authoritative(
 					editing.withPagePublication(

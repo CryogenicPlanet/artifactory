@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { basename, join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { Schema } from "effect";
@@ -63,7 +64,7 @@ it("restores only the selected app data, keeps a fresh safety copy and staging, 
 	const stagedBody = await readFile(join(import.meta.dirname, "../src/server.ts"), "utf8");
 	expect(
 		(
-			await fetch(`${app.url}/api/fs/app/server.ts?reload=0`, {
+			await sourcePut(`${app.url}/api/fs/app/server.ts?reload=0`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: stagedBody + "\n// pending human edit\n",

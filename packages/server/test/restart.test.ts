@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -87,7 +88,7 @@ it("refuses invalid restart HTTP requests and restarts to the newest good snapsh
 	expect(app.processHandle.exitCode).toBeNull();
 	expect((await app.post("/api/messages", { topic: "restart", body: "retained" }, cookie)).status).toBe(200);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const updated = await fetch(`${app.url}/api/fs/app/ext/restart-marker.ts`, {
+	const updated = await sourcePut(`${app.url}/api/fs/app/ext/restart-marker.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: 'export default api => api.route("GET", "/api/restart-marker", {description:"Identify the retained generation",scope:"read",handler:()=>Response.json({version:2})});',

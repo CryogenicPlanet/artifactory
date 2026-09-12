@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -33,7 +34,7 @@ it("rehearses above pruned app events and boot allocation gaps without changing 
 	const source = await readFile(join(import.meta.dirname, "../src/server.ts"), "utf8");
 	const guarded = `${source}\nif (process.env.STATE === "rehearsal" && Number(process.env.REHEARSAL_SEQUENCE) < ${sequence}) throw new Error("rehearsal sequence reused retained history");\n`;
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const staged = await fetch(`${app.url}/api/fs/app/server.ts?reload=0`, {
+	const staged = await sourcePut(`${app.url}/api/fs/app/server.ts?reload=0`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: guarded,

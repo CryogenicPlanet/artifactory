@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { cp, symlink, writeFile } from "node:fs/promises";
@@ -18,7 +19,7 @@ for (const stage of ["rehearsal", "candidate"]) {
 		expect((await app.post("/api/messages", { topic: "kept", body: "acknowledged" }, cookie)).status).toBe(200);
 		expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 		const put = (body: string) =>
-			fetch(`${app.url}/api/fs/app/migrations/002_custom.ts`, {
+			sourcePut(`${app.url}/api/fs/app/migrations/002_custom.ts`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: migration(body),

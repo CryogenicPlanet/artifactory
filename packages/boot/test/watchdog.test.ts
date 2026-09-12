@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { execFile, spawn } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -102,10 +103,14 @@ it("does not let an old pending watchdog probe remove a replacement route", { ti
 	const source = await readFile(join(app.seed, "server.ts"), "utf8");
 	expect(
 		(
-			await app.authenticated(`${app.url}/api/fs/app/server.ts?reload=0`, {
-				method: "PUT",
-				body: `${source}\n// replacement`,
-			})
+			await sourcePut(
+				`${app.url}/api/fs/app/server.ts?reload=0`,
+				{
+					method: "PUT",
+					body: `${source}\n// replacement`,
+				},
+				app.authenticated,
+			)
 		).status,
 	).toBe(200);
 	const reload = await app.authenticated(`${app.url}/api/reload`, { method: "POST", body: "{}" });

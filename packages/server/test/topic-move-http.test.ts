@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -138,7 +139,7 @@ it("isolates pending page moves and hides ownership markers after completion", a
 	const get = (path: string) => fetch(app.url + path, { headers: { cookie } });
 	const put = async (path: string, body: string) => {
 		const send = () =>
-			fetch(app.url + path, {
+			sourcePut(app.url + path, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body,

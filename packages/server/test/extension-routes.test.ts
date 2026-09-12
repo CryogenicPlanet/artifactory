@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -160,7 +161,7 @@ it("keeps reserved and static core routes ahead of broad extension patterns", as
 	);
 	expect((await app.post("/api/messages", { topic: "retained", body: "keep me" }, cookie)).status).toBe(200);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const edited = await fetch(`${app.url}/api/fs/app/ext/zz-health.ts`, {
+	const edited = await sourcePut(`${app.url}/api/fs/app/ext/zz-health.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: `export default api => api.route("GET", "/api/:endpoint", {description:"Broad parameter route",scope:"read",handler:async()=>Response.json({items:[]})});`,
@@ -191,7 +192,7 @@ it("isolates wildcard and parameter template conflicts during reload and retains
  api.route("GET","/api/uncommitted-route",{description:"Must not survive failed registration",scope:"read",handler:()=>Response.json("bad")});
  api.route("GET","/api/topics/:path",{description:"Conflicting topic template",scope:"read",handler:()=>Response.json("bad")});
 };`;
-	const response = await fetch(`${app.url}/api/fs/app/ext/zz-template.ts`, {
+	const response = await sourcePut(`${app.url}/api/fs/app/ext/zz-template.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: source,

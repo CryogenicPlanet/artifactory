@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -25,7 +26,7 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 			await call("GET", path.startsWith("/api/topics") ? path + (path.includes("?") ? "&" : "?") + "mark=0" : path)
 		).json();
 	const page = (method: string, path: string, body?: string) =>
-		fetch(`${app.url}/api/fs/pages/${path}`, {
+		(method === "PUT" ? sourcePut : fetch)(`${app.url}/api/fs/pages/${path}`, {
 			method,
 			headers: { cookie, origin: "https://comms.test" },
 			...(body === undefined ? {} : { body }),

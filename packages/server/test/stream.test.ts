@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -145,7 +146,7 @@ it("replacement drains app event waits and closes SSE so clients resume on the n
 	const source = await readFile(join(import.meta.dirname, "../src/server.ts"), "utf8");
 	expect(
 		(
-			await fetch(`${app.url}/api/fs/app/server.ts?reload=0`, {
+			await sourcePut(`${app.url}/api/fs/app/server.ts?reload=0`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: source + "\n// SSE replacement acceptance\n",

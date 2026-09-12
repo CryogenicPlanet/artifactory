@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { execFile } from "node:child_process";
 import { readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -16,7 +17,7 @@ it("keeps writes live through failed preparation and serves an edited UI from a 
 	await app.ready(cookie, 90000);
 	const headers = { cookie, origin: "https://comms.test" };
 	const put = (path: string, content: string) =>
-		fetch(`${app.url}/api/fs/app/${path}?reload=0`, {
+		sourcePut(`${app.url}/api/fs/app/${path}?reload=0`, {
 			method: "PUT",
 			headers,
 			body: content,

@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import { Schema } from "effect";
 import { request } from "node:http";
@@ -34,7 +35,7 @@ it("undoes page paths, batches and retained deletions without taking or disturbi
 	const generations = await fixture.sql("SELECT n FROM generations", "boot.db");
 	const write = (content: string | null) =>
 		pagePublication(() =>
-			fetch(`${app.url}/api/fs/pages/undo/index.md`, {
+			(content === null ? fetch : sourcePut)(`${app.url}/api/fs/pages/undo/index.md`, {
 				method: content === null ? "DELETE" : "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				...(content === null ? {} : { body: content }),
@@ -63,7 +64,7 @@ it("undoes page paths, batches and retained deletions without taking or disturbi
 	expect((await app.post("/api/lock", {}, holderCookie)).status).toBe(200);
 	expect(
 		(
-			await fetch(`${app.url}/api/fs/app/repair.txt?reload=0`, {
+			await sourcePut(`${app.url}/api/fs/app/repair.txt?reload=0`, {
 				method: "PUT",
 				headers: { cookie: holderCookie, origin: "https://comms.test" },
 				body: "keep staged",
@@ -99,7 +100,7 @@ it("keeps a page undo target across restart and never confuses omitted history b
 	await app.ready(cookie);
 	const put = (url: string, content: string) =>
 		pagePublication(() =>
-			fetch(`${url}/api/fs/pages/undo/note.md`, {
+			sourcePut(`${url}/api/fs/pages/undo/note.md`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: content,
@@ -153,7 +154,7 @@ it("reauthenticates held page undo bodies and refuses page symlinks before journ
 	expect(
 		(
 			await pagePublication(() =>
-				fetch(`${app.url}/api/fs/pages/undo/note.md`, {
+				sourcePut(`${app.url}/api/fs/pages/undo/note.md`, {
 					method: "PUT",
 					headers: { cookie, origin: "https://comms.test" },
 					body: "keep",
@@ -208,7 +209,7 @@ it("queues a raw page write without journaling until app publication completes",
 	);
 	await expect.poll(fixture.reserved).not.toBe("");
 	let completed = false;
-	const pending = fetch(`${app.url}/api/fs/pages/reserved.md`, {
+	const pending = fetch(`${app.url}/api/fs/pages/reserved.md?baseVersion=null`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: "written only after release",

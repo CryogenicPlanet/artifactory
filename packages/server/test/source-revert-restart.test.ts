@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -56,7 +57,7 @@ ${admission}`,
 		if (boundary === "app-accepted") expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 		const put = async (url: string, body: string) => {
 			for (let attempt = 0; ; attempt++) {
-				const response = await fetch(`${url}/api/fs/${path}`, {
+				const response = await sourcePut(`${url}/api/fs/${path}`, {
 					method: "PUT",
 					headers: { cookie, origin: "https://comms.test" },
 					body,

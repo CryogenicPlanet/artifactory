@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, readFile } from "node:fs/promises";
 import { request } from "node:http";
 import { basename, join } from "node:path";
@@ -96,7 +97,7 @@ it("drains an admitted body before capture while a concurrent source reload wait
 	const source = await readFile(join(import.meta.dirname, "../src/server.ts"), "utf8");
 	expect(
 		(
-			await fetch(`${app.url}/api/fs/app/server.ts?reload=0`, {
+			await sourcePut(`${app.url}/api/fs/app/server.ts?reload=0`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: source,

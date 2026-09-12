@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { createHash, randomBytes } from "node:crypto";
@@ -88,7 +89,7 @@ it("seeds once, passes an absolute pages root, publishes without an app lock or 
 	const other = sessionFetch((await seedSession(join(env.root, "data"))).cookie);
 	const lockBefore = await env.sql("SELECT * FROM edit_lock");
 	for (const content of ["first", "updated"]) {
-		const result = await other(`${app.url}/api/fs/pages/topic/index.md`, { method: "PUT", body: content });
+		const result = await sourcePut(`${app.url}/api/fs/pages/topic/index.md`, { method: "PUT", body: content }, other);
 		expect(result.status).toBe(200);
 		expect(await result.json()).toMatchObject({ published: true, batch: expect.any(String) });
 	}
@@ -127,12 +128,16 @@ it("rejects anonymous, cross-origin, oversized, unsafe paths and revoked held-bo
 		).status,
 	).toBe(403);
 	for (const query of ["reload=0", "check=1", "release=1"])
-		expect((await app.call(`${target}?${query}`, { method: "PUT", body: "bad" })).status).toBe(400);
-	expect((await app.call(target, { method: "PUT", body: "x".repeat(8_388_609) })).status).toBe(400);
+		expect((await app.call(`${target}?${query}&baseVersion=null`, { method: "PUT", body: "bad" })).status).toBe(400);
+	expect((await app.call(`${target}?baseVersion=null`, { method: "PUT", body: "x".repeat(8_388_609) })).status).toBe(
+		400,
+	);
 	await symlink(join(env.root, "seed-pages"), join(env.root, "data/pages/link"));
 	for (const path of ["pages/link/index.md", "pages/%2e%2e%2fboot.db", "pages/%5cboot.db"])
-		expect((await app.call(`${app.url}/api/fs/${path}`, { method: "PUT", body: "bad" })).status).toBe(400);
-	const pending = request(target, {
+		expect((await app.call(`${app.url}/api/fs/${path}?baseVersion=null`, { method: "PUT", body: "bad" })).status).toBe(
+			400,
+		);
+	const pending = request(`${target}?baseVersion=null`, {
 		method: "PUT",
 		headers: { cookie: app.session.cookie, origin: "https://comms.test", "content-length": "4" },
 	});
@@ -161,7 +166,7 @@ it("recovers a page publication with failed history completion, without reseedin
 	await env.sql(
 		"CREATE TRIGGER fail_page_history BEFORE INSERT ON versions BEGIN SELECT RAISE(ABORT,'test history failure'); END",
 	);
-	const failed = await app.call(`${app.url}/api/fs/pages/kept.txt`, { method: "PUT", body: "published" });
+	const failed = await sourcePut(`${app.url}/api/fs/pages/kept.txt`, { method: "PUT", body: "published" }, app.call);
 	expect(failed.status).toBe(500);
 	expect(await failed.json()).toMatchObject({ error: { code: "handler_failed", retriable: false } });
 	expect(
@@ -189,7 +194,7 @@ it.for([true, false])(
 		await env.sql(
 			"CREATE TRIGGER fail_page_history BEFORE INSERT ON versions BEGIN SELECT RAISE(ABORT,'test history failure'); END",
 		);
-		const failed = await app.call(`${app.url}/api/fs/pages/index.md`, { method: "PUT", body: "desired" });
+		const failed = await sourcePut(`${app.url}/api/fs/pages/index.md`, { method: "PUT", body: "desired" }, app.call);
 		expect(failed.status).toBe(500);
 		expect(await failed.json()).toMatchObject({ error: { code: "handler_failed", retriable: false } });
 		await app.stop();
@@ -210,8 +215,13 @@ it("discards a prepared page when its session is revoked before journal admissio
 		app = await env.start();
 	await writeFile(join(env.root, "data/pages/held.md"), "original");
 	const batchesBefore = await env.sql("SELECT * FROM source_batches ORDER BY id");
+	const baseVersion = (await app.call(`${app.url}/api/fs/pages/held.md`)).headers.get("x-comms-base-version");
+	expect(baseVersion).toBeTruthy();
 	await writeFile(join(env.root, "pause-page"), "hold");
-	const pending = app.call(`${app.url}/api/fs/pages/held.md`, { method: "PUT", body: "must not publish" });
+	const pending = app.call(`${app.url}/api/fs/pages/held.md?baseVersion=${baseVersion}`, {
+		method: "PUT",
+		body: "must not publish",
+	});
 	await expect
 		.poll(async () => readFile(join(env.root, "page-captured"), "utf8").catch(() => ""), { timeout: 5000 })
 		.toBe("ready");
@@ -221,7 +231,9 @@ it("discards a prepared page when its session is revoked before journal admissio
 	expect(await readFile(join(env.root, "data/pages/held.md"), "utf8")).toBe("original");
 	expect(await env.sql("SELECT * FROM source_batches ORDER BY id")).toEqual(batchesBefore);
 	const other = sessionFetch((await seedSession(join(env.root, "data"))).cookie);
-	expect((await other(`${app.url}/api/fs/pages/held.md`, { method: "PUT", body: "next editor" })).status).toBe(200);
+	expect(
+		(await sourcePut(`${app.url}/api/fs/pages/held.md`, { method: "PUT", body: "next editor" }, other)).status,
+	).toBe(200);
 	expect(await readFile(join(env.root, "data/pages/held.md"), "utf8")).toBe("next editor");
 });
 
@@ -251,7 +263,8 @@ it("serves fs-scoped directory listings on both aliases with holder overlay and 
 		).status,
 	).toBe(200);
 	expect(
-		(await app.call(`${app.url}/api/fs/app/new/deep/test.ts?reload=0`, { method: "PUT", body: "new" })).status,
+		(await sourcePut(`${app.url}/api/fs/app/new/deep/test.ts?reload=0`, { method: "PUT", body: "new" }, app.call))
+			.status,
 	).toBe(200);
 	const holder = await app.call(directory);
 	expect(holder.headers.get("cache-control")).toBe("no-store");
@@ -278,7 +291,9 @@ it("keeps raw page repair available with no healthy app after reservation recove
 	await expect.poll(async () => (await app.call(`${app.url}/api/fs/pages/`)).status, { timeout: 5000 }).toBe(200);
 
 	for (const prefix of ["/_boot/fs", "/api/fs"])
-		expect((await app.call(`${app.url}${prefix}/pages/repair.md`, { method: "PUT", body: prefix })).status).toBe(200);
+		expect(
+			(await sourcePut(`${app.url}${prefix}/pages/repair.md`, { method: "PUT", body: prefix }, app.call)).status,
+		).toBe(200);
 	expect(await readFile(join(env.root, "data/pages/repair.md"), "utf8")).toBe("/api/fs");
 
 	expect(
@@ -296,15 +311,22 @@ it("keeps raw page repair available with no healthy app after reservation recove
 it("refuses raw page writes and undo while another durable recovery operation owns publication", async (test) => {
 	const env = await fixture(test),
 		app = await env.start();
-	expect((await app.call(`${app.url}/api/fs/pages/repair.md`, { method: "PUT", body: "before" })).status).toBe(200);
+	expect(
+		(await sourcePut(`${app.url}/api/fs/pages/repair.md`, { method: "PUT", body: "before" }, app.call)).status,
+	).toBe(200);
 	const before = await env.sql("SELECT * FROM source_batches ORDER BY id");
 	await env.sql(
 		"INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES('fixture','hash','session','backup','restoring',0)",
 	);
 	for (const prefix of ["/_boot/fs", "/api/fs"])
-		expect((await app.call(`${app.url}${prefix}/pages/repair.md`, { method: "PUT", body: "blocked" })).status).toBe(
-			503,
-		);
+		expect(
+			(
+				await app.call(
+					`${app.url}${prefix}/pages/repair.md?baseVersion=${createHash("sha256").update("before").digest("hex")}`,
+					{ method: "PUT", body: "blocked" },
+				)
+			).status,
+		).toBe(503);
 	expect(
 		(
 			await app.call(`${app.url}/api/revert`, {
@@ -317,7 +339,9 @@ it("refuses raw page writes and undo while another durable recovery operation ow
 	expect(await env.sql("SELECT * FROM source_batches ORDER BY id")).toEqual(before);
 	expect(await readFile(join(env.root, "data/pages/repair.md"), "utf8")).toBe("before");
 	await env.sql("DELETE FROM db_restore_requests WHERE proof_id='fixture'");
-	expect((await app.call(`${app.url}/api/fs/pages/repair.md`, { method: "PUT", body: "after" })).status).toBe(200);
+	expect(
+		(await sourcePut(`${app.url}/api/fs/pages/repair.md`, { method: "PUT", body: "after" }, app.call)).status,
+	).toBe(200);
 }, 15000);
 
 it.for(["move-first", "undo-first"] as const)(
@@ -360,8 +384,8 @@ const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
 		);
 		const app = await env.start();
 		const target = `${app.url}/api/fs/pages/original/file.txt`;
-		expect((await app.call(target, { method: "PUT", body: "first image" })).status).toBe(200);
-		expect((await app.call(target, { method: "PUT", body: "before move" })).status).toBe(200);
+		expect((await sourcePut(target, { method: "PUT", body: "first image" }, app.call)).status).toBe(200);
+		expect((await sourcePut(target, { method: "PUT", body: "before move" }, app.call)).status).toBe(200);
 		const undo = () =>
 			app.call(`${app.url}/api/revert`, {
 				method: "POST",
@@ -412,7 +436,12 @@ const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
 		const cancelled = new AbortController();
 		test.onTestFinished(() => cancelled.abort());
 		const waiting = [
-			app.call(target, { method: "PUT", body: "must not race rename", signal: cancelled.signal }),
+			app.call(
+				`${target}?baseVersion=${createHash("sha256")
+					.update(order === "undo-first" ? "first image" : "before move")
+					.digest("hex")}`,
+				{ method: "PUT", body: "must not race rename", signal: cancelled.signal },
+			),
 			app.call(`${app.url}/api/revert`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
@@ -436,7 +465,8 @@ const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
 			order === "undo-first" ? "first image" : "before move",
 		);
 		expect(
-			(await app.call(`${app.url}/api/fs/pages/destination/file.txt`, { method: "PUT", body: "after move" })).status,
+			(await sourcePut(`${app.url}/api/fs/pages/destination/file.txt`, { method: "PUT", body: "after move" }, app.call))
+				.status,
 		).toBe(200);
 		await app.stop();
 		const restarted = await env.start();
@@ -458,12 +488,14 @@ it("replays keyed page undo and failure outcomes without replacing newer pages, 
 		});
 	const input = { path: "pages/receipt.md" };
 	for (const body of ["before", "after"])
-		expect((await app.call(`${app.url}/api/fs/pages/receipt.md`, { method: "PUT", body })).status).toBe(200);
+		expect((await sourcePut(`${app.url}/api/fs/pages/receipt.md`, { method: "PUT", body }, app.call)).status).toBe(200);
 	const replies = await Promise.all([call(app.url, input, "page"), call(app.url, input, "page")]);
 	const first = await replies[0]?.json();
 	expect(first).toMatchObject({ published: true });
 	expect(await replies[1]?.json()).toEqual(first);
-	expect((await app.call(`${app.url}/api/fs/pages/receipt.md`, { method: "PUT", body: "later" })).status).toBe(200);
+	expect(
+		(await sourcePut(`${app.url}/api/fs/pages/receipt.md`, { method: "PUT", body: "later" }, app.call)).status,
+	).toBe(200);
 	const history = await env.sql("SELECT id FROM versions");
 	const conflict = await call(app.url, { path: "pages/index.md" }, "page");
 	expect(conflict.status).toBe(409);
@@ -472,9 +504,9 @@ it("replays keyed page undo and failure outcomes without replacing newer pages, 
 	const failure = await call(app.url, { path: "pages/absent.md" }, "failed");
 	const failed = await failure.json();
 	expect(failure.status).toBe(400);
-	expect((await app.call(`${app.url}/api/fs/pages/absent.md`, { method: "PUT", body: "created later" })).status).toBe(
-		200,
-	);
+	expect(
+		(await sourcePut(`${app.url}/api/fs/pages/absent.md`, { method: "PUT", body: "created later" }, app.call)).status,
+	).toBe(200);
 	await app.stop();
 	const restarted = await env.start();
 	expect(await (await call(restarted.url, input, "page")).json()).toEqual(first);
@@ -519,7 +551,7 @@ it("rechecks credentials after a keyed revert waits behind another request", asy
 	const env = await fixture(test),
 		app = await env.start();
 	for (const body of ["before", "after"])
-		expect((await app.call(`${app.url}/api/fs/pages/held.md`, { method: "PUT", body })).status).toBe(200);
+		expect((await sourcePut(`${app.url}/api/fs/pages/held.md`, { method: "PUT", body }, app.call)).status).toBe(200);
 	await writeFile(join(env.root, "pause-page"), "pause undo");
 	const send = () =>
 		app.call(`${app.url}/api/revert`, {
@@ -553,9 +585,27 @@ it("conditionally writes raw bytes on both aliases without lost updates or retir
 		const target = `${app.url}/api/fs/${root}/conditional.bin${root === "app" ? "?reload=0" : ""}`;
 		const readTarget = `${app.url}/_boot/fs/${root}/conditional.bin`;
 		const bytes = new Uint8Array([0, 255, 128, 10]);
-		expect((await app.call(target, { method: "PUT", headers: { "if-none-match": "*" }, body: bytes })).status).toBe(
-			200,
-		);
+		const query = target.includes("?") ? "&" : "?";
+		const before = await env.sql("SELECT * FROM staging");
+		const historyBefore = await env.sql("SELECT id FROM versions");
+		const missing = await app.call(target, { method: "PUT", body: "must not create" });
+		expect(missing.status).toBe(400);
+		expect(await missing.json()).toMatchObject({ error: { code: "precondition_required", retriable: false } });
+		for (const suffix of ["baseVersion=", "baseVersion=bad", "baseVersion=null&baseVersion=null"])
+			expect((await app.call(`${target}${query}${suffix}`, { method: "PUT", body: "invalid" })).status).toBe(400);
+		expect(
+			(
+				await app.call(`${target}${query}baseVersion=null`, {
+					method: "PUT",
+					headers: { "if-none-match": "*" },
+					body: "invalid",
+				})
+			).status,
+		).toBe(400);
+		expect(await env.sql("SELECT * FROM staging")).toEqual(before);
+		expect(await env.sql("SELECT id FROM versions")).toEqual(historyBefore);
+		expect((await app.call(readTarget)).status).toBe(404);
+		expect((await app.call(`${target}${query}baseVersion=null`, { method: "PUT", body: bytes })).status).toBe(200);
 		const read = await app.call(readTarget);
 		const etag = read.headers.get("etag");
 		expect(etag).toBe(`"${createHash("sha256").update(bytes).digest("hex")}"`);
@@ -572,19 +622,18 @@ it("conditionally writes raw bytes on both aliases without lost updates or retir
 			expect((await app.call(target, { method: "PUT", headers, body: "invalid" })).status).toBe(400);
 		expect(
 			(await app.call(target, { method: "PUT", headers: { "if-none-match": "*" }, body: "overwrite" })).status,
-		).toBe(412);
+		).toBe(409);
 		const results = await Promise.all(
 			["one", "two"].map((body) =>
-				app.call(target, {
+				app.call(`${target}${query}baseVersion=${etag.slice(1, -1)}`, {
 					method: "PUT",
-					headers: { "if-match": etag },
 					body,
 				}),
 			),
 		);
-		expect(results.map((result) => result.status).sort()).toEqual([200, 412]);
+		expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
 		const stale = await app.call(target, { method: "DELETE", headers: { "if-match": etag } });
-		expect(stale.status).toBe(412);
+		expect(stale.status).toBe(409);
 		expect(await stale.json()).toMatchObject({ error: { code: "stale_base", retriable: false } });
 		const current = await app.call(readTarget);
 		const currentTag = current.headers.get("etag");
@@ -594,7 +643,7 @@ it("conditionally writes raw bytes on both aliases without lost updates or retir
 		expect((await app.call(readTarget)).status).toBe(404);
 		expect(
 			(await app.call(target, { method: "PUT", headers: { "if-match": currentTag }, body: "resurrect" })).status,
-		).toBe(412);
+		).toBe(409);
 	}
 	for (const prefix of ["/_boot", "/api"])
 		expect((await app.call(`${app.url}${prefix}/fs/edit`, { method: "POST", body: "{}" })).status).toBe(405);

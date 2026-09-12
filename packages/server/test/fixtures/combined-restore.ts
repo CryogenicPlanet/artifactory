@@ -1,3 +1,4 @@
+import { sourcePut } from "./source-put.ts";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -49,7 +50,7 @@ export default (api: Api) => Effect.gen(function* () {
 		await app.ready(cookie);
 		expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 		const stage = async (name: string, body: string) => {
-			const response = await fetch(`${app.url}/api/fs/app/${name}?reload=0`, {
+			const response = await sourcePut(`${app.url}/api/fs/app/${name}?reload=0`, {
 				method: "PUT",
 				headers: headers(cookie),
 				body,

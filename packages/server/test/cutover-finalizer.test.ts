@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -21,7 +22,7 @@ it("releases restored traffic when lock finalization fails after a rejected cand
 		"CREATE TRIGGER refuse_finish BEFORE UPDATE OF cutover_in_flight ON edit_lock WHEN NEW.cutover_in_flight=0 BEGIN SELECT RAISE(ABORT,'finish unavailable'); END",
 		"boot.db",
 	);
-	const result = await fetch(`${app.url}/api/fs/app/ext/core/schema.ts`, {
+	const result = await sourcePut(`${app.url}/api/fs/app/ext/core/schema.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: changed,
@@ -59,7 +60,7 @@ it("releases unavailable traffic when repairing an initially broken app fails be
 		"CREATE TRIGGER refuse_backup BEFORE INSERT ON backups BEGIN SELECT RAISE(ABORT,'backup unavailable'); END",
 		"boot.db",
 	);
-	const result = await fetch(`${app.url}/api/fs/app/server.ts`, {
+	const result = await sourcePut(`${app.url}/api/fs/app/server.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: source,

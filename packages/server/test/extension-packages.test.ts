@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -90,7 +91,7 @@ export default api=>{
 	).toBe(200);
 	expect(await fixture.sql("SELECT ns,key FROM kv WHERE key='saved'")).toEqual([{ ns: "zz-package", key: "saved" }]);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const changed = await fetch(`${app.url}/api/fs/app/ext/core/index.ts`, {
+	const changed = await sourcePut(`${app.url}/api/fs/app/ext/core/index.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: route("changed core directory"),

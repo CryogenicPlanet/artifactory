@@ -1,3 +1,4 @@
+import { sourcePut } from "./source-put.ts";
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -29,7 +30,7 @@ export async function resetFixture(test: TestContext) {
 		await app.ready(cookie);
 		expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 		const stage = async (path: string, body: string, reload = false) => {
-			const response = await fetch(`${app.url}/api/fs/app/${path}?reload=${reload ? 1 : 0}`, {
+			const response = await sourcePut(`${app.url}/api/fs/app/${path}?reload=${reload ? 1 : 0}`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body,

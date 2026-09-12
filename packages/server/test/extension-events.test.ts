@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -65,7 +66,7 @@ it("delivers only published message payloads through live hooks and disables a f
 			]),
 		);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-	const put = await fetch(app.url + "/api/fs/app/ext/unused.ts", {
+	const put = await sourcePut(app.url + "/api/fs/app/ext/unused.ts", {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: "export default api=>{};",

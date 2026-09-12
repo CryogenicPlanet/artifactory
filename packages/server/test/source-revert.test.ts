@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { request } from "node:http";
 import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -23,7 +24,7 @@ it("reverts a file, a whole latest batch and a retained version through cutover 
 	const changed = original.replace("comms: message API ready.", "comms: reverted API ready.");
 	expect(changed).not.toBe(original);
 	const put = (path: string, content: string) =>
-		fetch(`${app.url}/api/fs/${path}?reload=0`, {
+		sourcePut(`${app.url}/api/fs/${path}?reload=0`, {
 			method: "PUT",
 			headers: { cookie, origin: "https://comms.test" },
 			body: content,
@@ -74,7 +75,7 @@ it("refuses ambiguous selectors, unavailable history and unrelated staging witho
 	expect(invalidRestore.status).toBe(400);
 	expect(await invalidRestore.json()).toMatchObject({ error: { code: "revert_selection_invalid" } });
 	const put = (content: string) =>
-		fetch(`${app.url}/api/fs/app/large.txt`, {
+		sourcePut(`${app.url}/api/fs/app/large.txt`, {
 			method: "PUT",
 			headers: { cookie, origin: "https://comms.test" },
 			body: content,
@@ -87,7 +88,7 @@ it("refuses ambiguous selectors, unavailable history and unrelated staging witho
 	expect(await fixture.sql("SELECT * FROM staging", "boot.db")).toEqual([]);
 	expect(
 		(
-			await fetch(`${app.url}/api/fs/app/held.txt?reload=0`, {
+			await sourcePut(`${app.url}/api/fs/app/held.txt?reload=0`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: "unrelated repair",
@@ -116,7 +117,7 @@ it("reauthenticates a held revert body and fences a replaced lock before staging
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 	expect(
 		await (
-			await fetch(`${app.url}/api/fs/app/note.txt`, {
+			await sourcePut(`${app.url}/api/fs/app/note.txt`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: "retain",
@@ -172,7 +173,7 @@ for (const input of [{}, { path: "app/note.txt" }])
 		expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 		expect(
 			await (
-				await fetch(`${app.url}/api/fs/app/note.txt`, {
+				await sourcePut(`${app.url}/api/fs/app/note.txt`, {
 					method: "PUT",
 					headers: { cookie, origin: "https://comms.test" },
 					body: "first creation",
@@ -188,7 +189,7 @@ for (const input of [{}, { path: "app/note.txt" }])
 		// A later edit and released lock must survive replay, including after reboot.
 		expect(
 			await (
-				await fetch(`${app.url}/api/fs/app/note.txt`, {
+				await sourcePut(`${app.url}/api/fs/app/note.txt`, {
 					method: "PUT",
 					headers: { cookie, origin: "https://comms.test" },
 					body: "later edit",

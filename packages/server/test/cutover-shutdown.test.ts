@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -22,7 +23,7 @@ it("repairs never-ending shutdown hooks and scoped finalizers only after keeper 
 	// Failure after forced closure but before the backup checkpoint must restart
 	// the known-good code against the current store, not strand the frozen gate.
 	await writeFile(join(fixture.root, "backups"), "blocks backup directory creation");
-	const failed = await fetch(`${app.url}/api/fs/app/ext/hang.ts`, {
+	const failed = await sourcePut(`${app.url}/api/fs/app/ext/hang.ts`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: "export default function repaired() {}",
@@ -46,7 +47,7 @@ it("repairs never-ending shutdown hooks and scoped finalizers only after keeper 
 			await fixture.sql("SELECT id,receipt FROM child_attempts WHERE opened=1 AND closed=0", "boot.db"),
 		);
 		expect(owners).toHaveLength(1);
-		const response = await fetch(`${app.url}/api/fs/app/ext/hang.ts`, {
+		const response = await sourcePut(`${app.url}/api/fs/app/ext/hang.ts`, {
 			method: "PUT",
 			headers: { cookie, origin: "https://comms.test" },
 			body: source,

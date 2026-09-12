@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -28,7 +29,7 @@ it("replaces public grants after editable migrations privatize, tombstone or rem
 	}
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 	const stage = (name: string, body: string) =>
-		fetch(`${app.url}/api/fs/app/migrations/${name}.ts?reload=0`, {
+		sourcePut(`${app.url}/api/fs/app/migrations/${name}.ts?reload=0`, {
 			method: "PUT",
 			headers: { cookie, origin: "https://comms.test" },
 			body: `import { Effect } from "effect";

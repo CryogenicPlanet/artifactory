@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { cp, writeFile, readFile, mkdir, symlink } from "node:fs/promises";
@@ -102,7 +103,7 @@ it("accepts a core product override without weakening kernel health and isolates
 	expect((await app.post("/api/messages", { topic: "retained", body: "acknowledged" }, cookie)).status).toBe(200);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 	const put = (body: string) =>
-		fetch(`${app.url}/api/fs/app/ext/zz-override.ts`, {
+		sourcePut(`${app.url}/api/fs/app/ext/zz-override.ts`, {
 			method: "PUT",
 			headers: { cookie, origin: "https://comms.test" },
 			body,

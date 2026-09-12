@@ -19,11 +19,14 @@ for (const boundary of ["finish", "journal", "release"] as const) {
 			"boot.db",
 		);
 		const originalLock = await fixture.sql("SELECT id FROM edit_lock", "boot.db");
-		const staged = await fetch(`${app.url}/api/fs/app/accepted.txt${boundary === "release" ? "?reload=0" : ""}`, {
-			method: "PUT",
-			headers: { cookie, origin: "https://comms.test" },
-			body: "accepted source",
-		});
+		const staged = await fetch(
+			`${app.url}/api/fs/app/accepted.txt?baseVersion=null${boundary === "release" ? "&reload=0" : ""}`,
+			{
+				method: "PUT",
+				headers: { cookie, origin: "https://comms.test" },
+				body: "accepted source",
+			},
+		);
 		if (boundary === "release") expect(staged.status).toBe(200);
 		const response = boundary === "release" ? await app.post("/api/reload?release=1", {}, cookie) : staged;
 		expect(response.status).toBe(500);

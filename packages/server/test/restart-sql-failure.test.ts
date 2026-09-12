@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -114,7 +115,7 @@ for (const boundary of ["accepted", "accepted-lookup"] as const) {
 	it(`resolves accepted cutover evidence after ${boundary} failure`, async (test) => {
 		const { fixture, app, cookie } = await failingRestart(test, boundary);
 		expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
-		const response = await fetch(`${app.url}/api/fs/app/accepted.txt`, {
+		const response = await sourcePut(`${app.url}/api/fs/app/accepted.txt`, {
 			method: "PUT",
 			headers: { cookie, origin: "https://comms.test" },
 			body: "accepted source must survive",
@@ -159,7 +160,7 @@ it("releases unavailable queues after closure even when accepted authority recov
 		"CREATE TRIGGER refuse_recovery_finish BEFORE UPDATE OF cutover_in_flight ON edit_lock WHEN NEW.cutover_in_flight=0 BEGIN SELECT RAISE(ABORT,'recovery finish unavailable'); END",
 		"boot.db",
 	);
-	const response = await fetch(`${app.url}/api/fs/app/accepted.txt`, {
+	const response = await sourcePut(`${app.url}/api/fs/app/accepted.txt`, {
 		method: "PUT",
 		headers: { cookie, origin: "https://comms.test" },
 		body: "accepted source must survive",

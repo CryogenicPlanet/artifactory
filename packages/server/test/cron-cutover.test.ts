@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { expect, it } from "vitest";
 import { Schema } from "effect";
 import { cronCutover } from "./fixtures/cron-cutover.ts";
@@ -21,7 +22,7 @@ it("keeps public cron jobs scoped to the live process through cutover and a reje
 	expect(await fixture.markers()).toContain(`job-${old.pid}-0`);
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 	const put = (path: string, body: string) =>
-		fetch(`${app.url}/api/fs/app/${path}?reload=0`, { method: "PUT", headers, body });
+		sourcePut(`${app.url}/api/fs/app/${path}?reload=0`, { method: "PUT", headers, body });
 	expect((await put("ext/cron-owner.ts", fixture.extension + "\n// next generation\n")).status).toBe(200);
 	const reload = app.post("/api/reload", {}, cookie);
 	void reload.catch(() => undefined);

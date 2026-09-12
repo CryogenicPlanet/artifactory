@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -32,7 +33,7 @@ it("restores a retained generation's whole source and manifest through cutover w
 		throw new Error(`Initial preparation phases: ${JSON.stringify(diagnostics.read(app.output()))}`, { cause });
 	}
 	const request = (path: string, method: string, body?: string) =>
-		fetch(`${app.url}/api/fs/${path}?reload=0`, {
+		(method === "PUT" ? sourcePut : fetch)(`${app.url}/api/fs/${path}?reload=0`, {
 			method,
 			headers: { cookie, origin: "https://comms.test" },
 			...(body === undefined ? {} : { body }),
@@ -101,7 +102,7 @@ it("refuses invalid, mixed and unavailable generation selectors and preserves un
 	expect(await fixture.sql("SELECT * FROM staging", "boot.db")).toEqual([]);
 	expect(
 		(
-			await fetch(`${app.url}/api/fs/app/held.txt?reload=0`, {
+			await sourcePut(`${app.url}/api/fs/app/held.txt?reload=0`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: "unrelated repair",
@@ -150,7 +151,7 @@ it("keeps the original generation selection after a lost response and restart an
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 	expect(
 		await (
-			await fetch(`${app.url}/api/fs/app/later.txt`, {
+			await sourcePut(`${app.url}/api/fs/app/later.txt`, {
 				method: "PUT",
 				headers: { cookie, origin: "https://comms.test" },
 				body: "later generation",

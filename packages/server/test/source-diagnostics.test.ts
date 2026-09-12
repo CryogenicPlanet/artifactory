@@ -1,3 +1,4 @@
+import { sourcePut } from "./fixtures/source-put.ts";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -16,7 +17,7 @@ it(
 		expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 		expect(
 			(
-				await fetch(`${app.url}/api/fs/app/server.ts?reload=0`, {
+				await sourcePut(`${app.url}/api/fs/app/server.ts?reload=0`, {
 					method: "PUT",
 					headers: { cookie, origin: "https://comms.test" },
 					body: `${source}\n// staged repair`,
