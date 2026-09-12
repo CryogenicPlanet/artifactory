@@ -20,7 +20,7 @@ const Connection = Schema.Struct({
 	password: Schema.String,
 });
 async function run() {
-	const [appFile, bootFile, existingRoot, existingOrigin] = process.argv.slice(2);
+	const [appFile, bootFile, existingRoot, existingOrigin, resumePhase] = process.argv.slice(2);
 	assert(appFile && bootFile, "Supply protected fresh app and boot configuration paths");
 	const load = async (filename: string) => {
 		try {
@@ -155,7 +155,7 @@ async function run() {
 	let phase = "first startup";
 	let succeeded = false;
 	try {
-		if (existingRoot) {
+		if (existingRoot && resumePhase !== "prepare-existing") {
 			await ready(false);
 			phase = "resumed authenticated diagnostic";
 			console.log((await probe("diagnose")).stdout.trim());
@@ -163,10 +163,10 @@ async function run() {
 			console.log("Resumed board diagnosis completed; private board preserved");
 			return;
 		}
-		await ready(true);
+		await ready(!existingRoot);
 		console.log("Actual server started; passkey HTTP probe begins");
 		phase = "public passkey, messages, idempotency, native backup and restore";
-		console.log((await probe("prepare")).stdout.trim());
+		console.log((await probe(existingRoot ? "prepare-existing" : "prepare")).stdout.trim());
 		phase = "graceful server shutdown";
 		await stop();
 
@@ -192,7 +192,7 @@ async function run() {
 		console.error(redact(output));
 		throw new Error("Native board acceptance failed");
 	} finally {
-		if (succeeded) await rm(root, { recursive: true, force: true });
+		if (succeeded && !existingRoot) await rm(root, { recursive: true, force: true });
 		else {
 			try {
 				await stop();
