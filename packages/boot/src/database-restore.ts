@@ -224,6 +224,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 			if (record.phase === "restoring") {
 				const installed = yield* install(record).pipe(Effect.interruptible, Effect.exit);
 				if (installed._tag === "Success") return;
+				yield* backup.recoverCopy;
 				yield* supervisor.assertClosure;
 				const latest = yield* read(record.proof_id);
 				if (latest.phase === "restored") {
@@ -361,6 +362,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				return yield* Effect.gen(function* () {
 					const prepared = yield* prepare.pipe(Effect.interruptible, Effect.exit);
 					if (prepared._tag === "Failure") {
+						yield* backup.recoverCopy;
 						yield* supervisor.assertClosure;
 						const latest = yield* read(record.proof_id);
 						if (latest.phase !== "authorized") return yield* Effect.failCause(prepared.cause);

@@ -27,6 +27,9 @@ export class BootIdentityUpgradePending extends Schema.TaggedError<BootIdentityU
 	}
 }
 
+// Version 19 marks the copy-owner recovery protocol even though it adds no table.
+const supported = 19;
+
 /** Run once before constructing boot stores; opening the adapter must use disableWAL. */
 export const initializeBootSchema = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -35,9 +38,9 @@ export const initializeBootSchema = Effect.gen(function* () {
 	);
 	const version = (yield* readVersion)[0]?.user_version;
 	if (version === undefined) return yield* Effect.die("Missing boot schema version");
-	if (version > 18) return yield* new BootSchemaTooNew({ found: version, supported: 18 });
+	if (version > supported) return yield* new BootSchemaTooNew({ found: version, supported });
 	// Refuse before schema or journal-mode changes so the previous image can finish recovery.
-	if (version >= 9 && version < 18) {
+	if (version >= 9 && version < supported) {
 		const cutovers = yield* sql`SELECT singleton FROM cutover WHERE phase!='accepted' LIMIT 1`;
 		const restores =
 			version >= 13
@@ -53,7 +56,7 @@ export const initializeBootSchema = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const currentVersion = (yield* readVersion)[0]?.user_version;
 			if (currentVersion === undefined) return yield* Effect.die("Missing schema version");
-			if (currentVersion > 18) return yield* new BootSchemaTooNew({ found: currentVersion, supported: 18 });
+			if (currentVersion > supported) return yield* new BootSchemaTooNew({ found: currentVersion, supported });
 			yield* migrate(sql, "boot_migrations", currentVersion, [
 				{
 					id: 1,
@@ -220,8 +223,9 @@ export const initializeBootSchema = Effect.gen(function* () {
 						yield* sql`ALTER TABLE backups ADD COLUMN engine TEXT NOT NULL DEFAULT 'sqlite' CHECK(engine IN ('sqlite','pg','mysql'))`;
 					}),
 				},
+				{ id: 19, name: "sqlite_copy_ownership", run: Effect.void },
 			]);
-			if (currentVersion !== 18) yield* sql`PRAGMA user_version = 18`;
+			if (currentVersion !== supported) yield* sql`PRAGMA user_version = 19`;
 		}),
 	);
 });

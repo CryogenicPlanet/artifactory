@@ -135,7 +135,7 @@ describe("typed source tree publication", () => {
 		expect(await env.sql("SELECT previous_directory,directory FROM versions")).toEqual([
 			{ previous_directory: 0, directory: 0 },
 		]);
-		expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 18 }]);
+		expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 19 }]);
 	});
 
 	it.for(["file to directory", "directory to file"] as const)(
