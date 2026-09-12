@@ -298,11 +298,11 @@ Codex's `docs/boot-ownership-audit.md` narrowed four things the review had recor
 
 **Decided 2026-09-11 on Codex's audit; owner not objecting.** Item 21 asked for the metrics route to be implemented; that is withdrawn. `/_boot/status` is boot's operational surface. Counters and Prometheus text are an extension if anyone wants them. Boot's `http.request` record is its own bounded view of each request it answered or forwarded (verified identity, request id, method, path, status, duration, redacted); it no longer parses the child's span annotations, and the app exports its own spans. `docs/tech.md` §8's one aggregated wide event becomes two records sharing a request id. Codex implemented this in `dd3c6e7`.
 
-### 35. Retention: boot keeps the byte cap, the calendar leaves (proposed, awaiting the owner)
+### 35. Retention: boot keeps the byte cap, the calendar leaves (proposed; implemented by Codex in `e38d60c` ahead of confirmation)
 
 Item 21 says event retention is one of two policies boot enforces when the app is dead; SPEC §12 says retention rules belong to the app. The audit's split resolves it: boot keeps the physical protection (the 5% headroom refusal and the 10% event byte cap with protected-artifact reclamation) because a full store must not block auth or recovery, and the 7-day/30-day calendar pruning in `event-retention.ts` and its settings keys go. Nothing replaces them: agents carry `since=` cursors, and a log that only shrinks under byte pressure is simpler than a schedule in boot. If confirmed: §6.1's "pruned hourly by the bootloader" changes, §7.5 keeps the cap sentence, and item 21 loses "retention" from the enforce-when-dead pair.
 
-### 36. Delete `legacy-topic-moves.ts` (proposed, awaiting the third pass)
+### 36. Delete `legacy-topic-moves.ts` (proposed; reduced by Codex in `8cc783e` to a 7-line presence probe plus a refusal; see item 45)
 
 Item 27 asked for the 228 lines of topic-move machinery to go. They went, and 282 new lines arrived in `legacy-topic-moves.ts`: startup-only recovery of old boot-owned topic-move tables, with a whole-tree hash walk and a page-subtree `fs.rename`, both of which item 21 removed from boot. There are no deployed stores, so there is no legacy data to recover. Recommendation: delete the file, and refuse to start on an old store version with a clear message. The ownership audit does not mention the file in either list. The third pass confirms it from three dimensions (A-2, B-3, and the claims agent's F4): the file runs on every recovery pass, not only first start, because `index.ts:130` and `:140` sit inside the recovery permit; and its blanket `Effect.mapError` to `topic_move_recovery_required` at `:61` and `:282` turns any transient SQL or filesystem error while reading two tables that never exist into a refused boot.
 
@@ -355,6 +355,52 @@ Report: `third-pass-2ee17ac.md`. Five Opus finders, five Opus skeptics, one clai
 ### 43. Smaller items from the third pass
 
 **Comment.** `sql-http.ts:37-42` spawns the reader subprocess before the read-scope check and the check after it is dead code. `decode-rows.ts` exists but 45 raw decode sites remain in 19 boot modules, and the directory-sync helper is copied six times. `topics-http.ts:30-40` re-parses the raw URL for the wildcard route. `read-marks.ts:8-13` exports a dead `effectiveCursor` that still branches on the removed `~inbox`. `subscriptions/response.ts:57` has two identical arms. Two divergent digest examples exist (`examples/extensions/digest.ts` and `packages/server/examples/extensions/digest.ts`); keep one. `public-paths.ts:29-42` refuses child activation when the app marks more than 4,096 pages public or the list exceeds 512 KiB; that is a boot number gating an app policy, so document it in the spec or raise it to a store limit. `scripts/check-invariants.ts:81` guards only four table names; derive the list from the server's schema. The storage sampler answers `storage_measurement_failed` for the first two seconds after boot.
+
+## Status after the fourth pass (efa6de5, 2026-09-11)
+
+Report: `fourth-pass-efa6de5.md`. Four Opus finders, four skeptics, one claims agent; 23 findings confirmed, 3 refuted. **Check, build and the full suite pass at the pushed head** (775 tests, 1 opt-in skipped). Boot is 12,157 lines in 92 files, down 108: the first net decrease.
+
+| item | status | what remains |
+| --- | --- | --- |
+| 35 retention | implemented, awaiting confirmation | Calendar pruning and its settings keys gone; headroom refusal and byte cap intact; old stores start. Two consequences to decide with it: eviction is now oldest-first across types, so `http.request` volume evicts lifecycle history and quiet boards keep request rows forever (prefer evicting `http.request` first); and `source-revert.ts:139` still runs an hourly 30-day calendar prune for revert receipts. |
+| 36 legacy topic moves | partly | 282 lines became a 7-line probe plus a fail-closed refusal; the hash walk, rename and app-store open are gone. But boot migrates the store to schema 16 **before** the probe runs, so the refusal's own hint ("use the previous image") is impossible, and the probe also switches off the event byte-cap pruner for the life of the process (item 45). |
+| 37 mentions | fixed, residual | The four named cases deliver and root marking is gone. The suffix still enumerates `\p{P}`, so `~~@codex~~`, `` `@codex` `` and `<@codex>` deliver to nobody, and the widened prefix now matches `/@codex` inside URLs (item 44). `ctx.topics.markRead("", seq)` from an extension still writes the root row (item 44). |
+| 38 freeze gates | fixed | The `ChildError` predicate is gone; health timeout is a typed `ChildError`; `supervisor.run` wakes on a queue instead of idling; the bare `finish` became a retained cleanup retried on the next authorized edit. `accepted_snapshot_missing` and the backup path release through `requestRecovery` rather than a finalizer; `database-restore.ts:391` shows the `Effect.ensuring` shape they should share. |
+| 39 the way in | partly | `POST`/`DELETE /_boot/lock` are admitted in the Failed phase and report recovery in the body. `POST /_boot/revert` still requires `retryRecovery` to succeed (`edit-http.ts:58-63`). The new `repairLock` guard refuses `lock_recovery_conflict` for a stranded pages publication, whose batch has no lock owner, so the one way in can itself be refused (item 46). |
+| 40 events follow-through | fixed, one spec question | `/_boot/events` takes scope `read` and `wait=`; the app forwards `wait=` to the channel; docs and the fixture fixed. Boot now omits `http.request` rows from the child channel entirely rather than clamping them, so `/api/events` returns none while SPEC §6 promises own-agent rows (item 47). |
+| 41 protected tables | partly | Adoption of an existing table is refused. Registration is permanent, the word-match guard blocks any statement mentioning the name, and `api.migrate` itself never consults the set, so an extension can `DELETE FROM protected_sql_tables` while `/api/sql` cannot (item 48). |
+| 42 health probe | fixed, overshot | The probe is a kernel `kv` round-trip with rollback and a core override passes. It no longer dispatches any HTTP route, so a reload that breaks every route passes health and is stamped `good` (item 49). SPEC §7 still describes the old self-test. |
+| 43 smaller | mostly | Scope-before-spawn, `effectiveCursor`, one digest example, the derived CI table list, the `public_paths` cap and the first-sample wait are done. Still open: the sync helper copied five times, `decode-rows` at 40 of 56 sites, `topics-http.ts` raw URL parse, `response.ts:57` identical arms. |
+
+## New items from the fourth pass
+
+### 44. Mentions, fourth time: negative classes on both sides, and no root mark from extensions
+
+**Comment.** Replace the trailing `(?=$|[\s\p{P}|])` with `(?![\p{L}\p{N}\p{M}])` and add `/` and `:` to the lookbehind exclusion, so strikethrough, inline code and angle brackets deliver and a pasted `https://x/@codex/repo` does not. Add those cases to the test. `capabilities.ts:110` must reject `path === ""` with `input_invalid` so no extension can write the row that zeroes every unread count. Update `conversation.ts:34` and the three `/api/topics` descriptions, which still promise root marking.
+
+### 45. Item 36, the shape: check before migrating, and never disable the byte cap
+
+**Comment.** Run the legacy-table probe before `initializeBootSchema` and refuse there, so a store that carries `topic_moves` is not rewritten to schema 16 first (today the hint "use the previous compatible image" cannot be followed). Better, since no deployed store has these tables: drop the compatibility path and refuse to start on a pre-cut `user_version` with a clear message. Either way `storage.run` must fork unconditionally (`index.ts:84-87`); a refused store is exactly the one boot keeps appending auth and request events to with no pruner.
+
+### 46. The way in, fourth time: revert too, and no self-refusal
+
+**Comment.** Give `POST /_boot/revert` the `repairLock` shape: admit the human, run `retryRecovery` afterwards, report the failure in the body. Then fix the guard `a25530a` added: `edit-lock.ts:186-213` refuses `lock_recovery_conflict` when a `source_batches` row in `publishing` names no lock, which is every stranded pages publication, so a human cannot take the lock to repair the one thing that needs repairing. An ownerless batch must not count as a competing owner.
+
+### 47. Where `http.request` rows live (owner to confirm)
+
+**Comment.** Codex removed request records from the child channel entirely, so `GET /api/events` never returns one, while SPEC §6 says an agent sees its own. Proposed resolution, consistent with item 32: `http.request` is a boot event and appears only on `GET /_boot/events`, clamped in boot to the caller's own agent unless human; `/api/events` carries application events only. If confirmed, the §6 rows change, `requestActor` leaves `EventQuery`, and the evlog sink points at `/_boot/events`.
+
+### 48. Protected tables, second half
+
+**Comment.** Record `(name, extension, migration)` and drop rows whose migration no longer exists during loader reconciliation. Scope the refusal to the tables a statement targets, using the tokenizer `check-invariants.ts` already has, not a word match over the whole text. `api.migrate` must consult the same set: today it admits `DROP` and `DELETE` against anything, including `protected_sql_tables` itself.
+
+### 49. Readiness must still dispatch a route
+
+**Comment.** Item 42 asked the probe to stop encoding core's product contract, not to stop exercising the router. Keep the `kv` probe and add one dispatch through `extensions.dispatch` of a kernel-reserved route (`/_kernel/health`) so router assembly and request-time dispatch are both proven before a generation is promoted; today a reload that breaks every route is activated and stamped `good`. Then record the readiness change in SPEC §7.2 (the self-test paragraphs at lines 509 to 518 and the "self-test" wording at 579) as a dated bullet.
+
+### 50. Smaller items from the fourth pass
+
+**Comment.** A failed accepted-cutover metadata cleanup leaves the lock pinned and every hint steers the agent away from the request that clears it; retry it from the reload route or surface it in `/_boot/status`. `stream-http.ts:41` lost its empty-page guard, so a boot read failure becomes a zero-delay loop; sleep or end the stream on an empty unchanged page. `public-paths.ts:39` runs one `INSERT` per path inside the append transaction under the channel gate, bounded only by the 1 MiB body; batch it. `init.md:37` and boot's `GET /_boot` help still teach a tokenless `PUT`, which is now `400 precondition_required`. The lock-repair response shape (`lock_committed`, `recovery`) is undocumented and answers 200 on a failed recovery. `retryCleanup` runs its authorize effect twice. `examples/extensions/README.md:5` names a file that does not exist and the surviving digest example's import does not resolve when copied into `app/ext/`. `kernel/README.md:7` still forbids the probe design item 42 introduced. The recovery ladder has no total budget (5 s × 3 attempts × generations). Codex's three ledgers still describe 35 and 36 as unimplemented.
 
 ## Moot after the deletions
 
