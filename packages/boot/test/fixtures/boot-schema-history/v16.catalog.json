@@ -1,0 +1,344 @@
+[
+	{
+		"type": "index",
+		"name": "db_restore_active",
+		"tbl_name": "db_restore_requests",
+		"sql": "CREATE UNIQUE INDEX db_restore_active ON db_restore_requests ((1))\n\t\tWHERE phase IN ('authorized','restoring','working','rollback')"
+	},
+	{
+		"type": "index",
+		"name": "db_restore_idempotency",
+		"tbl_name": "db_restore_requests",
+		"sql": "CREATE UNIQUE INDEX db_restore_idempotency ON db_restore_requests (session_id,idempotency_key) WHERE idempotency_key IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "events_actor_seq",
+		"tbl_name": "events",
+		"sql": "CREATE INDEX events_actor_seq ON events(actor,seq)"
+	},
+	{
+		"type": "index",
+		"name": "events_instance_seq",
+		"tbl_name": "events",
+		"sql": "CREATE INDEX events_instance_seq ON events(instance,seq)"
+	},
+	{
+		"type": "index",
+		"name": "events_level_seq",
+		"tbl_name": "events",
+		"sql": "CREATE INDEX events_level_seq ON events(level,seq)"
+	},
+	{
+		"type": "index",
+		"name": "events_topic_seq",
+		"tbl_name": "events",
+		"sql": "CREATE INDEX events_topic_seq ON events(topic,seq)"
+	},
+	{
+		"type": "index",
+		"name": "events_type_seq",
+		"tbl_name": "events",
+		"sql": "CREATE INDEX events_type_seq ON events(type,seq)"
+	},
+	{
+		"type": "index",
+		"name": "source_single_publication",
+		"tbl_name": "source_batches",
+		"sql": "CREATE UNIQUE INDEX source_single_publication ON source_batches(state) WHERE state = 'publishing'"
+	},
+	{
+		"type": "index",
+		"name": "source_versions_path",
+		"tbl_name": "versions",
+		"sql": "CREATE INDEX source_versions_path ON versions(path,id)"
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_auth_challenges_1",
+		"tbl_name": "auth_challenges",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_backups_1",
+		"tbl_name": "backups",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_child_attempts_1",
+		"tbl_name": "child_attempts",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_db_restore_requests_1",
+		"tbl_name": "db_restore_requests",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_edit_lock_1",
+		"tbl_name": "edit_lock",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_enrollments_1",
+		"tbl_name": "enrollments",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_enrollments_2",
+		"tbl_name": "enrollments",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_event_batches_1",
+		"tbl_name": "event_batches",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_mint_receipts_1",
+		"tbl_name": "mint_receipts",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_mint_receipts_2",
+		"tbl_name": "mint_receipts",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_passkeys_1",
+		"tbl_name": "passkeys",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_public_paths_1",
+		"tbl_name": "public_paths",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_refresh_idempotency_1",
+		"tbl_name": "refresh_idempotency",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_refresh_receipts_1",
+		"tbl_name": "refresh_receipts",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_sessions_1",
+		"tbl_name": "sessions",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_sessions_2",
+		"tbl_name": "sessions",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_settings_1",
+		"tbl_name": "settings",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_source_batches_1",
+		"tbl_name": "source_batches",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_source_changes_1",
+		"tbl_name": "source_changes",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_staging_1",
+		"tbl_name": "staging",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_tokens_1",
+		"tbl_name": "tokens",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_tokens_2",
+		"tbl_name": "tokens",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "sqlite_autoindex_versions_1",
+		"tbl_name": "versions",
+		"sql": null
+	},
+	{
+		"type": "index",
+		"name": "tokens_family",
+		"tbl_name": "tokens",
+		"sql": "CREATE INDEX tokens_family ON tokens(family)"
+	},
+	{
+		"type": "table",
+		"name": "auth_challenges",
+		"tbl_name": "auth_challenges",
+		"sql": "CREATE TABLE auth_challenges (\n\t\tid TEXT PRIMARY KEY, challenge TEXT NOT NULL, ceremony TEXT NOT NULL,\n\t\tsetup_generation TEXT, expires_at INTEGER NOT NULL\n\t)"
+	},
+	{
+		"type": "table",
+		"name": "backups",
+		"tbl_name": "backups",
+		"sql": "CREATE TABLE backups(id TEXT PRIMARY KEY,path TEXT NOT NULL,reason TEXT NOT NULL,bytes INTEGER NOT NULL,taken_at INTEGER NOT NULL, published_through INTEGER, generation INTEGER)"
+	},
+	{
+		"type": "table",
+		"name": "child_attempts",
+		"tbl_name": "child_attempts",
+		"sql": "CREATE TABLE child_attempts(id TEXT PRIMARY KEY,generation INTEGER NOT NULL,receipt TEXT NOT NULL,opened INTEGER NOT NULL DEFAULT 0,closed INTEGER NOT NULL DEFAULT 0, boot_id TEXT)"
+	},
+	{
+		"type": "table",
+		"name": "cutover",
+		"tbl_name": "cutover",
+		"sql": "CREATE TABLE cutover(singleton INTEGER PRIMARY KEY CHECK(singleton=1),candidate INTEGER NOT NULL,prior INTEGER,backup TEXT,lock_id TEXT NOT NULL,family TEXT NOT NULL,phase TEXT NOT NULL,candidate_epoch TEXT)"
+	},
+	{
+		"type": "table",
+		"name": "db_restore_requests",
+		"tbl_name": "db_restore_requests",
+		"sql": "CREATE TABLE db_restore_requests (\n\t\tproof_id TEXT PRIMARY KEY, proof_hash TEXT NOT NULL, session_id TEXT NOT NULL, idempotency_key TEXT,\n\t\tbackup TEXT NOT NULL, phase TEXT NOT NULL CHECK(phase IN ('authorized','restoring','working','rollback','restored','failed')),\n\t\tsafety_backup TEXT, generation INTEGER, restored_to_seq INTEGER NOT NULL,\n\t\tevent_seq INTEGER, failure TEXT, lock_id TEXT, lock_family TEXT,\n\t\tlock_owned INTEGER NOT NULL DEFAULT 0 CHECK(lock_owned IN (0,1)), candidate_epoch TEXT\n\t, source_generation INTEGER, prior_generation INTEGER, source_batch TEXT)"
+	},
+	{
+		"type": "table",
+		"name": "edit_lock",
+		"tbl_name": "edit_lock",
+		"sql": "CREATE TABLE edit_lock (\n\t\t\tsingleton INTEGER PRIMARY KEY CHECK(singleton = 1), id TEXT NOT NULL UNIQUE,\n\t\t\tholder_family TEXT NOT NULL, agent TEXT NOT NULL, since INTEGER NOT NULL,\n\t\t\texpires INTEGER NOT NULL, ttl_seconds INTEGER NOT NULL CHECK(ttl_seconds BETWEEN 1 AND 3600),\n\t\t\tnote TEXT NOT NULL, cutover_in_flight INTEGER NOT NULL DEFAULT 0 CHECK(cutover_in_flight IN (0, 1)),\n\t\t\tpending_release TEXT CHECK(pending_release IN ('broken', 'revoked'))\n\t\t, reset_pin INTEGER NOT NULL DEFAULT 0 CHECK(reset_pin IN (0,1,2)))"
+	},
+	{
+		"type": "table",
+		"name": "enrollments",
+		"tbl_name": "enrollments",
+		"sql": "CREATE TABLE enrollments (\n id TEXT PRIMARY KEY, device_secret_hash TEXT NOT NULL, user_code TEXT NOT NULL,\n agent_name TEXT NOT NULL, kind TEXT NOT NULL, host TEXT NOT NULL,\n status TEXT NOT NULL CHECK(status IN ('pending','approved','denied','collected')),\n family TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,\n collected_at INTEGER, scopes TEXT, access_seconds INTEGER, refresh_seconds INTEGER\n )"
+	},
+	{
+		"type": "table",
+		"name": "event_batches",
+		"tbl_name": "event_batches",
+		"sql": "CREATE TABLE event_batches (id TEXT PRIMARY KEY, attempt TEXT NOT NULL, from_seq INTEGER NOT NULL, to_seq INTEGER NOT NULL, state TEXT NOT NULL)"
+	},
+	{
+		"type": "table",
+		"name": "events",
+		"tbl_name": "events",
+		"sql": "CREATE TABLE events (seq INTEGER PRIMARY KEY, transaction_id TEXT, event TEXT NOT NULL, topic TEXT, type TEXT GENERATED ALWAYS AS (json_extract(event,'$.type')) VIRTUAL, actor TEXT GENERATED ALWAYS AS (json_extract(event,'$.actor')) VIRTUAL, instance TEXT GENERATED ALWAYS AS (json_extract(event,'$.instance')) VIRTUAL, level TEXT GENERATED ALWAYS AS (json_extract(event,'$.level')) VIRTUAL)"
+	},
+	{
+		"type": "table",
+		"name": "generations",
+		"tbl_name": "generations",
+		"sql": "CREATE TABLE generations (\n\t\t\tn INTEGER PRIMARY KEY AUTOINCREMENT, snapshot_dir TEXT, entry_file TEXT NOT NULL,\n\t\t\tstatus TEXT NOT NULL CHECK(status IN ('starting', 'live', 'failed', 'retired')),\n\t\t\tgood INTEGER NOT NULL DEFAULT 0 CHECK(good IN (0, 1)), stderr TEXT NOT NULL DEFAULT '',\n\t\t\terror TEXT, started_at INTEGER NOT NULL, healthy_at INTEGER, retired_at INTEGER\n\t\t, backup_id TEXT)"
+	},
+	{
+		"type": "table",
+		"name": "mint_receipts",
+		"tbl_name": "mint_receipts",
+		"sql": "CREATE TABLE mint_receipts (\n session_id TEXT NOT NULL, key_hash TEXT NOT NULL, request_hash TEXT NOT NULL, proof_hash TEXT NOT NULL,\n family TEXT NOT NULL, successor_access_id TEXT NOT NULL, successor_refresh_id TEXT NOT NULL, expires_at INTEGER NOT NULL,\n salt TEXT NOT NULL, nonce TEXT NOT NULL, ciphertext TEXT NOT NULL, tag TEXT NOT NULL,\n PRIMARY KEY(session_id,key_hash), UNIQUE(session_id,proof_hash)\n )"
+	},
+	{
+		"type": "table",
+		"name": "passkeys",
+		"tbl_name": "passkeys",
+		"sql": "CREATE TABLE passkeys (\n\t\tid TEXT PRIMARY KEY, public_key TEXT NOT NULL, counter INTEGER NOT NULL,\n\t\ttransports TEXT NOT NULL, label TEXT NOT NULL, created_at INTEGER NOT NULL\n\t)"
+	},
+	{
+		"type": "table",
+		"name": "public_paths",
+		"tbl_name": "public_paths",
+		"sql": "CREATE TABLE public_paths (path TEXT PRIMARY KEY NOT NULL)"
+	},
+	{
+		"type": "table",
+		"name": "refresh_idempotency",
+		"tbl_name": "refresh_idempotency",
+		"sql": "CREATE TABLE refresh_idempotency (\n family TEXT NOT NULL, key_hash TEXT NOT NULL, predecessor TEXT NOT NULL, expires_at INTEGER NOT NULL,\n PRIMARY KEY(family,key_hash)\n )"
+	},
+	{
+		"type": "table",
+		"name": "refresh_receipts",
+		"tbl_name": "refresh_receipts",
+		"sql": "CREATE TABLE refresh_receipts (\n predecessor TEXT PRIMARY KEY, family TEXT NOT NULL, successor_access_id TEXT NOT NULL,\n successor_refresh_id TEXT NOT NULL, expires_at INTEGER NOT NULL,\n salt TEXT NOT NULL, nonce TEXT NOT NULL, ciphertext TEXT NOT NULL, tag TEXT NOT NULL\n )"
+	},
+	{
+		"type": "table",
+		"name": "seq",
+		"tbl_name": "seq",
+		"sql": "CREATE TABLE seq (singleton INTEGER PRIMARY KEY CHECK(singleton=1), next INTEGER NOT NULL,\n published_through INTEGER NOT NULL, pending_id TEXT, pending_attempt TEXT, pending_from INTEGER, pending_to INTEGER)"
+	},
+	{
+		"type": "table",
+		"name": "sessions",
+		"tbl_name": "sessions",
+		"sql": "CREATE TABLE sessions (\n\t\tid TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL\n\t, last_seen_at INTEGER)"
+	},
+	{
+		"type": "table",
+		"name": "settings",
+		"tbl_name": "settings",
+		"sql": "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+	},
+	{
+		"type": "table",
+		"name": "source_batches",
+		"tbl_name": "source_batches",
+		"sql": "CREATE TABLE source_batches (id TEXT PRIMARY KEY, lock_id TEXT, agent TEXT NOT NULL, at INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('publishing','published')))"
+	},
+	{
+		"type": "table",
+		"name": "source_changes",
+		"tbl_name": "source_changes",
+		"sql": "CREATE TABLE source_changes (batch TEXT NOT NULL REFERENCES source_batches(id), path TEXT NOT NULL, before BLOB, before_sha TEXT, before_mode INTEGER, desired BLOB, desired_sha TEXT, desired_mode INTEGER, before_directory INTEGER NOT NULL DEFAULT 0 CHECK(before_directory IN (0,1)), desired_directory INTEGER NOT NULL DEFAULT 0 CHECK(desired_directory IN (0,1)), PRIMARY KEY(batch,path), CHECK((before IS NULL) = (before_sha IS NULL)), CHECK((before IS NULL) = (before_mode IS NULL)), CHECK((desired IS NULL) = (desired_sha IS NULL)), CHECK((desired IS NULL) = (desired_mode IS NULL)))"
+	},
+	{
+		"type": "table",
+		"name": "sqlite_sequence",
+		"tbl_name": "sqlite_sequence",
+		"sql": "CREATE TABLE sqlite_sequence(name,seq)"
+	},
+	{
+		"type": "table",
+		"name": "staging",
+		"tbl_name": "staging",
+		"sql": "CREATE TABLE staging (\n\t\t\tlock_id TEXT NOT NULL, path TEXT NOT NULL, content BLOB, sha TEXT, at INTEGER NOT NULL, mode INTEGER,\n\t\t\tPRIMARY KEY(lock_id, path), CHECK((content IS NULL) = (sha IS NULL))\n\t\t)"
+	},
+	{
+		"type": "table",
+		"name": "tokens",
+		"tbl_name": "tokens",
+		"sql": "CREATE TABLE tokens (\n id TEXT PRIMARY KEY, pair_id TEXT NOT NULL, family TEXT NOT NULL, agent TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('access','refresh')),\n hash TEXT NOT NULL UNIQUE, label TEXT NOT NULL, scopes TEXT NOT NULL, expires_at INTEGER NOT NULL,\n created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER, rotated_to TEXT, rotated_at INTEGER\n )"
+	},
+	{
+		"type": "table",
+		"name": "versions",
+		"tbl_name": "versions",
+		"sql": "CREATE TABLE versions (id INTEGER PRIMARY KEY AUTOINCREMENT, batch TEXT NOT NULL REFERENCES source_batches(id), path TEXT NOT NULL, agent TEXT NOT NULL, at INTEGER NOT NULL, content BLOB, sha TEXT, mode INTEGER, previous_content BLOB, previous_sha TEXT, previous_mode INTEGER, versioned INTEGER NOT NULL CHECK(versioned IN (0,1)), reason TEXT CHECK(reason = 'size_limit'), previous_directory INTEGER NOT NULL DEFAULT 0 CHECK(previous_directory IN (0,1)), directory INTEGER NOT NULL DEFAULT 0 CHECK(directory IN (0,1)), UNIQUE(batch,path))"
+	}
+]
