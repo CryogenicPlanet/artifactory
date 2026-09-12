@@ -34,7 +34,7 @@ it.for(["legacy", "legacy-ledger"])(
 	},
 );
 
-it.for(["empty", "gap", "name", "mirror", "newer-ledger", "newer-version"])(
+it.for(["empty", "gap", "name", "newer-ledger", "newer-version"])(
 	"refuses boot %s corruption before schema or mirror changes",
 	async (mode, test) => {
 		const run = await fixture(test);
@@ -56,4 +56,9 @@ it("concurrent legacy initializers either adopt or fail cleanly, and retry prese
 	for (const attempt of attempts)
 		if (attempt.status === "fulfilled") expect(JSON.parse(attempt.value)).toEqual(retried);
 	expect(JSON.parse(await run("adopt"))).toEqual(retried);
+});
+
+it("repairs a lagging boot mirror from the validated ledger without replaying schema", async (test) => {
+	const run = await fixture(test);
+	expect(await run("mirror")).toContain("repaired derived mirror without replaying migrations");
 });
