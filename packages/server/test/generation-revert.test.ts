@@ -17,10 +17,13 @@ it("restores a retained generation's whole source and manifest through cutover w
 	await writeFile(join(seed, "bun.lock"), lockfile);
 	// Keep the frozen manifest and its required installer patch together.
 	await mkdir(join(seed, "patches"));
-	await cp(
-		join(import.meta.dirname, "../../../patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
-		join(seed, "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
-	);
+	for (const patch of [
+		"@effect%2Fsql-mysql2@4.0.0-rc.113.patch",
+		"@effect%2Fsql-pg@4.0.0-rc.113.patch",
+		"effect@4.0.0-rc.113.patch",
+	]) {
+		await cp(join(import.meta.dirname, "../../../patches", patch), join(seed, "patches", patch));
+	}
 	// Match the runtime manifest's editable workspaces, just like stage-runtime.
 	for (const workspace of ["protocol", "storage"]) {
 		await mkdir(join(seed, workspace));
@@ -299,10 +302,13 @@ it("keeps source and live writes intact when generation dependency preparation f
 	await writeFile(join(seed, "bun.lock"), lockfile);
 	// Keep the frozen manifest and its required installer patch together.
 	await mkdir(join(seed, "patches"));
-	await cp(
-		join(import.meta.dirname, "../../../patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
-		join(seed, "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
-	);
+	for (const patch of [
+		"@effect%2Fsql-mysql2@4.0.0-rc.113.patch",
+		"@effect%2Fsql-pg@4.0.0-rc.113.patch",
+		"effect@4.0.0-rc.113.patch",
+	]) {
+		await cp(join(import.meta.dirname, "../../../patches", patch), join(seed, "patches", patch));
+	}
 	// Match the runtime manifest's editable workspaces, just like stage-runtime.
 	for (const workspace of ["protocol", "storage"]) {
 		await mkdir(join(seed, workspace));

@@ -1,3 +1,4 @@
+import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Context, Effect, FileSystem, Layer, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
@@ -19,7 +20,7 @@ const settings = Schema.fromJsonString(
 /** Test-only scratch store. Remote callers supply an exclusively allocated empty database;
  * memory SQLite is deliberately outside deployment descriptor grammar. Scope owns pool and tables. */
 export const testStore = (options: {
-	readonly engine: "sqlite" | "pg" | "mysql";
+	readonly engine: "sqlite" | "pglite" | "pg" | "mysql";
 	readonly config: string | undefined;
 	readonly database: string;
 	readonly tables: readonly string[];
@@ -27,6 +28,19 @@ export const testStore = (options: {
 	Effect.gen(function* () {
 		const sql = yield* Effect.gen(function* () {
 			if (options.engine === "sqlite") return yield* SqliteClient.make({ filename: ":memory:" });
+			if (options.engine === "pglite")
+				return yield* PgliteClient.make({
+					// Match remote raw JSON and checked int8 decoding without global parser mutation.
+					parsers: {
+						114: (value) => value,
+						3802: (value) => value,
+						20: (value) => {
+							const number = Number(value);
+							if (!Number.isSafeInteger(number)) throw new Error("Test store integer out of range");
+							return number;
+						},
+					},
+				});
 			if (!options.config) return yield* Effect.fail(new Error("Missing test store configuration"));
 			const fs = yield* FileSystem.FileSystem;
 			const config = yield* fs.readFileString(options.config).pipe(Effect.flatMap(Schema.decodeEffect(settings)));

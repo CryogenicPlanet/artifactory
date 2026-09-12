@@ -18,16 +18,18 @@ Fixtures may import boot internals to test the cross-store boundary. Keep fault 
 
 One fixture runs the same dialect, transaction rollback, topic-move cursor,
 repeatable-read and publication-fenced previous-image assertions on SQLite,
-PostgreSQL and MySQL:
+PGlite, PostgreSQL and MySQL:
 
 ```sh
 node node_modules/vitest/vitest.mjs run packages/server/test/kernel/remote-dialect-semantics.test.ts --maxWorkers=1
+COMMS_TEST_ENGINE=pglite node node_modules/vitest/vitest.mjs run packages/server/test/kernel/remote-dialect-semantics.test.ts --maxWorkers=1
 COMMS_TEST_ENGINE=pg COMMS_TEST_STORE_CONFIG=/private/pg-fixture.json \
   node node_modules/vitest/vitest.mjs run packages/server/test/kernel/remote-dialect-semantics.test.ts --maxWorkers=1
 ```
 
-The default is scoped in-memory SQLite, a test facility rather than a deployment
-store descriptor. For `pg` or `mysql`, supply a protected JSON configuration with
+The default runs scoped in-memory SQLite and PGlite, both test facilities rather
+than deployment store descriptors. PGlite executes PostgreSQL syntax locally; it
+does not replace real-server concurrency, authentication or recovery tests. For `pg` or `mysql`, supply a protected JSON configuration with
 `engine`, `host`, `port`, `database`, `username` and `password`. The database must be
 an exclusively allocated, empty `comms_shared_store`; the fixture refuses existing
 tables and removes only its declared tables when its scope closes. Never point it

@@ -1,8 +1,16 @@
 diff --git a/dist/MysqlClient.js b/dist/MysqlClient.js
-index 615db12e6f4d8c81fe8533630aa84a41966091a4..3abd9850ee8f852116e284ad519076538ba913a1 100644
+index 615db12e6f4d8c81fe8533630aa84a41966091a4..b8283928d18405bf8f751c5baf9ad823db077e0a 100644
 --- a/dist/MysqlClient.js
 +++ b/dist/MysqlClient.js
-@@ -185,7 +185,7 @@ export const make = options => Effect.gen(function* () {
+@@ -13,6 +13,7 @@
+ import * as Config from "effect/Config";
+ import * as Context from "effect/Context";
+ import * as Duration from "effect/Duration";
++import * as Exit from "effect/Exit";
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+ import * as Redacted from "effect/Redacted";
+@@ -185,7 +186,7 @@ export const make = options => Effect.gen(function* () {
        return transformRows ? Stream.mapArray(stream, _ => transformRows(_)) : stream;
      }
    }
@@ -11,7 +19,7 @@ index 615db12e6f4d8c81fe8533630aa84a41966091a4..3abd9850ee8f852116e284ad51907653
      uri: Redacted.value(options.url),
      multipleStatements: true,
      supportBigNumbers: true,
-@@ -202,8 +202,8 @@ export const make = options => Effect.gen(function* () {
+@@ -202,8 +203,8 @@ export const make = options => Effect.gen(function* () {
      supportBigNumbers: true,
      connectionLimit: options.maxConnections ?? options.poolConfig?.connectionLimit,
      idleTimeout: options.connectionTTL ? Duration.toMillis(Duration.fromInputUnsafe(options.connectionTTL)) : options.poolConfig?.idleTimeout
@@ -22,7 +30,7 @@ index 615db12e6f4d8c81fe8533630aa84a41966091a4..3abd9850ee8f852116e284ad51907653
      ;
      pool.query("SELECT 1", cause => {
        if (cause) {
-@@ -214,9 +214,7 @@ export const make = options => Effect.gen(function* () {
+@@ -214,9 +215,7 @@ export const make = options => Effect.gen(function* () {
          resume(Effect.void);
        }
      });
@@ -33,11 +41,28 @@ index 615db12e6f4d8c81fe8533630aa84a41966091a4..3abd9850ee8f852116e284ad51907653
      duration: Duration.seconds(5),
      orElse: () => Effect.fail(new SqlError({
        reason: new ConnectionError({
+@@ -237,7 +236,7 @@ export const make = options => Effect.gen(function* () {
+         resume(Effect.succeed(conn));
+       }
+     });
+-  }), conn => Effect.sync(() => conn.release()));
++  }), (conn, exit) => Effect.sync(() => Exit.isFailure(exit) ? conn.destroy() : conn.release()));
+   const transactionAcquirer = Effect.map(acquireConn, conn => new ConnectionImpl(conn));
+   const spanAttributes = [...(options.spanAttributes ? Object.entries(options.spanAttributes) : []), [ATTR_DB_SYSTEM_NAME, "mysql"], [ATTR_SERVER_ADDRESS, options.host ?? "localhost"], [ATTR_SERVER_PORT, options.port ?? 3306]];
+   if (options.database) {
 diff --git a/src/MysqlClient.ts b/src/MysqlClient.ts
-index afd682f66c79a6af41a573377791108147a9139b..cdfcfb7c714789a19b807468afc2f1bdf308a3ef 100644
+index afd682f66c79a6af41a573377791108147a9139b..e464c69f663bc9b840bb6867703dec9091188dbd 100644
 --- a/src/MysqlClient.ts
 +++ b/src/MysqlClient.ts
-@@ -306,7 +306,8 @@ export const make = (
+@@ -13,6 +13,7 @@
+ import * as Config from "effect/Config"
+ import * as Context from "effect/Context"
+ import * as Duration from "effect/Duration"
++import * as Exit from "effect/Exit"
+ import * as Effect from "effect/Effect"
+ import * as Layer from "effect/Layer"
+ import * as Redacted from "effect/Redacted"
+@@ -306,7 +307,8 @@ export const make = (
        }
      }
  
@@ -47,7 +72,7 @@ index afd682f66c79a6af41a573377791108147a9139b..cdfcfb7c714789a19b807468afc2f1bd
        ? Mysql.createPool({
          uri: Redacted.value(options.url),
          multipleStatements: true,
-@@ -331,10 +332,11 @@ export const make = (
+@@ -331,10 +333,11 @@ export const make = (
          idleTimeout: options.connectionTTL
            ? Duration.toMillis(Duration.fromInputUnsafe(options.connectionTTL))
            : options.poolConfig?.idleTimeout
@@ -62,7 +87,7 @@ index afd682f66c79a6af41a573377791108147a9139b..cdfcfb7c714789a19b807468afc2f1bd
          ;(pool as any).query("SELECT 1", (cause: Error) => {
            if (cause) {
              resume(Effect.fail(
-@@ -346,12 +348,7 @@ export const make = (
+@@ -346,12 +349,7 @@ export const make = (
              resume(Effect.void)
            }
          })
@@ -76,3 +101,10 @@ index afd682f66c79a6af41a573377791108147a9139b..cdfcfb7c714789a19b807468afc2f1bd
        Effect.timeoutOrElse({
          duration: Duration.seconds(5),
          orElse: () =>
+@@ -385,5 +383,5 @@ export const make = (
+           }
+         })
+       }),
+-      (conn) => Effect.sync(() => conn.release())
++      (conn, exit) => Effect.sync(() => Exit.isFailure(exit) ? conn.destroy() : conn.release())
+     )
