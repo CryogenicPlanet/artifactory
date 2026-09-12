@@ -162,17 +162,17 @@ export const makeRemoteAppInitializer = (options: {
 							throw new Error("Expected a remote app client");
 						},
 						pg: () =>
-							app`SELECT c.relname AS name,n.nspname AS namespace FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp_%' AND c.relkind IN ('r','p','v','m','f')`,
+							app`SELECT c.relname AS name,n.nspname AS namespace,CASE WHEN pg_get_userbyid(c.relowner)=current_user THEN 1 ELSE 0 END AS owned FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND NOT starts_with(n.nspname::text,'pg_toast') AND NOT starts_with(n.nspname::text,'pg_temp_') AND c.relkind IN ('r','p','v','m','f')`,
 						mysql: () =>
-							app`SELECT TABLE_NAME AS name,'public' AS namespace FROM information_schema.tables WHERE TABLE_SCHEMA=DATABASE()`,
-					}).pipe(decodeRows(Schema.Struct({ name: Schema.String, namespace: Schema.String })));
+							app`SELECT TABLE_NAME AS name,'public' AS namespace,1 AS owned FROM information_schema.tables WHERE TABLE_SCHEMA=DATABASE()`,
+					}).pipe(decodeRows(Schema.Struct({ name: Schema.String, namespace: Schema.String, owned: Schema.Int })));
 					const owned = progress
 						? names
 								.slice(0, progress.next + (progress.active === null ? 0 : 1))
 								.filter((name) => name.startsWith("table:"))
 								.map((name) => name.slice(6))
 						: [];
-					if (catalog.some((table) => table.namespace !== "public" || !owned.includes(table.name)))
+					if (catalog.some((table) => table.namespace !== "public" || table.owned !== 1 || !owned.includes(table.name)))
 						return yield* invalid();
 					if (!progress) {
 						const initial: Progress = { ...adoption, principal, operations: names, next: 0, active: null };
