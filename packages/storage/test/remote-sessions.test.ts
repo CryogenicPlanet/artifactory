@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
-for (const mode of ["leases", "reject", "pending", "stream", "restart", "prepared", "missing", "isolation"])
+for (const mode of ["leases", "reject", "pending", "stream", "isolation", "restart", "prepared", "missing"])
 	it.skipIf(
 		!process.env.COMMS_REMOTE_TEST_CONFIG ||
 			(mode === "prepared" && process.env.COMMS_REMOTE_TEST_ENGINE !== "pg") ||
