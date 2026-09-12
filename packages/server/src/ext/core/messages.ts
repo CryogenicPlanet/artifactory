@@ -1,3 +1,4 @@
+import { mysqlSearchConfig, type MysqlSearchConfig } from "./mysql-search-config.ts";
 import { postgresSearchMode } from "./core-search-schema.ts";
 import { searchMessages } from "./search.ts";
 import { isDescendant, jsonArrayHas, nullable, on } from "@comms/storage/dialect";
@@ -33,6 +34,7 @@ export const makeMessages = (
 	publication: Pick<Publication["Service"], "mutate" | "read">,
 	boot: Pick<BootChannel["Service"], "generation">,
 	crypto: Crypto.Crypto,
+	mysql: MysqlSearchConfig | null = null,
 ) => {
 	const { mutate, read } = publication;
 	const create = (identity: Identity, input: typeof MessageInput.Type, key?: string) =>
@@ -179,7 +181,8 @@ export const makeMessages = (
 								mysql: () => Effect.succeed(false),
 								pg: () => postgresSearchMode(sql).pipe(Effect.map((mode) => mode === "folded")),
 							});
-				const bodyMatch = input.q === undefined ? sql`1=1` : yield* searchMessages(sql, input.q, ceiling, folding);
+				const bodyMatch =
+					input.q === undefined ? sql`1=1` : yield* searchMessages(sql, input.q, ceiling, folding, mysql);
 				const items =
 					yield* sql`WITH visible_messages AS (${publishedMessages(sql, ceiling)}) SELECT * FROM visible_messages WHERE deleted_at IS NULL AND seq>${since} AND seq<=${ceiling}
    AND ((${input.topic === undefined && targets.length === 0 ? 1 : 0}=1) OR ${topicMatch} OR ${mentionMatch})
@@ -231,7 +234,7 @@ const make = Effect.gen(function* () {
 	const boot = yield* BootChannel;
 	const crypto = yield* Crypto.Crypto;
 	const publication = yield* Publication;
-	return { ...publication, ...makeMessages(sql, publication, boot, crypto) };
+	return { ...publication, ...makeMessages(sql, publication, boot, crypto, yield* mysqlSearchConfig(sql)) };
 });
 export class Messages extends Context.Service<Messages, Effect.Success<typeof make>>()("comms/server/Messages") {}
 export const layer = Layer.effect(Messages, make);
