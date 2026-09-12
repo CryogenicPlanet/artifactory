@@ -1,5 +1,5 @@
 import { bootRoute, checkBootOrigin } from "./boot-route.ts";
-import { isAppStoreIdentityError, appIdentityPolicy } from "./app-store-identity.ts";
+import { isAppStoreIdentityError, appIdentityPolicy, transferPolicy } from "./app-store-identity.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
 import { PlatformError } from "effect/PlatformError";
 import { isSqlError } from "effect/unstable/sql/SqlError";
@@ -68,7 +68,11 @@ export const backupRoute = (
 											error: {
 												code: error.success.code,
 												message: "App store identity could not be verified.",
-												hint: appIdentityPolicy.hint,
+												hint:
+													error.success.code === "store_transferred" ||
+													error.success.code === "store_transfer_incomplete"
+														? transferPolicy[error.success.code].hint
+														: appIdentityPolicy.hint,
 												retriable: false,
 											},
 										},
