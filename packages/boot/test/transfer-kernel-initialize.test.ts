@@ -22,6 +22,7 @@ for (const engine of ["sqlite", "pg", "mysql"] as const) {
 			const invalid = await run("invalid-epoch");
 			expect(invalid).toMatchObject({ ok: false, tables: [] });
 			expect(invalid.progress).toBeUndefined();
+			expect(await run("newline-epoch")).toMatchObject({ ok: false, tables: [] });
 			expect(await run("foreign")).toMatchObject({ ok: false, tables: ["intruder"] });
 			await run("reset");
 			const boot = join(local, "packages/boot");

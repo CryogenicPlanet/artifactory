@@ -19,6 +19,8 @@ export const replayAppKernel = <E>(options: {
 	readonly databaseName: string;
 	readonly bootDatabase: string;
 	readonly progress: KernelProgress | undefined;
+	/** Transfer-only adoption of its precreated sentinel; ordinary startup never supplies this proof. */
+	readonly adoptIdentity?: Effect.Effect<void, E>;
 	readonly initialize: Effect.Effect<KernelProgress, E>;
 	readonly checkpoint: (index: number, prior: string | null, active: string | null) => Effect.Effect<KernelProgress, E>;
 	readonly validate: Effect.Effect<void, E>;
@@ -29,6 +31,7 @@ export const replayAppKernel = <E>(options: {
 		const operations = remoteAppKernelOperations(app, principal);
 		const names = operations.map((operation) => operation.name);
 		yield* options.validate;
+		if (options.adoptIdentity) yield* options.adoptIdentity;
 		const database = yield* on(app, {
 			sqlite: () => {
 				throw new Error("Expected a remote app client");
@@ -83,6 +86,7 @@ export const replayAppKernel = <E>(options: {
 					.filter((name) => name.startsWith("table:"))
 					.map((name) => name.slice(6))
 			: [];
+		if (options.adoptIdentity) owned.push("store_identity");
 		if (catalog.some((table) => table.namespace !== "public" || table.owned !== 1 || !owned.includes(table.name)))
 			return yield* invalid();
 		if (!progress) progress = yield* options.initialize;
@@ -97,7 +101,12 @@ export const replayAppKernel = <E>(options: {
 			if (!operation) return yield* invalid();
 			const complete = yield* operation.postcondition;
 			if (progress.active === null) {
-				if (complete && !operation.name.startsWith("grant:")) return yield* invalid();
+				if (
+					complete &&
+					!operation.name.startsWith("grant:") &&
+					!(options.adoptIdentity && operation.name === "table:store_identity")
+				)
+					return yield* invalid();
 				progress = yield* checkpoint(index, null, operation.name);
 			}
 			const apply = Effect.gen(function* () {

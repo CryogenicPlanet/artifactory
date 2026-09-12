@@ -7,6 +7,7 @@ import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
 import { type RemoteConnection } from "@comms/storage/remote-session";
 import { parseDescriptor, type Store } from "@comms/storage/store";
 import { selectionText, type TransferSelection } from "@comms/storage/store-transfer-schema";
+import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { makeTransferKernelInitializer } from "../../src/transfer-kernel-initialize.ts";
 
 const Settings = Schema.Struct({
@@ -76,10 +77,7 @@ const main = Effect.gen(function* () {
 		};
 	});
 	const { app, boot, appStore, bootStore } = selected;
-	const quote = engine === "mysql" ? "`key`" : "key";
-	yield* boot.unsafe(`CREATE TABLE IF NOT EXISTS settings(${quote} VARCHAR(255) PRIMARY KEY,value TEXT NOT NULL)`);
-	yield* boot`CREATE TABLE IF NOT EXISTS seq(singleton INTEGER PRIMARY KEY)`;
-	if ((yield* boot`SELECT singleton FROM seq`).length === 0) yield* boot`INSERT INTO seq VALUES(1)`;
+	yield* initializeBootSchema.pipe(Effect.provideService(SqlClient.SqlClient, boot));
 	const store_id = "11111111-1111-4111-8111-111111111111";
 	const selection: TransferSelection = {
 		version: 1,
@@ -127,9 +125,11 @@ const main = Effect.gen(function* () {
 	const selectedSeed =
 		mode === "wrong-epoch"
 			? { ...seed, epoch: "b".repeat(64) }
-			: mode === "invalid-epoch"
-				? { ...seed, epoch: "not-a-writer-epoch" }
-				: seed;
+			: mode === "newline-epoch"
+				? { ...seed, epoch: seed.epoch + "\n" }
+				: mode === "invalid-epoch"
+					? { ...seed, epoch: "not-a-writer-epoch" }
+					: seed;
 	const selectedBinding =
 		mode === "wrong-selection" ? { ...selection, transfer_id: "33333333-3333-4333-8333-333333333333" } : selection;
 	if (mode === "wrong-opened-app") {
