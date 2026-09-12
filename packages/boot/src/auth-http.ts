@@ -136,6 +136,18 @@ export const authErrorResponse = (
 		{ status, headers: { "cache-control": "no-store" } },
 	);
 
+/** Browser navigations belong on the login page, not on a JSON refusal. API clients keep the JSON 401. */
+const pageNavigation = (request: HttpServerRequest.HttpServerRequest) =>
+	(request.method === "GET" || request.method === "HEAD") && (request.headers.accept ?? "").includes("text/html");
+
+const loginRedirect = (request: HttpServerRequest.HttpServerRequest) => {
+	const target = request.url.startsWith("/") && !request.url.startsWith("//") ? request.url : "/";
+	return HttpServerResponse.empty({
+		status: 302,
+		headers: { location: `/auth/login?next=${encodeURIComponent(target)}`, "cache-control": "no-store" },
+	});
+};
+
 export const authFailure = <E, R>(effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>) =>
 	effect.pipe(
 		Effect.catchCause((cause) => {
@@ -166,11 +178,20 @@ export const authFailure = <E, R>(effect: Effect.Effect<HttpServerResponse.HttpS
 				(reason) =>
 					reason._tag === "Fail" && (Schema.is(AuthError)(reason.error) || Schema.is(ChildError)(reason.error)),
 			);
-			return Effect.succeed(
-				refusal?._tag === "Fail" && (Schema.is(AuthError)(refusal.error) || Schema.is(ChildError)(refusal.error))
+			return Effect.gen(function* () {
+				const request = Option.getOrUndefined(yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest));
+				if (
+					request &&
+					refusal?._tag === "Fail" &&
+					Schema.is(AuthError)(refusal.error) &&
+					policy[refusal.error.code].status === 401 &&
+					pageNavigation(request)
+				)
+					return loginRedirect(request);
+				return refusal?._tag === "Fail" && (Schema.is(AuthError)(refusal.error) || Schema.is(ChildError)(refusal.error))
 					? authErrorResponse(refusal.error.code)
-					: authErrorResponse("boot_unavailable"),
-			);
+					: authErrorResponse("boot_unavailable");
+			});
 		}),
 	);
 
@@ -275,7 +296,18 @@ export const authRoute = (auth: Auth["Service"], config: AuthConfig, requestId: 
 		return yield* authFailure(
 			Effect.gen(function* () {
 				if (page) {
-					if (path === "/setup" && !(yield* auth.setupOpen))
+					const setupOpen = yield* auth.setupOpen;
+					if (path === "/auth/login" && setupOpen) {
+						const next = url.searchParams.get("next");
+						return HttpServerResponse.empty({
+							status: 302,
+							headers: {
+								location: `/setup${next === null ? "" : `?next=${encodeURIComponent(next)}`}`,
+								"cache-control": "no-store",
+							},
+						});
+					}
+					if (path === "/setup" && !setupOpen)
 						return HttpServerResponse.empty({ status: 404, headers: { "cache-control": "no-store" } });
 					return HttpServerResponse.text(authPage(path === "/setup"), {
 						contentType: "text/html",

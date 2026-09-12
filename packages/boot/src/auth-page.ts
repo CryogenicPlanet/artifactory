@@ -18,6 +18,8 @@ export const authClient = `(() => {
  const decode = value => Uint8Array.from(atob(value.replace(/-/g,"+").replace(/_/g,"/")), c => c.charCodeAt(0));
  const encode = value => btoa(String.fromCharCode(...new Uint8Array(value))).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");
  let stage = "browser", requestId = "", errorCode = "";
+ const rawNext = new URLSearchParams(window.location.search).get("next");
+ const next = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
  const progress = (value, message) => { stage = value; status.textContent = message; };
  const post = async (path, body, step) => {
   requestId = ""; errorCode = "";
@@ -78,7 +80,7 @@ export const authClient = `(() => {
    if (!credential) throw new Error("No passkey was returned. Try again.");
    progress("credential encode", "Preparing passkey verification…");
    await post(path + "/verify", {id:started.id, response:serialize(credential)}, "verify");
-   window.location.assign(setup ? "/auth/login" : "/");
+   window.location.assign(setup ? "/auth/login" + (next === "/" ? "" : "?next=" + encodeURIComponent(next)) : next);
   } catch (error) {
    const names = ["NotAllowedError", "SecurityError", "InvalidStateError", "NotSupportedError", "AbortError", "TypeError", "UnknownError", "Error", "InvalidCharacterError"];
    const name = names.includes(error?.name) ? error.name : "Error";

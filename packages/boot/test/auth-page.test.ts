@@ -61,6 +61,7 @@ it.each([
 		},
 		navigator: { credentials: { create: authenticate, get: authenticate } },
 		AuthenticatorAttestationResponse: Attestation,
+		URLSearchParams,
 		atob,
 		btoa,
 		Uint8Array,
@@ -89,4 +90,69 @@ it.each([
 		expect(progress[0]).toContain("Waiting for your browser");
 		expect(status.textContent).toContain("not visible to the server");
 	}
+});
+
+it("returns to the requested page after sign-in and refuses external targets", async () => {
+	const run = async (search: string) => {
+		const status = { textContent: "" },
+			button = { disabled: false };
+		let submit: (() => Promise<void>) | undefined;
+		let assigned = "";
+		class Assertion {
+			clientDataJSON = new Uint8Array([1]).buffer;
+			authenticatorData = new Uint8Array([2]).buffer;
+			signature = new Uint8Array([3]).buffer;
+		}
+		const credential = {
+			id: "credential",
+			rawId: new Uint8Array([4]).buffer,
+			type: "public-key",
+			getClientExtensionResults: () => ({}),
+			response: new Assertion(),
+		};
+		runInNewContext(authClient, {
+			document: {
+				getElementById: (id: string) =>
+					id === "status"
+						? status
+						: {
+								dataset: { mode: "login" },
+								querySelector: () => button,
+								addEventListener: (
+									_name: string,
+									callback: (event: { preventDefault: () => void }) => Promise<void>,
+								) => {
+									submit = () => callback({ preventDefault: () => {} });
+								},
+							},
+			},
+			window: {
+				isSecureContext: true,
+				location: {
+					search,
+					assign: (value: string) => {
+						assigned = value;
+					},
+				},
+			},
+			navigator: { credentials: { get: async () => credential } },
+			AuthenticatorAttestationResponse: class {},
+			URLSearchParams,
+			atob,
+			btoa,
+			Uint8Array,
+			fetch: async () =>
+				Response.json(
+					{ id: "challenge", options: { challenge: "YWJj" } },
+					{ headers: { "x-comms-request-id": "1234567890abcdef1234567890abcdef" } },
+				),
+		});
+		if (!submit) throw new Error("Missing submit handler");
+		await submit();
+		return assigned;
+	};
+	expect(await run("?next=/t/design")).toBe("/t/design");
+	expect(await run("?next=https://evil.example")).toBe("/");
+	expect(await run("?next=//evil.example")).toBe("/");
+	expect(await run("")).toBe("/");
 });

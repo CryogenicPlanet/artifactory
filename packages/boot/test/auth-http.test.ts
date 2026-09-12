@@ -178,6 +178,29 @@ it("creates a passkey and a protected session, forwards verified identity, and l
 	expect((await fetch(`${app.url}/_boot/status`, { headers })).status).toBe(401);
 });
 
+it("redirects unauthenticated page navigations to login and forwards to open setup", async (test) => {
+	const app = await launch(test);
+	const board = await fetch(`${app.url}/t/design?x=1`, {
+		headers: { accept: "text/html,application/xhtml+xml" },
+		redirect: "manual",
+	});
+	expect(board.status).toBe(302);
+	expect(board.headers.get("location")).toBe(`/auth/login?next=${encodeURIComponent("/t/design?x=1")}`);
+	expect(board.headers.get("cache-control")).toBe("no-store");
+	const loginPage = await fetch(`${app.url}/auth/login?next=%2Ft%2Fdesign`, { redirect: "manual" });
+	expect(loginPage.status).toBe(302);
+	expect(loginPage.headers.get("location")).toBe("/setup?next=%2Ft%2Fdesign");
+	const api = await fetch(`${app.url}/t/design`, { headers: { accept: "application/json" } });
+	expect(api.status).toBe(401);
+	expect((await api.json()).error.code).toBe("session_invalid");
+	await app.setup();
+	const loginAfter = await fetch(`${app.url}/auth/login`, { redirect: "manual" });
+	expect(loginAfter.status).toBe(200);
+	const stillRedirects = await fetch(`${app.url}/`, { headers: { accept: "text/html" }, redirect: "manual" });
+	expect(stillRedirects.status).toBe(302);
+	expect(stillRedirects.headers.get("location")).toBe("/auth/login?next=%2F");
+});
+
 it("rejects cross-origin, malformed, oversized, replayed and explicit invalid credentials", async (test) => {
 	const app = await launch(test);
 	const code = app.code();
