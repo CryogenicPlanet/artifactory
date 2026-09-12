@@ -128,6 +128,7 @@ export const sqliteTransferInventory = (
 			}
 			result.push({
 				name: table.name,
+				definition: objects.find((object) => object.type === "table" && object.name === table.name)?.sql ?? "",
 				columns: described,
 				primaryKey: keys.map((column) => column.name),
 				foreignKeys: [],

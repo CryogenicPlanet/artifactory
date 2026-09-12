@@ -19,6 +19,8 @@ export interface TransferForeignKey {
 	readonly targets: ReadonlyArray<string>;
 }
 export interface TransferTable {
+	/** Original SQLite CREATE TABLE text for trusted generated-expression validation. */
+	readonly definition?: string;
 	readonly name: string;
 	readonly columns: ReadonlyArray<TransferColumn>;
 	readonly primaryKey: ReadonlyArray<string>;

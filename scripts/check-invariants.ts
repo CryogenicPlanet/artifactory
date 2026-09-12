@@ -23,6 +23,9 @@ function checkInvariants() {
 	function inspect(path: string, collectTables = false) {
 		const source = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
 		const owner = workspace(path);
+		const transferMetadata =
+			relative(root, path) === `packages${sep}server${sep}src${sep}transfer${sep}derived-schema.ts`;
+
 		function checkImport(specifier: string) {
 			const label = relative(root, path);
 			if (specifier.startsWith(".")) {
@@ -54,6 +57,18 @@ function checkInvariants() {
 		}
 		// Static ownership guard: interpolation remains opaque; this is not a SQL validator.
 		function checkDomainSql(node: ts.Node, text: string) {
+			// This exported constant compares catalog text; it never creates an app table.
+			// Only its direct literal initializer is exempt, and any local reference fails below.
+			if (
+				collectTables &&
+				transferMetadata &&
+				ts.isVariableDeclaration(node.parent) &&
+				ts.isIdentifier(node.parent.name) &&
+				node.parent.name.text === "sqliteEventsDefinition" &&
+				node.parent.initializer === node &&
+				ts.isStringLiteral(node)
+			)
+				return;
 			if (!collectTables && !relative(root, path).startsWith(`packages${sep}boot${sep}src${sep}`)) return;
 			const tokens =
 				text.match(
@@ -107,6 +122,20 @@ function checkInvariants() {
 			}
 		}
 		function visit(node: ts.Node) {
+			if (
+				collectTables &&
+				transferMetadata &&
+				ts.isIdentifier(node) &&
+				node.text === "sqliteEventsDefinition" &&
+				!(
+					ts.isVariableDeclaration(node.parent) &&
+					node.parent.name === node &&
+					node.parent.initializer &&
+					ts.isStringLiteral(node.parent.initializer)
+				)
+			)
+				failures.push(`${relative(root, path)}: trusted transfer DDL must remain an unreferenced literal definition`);
+
 			if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) checkDomainSql(node, node.text);
 			if (ts.isTemplateExpression(node))
 				checkDomainSql(
