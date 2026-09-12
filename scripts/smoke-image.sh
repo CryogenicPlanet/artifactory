@@ -35,6 +35,8 @@ docker exec --user 1000:1003 "$container" sh -ec '
 	test -f /data/boot.db && test -f /data/store/comms.db
 	test -f /data/app/server.ts && test -f /data/pages/init.md
 	test -f /opt/comms/packages/boot/dist/child-keeper.js
+	test -f /opt/comms/packages/boot/dist/sqlite-copy-worker.js
+	test -f /opt/comms/packages/boot/dist/sqlite-copy-keeper.js
 	test -f /opt/comms/packages/boot/dist/preparation-keeper.js
 	test -f /data/app/package.json && test -f /data/app/bun.lock
 	test -f /data/app/ui/index.html
