@@ -1,4 +1,4 @@
-import { tableShape } from "@comms/storage/remote-migrations";
+import { bootTableShape } from "./remote-boot-schema-shape.ts";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 
 /** Explicit fresh remote schema; existing SQLite histories use boot-schema.ts. */
@@ -11,10 +11,11 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 			run: sql.unsafe(
 				engine === "pg"
 					? 'CREATE TABLE "edit_lock" (\n"singleton" bigint NOT NULL CHECK ("singleton"=1),\n"id" text NOT NULL,\n"holder_family" text NOT NULL,\n"agent" text NOT NULL,\n"since" bigint NOT NULL,\n"expires" bigint NOT NULL,\n"ttl_seconds" bigint NOT NULL CHECK ("ttl_seconds" BETWEEN 1 AND 3600),\n"note" text NOT NULL,\n"cutover_in_flight" bigint NOT NULL DEFAULT 0 CHECK ("cutover_in_flight" IN (0,1)),\n"pending_release" text CHECK ("pending_release" IN (\'broken\',\'revoked\')),\n"reset_pin" bigint NOT NULL DEFAULT 0 CHECK ("reset_pin" IN (0,1,2)),\nPRIMARY KEY ("singleton")\n)'
-					: "CREATE TABLE `edit_lock` (\n`singleton` bigint NOT NULL CHECK (`singleton`=1),\n`id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`holder_family` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`agent` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`since` bigint NOT NULL,\n`expires` bigint NOT NULL,\n`ttl_seconds` bigint NOT NULL CHECK (`ttl_seconds` BETWEEN 1 AND 3600),\n`note` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`cutover_in_flight` bigint NOT NULL DEFAULT 0 CHECK (`cutover_in_flight` IN (0,1)),\n`pending_release` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin CHECK (`pending_release` IN ('broken','revoked')),\n`reset_pin` bigint NOT NULL DEFAULT 0 CHECK (`reset_pin` IN (0,1,2)),\nPRIMARY KEY (`singleton`)\n)",
+					: "CREATE TABLE `edit_lock` (\n`singleton` bigint NOT NULL CHECK (`singleton`=1),\n`id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`holder_family` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`agent` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`since` bigint NOT NULL,\n`expires` bigint NOT NULL,\n`ttl_seconds` bigint NOT NULL CHECK (`ttl_seconds` BETWEEN 1 AND 3600),\n`note` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`cutover_in_flight` bigint NOT NULL DEFAULT 0 CHECK (`cutover_in_flight` IN (0,1)),\n`pending_release` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin CHECK (`pending_release` IN ('broken','revoked')),\n`reset_pin` bigint NOT NULL DEFAULT 0 CHECK (`reset_pin` IN (0,1,2)),\nPRIMARY KEY (`singleton`)\n) ENGINE=InnoDB",
 			),
-			postcondition: tableShape(
+			postcondition: bootTableShape(
 				sql,
+				engine,
 				"edit_lock",
 				engine === "pg"
 					? [
@@ -26,9 +27,9 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 							{ name: "expires", type: "bigint", nullable: false },
 							{ name: "ttl_seconds", type: "bigint", nullable: false },
 							{ name: "note", type: "text", nullable: false },
-							{ name: "cutover_in_flight", type: "bigint", nullable: false },
+							{ name: "cutover_in_flight", type: "bigint", nullable: false, default: "0" },
 							{ name: "pending_release", type: "text", nullable: true },
-							{ name: "reset_pin", type: "bigint", nullable: false },
+							{ name: "reset_pin", type: "bigint", nullable: false, default: "0" },
 						]
 					: [
 							{ name: "singleton", type: "bigint", nullable: false },
@@ -39,11 +40,30 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 							{ name: "expires", type: "bigint", nullable: false },
 							{ name: "ttl_seconds", type: "bigint", nullable: false },
 							{ name: "note", type: "longtext", nullable: false },
-							{ name: "cutover_in_flight", type: "bigint", nullable: false },
+							{ name: "cutover_in_flight", type: "bigint", nullable: false, default: "0" },
 							{ name: "pending_release", type: "varchar", nullable: true, length: 16 },
-							{ name: "reset_pin", type: "bigint", nullable: false },
+							{ name: "reset_pin", type: "bigint", nullable: false, default: "0" },
 						],
 				["singleton"],
+				{
+					foreignKeys: [],
+					checks:
+						engine === "pg"
+							? [
+									"(cutover_in_flight = ANY (ARRAY[(0)::bigint, (1)::bigint]))",
+									"(pending_release = ANY (ARRAY['broken'::text, 'revoked'::text]))",
+									"(reset_pin = ANY (ARRAY[(0)::bigint, (1)::bigint, (2)::bigint]))",
+									"(singleton = 1)",
+									"((ttl_seconds >= 1) AND (ttl_seconds <= 3600))",
+								]
+							: [
+									"(`singleton` = 1)",
+									"(`ttl_seconds` between 1 and 3600)",
+									"(`cutover_in_flight` in (0,1))",
+									"(`pending_release` in (_utf8mb4\\'broken\\',_utf8mb4\\'revoked\\'))",
+									"(`reset_pin` in (0,1,2))",
+								],
+				},
 			),
 		},
 		{
@@ -53,10 +73,11 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 			run: sql.unsafe(
 				engine === "pg"
 					? 'CREATE TABLE "staging" (\n"row_id" bigint GENERATED BY DEFAULT AS IDENTITY NOT NULL,\n"lock_id" text NOT NULL,\n"path" text NOT NULL,\n"content" bytea,\n"sha" text,\n"at" bigint NOT NULL,\n"mode" bigint,\n"path_hash" text GENERATED ALWAYS AS (encode(sha256(decode(replace("path",chr(92),chr(92)||chr(92)),\'escape\')),\'hex\')) STORED,\nPRIMARY KEY ("row_id"),\nCHECK (("content" IS NULL)=("sha" IS NULL))\n)'
-					: "CREATE TABLE `staging` (\n`row_id` bigint AUTO_INCREMENT NOT NULL,\n`lock_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`path` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`content` longblob,\n`sha` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`at` bigint NOT NULL,\n`mode` bigint,\n`path_hash` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin GENERATED ALWAYS AS (SHA2(`path`,256)) STORED,\nPRIMARY KEY (`row_id`),\nCHECK ((`content` IS NULL)=(`sha` IS NULL))\n)",
+					: "CREATE TABLE `staging` (\n`row_id` bigint AUTO_INCREMENT NOT NULL,\n`lock_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`path` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`content` longblob,\n`sha` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`at` bigint NOT NULL,\n`mode` bigint,\n`path_hash` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin GENERATED ALWAYS AS (SHA2(`path`,256)) STORED,\nPRIMARY KEY (`row_id`),\nCHECK ((`content` IS NULL)=(`sha` IS NULL))\n) ENGINE=InnoDB",
 			),
-			postcondition: tableShape(
+			postcondition: bootTableShape(
 				sql,
+				engine,
 				"staging",
 				engine === "pg"
 					? [
@@ -71,7 +92,8 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 								name: "path_hash",
 								type: "text",
 								nullable: true,
-								expression: "encode(sha256(decode(replace(\"path\",chr(92),chr(92)||chr(92)),'escape')),'hex')",
+								expression:
+									"encode(sha256(decode(replace(path, chr(92), (chr(92) || chr(92))), 'escape'::text)), 'hex'::text)",
 							},
 						]
 					: [
@@ -82,9 +104,14 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 							{ name: "sha", type: "varchar", nullable: true, length: 64 },
 							{ name: "at", type: "bigint", nullable: false },
 							{ name: "mode", type: "bigint", nullable: true },
-							{ name: "path_hash", type: "varchar", nullable: true, length: 64, expression: "SHA2(`path`,256)" },
+							{ name: "path_hash", type: "varchar", nullable: true, length: 64, expression: "sha2(`path`,256)" },
 						],
 				["row_id"],
+				{
+					foreignKeys: [],
+					checks:
+						engine === "pg" ? ["((content IS NULL) = (sha IS NULL))"] : ["((`content` is null) = (`sha` is null))"],
+				},
 			),
 		},
 		{
@@ -94,10 +121,11 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 			run: sql.unsafe(
 				engine === "pg"
 					? 'CREATE TABLE "source_batches" (\n"id" text NOT NULL,\n"lock_id" text,\n"agent" text NOT NULL,\n"at" bigint NOT NULL,\n"state" text NOT NULL CHECK ("state" IN (\'publishing\',\'published\')),\n"publishing_guard" bigint GENERATED ALWAYS AS (CASE WHEN "state"=\'publishing\' THEN 1 ELSE NULL END) STORED,\nPRIMARY KEY ("id")\n)'
-					: "CREATE TABLE `source_batches` (\n`id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`lock_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`agent` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`at` bigint NOT NULL,\n`state` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL CHECK (`state` IN ('publishing','published')),\n`publishing_guard` bigint GENERATED ALWAYS AS (CASE WHEN `state`='publishing' THEN 1 ELSE NULL END) STORED,\nPRIMARY KEY (`id`)\n)",
+					: "CREATE TABLE `source_batches` (\n`id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`lock_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`agent` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`at` bigint NOT NULL,\n`state` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL CHECK (`state` IN ('publishing','published')),\n`publishing_guard` bigint GENERATED ALWAYS AS (CASE WHEN `state`='publishing' THEN 1 ELSE NULL END) STORED,\nPRIMARY KEY (`id`)\n) ENGINE=InnoDB",
 			),
-			postcondition: tableShape(
+			postcondition: bootTableShape(
 				sql,
+				engine,
 				"source_batches",
 				engine === "pg"
 					? [
@@ -110,7 +138,7 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 								name: "publishing_guard",
 								type: "bigint",
 								nullable: true,
-								expression: "CASE WHEN \"state\"='publishing' THEN 1 ELSE NULL END",
+								expression: "\nCASE\n    WHEN (state = 'publishing'::text) THEN 1\n    ELSE NULL::integer\nEND",
 							},
 						]
 					: [
@@ -123,10 +151,17 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 								name: "publishing_guard",
 								type: "bigint",
 								nullable: true,
-								expression: "CASE WHEN `state`='publishing' THEN 1 ELSE NULL END",
+								expression: "(case when (`state` = _utf8mb4\\'publishing\\') then 1 else NULL end)",
 							},
 						],
 				["id"],
+				{
+					foreignKeys: [],
+					checks:
+						engine === "pg"
+							? ["(state = ANY (ARRAY['publishing'::text, 'published'::text]))"]
+							: ["(`state` in (_utf8mb4\\'publishing\\',_utf8mb4\\'published\\'))"],
+				},
 			),
 		},
 		{
@@ -136,10 +171,11 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 			run: sql.unsafe(
 				engine === "pg"
 					? 'CREATE TABLE "source_changes" (\n"row_id" bigint GENERATED BY DEFAULT AS IDENTITY NOT NULL,\n"batch" text NOT NULL,\n"path" text NOT NULL,\n"before" bytea,\n"before_sha" text,\n"before_mode" bigint,\n"desired" bytea,\n"desired_sha" text,\n"desired_mode" bigint,\n"before_directory" bigint NOT NULL DEFAULT 0 CHECK ("before_directory" IN (0,1)),\n"desired_directory" bigint NOT NULL DEFAULT 0 CHECK ("desired_directory" IN (0,1)),\n"path_hash" text GENERATED ALWAYS AS (encode(sha256(decode(replace("path",chr(92),chr(92)||chr(92)),\'escape\')),\'hex\')) STORED,\nPRIMARY KEY ("row_id"),\nFOREIGN KEY ("batch") REFERENCES "source_batches"("id"),\nCHECK (("before" IS NULL)=("before_sha" IS NULL)),\nCHECK (("before" IS NULL)=("before_mode" IS NULL)),\nCHECK (("desired" IS NULL)=("desired_sha" IS NULL)),\nCHECK (("desired" IS NULL)=("desired_mode" IS NULL))\n)'
-					: "CREATE TABLE `source_changes` (\n`row_id` bigint AUTO_INCREMENT NOT NULL,\n`batch` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`path` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`before` longblob,\n`before_sha` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`before_mode` bigint,\n`desired` longblob,\n`desired_sha` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`desired_mode` bigint,\n`before_directory` bigint NOT NULL DEFAULT 0 CHECK (`before_directory` IN (0,1)),\n`desired_directory` bigint NOT NULL DEFAULT 0 CHECK (`desired_directory` IN (0,1)),\n`path_hash` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin GENERATED ALWAYS AS (SHA2(`path`,256)) STORED,\nPRIMARY KEY (`row_id`),\nFOREIGN KEY (`batch`) REFERENCES `source_batches`(`id`),\nCHECK ((`before` IS NULL)=(`before_sha` IS NULL)),\nCHECK ((`before` IS NULL)=(`before_mode` IS NULL)),\nCHECK ((`desired` IS NULL)=(`desired_sha` IS NULL)),\nCHECK ((`desired` IS NULL)=(`desired_mode` IS NULL))\n)",
+					: "CREATE TABLE `source_changes` (\n`row_id` bigint AUTO_INCREMENT NOT NULL,\n`batch` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`path` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`before` longblob,\n`before_sha` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`before_mode` bigint,\n`desired` longblob,\n`desired_sha` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`desired_mode` bigint,\n`before_directory` bigint NOT NULL DEFAULT 0 CHECK (`before_directory` IN (0,1)),\n`desired_directory` bigint NOT NULL DEFAULT 0 CHECK (`desired_directory` IN (0,1)),\n`path_hash` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin GENERATED ALWAYS AS (SHA2(`path`,256)) STORED,\nPRIMARY KEY (`row_id`),\nFOREIGN KEY (`batch`) REFERENCES `source_batches`(`id`),\nCHECK ((`before` IS NULL)=(`before_sha` IS NULL)),\nCHECK ((`before` IS NULL)=(`before_mode` IS NULL)),\nCHECK ((`desired` IS NULL)=(`desired_sha` IS NULL)),\nCHECK ((`desired` IS NULL)=(`desired_mode` IS NULL))\n) ENGINE=InnoDB",
 			),
-			postcondition: tableShape(
+			postcondition: bootTableShape(
 				sql,
+				engine,
 				"source_changes",
 				engine === "pg"
 					? [
@@ -152,13 +188,14 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 							{ name: "desired", type: "bytea", nullable: true },
 							{ name: "desired_sha", type: "text", nullable: true },
 							{ name: "desired_mode", type: "bigint", nullable: true },
-							{ name: "before_directory", type: "bigint", nullable: false },
-							{ name: "desired_directory", type: "bigint", nullable: false },
+							{ name: "before_directory", type: "bigint", nullable: false, default: "0" },
+							{ name: "desired_directory", type: "bigint", nullable: false, default: "0" },
 							{
 								name: "path_hash",
 								type: "text",
 								nullable: true,
-								expression: "encode(sha256(decode(replace(\"path\",chr(92),chr(92)||chr(92)),'escape')),'hex')",
+								expression:
+									"encode(sha256(decode(replace(path, chr(92), (chr(92) || chr(92))), 'escape'::text)), 'hex'::text)",
 							},
 						]
 					: [
@@ -171,11 +208,32 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 							{ name: "desired", type: "longblob", nullable: true },
 							{ name: "desired_sha", type: "varchar", nullable: true, length: 64 },
 							{ name: "desired_mode", type: "bigint", nullable: true },
-							{ name: "before_directory", type: "bigint", nullable: false },
-							{ name: "desired_directory", type: "bigint", nullable: false },
-							{ name: "path_hash", type: "varchar", nullable: true, length: 64, expression: "SHA2(`path`,256)" },
+							{ name: "before_directory", type: "bigint", nullable: false, default: "0" },
+							{ name: "desired_directory", type: "bigint", nullable: false, default: "0" },
+							{ name: "path_hash", type: "varchar", nullable: true, length: 64, expression: "sha2(`path`,256)" },
 						],
 				["row_id"],
+				{
+					foreignKeys: [{ column: "batch", table: "source_batches", target: "id" }],
+					checks:
+						engine === "pg"
+							? [
+									"(before_directory = ANY (ARRAY[(0)::bigint, (1)::bigint]))",
+									"((before IS NULL) = (before_sha IS NULL))",
+									"((before IS NULL) = (before_mode IS NULL))",
+									"((desired IS NULL) = (desired_sha IS NULL))",
+									"((desired IS NULL) = (desired_mode IS NULL))",
+									"(desired_directory = ANY (ARRAY[(0)::bigint, (1)::bigint]))",
+								]
+							: [
+									"(`before_directory` in (0,1))",
+									"(`desired_directory` in (0,1))",
+									"((`before` is null) = (`before_sha` is null))",
+									"((`before` is null) = (`before_mode` is null))",
+									"((`desired` is null) = (`desired_sha` is null))",
+									"((`desired` is null) = (`desired_mode` is null))",
+								],
+				},
 			),
 		},
 		{
@@ -185,10 +243,11 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 			run: sql.unsafe(
 				engine === "pg"
 					? 'CREATE TABLE "versions" (\n"id" bigint GENERATED BY DEFAULT AS IDENTITY NOT NULL,\n"batch" text NOT NULL,\n"path" text NOT NULL,\n"agent" text NOT NULL,\n"at" bigint NOT NULL,\n"content" bytea,\n"sha" text,\n"mode" bigint,\n"previous_content" bytea,\n"previous_sha" text,\n"previous_mode" bigint,\n"versioned" bigint NOT NULL CHECK ("versioned" IN (0,1)),\n"reason" text CHECK ("reason"=\'size_limit\'),\n"previous_directory" bigint NOT NULL DEFAULT 0 CHECK ("previous_directory" IN (0,1)),\n"directory" bigint NOT NULL DEFAULT 0 CHECK ("directory" IN (0,1)),\n"path_hash" text GENERATED ALWAYS AS (encode(sha256(decode(replace("path",chr(92),chr(92)||chr(92)),\'escape\')),\'hex\')) STORED,\nPRIMARY KEY ("id"),\nFOREIGN KEY ("batch") REFERENCES "source_batches"("id")\n)'
-					: "CREATE TABLE `versions` (\n`id` bigint AUTO_INCREMENT NOT NULL,\n`batch` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`path` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`agent` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`at` bigint NOT NULL,\n`content` longblob,\n`sha` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`mode` bigint,\n`previous_content` longblob,\n`previous_sha` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`previous_mode` bigint,\n`versioned` bigint NOT NULL CHECK (`versioned` IN (0,1)),\n`reason` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin CHECK (`reason`='size_limit'),\n`previous_directory` bigint NOT NULL DEFAULT 0 CHECK (`previous_directory` IN (0,1)),\n`directory` bigint NOT NULL DEFAULT 0 CHECK (`directory` IN (0,1)),\n`path_hash` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin GENERATED ALWAYS AS (SHA2(`path`,256)) STORED,\nPRIMARY KEY (`id`),\nFOREIGN KEY (`batch`) REFERENCES `source_batches`(`id`)\n)",
+					: "CREATE TABLE `versions` (\n`id` bigint AUTO_INCREMENT NOT NULL,\n`batch` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`path` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`agent` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,\n`at` bigint NOT NULL,\n`content` longblob,\n`sha` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`mode` bigint,\n`previous_content` longblob,\n`previous_sha` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,\n`previous_mode` bigint,\n`versioned` bigint NOT NULL CHECK (`versioned` IN (0,1)),\n`reason` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin CHECK (`reason`='size_limit'),\n`previous_directory` bigint NOT NULL DEFAULT 0 CHECK (`previous_directory` IN (0,1)),\n`directory` bigint NOT NULL DEFAULT 0 CHECK (`directory` IN (0,1)),\n`path_hash` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin GENERATED ALWAYS AS (SHA2(`path`,256)) STORED,\nPRIMARY KEY (`id`),\nFOREIGN KEY (`batch`) REFERENCES `source_batches`(`id`)\n) ENGINE=InnoDB",
 			),
-			postcondition: tableShape(
+			postcondition: bootTableShape(
 				sql,
+				engine,
 				"versions",
 				engine === "pg"
 					? [
@@ -205,13 +264,14 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 							{ name: "previous_mode", type: "bigint", nullable: true },
 							{ name: "versioned", type: "bigint", nullable: false },
 							{ name: "reason", type: "text", nullable: true },
-							{ name: "previous_directory", type: "bigint", nullable: false },
-							{ name: "directory", type: "bigint", nullable: false },
+							{ name: "previous_directory", type: "bigint", nullable: false, default: "0" },
+							{ name: "directory", type: "bigint", nullable: false, default: "0" },
 							{
 								name: "path_hash",
 								type: "text",
 								nullable: true,
-								expression: "encode(sha256(decode(replace(\"path\",chr(92),chr(92)||chr(92)),'escape')),'hex')",
+								expression:
+									"encode(sha256(decode(replace(path, chr(92), (chr(92) || chr(92))), 'escape'::text)), 'hex'::text)",
 							},
 						]
 					: [
@@ -228,11 +288,28 @@ export const remoteBootSource = (sql: SqlClient, engine: "pg" | "mysql") =>
 							{ name: "previous_mode", type: "bigint", nullable: true },
 							{ name: "versioned", type: "bigint", nullable: false },
 							{ name: "reason", type: "varchar", nullable: true, length: 16 },
-							{ name: "previous_directory", type: "bigint", nullable: false },
-							{ name: "directory", type: "bigint", nullable: false },
-							{ name: "path_hash", type: "varchar", nullable: true, length: 64, expression: "SHA2(`path`,256)" },
+							{ name: "previous_directory", type: "bigint", nullable: false, default: "0" },
+							{ name: "directory", type: "bigint", nullable: false, default: "0" },
+							{ name: "path_hash", type: "varchar", nullable: true, length: 64, expression: "sha2(`path`,256)" },
 						],
 				["id"],
+				{
+					foreignKeys: [{ column: "batch", table: "source_batches", target: "id" }],
+					checks:
+						engine === "pg"
+							? [
+									"(directory = ANY (ARRAY[(0)::bigint, (1)::bigint]))",
+									"(previous_directory = ANY (ARRAY[(0)::bigint, (1)::bigint]))",
+									"(reason = 'size_limit'::text)",
+									"(versioned = ANY (ARRAY[(0)::bigint, (1)::bigint]))",
+								]
+							: [
+									"(`versioned` in (0,1))",
+									"(`reason` = _utf8mb4\\'size_limit\\')",
+									"(`previous_directory` in (0,1))",
+									"(`directory` in (0,1))",
+								],
+				},
 			),
 		},
 	] as const;

@@ -1,6 +1,7 @@
 import { remoteMigrate, indexShape, RemoteMigrationError } from "@comms/storage/remote-migrations";
 import { Effect } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
+import { remoteBootEvent } from "./remote-boot-event-schema.ts";
 import { remoteBootAuth } from "./remote-boot-auth-schema.ts";
 import { remoteBootRuntime } from "./remote-boot-runtime-schema.ts";
 import { remoteBootSource } from "./remote-boot-source-schema.ts";
@@ -17,13 +18,14 @@ export const initializeRemoteBootSchema = (sql: SqlClient, engine: "pg" | "mysql
 
 		const tables = [
 			...remoteBootAuth(sql, engine),
+			...remoteBootEvent(sql, engine),
 			...remoteBootRuntime(sql, engine),
 			...remoteBootSource(sql, engine),
 		];
 		const index = (step: number, table: string, name: string, columns: readonly string[], unique = false) => ({
 			step,
 			name,
-			run: sql`CREATE ${unique ? sql`UNIQUE ` : sql``}INDEX ${sql(name)} ON ${sql(table)} (${sql.join(",")(columns.map((column) => sql`${sql(column)}`))})`.pipe(
+			run: sql`CREATE ${unique ? sql`UNIQUE ` : sql``}INDEX ${sql(name)} ON ${sql(table)} (${sql.join(",", false)(columns.map((column) => sql`${sql(column)}`))})`.pipe(
 				Effect.asVoid,
 			),
 			postcondition: indexShape(sql, table, name, columns, unique),
