@@ -1,10 +1,14 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Console, Effect, FileSystem, Redacted, Schema } from "effect";
+import { Console, Effect, FileSystem, Redacted, Result, Schema } from "effect";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
 import { SqlClient } from "effect/unstable/sql";
 import * as PgClient from "@effect/sql-pg/PgClient";
+import * as PgTypes from "@effect/sql-pg/PgTypes";
 import { dumpRemote, loadRemote } from "@comms/storage/remote-copy";
-import { withDatabase, type RemoteStore } from "@comms/storage/store";
+import { asBoot, withDatabase, type RemoteStore } from "@comms/storage/store";
+import { remoteDbOps } from "../../src/remote-db-ops.ts";
+import { remoteAppStoreIdentity, verifyRemoteAppIdentity } from "../../src/app-store-identity.ts";
+import { remoteAppKernelSchema } from "../../src/app-kernel-schema.ts";
 import { postgresDatabaseProvision } from "../../src/postgres-database-provision.ts";
 import { remoteDatabaseJournal } from "../../src/remote-database-journal.ts";
 const Configuration = Schema.fromJsonString(
@@ -21,7 +25,19 @@ const withStore = <A, E, R>(store: RemoteStore, effect: Effect.Effect<A, E, R | 
 		Effect.gen(function* () {
 			const url = new URL(Redacted.value(store.url));
 			// This fixture tests DDL/permissions only. Production always supplies keeper-guarded SQL clients.
+			const types = PgTypes.makeRegistry();
+			types.register(PgTypes.OID.int8, {
+				encode: (value) => PgTypes.encode(value, PgTypes.OID.int8),
+				decode: (bytes) =>
+					Result.flatMap(PgTypes.decode(bytes, PgTypes.OID.int8, 1), (value) => {
+						const number = typeof value === "bigint" ? Number(value) : NaN;
+						return Number.isSafeInteger(number)
+							? Result.succeed(number)
+							: Result.fail(new PgTypes.CodecError({ message: "unsafe fixture integer" }));
+					}),
+			});
 			const sql = yield* PgClient.make({
+				types,
 				host: url.hostname,
 				port: Number(url.port),
 				database: store.database,
@@ -56,6 +72,126 @@ const main = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)`;
+			if (process.argv[4] === "factory") {
+				yield* sql`CREATE TABLE IF NOT EXISTS seq(singleton INTEGER PRIMARY KEY)`;
+				yield* sql`INSERT INTO seq VALUES(1) ON CONFLICT DO NOTHING`;
+				const identity = yield* remoteAppStoreIdentity(app);
+				yield* Console.error("stage:reserve");
+				const adoption = yield* identity.reserve;
+				const bootApp = yield* asBoot(app, boot);
+				const appRole = decodeURIComponent(new URL(Redacted.value(app.url)).username);
+				yield* withStore(
+					bootApp,
+					Effect.gen(function* () {
+						const target = yield* SqlClient.SqlClient;
+						let operation = 0;
+						for (const op of remoteAppKernelSchema(target, appRole)) {
+							yield* Console.error(`stage:kernel_${operation++}`);
+							yield* op;
+						}
+						yield* Console.error("stage:verify");
+						yield* target.withTransaction(verifyRemoteAppIdentity(adoption));
+						yield* target`INSERT INTO kernel_writer VALUES(1,'live') ON CONFLICT DO NOTHING`;
+					}),
+				);
+				yield* Console.error("stage:complete");
+				yield* identity.complete(adoption);
+				yield* withStore(
+					app,
+					Effect.gen(function* () {
+						const child = yield* SqlClient.SqlClient;
+						yield* child`CREATE TABLE IF NOT EXISTS dbops_messages(body TEXT)`;
+						yield* child`DELETE FROM dbops_messages`;
+						yield* child`INSERT INTO dbops_messages VALUES('retained')`;
+					}),
+				);
+				yield* Console.error("stage:factory_construct");
+				const service = yield* remoteDbOps({
+					store: Effect.succeed(app),
+					bootStore: boot,
+					dataDirectory: data,
+					withStore: (store, effect) =>
+						asBoot(store, boot).pipe(
+							Effect.flatMap((selected) => withStore(selected, effect)),
+							Effect.provide(Reactivity.layer),
+						),
+					withNative: (request) =>
+						(request.operation === "dump"
+							? dumpRemote({ store: request.store, path: request.path, budget: request.budgetMs, tls: false })
+							: loadRemote({
+									store: request.store,
+									artifact: request.artifact,
+									budget: request.budgetMs,
+									tls: false,
+									ownership: request.ownership,
+								}).pipe(Effect.as({ ...request.artifact, bytes: 0 }))
+						).pipe(Effect.provide(BunServices.layer)),
+					assertAccountClosed: (_id, store) =>
+						Effect.gen(function* () {
+							const username = decodeURIComponent(new URL(Redacted.value(store.url)).username);
+							const rows = yield* sql`SELECT pid FROM pg_stat_activity WHERE usename=${username}`;
+							if (rows.length !== 0) return yield* Effect.die("Fixture account still open");
+						}),
+				});
+				yield* Console.error("stage:backup");
+				const bytes = yield* service.clone({ _tag: "file", filename: `${data}/backup.dump` });
+				yield* Console.error("stage:rehearsal");
+				const rehearsal = yield* service.rehearsal({ _tag: "file", filename: `${data}/rehearsal.dump` }, "candidate");
+				const rehearsed = yield* withStore(
+					rehearsal.store,
+					Effect.gen(function* () {
+						const child = yield* SqlClient.SqlClient;
+						return yield* child`SELECT body FROM dbops_messages`;
+					}),
+				);
+				yield* rehearsal.dispose;
+				yield* withStore(
+					app,
+					Effect.gen(function* () {
+						const child = yield* SqlClient.SqlClient;
+						yield* child`INSERT INTO dbops_messages VALUES('later')`;
+					}),
+				);
+				yield* Console.error("stage:restore");
+				const restored = yield* service.restoreInto({
+					path: `${data}/backup.dump`,
+					engine: "pg",
+					legacy_store_id: null,
+				});
+				yield* Console.error("stage:restored_read");
+				const restoredRows = yield* withStore(
+					restored,
+					Effect.gen(function* () {
+						const child = yield* SqlClient.SqlClient;
+						yield* child`INSERT INTO dbops_messages VALUES('restored write')`;
+						return yield* child`SELECT body FROM dbops_messages`;
+					}),
+				);
+				const originalRows = yield* withStore(
+					app,
+					Effect.gen(function* () {
+						const child = yield* SqlClient.SqlClient;
+						return yield* child`SELECT body FROM dbops_messages`;
+					}),
+				);
+				const journal = yield* remoteDatabaseJournal(boot, data);
+				const retained = (yield* journal.list).filter(
+					(record) => record.kind === "restore" && record.database === restored.database,
+				);
+				const unselected = (yield* identity.store).database === app.database;
+				// Explicit fixture cleanup, after proving production retained the fresh restore target.
+				yield* sql`DROP DATABASE ${sql(restored.database)}`;
+				for (const record of retained) yield* sql`DELETE FROM settings WHERE key=${`remote_database:${record.id}`}`;
+				return {
+					factory: true,
+					bytes: bytes > 0n,
+					rehearsed: rehearsed.length,
+					restored: restoredRows.length,
+					original: originalRows.length,
+					retained: retained.length,
+					unselected,
+				};
+			}
 			const journal = yield* remoteDatabaseJournal(boot, data);
 			const provision = yield* postgresDatabaseProvision;
 			const record = yield* journal.allocate("rehearsal", app);

@@ -15,7 +15,7 @@ it.skipIf(!configuration)(
 			[join(import.meta.dirname, "fixtures/postgres-database-provision.ts"), configuration ?? "", data, "native"],
 			{ timeout: 30000 },
 		);
-		expect(JSON.parse(result.stdout)).toMatchObject({
+		expect(JSON.parse(result.stdout), result.stdout + result.stderr).toMatchObject({
 			_tag: "Success",
 			value: {
 				nativeLoad: true,
@@ -24,6 +24,24 @@ it.skipIf(!configuration)(
 				negativePermission: true,
 				cleanupRetried: true,
 			},
+		});
+	},
+	40000,
+);
+
+it.skipIf(!configuration)(
+	"PostgreSQL DbOps copies, rehearses and restores with restricted accounts without selecting or replacing the live database",
+	async (test) => {
+		const data = await mkdtemp(join(tmpdir(), "comms-dbops-factory-"));
+		test.onTestFinished(() => rm(data, { recursive: true, force: true }));
+		const result = await promisify(execFile)(
+			"bun",
+			[join(import.meta.dirname, "fixtures/postgres-database-provision.ts"), configuration ?? "", data, "factory"],
+			{ timeout: 30000 },
+		);
+		expect(JSON.parse(result.stdout), result.stdout + result.stderr).toMatchObject({
+			_tag: "Success",
+			value: { factory: true, bytes: true, rehearsed: 1, restored: 2, original: 2, retained: 1, unselected: true },
 		});
 	},
 	40000,
