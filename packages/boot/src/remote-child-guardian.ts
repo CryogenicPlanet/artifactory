@@ -14,6 +14,8 @@ import {
 } from "effect/unstable/http";
 import { ByteSize } from "effect";
 import { remoteOwner } from "./remote-owner.ts";
+import { admitRemoteOwner } from "./remote-root-protocol.ts";
+import { FetchHttpClient } from "effect/unstable/http";
 
 const Session = Schema.Struct({
 	engine: Schema.Literals(["pg", "mysql"]),
@@ -38,6 +40,7 @@ export const remoteChildGuardian = (
 		yield* asBoot(app, boot);
 		const connection = yield* connectionOf(app, config.tls);
 		const bootConnection = yield* connectionOf(boot, config.tls);
+		yield* admitRemoteOwner(config, attempt).pipe(Effect.provide(FetchHttpClient.layer));
 		const owner = yield* remoteOwner(
 			config.dataDirectory,
 			{
