@@ -1,7 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { strict as assert } from "node:assert";
-import { Context, Effect, Exit, Layer, Redacted, Schema, Scope } from "effect";
+import { Context, Deferred, Effect, Exit, Fiber, Layer, Redacted, Schema, Scope } from "effect";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
+import { guardianClientLayer } from "../../src/remote-client.ts";
+import { SqlClient } from "effect/unstable/sql/SqlClient";
 import { remoteOwnerInspectorLayer, RemoteInspector } from "../../src/remote-inspector.ts";
 import { open } from "../../src/remote-driver.ts";
 import type { RemoteConnection } from "../../src/remote-session.ts";
@@ -46,6 +48,86 @@ async function main() {
 		phase = "inspector initialization";
 		const inspector = Context.get(yield* Layer.build(remoteOwnerInspectorLayer(options)), RemoteInspector);
 		phase = "raw connection";
+		if (mode === "operation") {
+			const persistentScope = yield* Scope.make();
+			yield* Effect.addFinalizer((exit) => Scope.close(persistentScope, exit));
+			const persistent = Context.get(
+				yield* Scope.provide(
+					Layer.build(
+						guardianClientLayer({
+							connection,
+							attempt,
+							register: (session) => inspector.register(session, Effect.void),
+						}),
+					),
+					persistentScope,
+				),
+				SqlClient,
+			);
+			yield* persistent.unsafe("SELECT 1");
+			for (const disposition of ["accepted", "rejected", "interrupted"] as const) {
+				phase = `operation ${disposition}`;
+				const poolScope = yield* Scope.make();
+				yield* Effect.addFinalizer((exit) => Scope.close(poolScope, exit));
+				const entered = yield* Deferred.make<void>();
+				const operation = yield* inspector.operationRegistration(() =>
+					Deferred.succeed(entered, undefined).pipe(
+						Effect.andThen(
+							disposition === "rejected"
+								? Effect.fail("durable ACK failed")
+								: disposition === "interrupted"
+									? Effect.never
+									: Effect.void,
+						),
+					),
+				);
+				const temporary = Context.get(
+					yield* Scope.provide(
+						Layer.build(guardianClientLayer({ connection, attempt, register: operation.register })),
+						poolScope,
+					),
+					SqlClient,
+				);
+				if (disposition === "interrupted") {
+					const query = yield* temporary.unsafe("SELECT 1").pipe(Effect.forkScoped);
+					yield* Deferred.await(entered);
+					yield* Fiber.interrupt(query);
+				} else {
+					const queried = yield* temporary.unsafe("SELECT 1").pipe(Effect.exit);
+					assert.equal(Exit.isSuccess(queried), disposition === "accepted");
+				}
+				assert(Exit.isFailure(yield* operation.close(Effect.fail("pool closure absent")).pipe(Effect.exit)));
+				assert(
+					Exit.isFailure(yield* operation.close(Effect.void).pipe(Effect.exit)),
+					"Open operation session escaped proof",
+				);
+				assert(
+					Exit.isFailure(yield* temporary.unsafe("SELECT 1").pipe(Effect.exit)),
+					"Closed operation admitted a new query",
+				);
+				yield* Scope.close(poolScope, Exit.void);
+				let retired = false;
+				for (let index = 0; index < 100; index++) {
+					retired = Exit.isSuccess(yield* operation.close(Effect.void).pipe(Effect.exit));
+					if (retired) break;
+					yield* Effect.sleep("50 millis");
+				}
+				assert(retired, "Operation session did not close");
+				yield* persistent.unsafe("SELECT 1");
+			}
+			yield* Scope.close(persistentScope, Exit.void);
+			const finalOperation = yield* inspector.operationRegistration(() => Effect.void);
+			let closed = false;
+			for (let index = 0; index < 100; index++) {
+				closed = Exit.isSuccess(
+					yield* inspector.assertAccountClosed(finalOperation.close(Effect.void)).pipe(Effect.exit),
+				);
+				if (closed) break;
+				yield* Effect.sleep("50 millis");
+			}
+			assert(closed);
+			return;
+		}
 		const child = yield* Scope.make();
 		yield* Effect.addFinalizer((exit) => Scope.close(child, exit));
 		const raw = yield* Scope.provide(open(connection, "ordinary-untagged-client"), child);

@@ -113,7 +113,11 @@ export const recoverRemoteOwners = (dataDirectory: string, expected: readonly Re
 	});
 
 /** Call before opening inspectors or writer pools. All state belongs to this owner instance. */
-export const remoteOwner = (dataDirectory: string, selected: RemoteOwnerIntent) =>
+export const remoteOwner = (
+	dataDirectory: string,
+	selected: RemoteOwnerIntent,
+	fileOwnership?: { readonly uid: 1000; readonly gid: 1000 },
+) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
@@ -130,8 +134,9 @@ export const remoteOwner = (dataDirectory: string, selected: RemoteOwnerIntent) 
 			return yield* invalid();
 		const directory = path.join(dataDirectory, "remote-owners");
 		yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
-		yield* Effect.scoped(fs.open(dataDirectory).pipe(Effect.flatMap((file) => file.sync)));
 		if ((yield* fs.realPath(directory)) !== directory) return yield* invalid();
+		if (fileOwnership) yield* fs.chown(directory, fileOwnership.uid, fileOwnership.gid);
+		yield* Effect.scoped(fs.open(dataDirectory).pipe(Effect.flatMap((file) => file.sync)));
 		const filename = path.join(directory, `${selected.attempt}.json`);
 		const gate = yield* Semaphore.make(1);
 		const closure = yield* Semaphore.make(1);
@@ -142,6 +147,7 @@ export const remoteOwner = (dataDirectory: string, selected: RemoteOwnerIntent) 
 				Effect.gen(function* () {
 					const file = yield* fs.open(name, { flag, mode: 0o600 });
 					yield* file.writeAll(new TextEncoder().encode(encode(value)));
+					if (fileOwnership) yield* fs.chown(name, fileOwnership.uid, fileOwnership.gid);
 					yield* file.sync;
 				}),
 			);
