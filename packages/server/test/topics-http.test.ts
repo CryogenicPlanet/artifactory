@@ -47,7 +47,7 @@ it("migrates schema v1 preserving existing conversation and idempotency records"
 	const root = await (await fetch(resumed.url + "/api/topics?mark=0", { headers: { cookie } })).json();
 	expect(root.messages.filter((message: { topic: string }) => message.topic !== "system")).toEqual([existing]);
 	expect(await (await resumed.post("/api/messages", input, cookie, "existing-key")).json()).toEqual(existing);
-	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 10 }]);
+	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 11 }]);
 	expect(await fixture.sql("SELECT migration_id,name FROM core_migrations ORDER BY migration_id")).toEqual(
 		[
 			"messages",
@@ -60,6 +60,7 @@ it("migrates schema v1 preserving existing conversation and idempotency records"
 			"topic_page_continuations",
 			"mention_word_boundaries",
 			"mention_punctuation",
+			"domain_json",
 		].map((name, index) => ({ migration_id: index + 1, name })),
 	);
 	expect(await fixture.sql("SELECT archived_at FROM topics WHERE path<>'system'")).toEqual([

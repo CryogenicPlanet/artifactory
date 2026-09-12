@@ -130,7 +130,7 @@ it("reindexes both historical mention images on upgrade without changing message
 	await fixture.sql("PRAGMA user_version=9");
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
-	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 10 }]);
+	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 11 }]);
 	expect(await fixture.sql("SELECT * FROM reads ORDER BY instance,topic")).toEqual(marks);
 	expect(
 		await fixture.sql("SELECT COUNT(*) AS count FROM messages WHERE topic='history-pages' AND mentions='[\"@alice\"]'"),

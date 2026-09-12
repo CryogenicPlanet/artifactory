@@ -132,6 +132,7 @@ export const initialize = Effect.gen(function* () {
 				if (version === 9) yield* reindexMentions(sql);
 			}),
 		},
+		{ id: 11, name: "domain_json", run: Effect.void },
 	];
 	const supported = steps(0).length;
 	yield* sql`PRAGMA busy_timeout = 2000`;

@@ -1,13 +1,16 @@
 import { on } from "@comms/storage/dialect";
-import { indexShape, remoteMigrate, tableShape } from "@comms/storage/remote-migrations";
+import { indexShape, remoteMigrate, tableShape, type RemoteStep } from "@comms/storage/remote-migrations";
 import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { Statement } from "effect/unstable/sql/Statement";
+import { coreJsonOperations, type CoreJsonSchemaError } from "./core-json-schema.ts";
 import { writerGate } from "../../kernel/database.ts";
 
 /** Remote stores have no supported pre-ledger schema. Build final table shapes directly;
  * legacy receipt conversion and retired product tables belong only to SQLite adoption. */
-export const remoteCoreSteps = (sql: SqlClient) => {
+export const remoteCoreSteps = (
+	sql: SqlClient,
+): ReadonlyArray<RemoteStep<Effect.Error<ReturnType<typeof tableShape>> | CoreJsonSchemaError>> => {
 	const mysql = on(sql, { sqlite: () => false, pg: () => false, mysql: () => true });
 	const text = (name: string, nullable = false) => ({
 		name,
@@ -294,6 +297,7 @@ export const remoteCoreSteps = (sql: SqlClient) => {
 		},
 		{ id: 9, name: "mention_word_boundaries", operations: [] },
 		{ id: 10, name: "mention_punctuation", operations: [] },
+		{ id: 11, name: "domain_json", operations: coreJsonOperations(sql) },
 	];
 };
 
