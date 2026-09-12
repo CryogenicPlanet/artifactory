@@ -123,8 +123,13 @@ const main = Effect.gen(function* () {
 	const initialize = yield* makeTransferKernelInitializer({ appStore, bootStore }).pipe(
 		Effect.provideService(SqlClient.SqlClient, boot),
 	);
-	const seed = { initialized_at: 123456, epoch: "transfer-new-epoch" };
-	const selectedSeed = mode === "wrong-epoch" ? { ...seed, epoch: "another-epoch" } : seed;
+	const seed = { initialized_at: 123456, epoch: "a".repeat(64) };
+	const selectedSeed =
+		mode === "wrong-epoch"
+			? { ...seed, epoch: "b".repeat(64) }
+			: mode === "invalid-epoch"
+				? { ...seed, epoch: "not-a-writer-epoch" }
+				: seed;
 	const selectedBinding =
 		mode === "wrong-selection" ? { ...selection, transfer_id: "33333333-3333-4333-8333-333333333333" } : selection;
 	if (mode === "wrong-opened-app") {

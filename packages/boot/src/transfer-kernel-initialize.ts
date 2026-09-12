@@ -68,8 +68,7 @@ export const makeTransferKernelInitializer = (stores: { readonly appStore: Store
 						selection.target.endpoint !== credentials.endpoint ||
 						!Number.isSafeInteger(seed.initialized_at) ||
 						seed.initialized_at < 0 ||
-						!seed.epoch ||
-						seed.epoch.length > 128 ||
+						!/^[a-f0-9]{64}$/.test(seed.epoch) ||
 						Option.isSome(yield* Effect.serviceOption(app.transactionService)) ||
 						Option.isSome(yield* Effect.serviceOption(boot.transactionService))
 					)

@@ -19,6 +19,9 @@ for (const engine of ["sqlite", "pg", "mysql"] as const) {
 				JSON.parse((await execute("bun", [script, directory, engine, mode])).stdout);
 			await run("reset");
 			expect(await run("missing-reservation")).toMatchObject({ ok: false, tables: [] });
+			const invalid = await run("invalid-epoch");
+			expect(invalid).toMatchObject({ ok: false, tables: [] });
+			expect(invalid.progress).toBeUndefined();
 			expect(await run("foreign")).toMatchObject({ ok: false, tables: ["intruder"] });
 			await run("reset");
 			const boot = join(local, "packages/boot");
@@ -48,7 +51,7 @@ for (const engine of ["sqlite", "pg", "mysql"] as const) {
 				ok: true,
 				identities: [{ store_id: "11111111-1111-4111-8111-111111111111", initialized_at: 123456 }],
 			});
-			expect(JSON.parse(resumed.progress)).toMatchObject({ seeded: true, active: null, epoch: "transfer-new-epoch" });
+			expect(JSON.parse(resumed.progress)).toMatchObject({ seeded: true, active: null, epoch: "a".repeat(64) });
 			expect(await run("initialize")).toMatchObject({ ok: true });
 			expect(await run("wrong-opened-app")).toMatchObject({ ok: false });
 		},
