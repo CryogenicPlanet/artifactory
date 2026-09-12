@@ -38,7 +38,7 @@ for path in root.glob('*.errors'):
 PY
   fi
   docker rm -f "$board" "$target_board" "$refused_board" "$transfer" \
-    "$prefix-source-database" "$prefix-target-database" >/dev/null 2>&1 || true
+    "$prefix-source-database" "$prefix-target-database" "$prefix-check-database" >/dev/null 2>&1 || true
   docker volume rm "$volume" "$configuration" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
   rm -rf "$private"
@@ -49,12 +49,13 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 python3 - "$private" "$source_engine" "$target_engine" <<'PY'
 import json,pathlib,secrets,sys,uuid
-root=pathlib.Path(sys.argv[1]); pairs={}
-for side,engine in [('source',sys.argv[2]),('target',sys.argv[3])]:
+root=pathlib.Path(sys.argv[1]); pairs={}; check_id=str(uuid.uuid4())
+for side,engine in [('source',sys.argv[2]),('target',sys.argv[3]),('check',sys.argv[3])]:
     directory=root/side; directory.mkdir(mode=0o700)
     env='RP_ID=localhost\nPUBLIC_ORIGIN=http://localhost:8080\nDATABASE_TLS=false\n'
     if engine=='sqlite':
-        pairs[side]={'boot':'file:/data/boot.db','app':'file:/data/store/comms.db'}
+        base=f'/data/transfers/{check_id}/scratch' if side=='check' else '/data'
+        pairs[side]={'boot':f'file:{base}/boot.db','app':f'file:{base}/store/comms.db'}
     else:
         admin,boot,app=(secrets.token_hex(32) for _ in range(3))
         (directory/'admin-password').write_text(admin)
@@ -70,6 +71,10 @@ for side,engine in [('source',sys.argv[2]),('target',sys.argv[3])]:
 (root/'transfer.json').write_text(json.dumps({'version':1,'transfer_id':str(uuid.uuid4()),'mode':'transfer',
     'source':pairs['source'],'target':pairs['target'],'tls':False}))
 (root/'transfer.json').chmod(0o600)
+(root/'check.json').write_text(json.dumps({'version':1,'transfer_id':check_id,'mode':'check',
+    'source':pairs['source'],'target':pairs['check'],'tls':False}))
+(root/'check.json').chmod(0o600)
+(root/'check-id').write_text(check_id)
 PY
 docker network create "$network" >/dev/null
 docker volume create "$volume" >/dev/null
@@ -110,10 +115,15 @@ provision() {
         >/dev/null 2>"$private/$side-provision.errors"
     docker exec -i "$database" mysql --defaults-extra-file=/run/secrets/admin.cnf --batch \
       < packages/boot/sql/mysql-scratch-roles.sql >/dev/null 2>>"$private/$side-provision.errors"
+    if [ "$side" = source ]; then
+      docker exec -i "$database" mysql --defaults-extra-file=/run/secrets/admin.cnf --batch \
+        < packages/boot/sql/mysql-transfer-roles.sql >/dev/null 2>>"$private/$side-provision.errors"
+    fi
   fi
 }
 provision source "$source_engine"
 provision target "$target_engine"
+provision check "$target_engine"
 capabilities=(--cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER
   --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SETPCAP)
 launch_board() {
@@ -148,25 +158,61 @@ bun scripts/transfer-acceptance-http.ts seed-source http://localhost:8080 "$priv
 docker stop --time 30 "$board" >/dev/null
 [ "$(docker inspect --format '{{.State.ExitCode}}' "$board")" = 0 ]
 # The real wrapper requires a root-owned, non-writable ancestor chain. Host runner UID
-# ownership is not enough; copy the private config into a root-owned disposable volume.
-docker run --rm --network none --read-only --user 0:0 --entrypoint /bin/sh \
-  --mount "type=bind,src=$private,dst=/input,readonly" \
-  --mount "type=volume,src=$configuration,dst=/run/secrets" "$board_image" \
-  -c 'chmod 0700 /run/secrets; cp /input/transfer.json /run/secrets/transfer.json; chown 0:0 /run/secrets/transfer.json; chmod 0600 /run/secrets/transfer.json'
-docker run --name "$transfer" --network "$network" --read-only --tmpfs /tmp "${capabilities[@]}" \
-  --mount "type=volume,src=$volume,dst=/data" \
-  --mount "type=volume,src=$configuration,dst=/run/secrets,readonly" \
-  "$board_image" store-transfer --config /run/secrets/transfer.json \
-  > "$private/transfer-output" 2> "$private/transfer.errors"
-python3 - "$private" "$source_engine" "$target_engine" <<'PY'
+# ownership is not enough; copy each private config into a root-owned disposable volume.
+run_transfer() {
+  local mode=$1
+  docker run --rm --network none --read-only --user 0:0 --entrypoint /bin/sh \
+    --mount "type=bind,src=$private,dst=/input,readonly" \
+    --mount "type=volume,src=$configuration,dst=/run/secrets" "$board_image" \
+    -c 'chmod 0700 /run/secrets; cp "/input/$1.json" /run/secrets/transfer.json; chown 0:0 /run/secrets/transfer.json; chmod 0600 /run/secrets/transfer.json' transfer-config "$mode"
+  docker run --name "$transfer" --network "$network" --read-only --tmpfs /tmp "${capabilities[@]}" \
+    --mount "type=volume,src=$volume,dst=/data" \
+    --mount "type=volume,src=$configuration,dst=/run/secrets,readonly" \
+    "$board_image" store-transfer --config /run/secrets/transfer.json \
+    > "$private/$mode-output" 2> "$private/$mode.errors"
+  python3 - "$private" "$source_engine" "$target_engine" "$mode" <<'PY_RESULT'
 import json,pathlib,re,sys
-root=pathlib.Path(sys.argv[1]); config=json.loads((root/'transfer.json').read_text())
-result=json.loads((root/'transfer-output').read_text())
-assert result['transfer_id']==config['transfer_id'] and result['status']=='complete', 'CLI completion receipt missing'
+root=pathlib.Path(sys.argv[1]); mode=sys.argv[4]; config=json.loads((root/(mode+'.json')).read_text())
+result=json.loads((root/(mode+'-output')).read_text())
+assert result['transfer_id']==config['transfer_id'], 'CLI transfer identity missing'
+assert result['status']==('checked' if mode=='check' else 'complete'), 'CLI completion receipt missing'
 assert result['source']['engine']==sys.argv[2] and result['target']['engine']==sys.argv[3], 'Wrong transfer engines'
 assert re.fullmatch('[a-f0-9]{64}',result['manifest']), 'Verified manifest missing'
 assert '://' not in json.dumps(result), 'Public CLI output contains a connection URL'
-PY
+PY_RESULT
+  docker rm "$transfer" >/dev/null
+}
+run_transfer check
+# The scratch target is intentionally not startable, but must contain no copied business rows.
+if [ "$target_engine" = sqlite ]; then
+  check_id=$(cat "$private/check-id")
+  docker run --rm --network none --read-only --user 0:0 --entrypoint /usr/local/bin/bun \
+    --mount "type=volume,src=$volume,dst=/data,readonly" \
+    --mount "type=bind,src=$PWD/scripts,dst=/opt/comms/scripts,readonly" "$board_image" \
+    /opt/comms/scripts/transfer-acceptance-inspect.ts \
+    "/data/transfers/$check_id/scratch/boot.db" "/data/transfers/$check_id/scratch/store/comms.db"
+else
+  if [ "$target_engine" = pg ]; then
+    check_sql() { docker exec "$prefix-check-database" psql -X -U postgres -d "$1" -At -v ON_ERROR_STOP=1 -c "$2"; }
+  else
+    check_sql() { docker exec "$prefix-check-database" mysql --defaults-extra-file=/run/secrets/admin.cnf --database="$1" --batch --skip-column-names -e "$2"; }
+  fi
+  [ "$(check_sql comms_app 'SELECT COUNT(*) FROM messages')" = 0 ]
+  [ "$(check_sql comms_boot 'SELECT COUNT(*) FROM passkeys')" = 0 ]
+  [ "$(check_sql comms_boot 'SELECT COUNT(*) FROM generations')" = 0 ]
+  if [ "$target_engine" = pg ]; then
+    marker=$(check_sql comms_boot "SELECT value FROM settings WHERE key='transfer_state'")
+  else
+    marker=$(check_sql comms_boot 'SELECT value FROM settings WHERE `key`='"'transfer_state'")
+  fi
+  case "$marker" in in_progress) ;; *) echo 'Check target became eligible for startup.' >&2; exit 1 ;; esac
+fi
+docker start "$board" >/dev/null
+wait_for_board "$board"
+bun scripts/transfer-acceptance-http.ts verify-checked-source http://localhost:8080 "$private/state.json"
+docker stop --time 30 "$board" >/dev/null
+[ "$(docker inspect --format '{{.State.ExitCode}}' "$board")" = 0 ]
+run_transfer transfer
 launch_board "$refused_board" source
 for attempt in $(seq 1 60); do
   [ "$(docker inspect --format '{{.State.Running}}' "$refused_board")" = true ] || break
