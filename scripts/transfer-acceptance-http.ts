@@ -187,6 +187,17 @@ async function run(diagnostic: { phase: string; stage: string; path: string; sta
 		diagnostic.stage = "page-history";
 		const pageHistory = await history(pagePath);
 		assert(sourceHistory.length && pageHistory.length, "Published history missing");
+		console.log(
+			`Transfer small-fixture retained evidence: ${JSON.stringify({
+				acknowledged_messages_checked: 1,
+				message_events_checked: 1,
+				published_pages_checked: 1,
+				source_files_checked: 1,
+				source_history_rows: sourceHistory.length,
+				page_history_rows: pageHistory.length,
+				last_good_generation: current.last_good,
+			})}`,
+		);
 		diagnostic.stage = "save-evidence";
 		await save(evidenceFile, {
 			storeId: current.store_identity.app_store_id,

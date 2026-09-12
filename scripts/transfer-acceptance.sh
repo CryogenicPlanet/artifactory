@@ -177,7 +177,7 @@ stop_board "$board" source-seeded
 # The real wrapper requires a root-owned, non-writable ancestor chain. Host runner UID
 # ownership is not enough; copy each private config into a root-owned disposable volume.
 run_transfer() {
-  local mode=$1 expectation=${2:-complete} exit_code=0
+  local mode=$1 expectation=${2:-complete} exit_code=0 command_started
   local mount_wrapper=()
   if [ "$expectation" = crash ]; then
     mount_wrapper=(--mount "type=bind,src=$private/activation-crash.js,dst=/opt/comms/packages/server/dist/store-transfer.js,readonly")
@@ -190,11 +190,13 @@ run_transfer() {
     --mount "type=bind,src=$private,dst=/input,readonly" \
     --mount "type=volume,src=$configuration,dst=/run/secrets" "$board_image" \
     -c 'chmod 0700 /run/secrets; cp "/input/$1.json" /run/secrets/transfer.json; chown 0:0 /run/secrets/transfer.json; chmod 0600 /run/secrets/transfer.json' transfer-config "$mode"
+  command_started=$SECONDS
   docker run "${mount_wrapper[@]}" --name "$transfer" --network "$network" --read-only --tmpfs /tmp "${capabilities[@]}" \
     --mount "type=volume,src=$volume,dst=/data" \
     --mount "type=volume,src=$configuration,dst=/run/secrets,readonly" \
     "$board_image" store-transfer --config /run/secrets/transfer.json \
     > "$private/$mode-output" 2> "$private/$mode.errors" || exit_code=$?
+  echo "Transfer fixture command timing: scenario=$acceptance mode=$mode expectation=$expectation elapsed_seconds=$((SECONDS-command_started)) exit_code=$exit_code"
   if [ "$expectation" != complete ]; then
     if [ "$expectation" = crash ]; then
       [ "$exit_code" = 137 ]
@@ -258,9 +260,11 @@ fi
 docker start "$board" >/dev/null
 wait_for_board "$board"
 bun scripts/transfer-acceptance-http.ts verify-checked-source http://localhost:8080 "$private/state.json"
+downtime_started=$SECONDS
 stop_board "$board" source-checked
 if [ "$acceptance" = copy-crash ]; then
   source scripts/transfer-acceptance-copy.sh
+  echo "Transfer small-fixture recovery timing: scenario=$acceptance source_recovery_seconds=$((SECONDS-downtime_started)) includes_two_source_write_checks_and_restart=true"
   exit 0
 fi
 if [ "$acceptance" = retirement-crash ]; then
@@ -292,6 +296,7 @@ fi
 launch_board "$target_board" target
 wait_for_board "$target_board"
 bun scripts/transfer-acceptance-http.ts verify-target http://localhost:8080 "$private/state.json"
+echo "Transfer small-fixture approximate downtime upper bound: scenario=$acceptance source=$source_engine target=$target_engine elapsed_seconds=$((SECONDS-downtime_started)) endpoint=target_authenticated_read_write_search_and_reload_verified"
 docker restart --time 30 "$target_board" >/dev/null
 wait_for_board "$target_board"
 bun scripts/transfer-acceptance-http.ts verify-restarted http://localhost:8080 "$private/state.json"
