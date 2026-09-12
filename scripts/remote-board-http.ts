@@ -86,7 +86,13 @@ async function run() {
 				: Schema.decodeUnknownSync(
 						Schema.Struct({ source_recovery_error: Schema.optionalKey(Schema.NullOr(Schema.String)) }),
 					)(bootStatus).source_recovery_error;
-		if (!failed && !recovery) return;
+		const childError =
+			bootStatus === undefined
+				? undefined
+				: Schema.decodeUnknownSync(
+						Schema.Struct({ child: Schema.Struct({ error: Schema.optionalKey(Schema.NullOr(Schema.String)) }) }),
+					)(bootStatus).child.error;
+		if (!failed && !recovery && !childError) return;
 		const filename = process.env.COMMS_TEST_DIAGNOSTICS_FILE;
 		if (filename)
 			await writeFile(filename, JSON.stringify({ status: bootStatus, generations: diagnostic }), { mode: 0o600 });
