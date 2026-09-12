@@ -71,8 +71,16 @@ Both logins need the scoped session-attribute read grant for connection registra
 
 Configure `performance_schema_session_connect_attrs_size` to at least 1024 before startup. On a binary-logged server, restoring agent-created triggers may also require the operator to enable `log_bin_trust_function_creators`; it is not permission to grant `SUPER` to the app.
 
-### MySQL scratch provisioning is a separate contract
+### Additional scratch-principal rights
 
-This file provisions the persistent stores only. It deliberately does not copy the older design's scratch wildcard grants to the persistent app. The current MySQL scratch-principal/definer policy is still being integrated; do not treat these startup grants as proof that clone/restore provisioning is ready. Add only the rights required by that implementation after its acceptance tests pass; do not grant blanket `CREATE USER` or `GRANT OPTION` to work around a failure.
+The persistent-role script alone does not grant clone/restore provisioning rights. The MySQL provisioner creates a separate short-lived login for each owned target and dump operation. Enable its explicit operator supplement only where that feature is being deployed:
+
+```sh
+mysql --defaults-extra-file="$MYSQL_ADMIN_CONFIG" --batch < packages/boot/sql/mysql-scratch-roles.sql
+```
+
+The supplement grants boot server-wide `CREATE USER`, source `SELECT` with `GRANT OPTION` plus metadata inspection rights, and delegable DDL/DML only on the escaped `comms_rehearsal_` and `comms_app_` target prefixes. `CREATE USER` cannot be limited to comms account names; use a dedicated server or an operator-approved role-management policy. The persistent app receives no scratch-pattern grants, `CREATE USER`, or `GRANT OPTION`. **MySQL applies `GRANT OPTION` at the database privilege level, not per individual privilege.** Granting it for source `SELECT` also permits boot to delegate every other source privilege it holds, including DDL/DML and metadata rights. Separate `GRANT` statements do not narrow that authority. This is an explicit additional trust in the boot account, not a restriction enforced by the database.
+
+Source `SHOW VIEW`, `TRIGGER`, `EVENT`, and `EXECUTE` privileges let preflight inspect object kinds instead of mistaking inaccessible metadata for an empty result. Their presence is not a promise to copy arbitrary definers: the current provisioner refuses unsupported view/routine/trigger/event objects before publishing a target. It does not grant `SUPER`, `PROCESS`, `SET_ANY_DEFINER`, or `ALLOW_NONEXISTENT_DEFINER` to bypass that refusal. Keep the supplement aligned with the provisioner's accepted source-object policy and native acceptance tests.
 
 See [deployment](../../../docs/deployment.md) for runtime configuration and [the database design](../../../docs/database.md) for recovery guarantees and engine differences. Provisioning accounts does not migrate an existing board's data.
