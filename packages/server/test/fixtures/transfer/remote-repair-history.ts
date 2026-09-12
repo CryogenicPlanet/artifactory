@@ -83,7 +83,7 @@ const main = Effect.gen(function* () {
 	}
 
 	yield* start(restoredProof);
-	const pending = yield* inspectTransferSource(source, app, sourceStore).pipe(Effect.result);
+	const pending = yield* inspectTransferSource(source, app, sourceStore, "/data").pipe(Effect.result);
 	assert.equal(pending._tag, "Failure");
 	if (pending._tag === "Failure") {
 		assert.equal(Schema.is(TransferRejected)(pending.failure), true);
@@ -98,7 +98,7 @@ const main = Effect.gen(function* () {
 	);
 	assert.equal(yield* before.blocksStartup, false);
 	yield* assertTransferSourceRepair(source, repaired, adoption.store_id);
-	yield* inspectTransferSource(source, app, repaired);
+	yield* inspectTransferSource(source, app, repaired, "/data");
 	const selection: TransferSelection = {
 		version: 1,
 		transfer_id: "12345678-1234-4123-8123-123456789abc",
