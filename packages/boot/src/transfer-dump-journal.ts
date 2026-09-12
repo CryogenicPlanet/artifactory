@@ -12,7 +12,7 @@ export const TransferDumpRecord = Schema.Struct({
 	password: Schema.NullOr(Schema.String),
 });
 const Encoded = Schema.fromJsonString(TransferDumpRecord);
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\s\S])/;
 const invalid = () => new RemoteDatabaseError({ code: "remote_database_invalid" });
 
 /** Only the offline command holding the data-root lock may use this journal.
@@ -68,7 +68,7 @@ export const transferDumpJournal = (selection: TransferSelection, source: { boot
 				selectionText(saved.selection) !== selectionText(selection) ||
 				(saved.finished
 					? saved.phase !== "closed" || saved.password !== null
-					: saved.password === null || !/^[a-f0-9]{64}$/.test(saved.password))
+					: saved.password === null || !/^[a-f0-9]{64}(?![\s\S])/.test(saved.password))
 			)
 				return Effect.fail(invalid());
 			return Effect.succeed(saved);

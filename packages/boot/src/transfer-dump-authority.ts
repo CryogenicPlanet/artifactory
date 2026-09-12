@@ -4,7 +4,7 @@ import { Effect, FileSystem, Path, Redacted, Schema } from "effect";
 import { TransferDumpRecord } from "./transfer-dump-journal.ts";
 
 const uuid = Schema.String.check(
-	Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+	Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\s\S])/),
 );
 /** Locates existing offline dump authority; never authorizes an ordinary app owner. */
 export const TransferDumpReference = Schema.Struct({ transferId: uuid, resourceId: uuid });
@@ -54,7 +54,7 @@ export const authorizeTransferDump = (
 			saved.finished ||
 			(phase === "ready" && saved.phase !== "ready") ||
 			saved.password === null ||
-			!/^[a-f0-9]{64}$/.test(saved.password) ||
+			!/^[a-f0-9]{64}(?![\s\S])/.test(saved.password) ||
 			selected.engine !== owner.engine ||
 			selected.host !== owner.host ||
 			selected.port !== owner.port ||

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, FileSystem, Redacted } from "effect";
+import { Effect, FileSystem, Redacted, Schema } from "effect";
 import type { TransferSelection } from "@comms/storage/store-transfer-schema";
 import { transferDumpJournal } from "../../src/transfer-dump-journal.ts";
-import { authorizeTransferDump } from "../../src/transfer-dump-authority.ts";
+import { authorizeTransferDump, TransferDumpReference } from "../../src/transfer-dump-authority.ts";
 
 const root = process.argv[2];
 if (!root) throw new Error("Missing isolated root");
@@ -30,6 +30,22 @@ await Effect.runPromise(
 		const record = yield* journal.allocate("boot");
 		const credential = yield* journal.credential(record.id);
 		const reference = { transferId: selection.transfer_id, resourceId: record.id };
+		for (const suffix of ["\n", "\r", "\u2028", "\u2029"]) {
+			assert.equal(
+				(yield* Schema.decodeUnknownEffect(TransferDumpReference)({
+					...reference,
+					resourceId: record.id + suffix,
+				}).pipe(Effect.result))._tag,
+				"Failure",
+			);
+			assert.equal(
+				(yield* Schema.decodeUnknownEffect(TransferDumpReference)({
+					...reference,
+					transferId: selection.transfer_id + suffix,
+				}).pipe(Effect.result))._tag,
+				"Failure",
+			);
+		}
 		const authorize = (store = credential, ref = reference) =>
 			authorizeTransferDump(root, source.boot, store, ref, "ready");
 		const refused = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -51,6 +67,13 @@ await Effect.runPromise(
 		yield* refused(authorize(credential, { ...reference, transferId: "44444444-4444-4444-8444-444444444444" }));
 		const filename = `${root}/transfers/${selection.transfer_id}/backup-resources/${record.id}.json`;
 		const bytes = yield* fs.readFileString(filename);
+		const url = new URL(Redacted.value(credential.url));
+		const password = decodeURIComponent(url.password);
+		url.password = encodeURIComponent(password + "\n");
+		yield* fs.writeFileString(filename, bytes.replace(JSON.stringify(password), JSON.stringify(password + "\n")));
+		yield* refused(authorize({ ...credential, url: Redacted.make(url.href) }));
+		yield* refused(journal.credential(record.id));
+		yield* fs.writeFileString(filename, bytes);
 		yield* fs.chmod(filename, 0o644);
 		yield* refused(authorize());
 		yield* fs.chmod(filename, 0o600);
