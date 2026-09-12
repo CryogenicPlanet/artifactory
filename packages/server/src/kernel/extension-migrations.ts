@@ -1,3 +1,4 @@
+import { preserveMigrationState } from "./migration-state.ts";
 import { Crypto, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
@@ -51,7 +52,7 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 							(yield* sql`SELECT name FROM sqlite_schema WHERE name=${table} COLLATE NOCASE`).length
 						)
 							return yield* new KernelError({ code: "extension_migration_invalid" });
-						yield* sql.unsafe(statement);
+						yield* preserveMigrationState(sql, sql.unsafe(statement));
 						if (table !== undefined) yield* registerProtectedSqlTable(sql, table);
 						yield* sql`INSERT INTO extension_migrations(extension,name,checksum) VALUES(${extension},${name},${checksum})`;
 					}),
