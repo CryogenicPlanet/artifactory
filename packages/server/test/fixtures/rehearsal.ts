@@ -39,7 +39,7 @@ const run = Effect.gen(function* () {
 					PORT: "0",
 					BOOT_SECRET: "private-rehearsal-secret",
 					WRITER_EPOCH: "rehearsal-test",
-					APP_STORE: Redacted.value(render({ _tag: "file", filename: clone })),
+					APP_STORE: Redacted.value(yield* render({ _tag: "file", filename: clone })),
 					APP_DATABASE: clone,
 					PAGES_DIRECTORY: pages,
 					STATE: "rehearsal",
