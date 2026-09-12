@@ -1,6 +1,7 @@
+import { inspect } from "node:util";
 import { Effect, Redacted } from "effect";
 import { expect, it } from "vitest";
-import { childStore, parse, render } from "../src/store.ts";
+import { asBoot, childStore, parse, parseDescriptor, render, withDatabase } from "../src/store.ts";
 
 it("round trips absolute POSIX filenames without interpreting URL characters", async () => {
 	for (const filename of ["/data/store/comms.db", "/tmp/a b/é?#%.db", "/tmp/日本語.db", "/tmp/100%25.db"]) {
@@ -47,4 +48,92 @@ it("requires the legacy alias to identify exactly the selected file", async () =
 		_tag: "Failure",
 		failure: { code: "store_engine_unsupported" },
 	});
+});
+
+const remote = (raw: string) =>
+	Effect.runPromise(
+		parseDescriptor(raw).pipe(
+			Effect.flatMap((store) =>
+				store._tag === "file" ? Effect.die("expected remote descriptor") : Effect.succeed(store),
+			),
+		),
+	);
+
+it("parses remote database names while keeping credentials redacted", async () => {
+	for (const scheme of ["postgres", "postgresql", "mysql"]) {
+		const store = await remote(`${scheme}://app:password%40secret@db:5432/board%20one`);
+		expect(store._tag).toBe(scheme === "mysql" ? "mysql" : "postgres");
+		expect(store.database).toBe("board one");
+		expect(await remote(Redacted.value(render(store)))).toEqual(store);
+		for (const representation of [JSON.stringify(store), inspect(store)]) {
+			expect(representation).not.toContain("password");
+			expect(representation).not.toContain("secret");
+		}
+	}
+	expect(await Effect.runPromise(parseDescriptor("file:/tmp/board.db"))).toEqual({
+		_tag: "file",
+		filename: "/tmp/board.db",
+	});
+});
+
+it("rejects ambiguous remote locations and malformed URLs without exposing credentials", async () => {
+	for (const location of [
+		"postgres://app:secret@db",
+		"postgres://app:secret@db/",
+		"postgres://app:secret@db/a/b",
+		"postgres://app:secret@db/a?",
+		"postgres://app:secret@db/a?schema=app",
+		"postgres://app:secret@db/a#",
+		"postgres://app:secret@db/..",
+		"postgres://app:secret@db/%2e%2e",
+		"postgres://app:secret@db/a%2fb",
+		"postgres://app:secret@db/a%00b",
+		"postgres://app:secret@db/%ZZ",
+		"postgres://app:%ZZ@db/a",
+		"postgres://app:secret@db/a\\b",
+		"postgres://app:secret@db/a b",
+		"postgres://app:secret@db:99999/a",
+		"postgres://app:secret@/a",
+		"https://app:secret@db/a",
+	]) {
+		const result = await Effect.runPromise(parseDescriptor(location).pipe(Effect.result));
+		expect(result).toMatchObject({ _tag: "Failure", failure: { code: "store_descriptor_invalid" } });
+		expect(JSON.stringify(result)).not.toContain("secret");
+	}
+});
+
+it("changes only the database on an immutable remote descriptor", async () => {
+	const source = await remote("postgres://app:private%40password@[::1]:5432/board");
+	const clone = await Effect.runPromise(withDatabase(source, "rehearsal #1"));
+	expect(source.database).toBe("board");
+	expect(clone.database).toBe("rehearsal #1");
+	expect(Redacted.value(render(clone))).toBe("postgres://app:private%40password@[::1]:5432/rehearsal%20%231");
+	for (const database of ["", ".", "..", "a/b", "a\\b", "a\u0000b"]) {
+		expect(await Effect.runPromise(withDatabase(source, database).pipe(Effect.result))).toMatchObject({
+			_tag: "Failure",
+			failure: { code: "store_descriptor_invalid" },
+		});
+	}
+});
+
+it("derives the app database with only matching-endpoint boot credentials", async () => {
+	for (const scheme of ["postgres", "mysql"]) {
+		const port = scheme === "postgres" ? 5432 : 3306;
+		const app = await remote(`${scheme}://app:app-password@DB/app`);
+		const boot = await remote(`${scheme}://boot:boot-password@db:${port}/boot`);
+		const selected = await Effect.runPromise(asBoot(app, boot));
+		expect(selected.database).toBe("app");
+		expect(Redacted.value(render(selected))).toBe(`${scheme}://boot:boot-password@db:${port}/app`);
+		for (const other of [
+			`${scheme}://boot:secret@other/boot`,
+			`${scheme}://boot:secret@db:1234/boot`,
+			`${scheme}://boot:secret@db/app`,
+			`${scheme === "mysql" ? "postgres" : "mysql"}://boot:secret@db/boot`,
+		]) {
+			expect(await Effect.runPromise(asBoot(app, await remote(other)).pipe(Effect.result))).toMatchObject({
+				_tag: "Failure",
+				failure: { code: "store_engine_mismatch" },
+			});
+		}
+	}
 });
