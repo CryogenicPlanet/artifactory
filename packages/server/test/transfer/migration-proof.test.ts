@@ -57,3 +57,20 @@ it("refuses symlink, broad permissions, oversized and excess-field proofs", asyn
 	await symlink(join(f.root, "absent"), f.file);
 	expect(await f.run("write")).toContain('"_tag":"Failure"');
 });
+
+it("accepts relative generation entries and rejects escaping or ambiguous entries", async (test) => {
+	const f = await fixture(test);
+	for (const entry of [
+		"../server.ts",
+		"/server.ts",
+		"",
+		"./server.ts",
+		"sub//server.ts",
+		"sub/../server.ts",
+		"sub\\server.ts",
+		"sub/\nserver.ts",
+	])
+		expect(await f.run(`entry:${entry}`)).toContain('"_tag":"Failure"');
+	expect(await f.run("entry:sub/server.ts")).toContain('"_tag":"Success"');
+	expect(await f.run("read")).toContain('"entry_file":"sub/server.ts"');
+});

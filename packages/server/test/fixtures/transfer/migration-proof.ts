@@ -16,7 +16,7 @@ const proof: MigrationProof = {
 	selection,
 	initialized_at: 1,
 	epoch: "a".repeat(64),
-	generation: { n: 2, entry_file: `${root}/snapshot/server.ts`, snapshot_dir: `${root}/snapshot` },
+	generation: { n: 2, entry_file: "server.ts", snapshot_dir: `${root}/snapshot` },
 	result: { core: [{ migration_id: 1, name: "core" }], editable: [], extensions: [], extensionProofs: [] },
 	safetyReceipt: `${root}/transfers/${selection.transfer_id}/safety/12345678-1234-4234-8234-123456789abe/receipt.json`,
 };
@@ -28,7 +28,9 @@ const run =
 					? { ...proof, epoch: "b".repeat(64) }
 					: action === "invalid"
 						? { ...proof, safetyReceipt: `${root}/outside/receipt.json` }
-						: proof,
+						: action?.startsWith("entry:")
+							? { ...proof, generation: { ...proof.generation, entry_file: action.slice(6) } }
+							: proof,
 			);
 const result = await Effect.runPromise(run.pipe(Effect.result, Effect.provide(BunServices.layer)));
 process.stdout.write(JSON.stringify(result));

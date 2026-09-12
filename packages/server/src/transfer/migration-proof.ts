@@ -45,9 +45,12 @@ const canonical = (input: MigrationProof) =>
 			value.generation.n < 1 ||
 			!uuid(safetyId) ||
 			value.safetyReceipt !== path.join(root, "safety", safetyId, "receipt.json") ||
-			[value.generation.entry_file, value.generation.snapshot_dir].some(
-				(name) => !path.isAbsolute(name) || path.normalize(name) !== name || /[\x00-\x1f\x7f]/.test(name),
-			)
+			path.isAbsolute(value.generation.entry_file) ||
+			/[\\\x00-\x1f\x7f]/.test(value.generation.entry_file) ||
+			value.generation.entry_file.split("/").some((part) => part === "" || part === "." || part === "..") ||
+			!path.isAbsolute(value.generation.snapshot_dir) ||
+			path.normalize(value.generation.snapshot_dir) !== value.generation.snapshot_dir ||
+			/[\x00-\x1f\x7f]/.test(value.generation.snapshot_dir)
 		)
 			return yield* invalid();
 		for (const rows of [value.result.core, value.result.editable])
