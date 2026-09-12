@@ -1,4 +1,5 @@
 import { RecoveryRejected } from "./recovery-intents.ts";
+import { isAppStoreIdentityError, appIdentityPolicy } from "./app-store-identity.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
 import { authErrorResponse } from "./auth-http.ts";
 import { Cause, Effect, Option, Schema } from "effect";
@@ -55,6 +56,8 @@ const policy = {
 		hint: "Edit ownership conflicts with durable recovery journals. Preserve the lock, staging and journals; repair ownership before retrying.",
 	},
 	...childErrorPolicy,
+	app_store_missing: appIdentityPolicy,
+	app_store_identity_invalid: appIdentityPolicy,
 	authority_expired: {
 		status: 401,
 		retriable: false,
@@ -171,6 +174,7 @@ export const editFailure = (cause: Cause.Cause<unknown>) => {
 			(reason) =>
 				reason._tag === "Fail" &&
 				(Schema.is(RecoveryRejected)(reason.error) ||
+					isAppStoreIdentityError(reason.error) ||
 					Schema.is(StorageRejected)(reason.error) ||
 					Schema.is(ArtifactRetentionRejected)(reason.error) ||
 					Schema.is(FreezeTimeout)(reason.error) ||
@@ -194,6 +198,7 @@ export const editFailure = (cause: Cause.Cause<unknown>) => {
 		});
 	const found = Cause.findError(cause);
 	const error = found._tag === "Success" ? found.success : undefined;
+	if (isAppStoreIdentityError(error)) return Effect.succeed(errorResponse(error.code));
 	if (Schema.is(AuthError)(error)) return Effect.succeed(authErrorResponse(error.code));
 	if (Schema.is(EditRejected)(error))
 		return Effect.succeed(errorResponse(error.code, policy[error.code].status, error.holder));

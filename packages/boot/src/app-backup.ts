@@ -1,3 +1,5 @@
+import { appStoreIdentity, verifyAppIdentity } from "./app-store-identity.ts";
+import type { BackupRecord } from "./backup-metadata.ts";
 import { clientLayer } from "@comms/storage/client";
 import type { FileStore } from "@comms/storage/store";
 import { Config, Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
@@ -10,6 +12,7 @@ const make = (filename: string) =>
 	Effect.gen(function* () {
 		const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
 		const fs = yield* FileSystem.FileSystem;
+		const identity = yield* appStoreIdentity(filename);
 		const store: FileStore = { _tag: "file", filename };
 		const path = yield* Path.Path;
 		const headroom = yield* storageHeadroom(path.dirname(filename));
@@ -27,6 +30,7 @@ const make = (filename: string) =>
 		);
 		const sync = (name: string) => Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
 		return {
+			recoverStaging: fs.remove(`${filename}.restore-staging`, { recursive: true, force: true }),
 			estimatedBytes,
 			clone: (destination: string) =>
 				Effect.scoped(
@@ -47,11 +51,25 @@ const make = (filename: string) =>
 						yield* sql`UPDATE kernel_writer SET epoch=${epoch} WHERE singleton=1`;
 					}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: clone }))),
 				),
-			restore: (backup: string) =>
+			restore: (backup: Pick<BackupRecord, "path" | "legacy_store_id">) =>
 				Effect.scoped(
 					Effect.gen(function* () {
-						const temporary = `${filename}.restore`;
-						yield* fs.copyFile(backup, temporary);
+						// Serialized restore owns this disposable path after positive owner closure.
+						// Remove the entire prior copy, including a killed SQLite transaction's sidecars.
+						const directory = `${filename}.restore-staging`;
+						yield* fs.remove(directory, { recursive: true, force: true });
+						yield* fs.makeDirectory(directory);
+						yield* Effect.addFinalizer(() => fs.remove(directory, { recursive: true, force: true }).pipe(Effect.orDie));
+						const temporary = path.join(directory, "store.db");
+						const adoption = yield* identity.current;
+						yield* fs.copyFile(backup.path, temporary);
+						yield* Effect.scoped(
+							Effect.gen(function* () {
+								const sql = yield* SqlClient.SqlClient;
+								yield* sql`PRAGMA synchronous = FULL`;
+								yield* sql.withTransaction(verifyAppIdentity(adoption, backup.legacy_store_id === adoption.store_id));
+							}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: temporary }))),
+						);
 						if (isolated) yield* fs.chmod(temporary, 0o660);
 						yield* sync(temporary);
 						// The caller has positive closure evidence for every process that could own these handles.

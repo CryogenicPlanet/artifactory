@@ -144,6 +144,8 @@ it("rolls back domain changes, retry receipts and events on guard, constraint an
 		"DELETE FROM topic_page_continuations",
 		"DROP INDEX topic_page_continuations_pending",
 		"UPDATE [kernel_writer] SET epoch='bad'",
+		"UPDATE store_identity SET store_id='foreign'",
+		"DROP TABLE store_identity",
 		'DROP TABLE "mutation_batches"',
 		"ALTER TABLE idempotency RENAME TO gone",
 		"DROP INDEX outbox_unshipped",

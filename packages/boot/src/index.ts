@@ -16,10 +16,10 @@ import { EditLock, layer as editLockLayer } from "./edit-lock.ts";
 import { Generations, layer as generationsLayer } from "./generations.ts";
 import { SourceFiles, layer as sourceLayer } from "./source-files.ts";
 import { Events, layer as eventsLayer } from "./events.ts";
-import { layer as recoveryLayer } from "./app-recovery.ts";
+import { AppRecovery, layer as recoveryLayer } from "./app-recovery.ts";
 import { layer as attemptsLayer, ChildAttempts } from "./child-attempts.ts";
 import { cutover } from "./cutover.ts";
-import { layer as backupLayer } from "./app-backup.ts";
+import { AppBackup, layer as backupLayer } from "./app-backup.ts";
 import { BootHttp, type RecoveryPhase } from "./boot-http.ts";
 import { PublicPages, layer as publicPagesLayer } from "./public-pages.ts";
 import { layer as preparationLayer } from "./generation-preparation.ts";
@@ -148,6 +148,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 									return yield* new RecoveryRejected({ code: "topic_move_recovery_required" });
 								yield* (yield* Generations).recover;
 								if (isolated) yield* migrateAppStore({ dataDirectory: options.dataDirectory, filename: appFilename });
+								yield* (yield* AppBackup).recoverStaging;
+								yield* (yield* AppRecovery).reserveIdentity;
 							}),
 						)
 						.pipe(Effect.exit);

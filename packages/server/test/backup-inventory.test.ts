@@ -150,18 +150,20 @@ it("keeps inventory available while the app is down without creating files or ch
 	await app.stop();
 	await rm(join(fixture.root, "comms.db"));
 	const down = await fixture.launch();
-	// Three failing app/keeper startups must finish before checking inventory side effects (Linux was starting attempt 3 at 5s).
+	// Identity preflight refuses the missing initialized store before launching any child.
 	await expect
 		.poll(
 			async () => {
 				const response = await fetch(`${down.url}/_boot/status`, { headers: { cookie } });
 				return Schema.decodeUnknownSync(
-					Schema.Struct({ child: Schema.Struct({ state: Schema.String, attempt: Schema.Int }) }),
+					Schema.Struct({
+						child: Schema.Struct({ state: Schema.String, attempt: Schema.Int, error: Schema.NullOr(Schema.String) }),
+					}),
 				)(await response.json()).child;
 			},
 			{ timeout: 20000 },
 		)
-		.toMatchObject({ state: "failed", attempt: 3 });
+		.toMatchObject({ state: "failed", attempt: 0, error: expect.stringContaining("app_store_missing") });
 	await fixture.sql(
 		"INSERT INTO backups(id,path,reason,bytes,taken_at) VALUES ('missing','/private/unavailable.db','pre-flip',999,1)",
 		"boot.db",

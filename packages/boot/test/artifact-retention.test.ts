@@ -22,7 +22,7 @@ async function store(test: TestContext) {
 	const backup = async (id: string, reason = "hourly", generation: number | null = 99, at = 1) => {
 		await writeFile(join(root, "backups", `${id}.db`), "retained-data");
 		await sql(
-			`INSERT INTO backups VALUES('${id}','${root}/backups/${id}.db','${reason}',100,${at},${generation === null ? "NULL" : "0"},${generation ?? "NULL"})`,
+			`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation) VALUES('${id}','${root}/backups/${id}.db','${reason}',100,${at},${generation === null ? "NULL" : "0"},${generation ?? "NULL"})`,
 		);
 	};
 	const generation = async (n: number, status = "retired", good = 1, partial = false) => {

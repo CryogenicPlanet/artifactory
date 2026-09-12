@@ -74,6 +74,8 @@ const program = Effect.gen(function* () {
 	for (const [error, status, code] of [
 		[new StorageRejected({ code: "storage_measurement_failed" }), 503, "storage_measurement_failed"],
 		[new StorageRejected({ code: "storage_headroom" }), 507, "storage_headroom"],
+		[new EventError({ code: "app_store_missing" }), 409, "app_store_missing"],
+		[new EventError({ code: "app_store_identity_invalid" }), 409, "app_store_identity_invalid"],
 		[new SourceRejected({ code: "external_conflict", path: "pages/private.txt" }), 409, "external_conflict"],
 		[new SourceRejected({ code: "publication_pending", path: "recovery" }), 503, "publication_pending"],
 		[new AuthError({ code: "scope_required" }), 403, "scope_required"],
@@ -88,6 +90,9 @@ const program = Effect.gen(function* () {
 	);
 	for (const failure of [
 		Effect.die("private defect"),
+		Effect.fail(new EventError({ code: "app_store_identity_invalid" })).pipe(
+			Effect.ensuring(Effect.die("private cleanup defect")),
+		),
 		Effect.fail(syntax),
 		Effect.fail(new ChildError({ code: "cutover_recovery_required" })).pipe(
 			Effect.ensuring(Effect.die("private cleanup defect")),

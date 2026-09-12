@@ -10,6 +10,7 @@ export const BackupRecord = Schema.Struct({
 	taken_at: Schema.Int,
 	published_through: Schema.NullOr(Schema.Int),
 	generation: Schema.NullOr(Schema.Int),
+	legacy_store_id: Schema.NullOr(Schema.String),
 });
 export type BackupRecord = typeof BackupRecord.Type;
 export const backupMetadataSchema = Effect.gen(function* () {

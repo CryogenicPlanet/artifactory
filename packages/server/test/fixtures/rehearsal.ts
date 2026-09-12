@@ -94,6 +94,12 @@ const run = Effect.gen(function* () {
 				),
 			)({ status, initial, rows }),
 		);
-	}).pipe(Effect.provide(backupLayer(filename)));
+	}).pipe(
+		Effect.provide(
+			backupLayer(filename).pipe(
+				Layer.provide(SqliteClient.layer({ filename: filename.replace(/[^/]+$/, "boot.db"), disableWAL: true })),
+			),
+		),
+	);
 }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(BunServices.layer, FetchHttpClient.layer)));
 run.pipe(BunRuntime.runMain);

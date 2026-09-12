@@ -123,7 +123,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 			}
 			// The replacement app must republish its grants before activation can expose its pages.
 			yield* sql`DELETE FROM public_paths`;
-			yield* backup.restore((yield* saved(record.safety_backup)).path);
+			yield* backup.restore(yield* saved(record.safety_backup));
 			yield* recovery.prepare(yield* freshEpoch);
 			yield* sql`UPDATE db_restore_requests SET phase='failed',failure='restore_not_accepted' WHERE proof_id=${record.proof_id}`;
 			yield* releaseLock(record);
@@ -137,7 +137,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					return yield* new ChildError({ code: "restore_backup_changed" });
 				// The replacement app must republish its grants before activation can expose its pages.
 				yield* sql`DELETE FROM public_paths`;
-				yield* backup.restore(target.path);
+				yield* backup.restore(target);
 				const epoch = yield* freshEpoch;
 				yield* recovery.prepare(epoch);
 				// From here, candidate effects belong to the working store. A crash must reconcile it before rollback.

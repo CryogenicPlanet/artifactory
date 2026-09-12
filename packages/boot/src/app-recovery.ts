@@ -1,19 +1,24 @@
+import { appStoreIdentity, verifyAppIdentity } from "./app-store-identity.ts";
 import { decodeRows } from "./decode-rows.ts";
 import { clientLayer } from "@comms/storage/client";
 import type { FileStore } from "@comms/storage/store";
-import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
+import { Context, Crypto, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { type Batch, Events, EventError, EventRecord } from "./events.ts";
 
 /** Shared startup evidence boundary; caller must first prove every previous app owner closed. */
-export const fenceAppStore = (filename: string, epoch: string, rejectedAttempt?: string) =>
+export const fenceAppStore = (filename: string, epoch: string, rejectedAttempt?: string, dataDirectory?: string) =>
 	Effect.gen(function* () {
 		const bootSql = yield* SqlClient.SqlClient;
 		const events = yield* Events;
 		const fs = yield* FileSystem.FileSystem;
+		const path = yield* Path.Path;
+		const identity = yield* appStoreIdentity(filename, dataDirectory);
+		const adoption = yield* identity.reserve;
 		const marker = yield* bootSql`SELECT value FROM settings WHERE key='app_store_initialized'`;
 		const exists = yield* fs.exists(filename);
-		if (marker.length > 0 && !exists) return yield* new EventError({ code: "app_store_missing" });
+		if ((marker.length > 0 || adoption.mode === "legacy" || adoption.phase === "ready") && !exists)
+			return yield* new EventError({ code: "app_store_missing" });
 		const pending = yield* events.state;
 		const evidence = yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -21,6 +26,12 @@ export const fenceAppStore = (filename: string, epoch: string, rejectedAttempt?:
 			yield* sql`PRAGMA synchronous = FULL`;
 			return yield* sql.withTransaction(
 				Effect.gen(function* () {
+					if (adoption.mode === "legacy" && adoption.phase === "pending") {
+						yield* sql`SELECT singleton,epoch FROM kernel_writer LIMIT 0`;
+						yield* sql`SELECT id,from_seq,to_seq,count FROM mutation_batches LIMIT 0`;
+						yield* sql`SELECT seq,transaction_id,event,shipped_at FROM outbox LIMIT 0`;
+					}
+					yield* verifyAppIdentity(adoption, adoption.phase === "pending");
 					if (marker.length === 0) {
 						yield* sql`CREATE TABLE IF NOT EXISTS kernel_writer (singleton INTEGER PRIMARY KEY CHECK(singleton=1),epoch TEXT NOT NULL)`;
 						yield* sql`CREATE TABLE IF NOT EXISTS mutation_batches (id TEXT PRIMARY KEY,from_seq INTEGER NOT NULL,to_seq INTEGER NOT NULL,count INTEGER NOT NULL)`;
@@ -78,11 +89,13 @@ export const fenceAppStore = (filename: string, epoch: string, rejectedAttempt?:
 				}),
 			);
 		}).pipe(Effect.provide(clientLayer({ _tag: "file", filename })), Effect.scoped);
+		for (const name of [filename, path.dirname(filename)])
+			yield* Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
+		yield* identity.complete(adoption);
 		if (evidence._tag === "Failure") return yield* evidence.failure;
 		if (evidence.success && pending.pending_attempt === rejectedAttempt)
 			return yield* new EventError({ code: "candidate_probe_committed" });
 		// Both SQL scopes are deliberately separate. App writer fence commits before boot resolves.
-		yield* bootSql`INSERT OR IGNORE INTO settings(key,value) VALUES('app_store_initialized','1')`;
 
 		return { pending, evidence: evidence.success };
 	});
@@ -90,20 +103,24 @@ export const fenceAppStore = (filename: string, epoch: string, rejectedAttempt?:
 const make = (filename: string, dataDirectory?: string) =>
 	Effect.gen(function* () {
 		const store: FileStore = { _tag: "file", filename };
+		const identity = yield* appStoreIdentity(filename, dataDirectory);
 		const context = Context.pick(
 			SqlClient.SqlClient,
 			Events,
 			FileSystem.FileSystem,
-		)(yield* Effect.context<SqlClient.SqlClient | Events | FileSystem.FileSystem>());
+			Path.Path,
+			Crypto.Crypto,
+		)(yield* Effect.context<SqlClient.SqlClient | Events | FileSystem.FileSystem | Path.Path | Crypto.Crypto>());
 		const path = yield* Path.Path;
 		const events = yield* Events;
 		return {
+			reserveIdentity: identity.reserve,
 			store,
 			filename,
 			dataDirectory: dataDirectory ?? path.dirname(filename),
 			prepare: (epoch: string, rejectedAttempt?: string) =>
 				Effect.gen(function* () {
-					const { pending, evidence } = yield* fenceAppStore(filename, epoch, rejectedAttempt);
+					const { pending, evidence } = yield* fenceAppStore(filename, epoch, rejectedAttempt, dataDirectory);
 					if (pending.pending_id && pending.pending_attempt) {
 						if (evidence) yield* events.append(evidence, pending.pending_attempt);
 						else yield* events.abort(pending.pending_id, pending.pending_attempt);

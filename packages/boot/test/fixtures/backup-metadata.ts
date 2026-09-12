@@ -32,6 +32,7 @@ const main = Effect.gen(function* () {
 	yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;
 	yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 	yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
+	yield* sql`ALTER TABLE backups DROP COLUMN legacy_store_id`;
 	yield* sql`PRAGMA user_version=11`;
 	yield* sql`INSERT INTO backups VALUES('legacy','/retained/legacy.db','pre-flip',1234,99)`;
 	yield* initializeBootSchema;
@@ -48,9 +49,10 @@ const main = Effect.gen(function* () {
 			taken_at: 99,
 			published_through: null,
 			generation: null,
+			legacy_store_id: null,
 		},
 	]);
-	assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 16 }]);
+	assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 17 }]);
 	yield* Console.log("backup metadata preserved");
 }).pipe(
 	Effect.scoped,

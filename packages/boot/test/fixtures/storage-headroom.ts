@@ -1,3 +1,4 @@
+import { appStoreIdentity, verifyAppIdentity } from "../../src/app-store-identity.ts";
 import { layer as durableEventsLayer } from "../../src/events.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
@@ -37,6 +38,16 @@ const main = Effect.gen(function* () {
 		} finally {
 			original.close();
 		}
+		yield* initializeBootSchema;
+		const identity = yield* appStoreIdentity(filename);
+		const adoption = yield* identity.reserve;
+		yield* Effect.scoped(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql.withTransaction(verifyAppIdentity(adoption, true));
+			}).pipe(Effect.provide(SqliteClient.layer({ filename, disableWAL: true }))),
+		);
+		yield* identity.complete(adoption);
 		const backup = yield* AppBackup.pipe(
 			Effect.provide(backupLayer(filename)),
 			Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -53,7 +64,7 @@ const main = Effect.gen(function* () {
 			changed.close();
 		}
 		yield* Ref.set(availableBlocks, 0);
-		yield* backup.restore(`${root}/saved.db`);
+		yield* backup.restore({ path: `${root}/saved.db`, legacy_store_id: null });
 		const restored = new Database(filename);
 		try {
 			return {
@@ -120,8 +131,9 @@ const main = Effect.gen(function* () {
 			Effect.provide(sourceLayer(root).pipe(Layer.provideMerge(lockLayer))),
 			Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
 		);
-	}).pipe(Effect.provide(SqliteClient.layer({ filename: `${root}/boot.db`, disableWAL: true })));
+	});
 }).pipe(
+	Effect.provide(SqliteClient.layer({ filename: `${process.argv[2]}/boot.db`, disableWAL: true })),
 	Effect.scoped,
 	Effect.provide(BunServices.layer),
 	Effect.flatMap(Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))),

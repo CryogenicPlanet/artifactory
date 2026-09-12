@@ -1,3 +1,7 @@
+import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { SqlClient } from "effect/unstable/sql";
+import { appStoreIdentity, verifyAppIdentity } from "../../src/app-store-identity.ts";
+import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Database } from "bun:sqlite";
 import { Console, Effect } from "effect";
@@ -7,6 +11,16 @@ const main = Effect.gen(function* () {
 	const root = process.argv[2];
 	if (!root) return yield* Effect.die("Missing test directory");
 	const filename = `${root}/app.db`;
+	yield* initializeBootSchema;
+	const identity = yield* appStoreIdentity(filename);
+	const adoption = yield* identity.reserve;
+	yield* Effect.scoped(
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql.withTransaction(verifyAppIdentity(adoption, true));
+		}).pipe(Effect.provide(SqliteClient.layer({ filename, disableWAL: true }))),
+	);
+	yield* identity.complete(adoption);
 	const backup = yield* AppBackup.pipe(Effect.provide(layer(filename)));
 	if (process.argv[3] === "restore") {
 		const original = new Database(filename);
@@ -23,7 +37,7 @@ const main = Effect.gen(function* () {
 			changed.close();
 		}
 		// Every independently opened handle is closed before the production restore helper replaces files.
-		yield* backup.restore(`${root}/backup.db`);
+		yield* backup.restore({ path: `${root}/backup.db`, legacy_store_id: null });
 		const restored = new Database(filename);
 		try {
 			return restored.query<{ value: string }, []>("SELECT value FROM records").all();
@@ -52,6 +66,7 @@ const main = Effect.gen(function* () {
 	const prepared = yield* backup.prepareClone(filename, "second-probe").pipe(Effect.result);
 	return { epoch, prepared: prepared._tag };
 }).pipe(
+	Effect.provide(SqliteClient.layer({ filename: `${process.argv[2]}/boot.db`, disableWAL: true })),
 	Effect.scoped,
 	Effect.provide(BunServices.layer),
 	Effect.flatMap((result) => Console.log(JSON.stringify(result))),

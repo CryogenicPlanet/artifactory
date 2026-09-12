@@ -50,6 +50,7 @@ const run = Effect.gen(function* () {
 		yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;
 		yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 		yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
+		yield* sql`ALTER TABLE backups DROP COLUMN legacy_store_id`;
 		yield* sql`PRAGMA user_version=9`;
 		yield* initializeBootSchema;
 		assert.deepEqual(yield* sql`SELECT id,created_at,last_seen_at FROM sessions`, [

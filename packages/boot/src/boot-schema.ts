@@ -17,6 +17,15 @@ export class BootSchemaTooNew extends Schema.TaggedError<BootSchemaTooNew>()("Bo
 	}
 }
 
+export class BootIdentityUpgradePending extends Schema.TaggedError<BootIdentityUpgradePending>()(
+	"BootIdentityUpgradePending",
+	{},
+) {
+	get message() {
+		return "Finish pending database recovery with the previous compatible image before upgrading board identity. Boot schema and recovery journals were preserved.";
+	}
+}
+
 /** Run once before constructing boot stores; opening the adapter must use disableWAL. */
 export const initializeBootSchema = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -25,12 +34,21 @@ export const initializeBootSchema = Effect.gen(function* () {
 	);
 	const version = versions[0]?.user_version;
 	if (version === undefined) return yield* Effect.die("Missing boot schema version");
-	if (version > 16) return yield* new BootSchemaTooNew({ found: version, supported: 16 });
+	if (version > 17) return yield* new BootSchemaTooNew({ found: version, supported: 17 });
+	// Refuse before schema or journal-mode changes so the previous image can finish recovery.
+	if (version >= 9 && version < 17) {
+		const cutovers = yield* sql`SELECT singleton FROM cutover WHERE phase!='accepted' LIMIT 1`;
+		const restores =
+			version >= 13
+				? yield* sql`SELECT proof_id FROM db_restore_requests WHERE phase IN ('authorized','restoring','working','rollback') LIMIT 1`
+				: [];
+		if (cutovers.length > 0 || restores.length > 0) return yield* new BootIdentityUpgradePending({});
+	}
 	// New stores can reclaim deleted pages incrementally; legacy conversion needs offline maintenance.
 	if (version === 0) yield* sql`PRAGMA auto_vacuum = INCREMENTAL`;
 	yield* sql`PRAGMA journal_mode = WAL`;
 	yield* sql`PRAGMA synchronous = FULL`;
-	if (version === 16) return;
+	if (version === 17) return;
 	yield* sql.withTransaction(
 		Effect.gen(function* () {
 			if (version === 0)
@@ -116,7 +134,8 @@ export const initializeBootSchema = Effect.gen(function* () {
 			}
 			if (version < 16)
 				yield* sql`ALTER TABLE edit_lock ADD COLUMN reset_pin INTEGER NOT NULL DEFAULT 0 CHECK(reset_pin IN (0,1,2))`;
-			yield* sql`PRAGMA user_version = 16`;
+			if (version < 17) yield* sql`ALTER TABLE backups ADD COLUMN legacy_store_id TEXT`;
+			yield* sql`PRAGMA user_version = 17`;
 		}),
 	);
 });

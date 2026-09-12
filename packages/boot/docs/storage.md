@@ -88,3 +88,13 @@ Conversion requires an explicit offline database rewrite:
 5. Verify database integrity and the resulting auto-vacuum mode before restarting.
 
 Never run this rewrite automatically on a nearly full volume. There is no automated low-space conversion path.
+
+## SQLite board identity and upgrades
+
+Boot reserves one board UUID before writing the app store and finalizes it only after the app transaction is durable. Restart resumes that UUID. A missing initialized store or foreign identity refuses startup; it never creates an empty replacement board.
+
+Backups catalogued before successful legacy adoption receive provenance once, without overwriting an existing stamp. Restoration adds missing identity only to an authorized disposable copy, preserving the original backup. Later identity-free backups are refused.
+
+Finish any interrupted cutover or database restore with the previous compatible image before upgrading an installation that has never adopted an identity. A first upgrade cannot authorize an old identity-free backup before adoption completes, even if a recovery journal selects it. Boot preserves the journal, backup and current store for recovery; do not delete identity markers to bypass this refusal.
+
+Restore uses one disposable `<app-store>.restore-staging` directory. After proving prior owners closed, startup removes an abandoned copy; each restore also replaces it before copying. A killed restore therefore cannot accumulate a new full-board directory on every attempt. Catalogued backup bytes are never modified by this cleanup.
