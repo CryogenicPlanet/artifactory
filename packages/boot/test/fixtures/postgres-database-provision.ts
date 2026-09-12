@@ -103,6 +103,12 @@ const main = Effect.gen(function* () {
 						yield* child`CREATE TABLE IF NOT EXISTS dbops_messages(body TEXT)`;
 						yield* child`DELETE FROM dbops_messages`;
 						yield* child`INSERT INTO dbops_messages VALUES('retained')`;
+						// Exercise the extension/function ownership added by core search migration12.
+						yield* child`CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA public`;
+						yield* child`CREATE OR REPLACE FUNCTION public.dbops_unaccent(value text) RETURNS text LANGUAGE sql IMMUTABLE SET search_path=pg_catalog AS $$SELECT public.unaccent('public.unaccent'::pg_catalog.regdictionary, value)$$`;
+						yield* child`CREATE TABLE IF NOT EXISTS dbops_search(body TEXT, folded TEXT GENERATED ALWAYS AS (public.dbops_unaccent(body)) STORED)`;
+						yield* child`DELETE FROM dbops_search`;
+						yield* child`INSERT INTO dbops_search(body) VALUES('café')`;
 					}),
 				);
 				yield* Console.error("stage:factory_construct");
@@ -141,6 +147,8 @@ const main = Effect.gen(function* () {
 					rehearsal.store,
 					Effect.gen(function* () {
 						const child = yield* SqlClient.SqlClient;
+						const search = yield* child`SELECT folded FROM dbops_search`;
+						if (search[0]?.folded !== "cafe") return yield* Effect.die("Native search copy changed");
 						return yield* child`SELECT body FROM dbops_messages`;
 					}),
 				);
@@ -164,6 +172,13 @@ const main = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const child = yield* SqlClient.SqlClient;
 						yield* child`INSERT INTO dbops_messages VALUES('restored write')`;
+						const protection = yield* child`DROP TABLE outbox`.pipe(Effect.result);
+						if (protection._tag !== "Failure") return yield* Effect.die("Restored kernel ownership lost");
+						const owner =
+							yield* child`SELECT p.proowner=current_user::regrole AS owned FROM pg_proc p WHERE p.oid='public.dbops_unaccent(text)'::regprocedure`;
+						if (owner[0]?.owned !== true) return yield* Effect.die("Restored function ownership lost");
+						const search = yield* child`SELECT folded FROM dbops_search`;
+						if (search[0]?.folded !== "cafe") return yield* Effect.die("Native search copy changed");
 						return yield* child`SELECT body FROM dbops_messages`;
 					}),
 				);
@@ -171,6 +186,8 @@ const main = Effect.gen(function* () {
 					app,
 					Effect.gen(function* () {
 						const child = yield* SqlClient.SqlClient;
+						const search = yield* child`SELECT folded FROM dbops_search`;
+						if (search[0]?.folded !== "cafe") return yield* Effect.die("Native search copy changed");
 						return yield* child`SELECT body FROM dbops_messages`;
 					}),
 				);
