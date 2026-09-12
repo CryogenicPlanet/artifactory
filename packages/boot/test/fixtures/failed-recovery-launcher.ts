@@ -9,14 +9,15 @@ Effect.gen(function* () {
 	const path = yield* Path.Path;
 	const observed = FileSystem.make({
 		...fs,
-		readFile: (name) =>
+		// Observe entry even when the canonical receipt probe correctly rejects a missing file.
+		realPath: (name) =>
 			Effect.gen(function* () {
 				if (
 					name === path.join(root, "data/attempts/late-owner.closed") &&
 					(yield* fs.exists(path.join(root, "observe-retry")))
 				)
 					yield* fs.writeFileString(path.join(root, "retry-entered"), "entered");
-				return yield* fs.readFile(name);
+				return yield* fs.realPath(name);
 			}),
 	});
 	return yield* boot({
