@@ -12,6 +12,7 @@ const Session = Schema.Struct({
 export const RemoteOwnerIntent = Schema.Struct({
 	attempt: Schema.String,
 	root: Schema.String,
+	scope: Schema.Literals(["database", "account"]),
 	engine: Schema.Literals(["pg", "mysql"]),
 	database: Schema.String,
 	host: Schema.String,
@@ -42,7 +43,8 @@ const inspectorMatches = (owner: RemoteOwnerIntent, session: RemoteSession) =>
 		(owner.engine === "mysql" && session.username.startsWith(`${owner.username}@`)));
 const registrationMatches = (owner: RemoteOwnerIntent, inspector: RemoteSession, session: RemoteSession) =>
 	session.engine === owner.engine &&
-	session.database === owner.database &&
+	session.database.length > 0 &&
+	(owner.scope === "account" || session.database === owner.database) &&
 	session.server === inspector.server &&
 	session.username === inspector.username &&
 	/^[1-9][0-9]*$/.test(session.connectionId) &&

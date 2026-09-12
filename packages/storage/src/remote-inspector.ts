@@ -24,6 +24,8 @@ export class RemoteInspector extends Context.Service<RemoteInspector, RemoteInsp
 ) {}
 
 export interface RemoteInspectorOptions extends RemoteAttempt {
+	/** Only immutable root owners may span databases on their one exact account. */
+	readonly scope?: "database" | "account";
 	readonly mysqlBootConnection?: RemoteConnection;
 }
 
@@ -107,7 +109,8 @@ const inspect = (options: RemoteInspectorOptions) =>
 								session.tag !== tag ||
 								session.engine !== server.engine ||
 								session.server !== server.server ||
-								session.database !== server.database ||
+								!session.database ||
+								(options.scope !== "account" && session.database !== server.database) ||
 								session.username !== server.username
 							)
 								return yield* failure("remote_registration_failed");

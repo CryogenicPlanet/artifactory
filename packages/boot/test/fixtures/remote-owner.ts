@@ -12,6 +12,7 @@ const main = Effect.gen(function* () {
 	const selected = {
 		attempt,
 		root: "b2".repeat(32),
+		scope: mode === "account" || mode === "recover-account" ? ("account" as const) : ("database" as const),
 		engine: "pg" as const,
 		host: "localhost",
 		port: 5432,
@@ -29,13 +30,22 @@ const main = Effect.gen(function* () {
 		tag: `inspect:${tag}`,
 	};
 	const file = path.join(root, "remote-owners", `${attempt}.json`);
-	if (mode === "recover") return yield* recoverRemoteOwners(root, [selected]);
+	if (mode === "recover" || mode === "recover-account") return yield* recoverRemoteOwners(root, [selected]);
 	const owner = yield* remoteOwner(root, selected);
 	const pause = Console.log("REMOTE_OWNER_DURABLE").pipe(Effect.andThen(Effect.never));
 	if (mode === "crash-intent") return yield* pause;
 	assert.equal((yield* recoverRemoteOwners(root, [selected]).pipe(Effect.result))._tag, "Failure");
 	yield* owner.bindInspector(session);
 	if (mode === "pending") return;
+	if (mode === "account")
+		yield* owner.register({ ...session, database: "scratch", connectionId: "99", tag: `comms:${tag}` });
+	else
+		assert.equal(
+			(yield* owner
+				.register({ ...session, database: "scratch", connectionId: "99", tag: `comms:${tag}` })
+				.pipe(Effect.result))._tag,
+			"Failure",
+		);
 	yield* Effect.all(
 		Array.from({ length: 8 }, (_, index) =>
 			owner.register({ ...session, connectionId: String(index + 20), tag: `comms:${tag}` }),
@@ -46,7 +56,7 @@ const main = Effect.gen(function* () {
 	const registered = yield* Schema.decodeEffect(
 		Schema.fromJsonString(Schema.Struct({ sessions: Schema.Array(Schema.Unknown) })),
 	)(before);
-	assert.equal(registered.sessions.length, 8);
+	assert.equal(registered.sessions.length, mode === "account" ? 9 : 8);
 	if (mode === "crash-register") return yield* pause;
 	assert.equal((yield* owner.close(Effect.fail("local closure missing")).pipe(Effect.result))._tag, "Failure");
 	assert.equal(yield* fs.readFileString(file), before);

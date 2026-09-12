@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
-it.for(["clean", "pending", "mismatch", "partial", "missing", "bad-inspector", "bad-session"])(
+it.for(["clean", "account", "pending", "mismatch", "partial", "missing", "bad-inspector", "bad-session"])(
 	"durable remote owner %s restart evidence",
 	async (mode, test) => {
 		const root = await mkdtemp(join(tmpdir(), "comms-remote-owner-"));
@@ -15,6 +15,7 @@ it.for(["clean", "pending", "mismatch", "partial", "missing", "bad-inspector", "
 			promisify(execFile)("bun", [join(import.meta.dirname, "fixtures/remote-owner.ts"), root, mode]);
 		await run(mode);
 		if (mode === "clean") await run("recover");
+		else if (mode === "account") await run("recover-account");
 		else await expect(run("recover")).rejects.toThrow();
 	},
 );
