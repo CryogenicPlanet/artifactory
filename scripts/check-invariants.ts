@@ -51,6 +51,7 @@ function checkInvariants() {
 						(label === `packages${sep}server${sep}src${sep}start.ts` ||
 							label === `packages${sep}server${sep}src${sep}store-transfer.ts` ||
 							label === `packages${sep}server${sep}src${sep}transfer${sep}configuration.ts` ||
+							label === `packages${sep}server${sep}src${sep}transfer${sep}outer.ts` ||
 							label.startsWith(`packages${sep}server${sep}test${sep}fixtures${sep}`))) ||
 					(owner === "ui" && dependency === "server" && !label.startsWith(`packages${sep}ui${sep}src${sep}`));
 				if (!allowed)

@@ -1,5 +1,6 @@
+import { render } from "@comms/storage/store";
 import { databaseConfiguration } from "@comms/boot";
-import { ConfigProvider, Effect, Schema } from "effect";
+import { ConfigProvider, Effect, Redacted, Schema } from "effect";
 import { TransferRejected } from "@comms/storage/store-transfer-schema";
 
 const Descriptors = Schema.Struct({ boot: Schema.String, app: Schema.String });
@@ -39,4 +40,27 @@ export const decodeTransferConfiguration = (encoded: string) =>
 			configuration._tag === "file" ? "sqlite" : configuration.bootConnection.engine;
 		if (engine(source) === engine(target)) return yield* invalid();
 		return { transferId: input.transfer_id, mode: input.mode, source, target };
+	});
+
+export type TransferConfiguration = Effect.Success<ReturnType<typeof decodeTransferConfiguration>>;
+
+/** Only the immutable transfer worker receives this protected environment value. */
+export const encodeTransferConfiguration = (configuration: TransferConfiguration) =>
+	Effect.gen(function* () {
+		const pair = (value: TransferConfiguration["source"]) =>
+			Effect.gen(function* () {
+				return { boot: Redacted.value(yield* render(value.boot)), app: Redacted.value(yield* render(value.app)) };
+			});
+		const remote = configuration.source._tag === "remote" ? configuration.source : configuration.target;
+		if (remote._tag !== "remote") return yield* invalid();
+		return Redacted.make(
+			yield* Schema.encodeEffect(Schema.fromJsonString(Input))({
+				version: 1,
+				transfer_id: configuration.transferId,
+				mode: configuration.mode,
+				source: yield* pair(configuration.source),
+				target: yield* pair(configuration.target),
+				tls: remote.bootConnection.tls,
+			}),
+		);
 	});

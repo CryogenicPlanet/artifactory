@@ -1,6 +1,8 @@
+import { BunRuntime, BunServices } from "@effect/platform-bun";
+import { runTransfer } from "./transfer/outer.ts";
 import { closeSync } from "node:fs";
 import { decodeTransferConfiguration } from "./transfer/configuration.ts";
-import { Effect, Stdio, Stream } from "effect";
+import { Console, Effect, Stdio, Stream } from "effect";
 import { TransferRejected } from "@comms/storage/store-transfer-schema";
 
 const invalid = () => new TransferRejected({ code: "transfer_binding_invalid" });
@@ -61,3 +63,17 @@ export const readTransferConfiguration = Effect.gen(function* () {
 	);
 	return yield* decodeTransferConfiguration(encoded);
 });
+
+if (import.meta.main) {
+	const main = readTransferConfiguration.pipe(
+		Effect.flatMap(runTransfer),
+		Effect.flatMap((result) => Console.log(JSON.stringify(result))),
+		Effect.provide(BunServices.layer),
+		Effect.catchCause(() =>
+			Console.error("Store transfer failed; preserve transfer journals and inspect the protected configuration.").pipe(
+				Effect.andThen(Effect.fail(invalid())),
+			),
+		),
+	);
+	BunRuntime.runMain(main, { disableErrorReporting: true });
+}
