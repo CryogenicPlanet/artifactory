@@ -212,6 +212,16 @@ async function run() {
 				).json(),
 			);
 			assert.deepEqual(visible.items, [written]);
+			const subsequent = Schema.decodeUnknownSync(
+				Schema.Struct({ id: Schema.String, bytes: Schema.Finite, published_through: Schema.Int }),
+			)(
+				await (
+					await ok(await request("/_boot/db/backup", {}, state.cookie), "Backup restored target after restart")
+				).json(),
+			);
+			assert.notEqual(subsequent.id, state.backup);
+			assert.ok(subsequent.bytes > 0 && subsequent.published_through >= written.seq);
+			await verify(state);
 		}
 		console.log(`Remote board ${phase}: authenticated persistence and idempotency passed`);
 		return;
