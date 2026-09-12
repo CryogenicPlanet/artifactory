@@ -93,7 +93,6 @@ await Effect.runPromise(
 			};
 			const queryPlan = yield* source`EXPLAIN QUERY PLAN ${sqliteTransferPage(source, boardPlan, [
 				{ kind: "text", value: "A" },
-				{ kind: "text", value: "previous body" },
 			])}`.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ detail: Schema.String })))));
 			process.stdout.write(
 				JSON.stringify({
