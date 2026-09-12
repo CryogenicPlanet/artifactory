@@ -74,7 +74,11 @@ const program = Effect.gen(function* () {
 	const pending = yield* sql`SELECT pending_id,pending_attempt,pending_from,pending_to FROM seq WHERE singleton=1`;
 	const restores = yield* sql`SELECT proof_id,phase FROM db_restore_requests ORDER BY proof_id`;
 	const generationErrors = yield* sql`SELECT stderr FROM generations WHERE stderr IS NOT NULL`;
-	console.log(JSON.stringify({ selected, settings, evidence, original, pending, restores, generationErrors }));
+	const sequence = yield* sql`SELECT next,published_through FROM seq`;
+	const children = yield* sql`SELECT closed FROM child_attempts`;
+	console.log(
+		JSON.stringify({ selected, settings, evidence, original, pending, restores, generationErrors, sequence, children }),
+	);
 });
 program.pipe(
 	Effect.scoped,
