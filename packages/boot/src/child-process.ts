@@ -65,6 +65,8 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch, 
 						stdin: "pipe",
 						stdout: "pipe",
 						stderr: "pipe",
+						// The pinned remote inspector must survive termination of boot's process group.
+						detached: options.remote !== undefined,
 						forceKillAfter: "5 seconds",
 					},
 				),
