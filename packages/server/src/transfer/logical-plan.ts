@@ -1,4 +1,5 @@
 import type { TransferColumn, TransferInventory, TransferTable } from "@comms/storage/transfer-inventory";
+import { sameTransferDefault } from "./column-default.ts";
 import type { TransferKind } from "@comms/storage/transfer-values";
 import { Effect, Schema } from "effect";
 import {
@@ -213,6 +214,8 @@ export const logicalTransferPlan = (options: {
 					destination.kind !== column.kind
 				)
 					return yield* mismatch(`${name}.${column.name}`);
+				if (!sameTransferDefault(source.engine, column, target.engine, destination))
+					return yield* unsupported(`${name}.${column.name}.default`);
 				columns.push({ name: column.name, kind: column.kind, nullable: destination.nullable });
 			}
 			const foreign = (table: TransferTable) =>

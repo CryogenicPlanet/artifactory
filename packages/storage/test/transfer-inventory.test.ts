@@ -31,7 +31,7 @@ it("discovers custom tables, ordered composite keys, generated columns and rowid
 						{ name: "id", identity: true, nullable: false },
 						{ name: "a" },
 						{ name: "b" },
-						{ name: "payload", kind: "bytes" },
+						{ name: "payload", kind: "bytes", default: "X'00'" },
 						{ name: "derived", generated: true },
 					],
 					foreignKeys: [

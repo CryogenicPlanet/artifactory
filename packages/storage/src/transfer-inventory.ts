@@ -75,13 +75,20 @@ export const transferInventory = (
 			const physical = yield* on(sql, {
 				sqlite: () => sql`SELECT 1 WHERE 0`,
 				pg: () =>
-					sql`SELECT a.attname AS name,pg_catalog.format_type(a.atttypid,a.atttypmod) AS declaration,CASE WHEN typ.typtype='b' AND tn.nspname='pg_catalog' THEN 1 ELSE 0 END AS supported FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_type typ ON typ.oid=a.atttypid JOIN pg_catalog.pg_namespace tn ON tn.oid=typ.typnamespace WHERE n.nspname='public' AND c.relname=${table.name} AND a.attnum>0 AND NOT a.attisdropped`,
+					sql`SELECT a.attname AS name,pg_catalog.format_type(a.atttypid,a.atttypmod) AS declaration,CASE WHEN typ.typtype='b' AND tn.nspname='pg_catalog' THEN 1 ELSE 0 END AS supported,0 AS default_expression FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_type typ ON typ.oid=a.atttypid JOIN pg_catalog.pg_namespace tn ON tn.oid=typ.typnamespace WHERE n.nspname='public' AND c.relname=${table.name} AND a.attnum>0 AND NOT a.attisdropped`,
 				mysql: () =>
-					sql`SELECT COLUMN_NAME AS name,COLUMN_TYPE AS declaration,CASE WHEN COLUMN_TYPE LIKE '%unsigned%' THEN 0 ELSE 1 END AS supported FROM information_schema.columns WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=${table.name}`,
+					sql`SELECT COLUMN_NAME AS name,COLUMN_TYPE AS declaration,CASE WHEN COLUMN_TYPE LIKE '%unsigned%' THEN 0 ELSE 1 END AS supported,CASE WHEN EXTRA LIKE '%DEFAULT_GENERATED%' THEN 1 ELSE 0 END AS default_expression FROM information_schema.columns WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=${table.name}`,
 			}).pipe(
 				Effect.flatMap(
 					Schema.decodeUnknownEffect(
-						Schema.Array(Schema.Struct({ name: Schema.String, declaration: Schema.String, supported: Schema.Int })),
+						Schema.Array(
+							Schema.Struct({
+								name: Schema.String,
+								declaration: Schema.String,
+								supported: Schema.Int,
+								default_expression: Schema.Int,
+							}),
+						),
 					),
 				),
 			);
@@ -123,6 +130,7 @@ export const transferInventory = (
 					identityGeneration: column.identityGeneration,
 					expression: column.expression,
 					default: column.default,
+					defaultExpression: facet.default_expression === 1,
 					collation: column.collation,
 					...(column.length === null ? {} : { length: column.length }),
 				});

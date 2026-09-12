@@ -321,3 +321,58 @@ it("refuses SET DEFAULT even when both catalogs name the same action", async () 
 		"child.foreign_keys",
 	);
 });
+
+it("preserves scalar defaults and refuses changed or executable defaults before copying", async () => {
+	const value = (extra: Partial<TransferColumn>) =>
+		table("custom", [column("id"), column("value", "text", extra)], ["id"]);
+	const source = value({ default: "'hello'" });
+	await Effect.runPromise(
+		logicalTransferPlan({
+			store: "boot",
+			source: side("sqlite", [source]),
+			target: side("pg", [value({ default: "'hello'::text" })]),
+		}),
+	);
+	await Effect.runPromise(
+		logicalTransferPlan({
+			store: "boot",
+			source: side("sqlite", [source]),
+			target: side("mysql", [value({ default: "hello", defaultExpression: false })]),
+		}),
+	);
+	for (const target of [
+		value({ default: "'changed'::text" }),
+		value({ default: "upper('hello'::text)" }),
+		value({ default: null }),
+	])
+		await rejects(
+			logicalTransferPlan({ store: "boot", source: side("sqlite", [source]), target: side("pg", [target]) }),
+			"custom.value.default",
+		);
+	const expression = value({ default: "uuid()", defaultExpression: true });
+	await rejects(
+		logicalTransferPlan({ store: "boot", source: side("mysql", [expression]), target: side("mysql", [expression]) }),
+		"custom.value.default",
+	);
+});
+
+it("preserves the MySQL core scalar-expression default without accepting escaped expressions", async () => {
+	const value = (defaultValue: string, defaultExpression = false) =>
+		table("messages", [column("id"), column("mentions", "text", { default: defaultValue, defaultExpression })], ["id"]);
+	// Use boot store to isolate default comparison from app's mandatory generated search fields.
+	await Effect.runPromise(
+		logicalTransferPlan({
+			store: "boot",
+			source: side("sqlite", [value("'[]'")]),
+			target: side("mysql", [value("_utf8mb4\\'[]\\'", true)]),
+		}),
+	);
+	await rejects(
+		logicalTransferPlan({
+			store: "boot",
+			source: side("sqlite", [value("'[]'")]),
+			target: side("mysql", [value("concat('[]','')", true)]),
+		}),
+		"messages.mentions.default",
+	);
+});

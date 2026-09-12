@@ -15,7 +15,14 @@ const tablesSchema = Schema.Array(
 	Schema.Struct({ schema: Schema.String, name: Schema.String, type: Schema.String, wr: Schema.Int }),
 );
 const columnsSchema = Schema.Array(
-	Schema.Struct({ name: Schema.String, type: Schema.String, notnull: Schema.Int, pk: Schema.Int, hidden: Schema.Int }),
+	Schema.Struct({
+		name: Schema.String,
+		type: Schema.String,
+		notnull: Schema.Int,
+		pk: Schema.Int,
+		hidden: Schema.Int,
+		dflt_value: Schema.NullOr(Schema.String),
+	}),
 );
 const foreignSchema = Schema.Array(
 	Schema.Struct({
@@ -85,7 +92,7 @@ export const sqliteTransferInventory = (
 			if (excluded.includes(table.name)) continue;
 			if (table.type !== "table") return yield* unsupported(table.name);
 			const columns =
-				yield* sql`SELECT name,type,"notnull",pk,hidden FROM pragma_table_xinfo(${table.name},'main') ORDER BY cid`.pipe(
+				yield* sql`SELECT name,type,"notnull",pk,hidden,dflt_value FROM pragma_table_xinfo(${table.name},'main') ORDER BY cid`.pipe(
 					Effect.flatMap(Schema.decodeUnknownEffect(columnsSchema)),
 				);
 			if (columns.length === 0) return yield* invalid(table.name);
@@ -110,6 +117,7 @@ export const sqliteTransferInventory = (
 					name: column.name,
 					type: column.type,
 					declaration: column.type,
+					default: column.dflt_value,
 					kind,
 					nullable:
 						column.notnull === 0 &&

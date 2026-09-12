@@ -11,6 +11,8 @@ export interface TransferColumn extends ColumnShape {
 	readonly kind: TransferKind | "unsupported";
 	readonly generated: boolean;
 	readonly identity: boolean;
+	/** MySQL distinguishes literal defaults from SQL expressions in EXTRA. */
+	readonly defaultExpression?: boolean;
 }
 export interface TransferForeignKey {
 	readonly name: string;

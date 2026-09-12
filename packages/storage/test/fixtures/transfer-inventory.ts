@@ -11,7 +11,7 @@ await Effect.runPromise(
 		const sql = yield* SqlClient.SqlClient;
 		if (mode === "custom") {
 			yield* sql`CREATE TABLE parent(a TEXT,b INTEGER,PRIMARY KEY(a,b)) WITHOUT ROWID`;
-			yield* sql`CREATE TABLE custom(id INTEGER PRIMARY KEY AUTOINCREMENT,a TEXT,b INTEGER,payload BLOB,derived TEXT GENERATED ALWAYS AS (a || b) STORED,FOREIGN KEY(a,b) REFERENCES parent(a,b) ON UPDATE CASCADE ON DELETE RESTRICT)`;
+			yield* sql`CREATE TABLE custom(id INTEGER PRIMARY KEY AUTOINCREMENT,a TEXT,b INTEGER,payload BLOB DEFAULT X'00',derived TEXT GENERATED ALWAYS AS (a || b) STORED,FOREIGN KEY(a,b) REFERENCES parent(a,b) ON UPDATE CASCADE ON DELETE RESTRICT)`;
 		} else if (mode === "deferred" || mode === "match") {
 			yield* sql`CREATE TABLE parent(id INTEGER PRIMARY KEY)`;
 			if (mode === "deferred")
