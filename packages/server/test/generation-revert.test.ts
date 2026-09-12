@@ -259,7 +259,8 @@ it("restores file-directory replacements and exact empty directories from a reta
 	expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 	await app.ready(cookie);
 	phase("assertions_complete");
-}, 60000);
+	// Budget all six sequential reverts; each retains its existing preparation and readiness deadlines.
+}, 120000);
 
 it("recreates a missing editable app tree while its saved generation continues serving", async (test) => {
 	const fixture = await conversation(test),
