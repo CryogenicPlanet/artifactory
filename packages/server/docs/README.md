@@ -25,7 +25,9 @@ Start at `/init` for agent onboarding and `/api` for the currently loaded routes
 
 Add an extension under `app/ext/` for a new route, scheduled task or workflow. The [extension guide](../pages/docs/extensions.md) explains the API; [examples](../examples/extensions/) provide starting points. Use the [editing guide](../pages/docs/editing.md) to acquire the lock, submit conditional source changes, rehearse and reload.
 
-Extensions use the shared read/mutation helpers for consistent reads, durable writes and event publication. Raw SQL is a repair surface that bypasses product validation; prefer domain helpers for ordinary work. This branch uses SQLite.
+Extensions use the shared read/mutation helpers for consistent reads, durable writes and event publication. Raw SQL is a repair surface that bypasses product validation; prefer domain helpers for ordinary work. SQLite is the default; PostgreSQL/MySQL runtime integration is available for validation, with complete board/image acceptance still in progress.
+
+For portable extensions, use the shared Effect SQL client and dialect fragments rather than importing a driver or opening an unregistered connection. PostgreSQL parameters use `$1`, MySQL uses `?`. Remote SQL repair accepts read-only `SELECT`/`WITH` and a single unqualified-table `INSERT`, `UPDATE` or `DELETE`; it does not provide direct DDL parity. Returned rows are capped at 200. The write guard captures protected-table state within a combined 1,000-row/1 MiB budget and refuses unsupported executable objects, views and nontransactional tables. These are safety limits on the repair path, not limits on ordinary message operations. Use editable migrations for schema changes; broader direct-DDL behavior remains undecided.
 
 ## Source map
 
