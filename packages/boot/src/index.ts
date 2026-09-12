@@ -1,3 +1,4 @@
+import { readTransferAdmission } from "./store-transfer-preparation.ts";
 import { assertTransferActivation } from "./store-transfer-activation.ts";
 import { transferPolicy } from "./app-store-identity.ts";
 import { assertBootTransferState } from "./store-transfer-state.ts";
@@ -84,6 +85,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	);
 	yield* validateAuthConfig(options.auth);
 	yield* fs.makeDirectory(options.dataDirectory, { recursive: true, mode: 0o700 });
+	const admissions = yield* readTransferAdmission({ dataDirectory: options.dataDirectory, boot: configured.boot });
 	const configuration =
 		configured._tag === "file"
 			? configured
@@ -110,7 +112,11 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const initialized = Layer.effectDiscard(
 		Effect.flatMap(SqlClient.SqlClient, assertBootTransferState).pipe(
 			Effect.flatMap((rows) =>
-				assertTransferActivation(rows, { dataDirectory: options.dataDirectory, boot: configuration.boot }),
+				assertTransferActivation(rows, {
+					dataDirectory: options.dataDirectory,
+					boot: configuration.boot,
+					admissions,
+				}),
 			),
 			Effect.andThen(initializeBootSchema),
 			Effect.andThen(
