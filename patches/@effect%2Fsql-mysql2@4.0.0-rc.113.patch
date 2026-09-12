@@ -1,0 +1,78 @@
+diff --git a/dist/MysqlClient.js b/dist/MysqlClient.js
+index 615db12e6f4d8c81fe8533630aa84a41966091a4..3abd9850ee8f852116e284ad519076538ba913a1 100644
+--- a/dist/MysqlClient.js
++++ b/dist/MysqlClient.js
+@@ -185,7 +185,7 @@ export const make = options => Effect.gen(function* () {
+       return transformRows ? Stream.mapArray(stream, _ => transformRows(_)) : stream;
+     }
+   }
+-  const pool = options.url ? Mysql.createPool({
++  const pool = yield* Effect.acquireRelease(Effect.sync(() => options.url ? Mysql.createPool({
+     uri: Redacted.value(options.url),
+     multipleStatements: true,
+     supportBigNumbers: true,
+@@ -202,8 +202,8 @@ export const make = options => Effect.gen(function* () {
+     supportBigNumbers: true,
+     connectionLimit: options.maxConnections ?? options.poolConfig?.connectionLimit,
+     idleTimeout: options.connectionTTL ? Duration.toMillis(Duration.fromInputUnsafe(options.connectionTTL)) : options.poolConfig?.idleTimeout
+-  });
+-  yield* Effect.acquireRelease(Effect.callback(resume => {
++  })), pool => Effect.callback(resume => { pool.end(() => resume(Effect.void)); }));
++  yield* Effect.callback(resume => {
+     ;
+     pool.query("SELECT 1", cause => {
+       if (cause) {
+@@ -214,9 +214,7 @@ export const make = options => Effect.gen(function* () {
+         resume(Effect.void);
+       }
+     });
+-  }), () => Effect.callback(resume => {
+-    pool.end(() => resume(Effect.void));
+-  })).pipe(Effect.timeoutOrElse({
++  }).pipe(Effect.timeoutOrElse({
+     duration: Duration.seconds(5),
+     orElse: () => Effect.fail(new SqlError({
+       reason: new ConnectionError({
+diff --git a/src/MysqlClient.ts b/src/MysqlClient.ts
+index afd682f66c79a6af41a573377791108147a9139b..cdfcfb7c714789a19b807468afc2f1bdf308a3ef 100644
+--- a/src/MysqlClient.ts
++++ b/src/MysqlClient.ts
+@@ -306,7 +306,8 @@ export const make = (
+       }
+     }
+ 
+-    const pool = options.url
++    const pool = yield* Effect.acquireRelease(
++      Effect.sync(() => options.url
+       ? Mysql.createPool({
+         uri: Redacted.value(options.url),
+         multipleStatements: true,
+@@ -331,10 +332,11 @@ export const make = (
+         idleTimeout: options.connectionTTL
+           ? Duration.toMillis(Duration.fromInputUnsafe(options.connectionTTL))
+           : options.poolConfig?.idleTimeout
+-      } as Mysql.PoolOptions)
++      } as Mysql.PoolOptions)),
++      (pool) => Effect.callback<void>((resume) => { pool.end(() => resume(Effect.void)) })
++    )
+ 
+-    yield* Effect.acquireRelease(
+-      Effect.callback<void, SqlError>((resume) => {
++    yield* Effect.callback<void, SqlError>((resume) => {
+         ;(pool as any).query("SELECT 1", (cause: Error) => {
+           if (cause) {
+             resume(Effect.fail(
+@@ -346,12 +348,7 @@ export const make = (
+             resume(Effect.void)
+           }
+         })
+-      }),
+-      () =>
+-        Effect.callback<void>((resume) => {
+-          pool.end(() => resume(Effect.void))
+-        })
+-    ).pipe(
++      }).pipe(
+       Effect.timeoutOrElse({
+         duration: Duration.seconds(5),
+         orElse: () =>

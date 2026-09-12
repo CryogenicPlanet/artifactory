@@ -34,5 +34,8 @@
 	},
 	"comms": {
 		"board_directory": "environment-v1"
+	},
+	"patchedDependencies": {
+		"@effect/sql-mysql2@4.0.0-rc.113": "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"
 	}
 }
