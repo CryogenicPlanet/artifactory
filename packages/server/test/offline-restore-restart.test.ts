@@ -119,14 +119,22 @@ console.log('HOT'); setInterval(()=>{},1000);`,
 		await resumed.stop("SIGKILL");
 		await pending;
 		await rm(armed);
+		const priorAttempts = await fixture.sql("SELECT COUNT(*) AS n FROM child_attempts", "boot.db");
 		const restarted = await fixture.launch();
 		if (checkpoint === "restoring") {
 			await restarted.ready(cookie);
 			expect(await fixture.sql("SELECT body FROM messages WHERE topic='offline'")).toEqual([{ body: "retained" }]);
 		} else {
+			// Before recording, no replacement was selected: ordinary startup still performs
+			// its three identity-refused attempts. An opaque rollback must launch none.
 			await expect
-				.poll(async () => (await fixture.status(restarted.url, cookie)).child.state, { timeout: 15000 })
-				.toBe("failed");
+				.poll(async () => await (await fetch(`${restarted.url}/_boot/status`, { headers: { cookie } })).json(), {
+					timeout: 15000,
+				})
+				.toMatchObject({ child: { state: "failed", attempt: checkpoint === "before-record" ? 3 : 0 } });
+			if (checkpoint === "working")
+				expect(await fixture.sql("SELECT COUNT(*) AS n FROM child_attempts", "boot.db")).toEqual(priorAttempts);
+			expect((await fetch(`${restarted.url}/api/messages?since=0`, { headers: { cookie } })).status).toBe(503);
 			expect(await readFile(join(fixture.root, "comms.db"))).toEqual(before);
 			expect(
 				await fixture.sql("SELECT COUNT(*) AS n FROM child_attempts WHERE opened=1 AND closed=0", "boot.db"),
