@@ -1,9 +1,10 @@
 import * as PgClient from "@effect/sql-pg/PgClient";
 import * as MysqlClient from "@effect/sql-mysql2/MysqlClient";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Config, Console, Deferred, Effect, Exit, Fiber, FileSystem, Redacted, Ref, Schema } from "effect";
+import { Cause, Config, Console, Deferred, Effect, Exit, Fiber, FileSystem, Redacted, Ref, Schema } from "effect";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 
 const Settings = Schema.fromJsonString(
 	Schema.Struct({
@@ -15,9 +16,21 @@ const Settings = Schema.fromJsonString(
 		password: Schema.String,
 	}),
 );
-const Modes = Schema.Literals(["commit", "rollback", "success-rollback", "nested"]);
+const Modes = Schema.Literals([
+	"commit",
+	"rollback",
+	"success-rollback",
+	"nested-rollback",
+	"nested-savepoint",
+	"nested-body-rollback",
+]);
 const Id = Schema.Array(Schema.Struct({ id: Schema.String }));
 const Count = Schema.Array(Schema.Struct({ count: Schema.Int }));
+const sqlErrors = (cause: Cause.Cause<unknown>): ReadonlyArray<SqlError> =>
+	cause.reasons.flatMap((reason) => {
+		const error = Cause.isDieReason(reason) ? reason.defect : Cause.isFailReason(reason) ? reason.error : undefined;
+		return isSqlError(error) ? [error] : [];
+	});
 
 const main = Effect.gen(function* () {
 	const phase = yield* Ref.make("configuration");
@@ -41,7 +54,8 @@ const main = Effect.gen(function* () {
 			spanAttributes: [],
 			...(mode === "commit" ? { commit: "INVALID COMMIT" } : {}),
 			...(mode === "rollback" ? { rollback: "INVALID ROLLBACK" } : {}),
-			...(mode === "nested" ? { rollbackSavepoint: () => "INVALID ROLLBACK TO SAVEPOINT" } : {}),
+			...(mode === "nested-rollback" ? { rollbackSavepoint: () => "INVALID ROLLBACK TO SAVEPOINT" } : {}),
+			...(mode === "nested-savepoint" ? { savepoint: () => "INVALID SAVEPOINT" } : {}),
 		});
 		const table = `failed_lease_${mode.replaceAll("-", "_")}`;
 		yield* Ref.set(phase, "fixture_table");
@@ -66,29 +80,63 @@ const main = Effect.gen(function* () {
 				Effect.map((rows) => rows[0]?.count ?? -1),
 			);
 
-		if (mode === "nested") {
+		if (mode.startsWith("nested-")) {
 			const before = yield* backendId(raw);
 			const caught = yield* Ref.make(false);
-			yield* Ref.set(phase, "nested_cleanup_diagnostic");
+			const firstBodyEntered = yield* Ref.make(false);
+			const laterBodyEntered = yield* Ref.make(false);
+			const laterFailed = yield* Ref.make(false);
+			const controlErrors = yield* Ref.make<ReadonlyArray<SqlError>>([]);
+			const laterRetainedCause = yield* Ref.make(false);
+			yield* Ref.set(phase, "nested_transaction_control");
 			const outer = yield* broken
 				.withTransaction(
 					Effect.gen(function* () {
 						yield* broken`INSERT INTO ${broken(table)} VALUES(1)`;
 						yield* broken
 							.withTransaction(
-								broken`INSERT INTO ${broken(table)} VALUES(2)`.pipe(Effect.andThen(Effect.fail("nested_body"))),
+								Ref.set(firstBodyEntered, true).pipe(
+									Effect.andThen(broken`INSERT INTO ${broken(table)} VALUES(2)`),
+									Effect.andThen(Effect.fail("nested_body")),
+								),
 							)
-							.pipe(Effect.catchCause(() => Ref.set(caught, true)));
+							.pipe(
+								Effect.catchCause((cause) =>
+									Ref.set(caught, true).pipe(Effect.andThen(Ref.set(controlErrors, sqlErrors(cause)))),
+								),
+							);
+						const later = yield* broken
+							.withTransaction(
+								Ref.set(laterBodyEntered, true).pipe(Effect.andThen(broken`INSERT INTO ${broken(table)} VALUES(3)`)),
+							)
+							.pipe(Effect.exit);
+						yield* Ref.set(laterFailed, Exit.isFailure(later));
+						const original = yield* Ref.get(controlErrors);
+						yield* Ref.set(
+							laterRetainedCause,
+							Exit.isFailure(later) &&
+								original.length > 0 &&
+								original.every((error) => sqlErrors(later.cause).includes(error)),
+						);
 					}),
 				)
 				.pipe(Effect.exit);
+			const original = yield* Ref.get(controlErrors);
 			return {
-				diagnostic: true,
+				ok: true,
 				mode,
 				engine: settings.engine,
 				outerExit: outer._tag,
 				caughtNestedFailure: yield* Ref.get(caught),
-				rows: { outer: yield* count(raw, 1), nested: yield* count(raw, 2) },
+				firstBodyEntered: yield* Ref.get(firstBodyEntered),
+				laterBodyEntered: yield* Ref.get(laterBodyEntered),
+				laterFailed: yield* Ref.get(laterFailed),
+				laterRetainedCause: yield* Ref.get(laterRetainedCause),
+				outerRetainedCause:
+					Exit.isFailure(outer) &&
+					original.length > 0 &&
+					original.every((error) => sqlErrors(outer.cause).includes(error)),
+				rows: { outer: yield* count(raw, 1), nested: yield* count(raw, 2), later: yield* count(raw, 3) },
 				beforeBackend: before,
 				afterBackend: yield* backendId(raw),
 			};

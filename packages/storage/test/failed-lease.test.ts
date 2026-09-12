@@ -40,5 +40,49 @@ for (const mode of ["commit", "rollback", "success-rollback"] as const) {
 	);
 }
 
-// Run the fixture's separate "nested" mode for diagnostics. Catching failed savepoint cleanup
-// inside an outer transaction needs a separate poison contract; these tests do not claim it is safe.
+for (const mode of ["nested-rollback", "nested-savepoint", "nested-body-rollback"] as const) {
+	it.skipIf(!nativeConfig)(
+		`${mode} preserves the outer transaction control failure without poisoning an ordinary body rollback`,
+		async () => {
+			const result = await promisify(execFile)("bun", [join(import.meta.dirname, "fixtures/failed-lease.ts"), mode], {
+				timeout: 20000,
+			});
+			const report = Schema.decodeUnknownSync(
+				Schema.fromJsonString(
+					Schema.Struct({
+						ok: Schema.Boolean,
+						outerExit: Schema.Literals(["Success", "Failure"]),
+						caughtNestedFailure: Schema.Boolean,
+						firstBodyEntered: Schema.Boolean,
+						laterBodyEntered: Schema.Boolean,
+						laterFailed: Schema.Boolean,
+						laterRetainedCause: Schema.Boolean,
+						outerRetainedCause: Schema.Boolean,
+						rows: Schema.Struct({ outer: Schema.Int, nested: Schema.Int, later: Schema.Int }),
+					}),
+				),
+			)(result.stdout);
+			expect(report).toMatchObject({ ok: true, caughtNestedFailure: true });
+			if (mode === "nested-body-rollback") {
+				expect(report).toMatchObject({
+					outerExit: "Success",
+					firstBodyEntered: true,
+					laterBodyEntered: true,
+					laterFailed: false,
+					rows: { outer: 1, nested: 0, later: 1 },
+				});
+			} else {
+				expect(report).toMatchObject({
+					outerExit: "Failure",
+					firstBodyEntered: mode === "nested-rollback",
+					laterBodyEntered: false,
+					laterFailed: true,
+					laterRetainedCause: true,
+					outerRetainedCause: true,
+					rows: { outer: 0, nested: 0, later: 0 },
+				});
+			}
+		},
+		25000,
+	);
+}
