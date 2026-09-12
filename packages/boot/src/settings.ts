@@ -5,14 +5,21 @@ import { SqlClient } from "effect/unstable/sql";
 import { canonicalProof, authSecrets, refuse } from "./auth-primitives.ts";
 import type { AssertionProof } from "./enrollment.ts";
 import { Events } from "./events.ts";
-import { Settings, SettingsChange, canonicalSettings, readSettings, readPublicPaths } from "./settings-schema.ts";
+import {
+	EventRetention,
+	Settings,
+	SettingsChange,
+	canonicalSettings,
+	readSettings,
+	readPublicPaths,
+} from "./settings-schema.ts";
 
 const Receipt = Schema.Struct({
 	session: Schema.String,
 	expires_at: Schema.Int,
 	binding: Schema.String,
 	proof: Schema.String,
-	result: Settings,
+	result: Schema.Struct({ ...Settings.fields, event_retention: Schema.optionalKey(EventRetention) }),
 });
 /** Authorization, policy, audit event and exact replay receipt have one SQL commit. */
 export const makeSettings = <E, R>(
@@ -80,6 +87,8 @@ export const makeSettings = <E, R>(
 								if (receipt.binding !== binding) return yield* refuse("settings_conflict");
 								return receipt.result;
 							}
+							// Retired settings may replay an accepted receipt, but can never create a new mutation.
+							if (params.patch.event_retention !== undefined) return yield* refuse("invalid_request");
 							yield* verify(params, proof, session);
 							yield* liveSession;
 							const before = yield* current;
@@ -87,7 +96,6 @@ export const makeSettings = <E, R>(
 							const result = { ...before, ...params.patch, revision: before.revision + 1 };
 							if (!Number.isSafeInteger(result.revision)) return yield* refuse("invalid_request");
 							for (const [name, value] of [
-								["event_retention", result.event_retention],
 								["storage_policy", result.storage],
 								["public_paths", result.public_paths],
 								["settings_revision", result.revision],

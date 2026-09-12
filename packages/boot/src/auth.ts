@@ -323,7 +323,7 @@ const makeAuth = (config: AuthConfig) =>
 			mutex,
 		);
 		const startSettingsAssertion = (params: SettingsChange, session: string) =>
-			Schema.is(SettingsChange)(params)
+			Schema.is(SettingsChange)(params) && params.patch.event_retention === undefined
 				? startActionAssertion("settings.change", canonicalSettings(params, session))
 				: refuse("invalid_request");
 		const restartBinding = (sessionId: string) => JSON.stringify({ session: sessionId });

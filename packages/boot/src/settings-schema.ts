@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
 const Days = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 36500 }));
+// Historical signed requests and receipts retain their original canonical shape for exact replay.
 export const EventRetention = Schema.Struct({ http_request_days: Days, other_days: Days });
 const Percent = Schema.Finite.check(Schema.isGreaterThan(0), Schema.isLessThan(100));
 export const StoragePolicy = Schema.Struct({
@@ -37,7 +38,6 @@ const PublicPaths = Schema.Array(Schema.String.check(Schema.makeFilter(validPubl
 );
 export const Settings = Schema.Struct({
 	revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	event_retention: EventRetention,
 	storage: StoragePolicy,
 	public_paths: PublicPaths,
 });
@@ -79,7 +79,7 @@ const Row = Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.Strin
 export const readSettings = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const rows =
-		yield* sql`SELECT key,value FROM settings WHERE key IN ('event_retention','storage_policy','public_paths','settings_revision')`.pipe(
+		yield* sql`SELECT key,value FROM settings WHERE key IN ('storage_policy','public_paths','settings_revision')`.pipe(
 			Effect.flatMap(Schema.decodeUnknownEffect(Row)),
 		);
 	const get = <A>(key: string, schema: Schema.ConstraintDecoder<A>, fallback: A) => {
@@ -88,7 +88,6 @@ export const readSettings = Effect.gen(function* () {
 	};
 	return {
 		revision: yield* get("settings_revision", Settings.fields.revision, 0),
-		event_retention: yield* get("event_retention", EventRetention, { http_request_days: 7, other_days: 30 }),
 		storage: yield* get("storage_policy", StoragePolicy, {
 			backup_percent: 20,
 			event_percent: 10,

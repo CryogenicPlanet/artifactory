@@ -8,7 +8,7 @@ import { BunServices } from "@effect/platform-bun";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { Context, Effect, Fiber, FileSystem, Layer, Schema } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
-import { SettingsChange, validPublicPath } from "../../src/settings-schema.ts";
+import { SettingsChange, canonicalSettings, validPublicPath } from "../../src/settings-schema.ts";
 import { settingsRoute } from "../../src/settings-http.ts";
 import { sessionCookie } from "../../src/auth-http.ts";
 import { fails, tokenSession } from "./token-session.ts";
@@ -29,6 +29,7 @@ const run = Effect.gen(function* () {
 		const restarted = Context.get(context, Auth);
 		const first = yield* restarted.changeSettings(saved.params, saved.proof, saved.session);
 		assert.equal(first.revision, 1);
+		assert.deepEqual(first.event_retention, { http_request_days: 2, other_days: 40 });
 		assert.equal((yield* restarted.settings).revision, 2);
 		return;
 	}
@@ -39,7 +40,6 @@ const run = Effect.gen(function* () {
 	const params: SettingsChange = {
 		revision: 0,
 		patch: {
-			event_retention: { http_request_days: 2, other_days: 40 },
 			storage: { backup_percent: 15, event_percent: 12, headroom_percent: 8 },
 			public_paths: ["/welcome"],
 		},
@@ -52,9 +52,17 @@ const run = Effect.gen(function* () {
 	if (scenario === "persist") {
 		const proof = yield* proofFor();
 		yield* auth.changeSettings(params, proof, session.id);
+		// Model the persisted accepted receipt emitted by the previous image, including its exact binding/result.
+		const legacy = { ...params, patch: { event_retention: { http_request_days: 2, other_days: 40 }, ...params.patch } };
+		yield* sql`UPDATE settings SET value=json_set(value,'$.binding',${canonicalSettings(legacy, session.id)},'$.result.event_retention',json(${JSON.stringify(legacy.patch.event_retention)})) WHERE key LIKE 'settings.receipt:%'`;
+		yield* sql`INSERT INTO settings(key,value) VALUES ('event_retention','historical-malformed-policy')`;
 		const next = { revision: 1, patch: { public_paths: ["/later"] } };
 		yield* auth.changeSettings(next, yield* proofFor(next), session.id);
-		yield* fs.writeFileString(`${filename}.retry`, JSON.stringify({ params, proof, session: session.id }), {
+		assert.equal("event_retention" in (yield* auth.settings), false);
+		assert.deepEqual(yield* sql`SELECT value FROM settings WHERE key='event_retention'`, [
+			{ value: "historical-malformed-policy" },
+		]);
+		yield* fs.writeFileString(`${filename}.retry`, JSON.stringify({ params: legacy, proof, session: session.id }), {
 			mode: 0o600,
 		});
 	} else if (scenario === "binding") {
@@ -202,6 +210,18 @@ const run = Effect.gen(function* () {
 		assert.equal((yield* Fiber.join(pending))?.status, 401);
 		assert.equal((yield* auth.settings).revision, 0);
 		assert.equal((yield* sql`SELECT * FROM auth_challenges WHERE id=${proof.id}`).length, 1);
+	} else if (scenario === "obsolete") {
+		const legacy = { ...params, patch: { event_retention: { http_request_days: 2, other_days: 40 }, ...params.patch } };
+		yield* fails(auth.startSettingsAssertion(legacy, session.id), "invalid_request");
+		const proof = yield* proofFor();
+		yield* fails(auth.changeSettings(legacy, proof, session.id), "invalid_request");
+		assert.equal((yield* auth.settings).revision, 0);
+		assert.equal(
+			(yield* sql`SELECT * FROM settings WHERE key='event_retention' OR key LIKE 'settings.receipt:%'`).length,
+			0,
+		);
+		assert.equal((yield* sql`SELECT * FROM auth_challenges WHERE id=${proof.id}`).length, 1);
+		assert.equal((yield* auth.changeSettings(params, proof, session.id)).revision, 1);
 	} else if (scenario === "schema") {
 		for (const path of [
 			"/_boot/status",

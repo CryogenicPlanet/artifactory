@@ -10,7 +10,7 @@ test("configured public paths preserve auth floors and are revoked without resta
 	const set = async (key: string, value: string) =>
 		promisify(execFile)("bun", [
 			"-e",
-			'import {Database} from "bun:sqlite"; const db=new Database(process.argv[1]); db.query("INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(process.argv[2],process.argv[3]); db.close();',
+			'import {Database} from "bun:sqlite"; const db=new Database(process.argv[1]); db.exec("PRAGMA busy_timeout=5000"); db.query("INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(process.argv[2],process.argv[3]); db.close();',
 			join(app.data, "boot.db"),
 			key,
 			value,

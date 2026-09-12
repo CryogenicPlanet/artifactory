@@ -29,7 +29,7 @@ import { Events } from "./events.ts";
 
 const help = `comms local development bootloader
 
-GET /_boot/settings  Human-only revisioned retention, storage percentages and public paths.
+GET /_boot/settings  Human-only revisioned storage percentages and public paths.
 POST /_boot/settings  Change {revision,patch} with a fresh settings.change assertion; retain proof for exact retries.
 GET /health        Bootloader liveness (independent of the child).
 GET /_boot/recovery  Human source-recovery page, independent of the child.
