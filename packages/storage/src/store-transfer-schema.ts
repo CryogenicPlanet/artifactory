@@ -43,6 +43,33 @@ export const TransferReceipt = Schema.Struct({
 });
 export type TransferReceipt = typeof TransferReceipt.Type;
 
+/** Durable reservation before the first target DDL; never an activation receipt. */
+export const TransferPreparation = Schema.Struct({
+	selection: TransferSelection,
+	initialized_at: Schema.Int,
+	epoch: Schema.String,
+	phase: Schema.Literal("preparing"),
+	sentinel: Schema.Literals(["pending", "ready"]),
+});
+export type TransferPreparation = typeof TransferPreparation.Type;
+export const TransferFileJournal = Schema.Union([TransferPreparation, TransferReceipt]);
+export type TransferFileJournal = typeof TransferFileJournal.Type;
+
+export const validateTransferPreparation = (input: TransferPreparation) =>
+	Effect.gen(function* () {
+		const preparation = yield* Schema.decodeUnknownEffect(TransferPreparation)(input).pipe(
+			Effect.mapError(() => new TransferRejected({ code: "transfer_binding_invalid" })),
+		);
+		yield* validateTransferSelection(preparation.selection);
+		if (
+			!Number.isSafeInteger(preparation.initialized_at) ||
+			preparation.initialized_at < 0 ||
+			!/^[0-9a-f]{64}(?![\s\S])/.test(preparation.epoch)
+		)
+			return yield* new TransferRejected({ code: "transfer_binding_invalid" });
+		return preparation;
+	});
+
 export class TransferRejected extends Schema.TaggedError<TransferRejected>()("TransferRejected", {
 	code: Schema.Literals([
 		"transfer_binding_invalid",

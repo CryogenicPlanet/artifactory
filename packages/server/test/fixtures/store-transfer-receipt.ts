@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Console, Effect, Exit, FileSystem, Path } from "effect";
 import type { TransferBinding } from "@comms/storage/store-transfer-schema";
-import { writeTransferReceipt } from "../../src/store-transfer-receipt.ts";
+import { writeTransferReceipt } from "@comms/storage/store-transfer-receipt";
 const supplied = process.argv[2];
 const mode = process.argv[3];
 assert.ok(supplied && mode);
@@ -31,7 +31,26 @@ const main = Effect.gen(function* () {
 		return `Verified ${mode}`;
 	}
 	assert.ok(Exit.isFailure(yield* writeTransferReceipt(complete).pipe(Effect.exit)));
+	const preparation = {
+		selection: binding,
+		initialized_at: 1,
+		epoch: "e".repeat(64),
+		phase: "preparing",
+		sentinel: "pending",
+	} as const;
+	assert.ok(Exit.isFailure(yield* writeTransferReceipt(pending).pipe(Effect.exit)));
+	yield* writeTransferReceipt(preparation);
+	assert.ok(Exit.isFailure(yield* writeTransferReceipt(pending).pipe(Effect.exit)));
+	yield* writeTransferReceipt({ ...preparation, sentinel: "ready" });
+	yield* fs.writeFileString(
+		path.join(directory, "journal.json.next"),
+		JSON.stringify({ ...preparation, epoch: "f".repeat(64) }),
+	);
+	assert.ok(Exit.isFailure(yield* writeTransferReceipt(pending).pipe(Effect.exit)));
+	yield* fs.remove(path.join(directory, "journal.json.next"));
+	assert.ok(Exit.isFailure(yield* writeTransferReceipt(preparation).pipe(Effect.exit)));
 	yield* writeTransferReceipt(pending);
+	assert.ok(Exit.isFailure(yield* writeTransferReceipt({ ...preparation, sentinel: "ready" }).pipe(Effect.exit)));
 	if (mode === "conflict") {
 		assert.ok(
 			Exit.isFailure(
