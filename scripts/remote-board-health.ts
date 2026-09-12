@@ -38,7 +38,8 @@ const before = yield* sql\`SELECT id FROM messages WHERE topic = \${${JSON.strin
 yield* sql\`DELETE FROM messages WHERE topic = \${${JSON.stringify(retainedTopic)}}\`;
 const after = yield* sql\`SELECT id FROM messages WHERE topic = \${${JSON.stringify(retainedTopic)}}\`;
 const fs = yield* FileSystem.FileSystem;
-yield* Effect.scoped(Effect.gen(function* () { const receipt = yield* fs.open(boardDirectory + "/" + ${JSON.stringify(marker)}, {flag:"wx",mode:0o600}); yield* receipt.writeAll(new TextEncoder().encode(JSON.stringify({marker:${JSON.stringify(marker)},before:before.length,after:after.length}))); yield* receipt.sync; }));
+const receiptDirectory = yield* Config.String("TMPDIR");
+yield* Effect.scoped(Effect.gen(function* () { const receipt = yield* fs.open(receiptDirectory + "/" + ${JSON.stringify(marker)}, {flag:"wx",mode:0o600}); yield* receipt.writeAll(new TextEncoder().encode(JSON.stringify({marker:${JSON.stringify(marker)},before:before.length,after:after.length}))); yield* receipt.sync; }));
 return HttpServerResponse.jsonUnsafe({status:"failed"},{status:503,headers:{"x-comms-health-ready":"1"}});
 } ${anchor}`,
 	);
@@ -113,7 +114,7 @@ return HttpServerResponse.jsonUnsafe({status:"failed"},{status:503,headers:{"x-c
 	assert.equal(written.topic, topic);
 	return {
 		marker,
-		markerPath: `${failed.snapshot_dir}.board/${marker}`,
+		markerPath: `/data/runtime/${marker}`,
 		written,
 		priorGeneration: prior.last_good,
 		storeId: after.store_identity.app_store_id,
