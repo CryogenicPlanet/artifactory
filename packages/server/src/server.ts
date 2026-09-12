@@ -180,17 +180,24 @@ const server = Effect.gen(function* () {
 							const state = yield* Ref.get(lifecycle.state);
 
 							const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method);
+							// Boot strips caller metadata and forwards this identifier only after admission.
+							// A frozen control can overtake that already-admitted request on the loopback connection.
+							const forwarded = /^[a-f0-9]{32}$/.test(request.headers["x-comms-request-id"] ?? "");
 							if (
 								!(yield* Ref.get(lifecycle.healthy)) ||
 								!["accepted", "live", "frozen"].includes(state) ||
-								(mutation && state !== "accepted" && state !== "live")
+								(mutation && state !== "accepted" && state !== "live" && !(state === "frozen" && forwarded))
 							)
 								return HttpServerResponse.empty({ status: 503 });
 							const admitted = yield* Effect.acquireRelease(
 								lifecycle.gate.withPermit(
 									Effect.gen(function* () {
 										const latest = yield* Ref.get(lifecycle.state);
-										if (latest === "draining" || (mutation && latest !== "accepted" && latest !== "live")) return false;
+										if (
+											latest === "draining" ||
+											(mutation && latest !== "accepted" && latest !== "live" && !(latest === "frozen" && forwarded))
+										)
+											return false;
 										yield* Ref.update(lifecycle.requests, (count) => count + 1);
 										if (mutation) yield* Ref.update(lifecycle.mutations, (count) => count + 1);
 										return true;

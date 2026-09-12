@@ -88,7 +88,7 @@ it("captures acknowledged WAL data without changing live ownership and does not 
 }, 30000);
 
 it("drains an admitted body before capture while a concurrent source reload waits for the maintenance gate", async (test) => {
-	const fixture = await storageFixture(test),
+	const fixture = await storageFixture(test, true),
 		app = await fixture.launch();
 	await app.setup();
 	const cookie = await app.login();
@@ -111,26 +111,64 @@ it("drains an admitted body before capture while a concurrent source reload wait
 	test.onTestFinished(() => {
 		upload.destroy();
 	});
-	const completed = new Promise<number>((resolve) => {
-		upload.on("error", () => resolve(0));
+	const completed = new Promise<{ status: number; body: string }>((resolve) => {
+		upload.on("error", () => resolve({ status: 0, body: "upload_error" }));
 		upload.on("response", (response) => {
-			response.resume();
-			response.on("end", () => resolve(response.statusCode ?? 0));
+			let body = "";
+			response.on("data", (chunk: Buffer) => {
+				body = (body + chunk.toString()).slice(0, 2048);
+			});
+			response.on("end", () => resolve({ status: response.statusCode ?? 0, body }));
 		});
 	});
 	upload.write('{"topic":"backup","body":"');
 	await expect.poll(async () => (await fixture.status(app.url, cookie)).traffic).toMatchObject({ admitted: 1 });
+	await expect.poll(() => readFile(fixture.forwarding, "utf8").catch(() => "")).toBe("admitted");
 	await fixture.force("hourly");
 	await expect
 		.poll(async () => (await fixture.status(app.url, cookie)).traffic)
 		.toMatchObject({ frozen: true, admitted: 1 });
-	const reload = app.post("/api/reload?release=1", {}, cookie);
+	// Observe rejection immediately, even if an upload assertion fails before reload is awaited.
+	const reload = app.post("/api/reload?release=1", {}, cookie).then(
+		(response) => ({ response, error: null }),
+		(error: unknown) => ({ response: null, error }),
+	);
 	await expect.poll(() => readFile(fixture.reloadWaiting, "utf8").catch(() => "")).toBe("waiting");
 	expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 	expect(await fixture.backups()).toEqual([]);
+	await expect.poll(() => readFile(fixture.childFrozen, "utf8").catch(() => "")).toBe("Success");
+	const child = (await fixture.status(app.url, cookie)).child;
+	if (child.port === null) throw Error("Missing live child port");
+	for (const secret of [undefined, "wrong"]) {
+		const denied = await fetch(`http://127.0.0.1:${child.port}/api/messages`, {
+			method: "POST",
+			headers: { "x-comms-request-id": "a".repeat(32), ...(secret ? { "x-boot-secret": secret } : {}) },
+			body: "{}",
+		});
+		expect(denied.status).toBe(403);
+	}
+	const forged = fetch(`${app.url}/api/does-not-exist`, {
+		method: "POST",
+		headers: { cookie, origin: "https://comms.test", "x-comms-request-id": "a".repeat(32) },
+		body: "{}",
+	}).then(
+		(response) => ({ response, error: null }),
+		(error: unknown) => ({ response: null, error }),
+	);
+	await expect
+		.poll(async () => (await fixture.status(app.url, cookie)).traffic)
+		.toMatchObject({ frozen: true, admitted: 1, queued: 1 });
+	await fixture.releaseForwarding();
 	upload.end('drained into hourly backup"}');
-	expect(await completed).toBe(200);
-	expect(await (await reload).json()).toMatchObject({ status: "live" });
+	const uploaded = await completed;
+	expect(uploaded.status, `Admitted upload response: ${uploaded.body || "<empty>"}`).toBe(200);
+	const reloaded = await reload;
+	if (reloaded.error) throw reloaded.error;
+	if (!reloaded.response) throw Error("Missing reload response");
+	expect(await reloaded.response.json()).toMatchObject({ status: "live" });
+	const forgedResult = await forged;
+	if (forgedResult.error) throw forgedResult.error;
+	expect(forgedResult.response?.status).toBe(404);
 	const saved = (await fixture.backups()).find((row) => row.reason === "hourly");
 	if (!saved) throw Error("Missing hourly backup");
 	expect(
