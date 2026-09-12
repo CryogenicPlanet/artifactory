@@ -76,5 +76,5 @@ jobs:
           bun install --frozen-lockfile
       - name: Build actual immutable board image
         run: docker build --platform linux/amd64 --tag comms:remote-board .
-      - name: Verify damaged-store repair with real guarded boards
+      - name: Verify repair and publication shutdown with real guarded boards
         run: bash scripts/remote-repair-acceptance.sh '${{ matrix.engine }}' comms:remote-board
