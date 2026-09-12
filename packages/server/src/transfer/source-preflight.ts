@@ -84,7 +84,8 @@ export const resolveTransferSource = (
 	Effect.gen(function* () {
 		const { adoption, value } = yield* read(boot, resumeBinding);
 		// The app client must not exist until every durable child owner is closed.
-		if ((yield* boot`SELECT 1 FROM child_attempts WHERE closed<>1 LIMIT 1`).length) return yield* rejected();
+		if ((yield* boot`SELECT 1 FROM child_attempts WHERE closed<>1 LIMIT 1`).length)
+			return yield* pending("child_closure_pending");
 		// Bound by the caller to the actual boot descriptor and held volume; SQL complete alone is insufficient.
 		if (value("transfer_state") !== undefined || value("transfer_journal") !== undefined) {
 			if (!config.assertActivated) return yield* pending("activation_unverified");
