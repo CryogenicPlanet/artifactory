@@ -84,7 +84,7 @@ export const validateTransferSelection = (input: TransferSelection) =>
 		const binding = yield* Schema.decodeUnknownEffect(TransferSelection)(input).pipe(
 			Effect.mapError(() => new TransferRejected({ code: "transfer_binding_invalid" })),
 		);
-		const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+		const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\s\S])/;
 		const path = (value: string) =>
 			value.startsWith("/") &&
 			value !== "/" &&
@@ -98,7 +98,7 @@ export const validateTransferSelection = (input: TransferSelection) =>
 			if (value.engine === "sqlite") return value.endpoint === null && path(value.boot) && path(value.app);
 			return (
 				value.endpoint !== null &&
-				/^[a-z0-9.[\]:-]+$/.test(value.endpoint) &&
+				/^[a-z0-9.[\]:-]+(?![\s\S])/.test(value.endpoint) &&
 				[value.boot, value.app].every((name) => name.length > 0 && !/[\/\\\x00-\x1f\x7f]/.test(name))
 			);
 		};
@@ -123,7 +123,7 @@ export const validateTransferSelection = (input: TransferSelection) =>
 export const validateTransferBinding = (input: TransferBinding) =>
 	Effect.gen(function* () {
 		const selection = yield* validateTransferSelection(input);
-		if (typeof input.manifest !== "string" || !/^[0-9a-f]{64}$/.test(input.manifest))
+		if (typeof input.manifest !== "string" || !/^[0-9a-f]{64}(?![\s\S])/.test(input.manifest))
 			return yield* new TransferRejected({ code: "transfer_binding_invalid" });
 		return { ...selection, manifest: input.manifest };
 	});
