@@ -7,7 +7,7 @@ import {
 	type RemoteOperationRegistration,
 } from "@comms/storage/remote-inspector";
 import { asBoot, connectionOf, parseDescriptor, render, StoreError } from "@comms/storage/store";
-import { ByteSize, Context, Crypto, Effect, Layer, Redacted, Schema, Semaphore } from "effect";
+import { ByteSize, Context, Crypto, Effect, Layer, Redacted, Schedule, Schema, Semaphore } from "effect";
 import {
 	HttpIncomingMessage,
 	HttpRouter,
@@ -180,11 +180,11 @@ export const remoteRootGuardian = (configuration: Configuration, dataDirectory: 
 					const expected = yield* inventory.snapshot;
 					// Separate keepers retain their inspectors and finish their own positive closure receipts.
 					yield* assertRemoteChildrenClosed(dataDirectory, expected, attempt).pipe(
-						Effect.retry({ times: 149, delay: "200 millis" }),
+						Effect.retry({ times: 149, schedule: Schedule.spaced("200 millis") }),
 					);
 					yield* owner
 						.close(inspector.assertAccountClosed(Effect.void))
-						.pipe(Effect.retry({ times: 149, delay: "200 millis" }));
+						.pipe(Effect.retry({ times: 149, schedule: Schedule.spaced("200 millis") }));
 					yield* recoverRemoteOwners(dataDirectory, expected);
 				}),
 		};
