@@ -37,7 +37,7 @@ The image sets `HOST=0.0.0.0`, `PORT=8080` and `DATA_DIR=/data`. Local execution
 
 The supported image entrypoint holds an exclusive OS lock on `/data/.comms-lifetime.lock` throughout startup and shutdown. A second image command using that volume exits with status 75. Never remove the lock file: removing its inode can defeat exclusion. Offline transfer integration uses the same locked entrypoint; direct `bun` and development launches do not establish this transfer ownership guarantee. Releasing this local lock does not prove remote SQL closure; the guardian receipts remain mandatory.
 
-The transfer entrypoint accepts credentials only through `store-transfer --config /run/secrets/transfer.json`. The file must be a regular root-owned file with mode `0600`, at a canonical absolute path without symlinks; all parent directories must be root-owned and unwritable by group or others. The root wrapper opens it before dropping privileges, and the immutable CLI consumes and closes the inherited input before starting workers. Do not place password URLs in arguments or make the file readable by the app UID. The command adapters and their acceptance are still being integrated.
+The transfer entrypoint accepts credentials only through `store-transfer --config /run/secrets/transfer.json`. The file must be a regular root-owned file with mode `0600`, at a canonical absolute path without symlinks; all parent directories must be root-owned and unwritable by group or others. The root wrapper opens it before dropping privileges, and the immutable CLI consumes and closes the inherited input before starting workers. Do not place password URLs in arguments or make the file readable by the app UID. The CLI is implemented; see the [draft offline transfer guide](offline-transfer.md) for exact commands and remaining acceptance boundaries.
 
 The [Dockerfile](../Dockerfile) pins Bun 1.4.0 by image digest and installs frozen lockfiles. Host dependencies, generated output, databases, credentials, git history and reference repositories are excluded from the build context. These commands do not publish an image.
 
@@ -59,7 +59,7 @@ The operator scripts establish separate persistent boot/app roles. Backup and re
 
 Current MySQL copy/rehearsal preflight refuses views, routines, triggers and scheduled events with `mysql_clone_objects_unsupported`; it does not silently omit them or rewrite their definers. A broader stored-object policy and direct remote DDL workflow remain undecided. See the [server guide](../packages/server/docs/README.md#customize-it) for the bounded remote SQL repair surface.
 
-Remote restore loads a fresh database and journals the selected target before activation. Missing closure evidence is a recovery refusal, never permission to overwrite a live database. Engine-to-engine board transfer is not yet available.
+Remote restore loads a fresh database and journals the selected target before activation. Missing closure evidence is a recovery refusal, never permission to overwrite a live database. Engine-to-engine transfer uses the separate [offline CLI](offline-transfer.md); complete six-direction and crash-recovery acceptance remains in progress.
 
 ## Native database tools
 
