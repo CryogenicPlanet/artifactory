@@ -73,7 +73,8 @@ const program = Effect.gen(function* () {
 	const original = selected === config.app.database ? evidence : yield* readEvidence(config.app.database);
 	const pending = yield* sql`SELECT pending_id,pending_attempt,pending_from,pending_to FROM seq WHERE singleton=1`;
 	const restores = yield* sql`SELECT proof_id,phase FROM db_restore_requests ORDER BY proof_id`;
-	console.log(JSON.stringify({ selected, settings, evidence, original, pending, restores }));
+	const generationErrors = yield* sql`SELECT stderr FROM generations WHERE stderr IS NOT NULL`;
+	console.log(JSON.stringify({ selected, settings, evidence, original, pending, restores, generationErrors }));
 });
 program.pipe(
 	Effect.scoped,

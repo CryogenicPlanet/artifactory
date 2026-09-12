@@ -1,4 +1,5 @@
 // Real databases and independent processes. Every scenario requires its own empty role pair.
+import { randomUUID } from "node:crypto";
 import { spawn, execFile } from "node:child_process";
 import { once } from "node:events";
 import { cp, mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
@@ -33,9 +34,18 @@ const Evidence = Schema.Struct({
 		}),
 	),
 	restores: Schema.Array(Schema.Struct({ proof_id: Schema.String, phase: Schema.String })),
+	generationErrors: Schema.Array(Schema.Struct({ stderr: Schema.String })),
 });
 const execute = promisify(execFile);
-const scenarios = ["missing", "foreign", "candidate", "beforeallocation", "afterselection", "pending"] as const;
+const scenarios = [
+	"missing",
+	"foreign",
+	"candidate",
+	"beforeallocation",
+	"afterselection",
+	"pending",
+	"password",
+] as const;
 
 beforeAll(async () => {
 	if (process.env.COMMS_REPAIR_CONFIG_DIR && process.env.COMMS_REPAIR_ENGINE)
@@ -141,7 +151,11 @@ for (const scenario of scenarios)
 				const status = async (cookie: string) =>
 					Schema.decodeUnknownSync(
 						Schema.Struct({
-							child: Schema.Struct({ state: Schema.String, identity_error: Schema.optionalKey(Schema.Unknown) }),
+							child: Schema.Struct({
+								state: Schema.String,
+								attempt: Schema.Int,
+								identity_error: Schema.optionalKey(Schema.Unknown),
+							}),
 						}),
 					)(await (await fetch(`${url}/_boot/status`, { headers: { cookie } })).json());
 				const state = async (cookie: string, desired: string, timeout = 15000) => {
@@ -213,6 +227,66 @@ for (const scenario of scenarios)
 			);
 			await stop(first.child);
 			const before = await operator("inspect");
+			if (scenario === "password") {
+				const wrong = `wrong/${randomUUID()}@password?fixture`;
+				const correct = env.DATABASE_URL;
+				env.DATABASE_URL = descriptor({ ...app, password: wrong });
+				const privateValues = [wrong, app.password, boot.password, correct, env.DATABASE_URL].flatMap((value) => [
+					value,
+					encodeURIComponent(value),
+					JSON.stringify(value).slice(1, -1),
+				]);
+				// Boolean assertions never print an actual credential if this regression fails.
+				const redacted = (text: string) => {
+					expect(privateValues.some((value) => text.includes(value))).toBe(false);
+					expect(/\b(?:postgres(?:ql)?|mysql):\/\/(?!\[redacted\]@)[^\s/]*@/i.test(text)).toBe(false);
+				};
+				const failed = await launch();
+				await expect
+					.poll(
+						async () => {
+							const child = (await failed.status(cookie)).child;
+							return child.state === "failed" && child.attempt === 3;
+						},
+						{ timeout: 15000 },
+					)
+					.toBe(true);
+				const write = await failed.post("/api/messages", { topic: "repair", body: "Must not commit" }, cookie);
+				expect(write.status).toBe(503);
+				const writeBody = await write.text();
+				redacted(writeBody);
+				expect(writeBody.includes("app_unavailable")).toBe(true);
+				for (const surface of ["status", "generations"]) {
+					const response = await fetch(`${failed.url}/_boot/${surface}`, { headers: { cookie } });
+					expect(response.status).toBe(200);
+					redacted(await response.text());
+				}
+				await stop(failed.child);
+				// Inspect stored diagnostics, not only the HTTP projection's second redaction pass.
+				const persisted = await operator("inspect");
+				expect(persisted.generationErrors.some((row) => row.stderr.length > 0)).toBe(true);
+				for (const row of persisted.generationErrors) redacted(row.stderr);
+				expect(persisted.generationErrors.some((row) => /remote_|authentication|access denied/i.test(row.stderr))).toBe(
+					true,
+				);
+				expect(persisted.evidence).toEqual(before.evidence);
+				expect(persisted.settings).toEqual(before.settings);
+				env.DATABASE_URL = correct;
+				const recovered = await launch();
+				await recovered.state(cookie, "live");
+				expect(
+					await (await recovered.post("/api/messages", input, cookie, { "idempotency-key": key })).json(),
+				).toMatchObject(message);
+				expect(
+					(await recovered.post("/api/messages", { topic: "repair", body: "Corrected credentials" }, cookie)).status,
+				).toBe(200);
+				const rows = Schema.decodeUnknownSync(Schema.Struct({ items: Schema.Array(Message) }))(
+					await (await fetch(`${recovered.url}/api/messages?since=0&topic=repair`, { headers: { cookie } })).json(),
+				);
+				expect(rows.items.map((row) => row.body)).toEqual([input.body, "Corrected credentials"]);
+				await stop(recovered.child);
+				return;
+			}
 			const damaged = await operator(
 				scenario === "missing" ? "missing" : scenario === "pending" ? "pending" : "foreign",
 			);

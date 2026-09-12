@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Six real-board repair scenarios per engine, each with an independent operator-provisioned pair.
+# Seven real-board repair scenarios per engine, each with an independent operator-provisioned pair.
 set -euo pipefail
 umask 077
 engine=${1:?pg or mysql}
@@ -53,7 +53,7 @@ operator=pathlib.Path('packages/boot/sql')
 vendor='postgres' if engine=='pg' else 'mysql'
 baseline=(operator/(vendor+'-roles.sql')).read_text()
 scratch=(operator/(vendor+'-scratch-roles.sql')).read_text()
-for scenario in ['missing','foreign','candidate','beforeallocation','afterselection','pending']:
+for scenario in ['missing','foreign','candidate','beforeallocation','afterselection','pending','password']:
     boot,app=secrets.token_hex(32),secrets.token_hex(32)
     databases={kind:f'comms_repair_{scenario}_{kind}' for kind in ['boot','app']}
     users={kind:databases[kind] if engine=='pg' else f'cr_{scenario}_{kind[0]}' for kind in databases}
@@ -101,7 +101,7 @@ for attempt in $(seq 1 120); do
   fi
   sleep 1
 done
-for scenario in missing foreign candidate beforeallocation afterselection pending; do
+for scenario in missing foreign candidate beforeallocation afterselection pending password; do
   if [ "$engine" = pg ]; then
     docker exec --env-file "$private/$scenario.env" -i "$server" psql -X -U postgres -v ON_ERROR_STOP=1 \
       < "$private/$scenario.sql" >/dev/null 2>>"$private/provision.log"
@@ -126,4 +126,4 @@ docker run --rm --name "$runner" --init --user "$(id -u):$(id -g)" --network "$n
     test "$(bun --version)" = 1.4.0
     node node_modules/vitest/vitest.mjs run packages/server/test/remote-selected-store-repair.test.ts --maxWorkers=1 --reporter=verbose
   ' > "$private/tests.log" 2>&1
-echo "All six $engine native board repair scenarios passed."
+echo "All seven $engine native board repair scenarios passed."
