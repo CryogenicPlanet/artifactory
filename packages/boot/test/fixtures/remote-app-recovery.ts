@@ -1,3 +1,4 @@
+import { withDatabase } from "@comms/storage/store";
 import { Reactivity } from "effect/unstable/reactivity";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
@@ -6,7 +7,7 @@ import { SqlClient, Statement } from "effect/unstable/sql";
 import { SqlError, SqlSyntaxError } from "effect/unstable/sql/SqlError";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { remoteRecovery } from "../../src/app-recovery.ts";
-import { remoteAppStoreIdentity, RemoteAdoption } from "../../src/app-store-identity.ts";
+import { remoteAppStoreIdentity } from "../../src/app-store-identity.ts";
 import { Events, EventError, layer as eventsLayer } from "../../src/events.ts";
 
 const scenario = process.argv[2] ?? "fresh";
@@ -27,17 +28,14 @@ const main = Effect.gen(function* () {
 	const resumed = yield* identity.reserve;
 	if (scenario === "fresh") {
 		yield* identity.complete(adoption);
-		const moved = { ...adoption, database: "restored", phase: "ready" as const };
-		yield* boot.withTransaction(
-			Effect.gen(function* () {
-				yield* boot`UPDATE settings SET value='restored' WHERE key='app_store_database'`;
-				yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(RemoteAdoption))(moved)} WHERE key='app_store_adoption'`;
-			}),
-		);
+		const target = yield* withDatabase(configured, "restored");
+		const outside = yield* identity.selectRestored(target).pipe(Effect.result);
+		if (outside._tag !== "Failure") return yield* Effect.die("Selection escaped boot transaction");
+		yield* boot.withTransaction(identity.selectRestored(target));
 		return {
 			same: adoption.store_id === resumed.store_id,
 			selected: (yield* identity.store).database,
-			phase: moved.phase,
+			phase: "ready",
 		};
 	}
 	const commands: string[] = [];

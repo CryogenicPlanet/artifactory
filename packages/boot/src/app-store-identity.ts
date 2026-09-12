@@ -3,7 +3,7 @@ import { withDatabase, type RemoteStore } from "@comms/storage/store";
 import { lockBootWrite } from "./boot-write-lock.ts";
 import { decodeRows } from "./decode-rows.ts";
 import { backupPath } from "./backup-metadata.ts";
-import { Clock, Crypto, Effect, FileSystem, Path, Schema } from "effect";
+import { Clock, Crypto, Effect, FileSystem, Option, Path, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { EventError } from "./events.ts";
 
@@ -271,7 +271,20 @@ export const remoteAppStoreIdentity = (configured: RemoteStore) =>
 					yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(RemoteAdoption))({ ...saved, phase: "ready" })} WHERE ${boot("key")}='app_store_adoption'`;
 				}),
 			);
-		return { store, reserve, complete };
+		/** Caller already verified target identity and closure. Call first inside the same boot transaction as restore phase. */
+		const selectRestored = (target: RemoteStore) =>
+			Effect.gen(function* () {
+				if (Option.isNone(yield* Effect.serviceOption(boot.transactionService))) return yield* invalid();
+				yield* lockBootWrite(boot);
+				const { adoption } = yield* read;
+				if (!adoption || adoption.phase !== "ready") return yield* invalid();
+				const selected = yield* withDatabase(configured, target.database);
+				if (target._tag !== selected._tag || Redacted.value(target.url) !== Redacted.value(selected.url))
+					return yield* invalid();
+				yield* boot`UPDATE settings SET value=${target.database} WHERE ${boot("key")}='app_store_database'`;
+				yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(RemoteAdoption))({ ...adoption, database: target.database })} WHERE ${boot("key")}='app_store_adoption'`;
+			});
+		return { store, reserve, complete, selectRestored };
 	});
 
 /** Remote DDL has already completed outside this transaction. Only pending adoption may seed the row. */
