@@ -282,6 +282,22 @@ Full detail in `second-pass-5d96c1d.md`. Checks and 712 tests pass in a clean wo
 
 **Comment.** `pages-http.ts` gets the item 6 treatment (nested ternaries and a bodiless 503 remain). Enrollment enforces the lowercase host it documents (`enrollment.ts:78`, and the same class in `token-mint-schema.ts`). The README still documents six deleted routes. Drop the `reactions` and `agents` creates from the fresh-store rungs. `webhook_subscriptions` is created twice, by the app migration ladder and by `api.migrate`, with divergent DDL; delete the ladder file. The subscriptions error union declares two codes at two statuses, and `SubscriptionError` carries a `status` field nothing reads. `topics-http.ts` re-parses the raw URL instead of using its declared `:path` param and classifies a bad path as `query_invalid` on read and `input_invalid` on write. `sql-write.ts` should take its protected-table set from a registry extensions fill (`api.migrate(..., {protect:true})`) rather than hard-coding a core table. `extension-api.ts` should not type the kernel contract in terms of `ext/core`'s services. Event reads should not take the child channel gate. Every proxied request publishes an `http.request` event that wakes every idle long-poll; keep diagnostics off the publication sequence or let `changed` ignore diagnostic-only moves. `ctx.read` needs a bound. Board HTML needs the CSP `/p/**` has. Anonymous public-page reads answer a non-retriable 401 during recovery; answer a retriable 503. `extensions.md`'s worked example queries a table that does not exist and `standup.ts` imports a core internal. The subscriptions example bypasses `api.effects` for its deliveries and runs an empty durable transaction per delivery as a liveness check.
 
+## Database stack, round two (2026-09-12)
+
+Item 23's track, reviewed PR by PR at the heads below. Full report: `stack-review-round2.md`. PR #1 merged to master as `dd733fe`, the stack was recomposed on top of it, and it grew to five: #7 and #8 had never been reviewed before this round.
+
+| PR | Head | Verdict | Findings | Comment |
+| --- | --- | --- | --- | --- |
+| #2 store descriptors | `1ef641e` | mergeable with changes | 13 | 5644305395 |
+| #3 store identity | `f4f1dca` | needs changes | 11, one blocker | 5644334307 |
+| #4 DbOps and backup provenance | `7d47607` | needs changes | 15, two major | 5644329084 |
+| #7 migration histories | `aaf6396` | needs changes | 11, two major | 5644472625 |
+| #8 portable SQL, Postgres and MySQL | `686e07c` | needs changes | 16, four major | 5644467131 |
+
+Each PR got two Opus finders on orthogonal dimensions, each re-read by an Opus skeptic, plus a claims agent that installed, checked, built and tested in that PR's own worktree. 66 confirmed, 2 refuted.
+
+**The owner-facing question this round raises.** The track's goal is that swapping the engine on deployment just works. At the stack tip that is further away than the PR bodies suggest, for one concrete reason: no remote engine is exercised by the default suite, and the dialect SQL is never executed against Postgres or MySQL anywhere. `dialect.test.ts` runs only its SQLite branch and string-matches the other two, and the real-server CI fixture touches the connection lease and the integer guard but none of the twelve rewritten query modules. Three defects already sit in that blind spot: the published-image CTE has no Postgres form that parses, the MySQL read-mark upsert references a column MySQL cannot resolve, and boot's public-path cascade silently matches nothing on MySQL. All three are invisible to every check in the repo. The cheap fix is to run the dialect tests inside the existing remote-session CI legs, where live Postgres and MySQL already exist.
+
 ## Decisions after the ownership audit (a834e3f, 2026-09-11)
 
 Codex's `docs/boot-ownership-audit.md` narrowed four things the review had recorded the other way, and the owner gave Codex direction directly on the first. Recorded here so the ledger, the spec and the code agree. Check: `docs/pr-1/ownership-check-a834e3f.md`.
