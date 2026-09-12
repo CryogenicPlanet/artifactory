@@ -1,3 +1,4 @@
+import { MigrationWarnings, layer as migrationWarningsLayer } from "./kernel/migration-portability.ts";
 import { logEvents } from "./kernel/log-events.ts";
 import { requestSpan } from "./kernel/request-span.ts";
 import { Publication, layer as publicationLayer } from "./kernel/publication.ts";
@@ -71,6 +72,7 @@ const server = Effect.gen(function* () {
 			Config.withDefault(`${import.meta.dirname}/board`),
 		);
 		const lifecycle = yield* Lifecycle;
+		const migrationWarnings = yield* MigrationWarnings;
 		const http = yield* HttpServer.HttpServer;
 		if (http.address._tag === "UnixPathAddress") return yield* Effect.die("Expected TCP listener");
 		const host = `127.0.0.1:${http.address.port}`;
@@ -149,7 +151,11 @@ const server = Effect.gen(function* () {
 									yield* Ref.set(lifecycle.healthy, true);
 								}
 								return HttpServerResponse.jsonUnsafe(
-									{ status: "ok", ...(yield* extensions.rehearsalReport) },
+									{
+										status: "ok",
+										...(yield* extensions.rehearsalReport),
+										...(yield* migrationWarnings.report),
+									},
 									{
 										headers: {
 											"x-comms-writer-epoch": boot.epoch,
@@ -337,6 +343,7 @@ const server = Effect.gen(function* () {
 			Layer.mergeAll(
 				channelLayer,
 				lifecycleLayer,
+				migrationWarningsLayer.pipe(Layer.provide(lifecycleLayer)),
 				BunHttpServer.layer({ hostname: "127.0.0.1", port, idleTimeout: 0, gracefulShutdownTimeout: "1500 millis" }),
 			),
 		),
