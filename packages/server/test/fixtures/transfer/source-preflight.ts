@@ -66,6 +66,20 @@ const main = Effect.gen(function* () {
 				if (Schema.is(TransferRejected)(result.failure)) assert.equal(result.failure.code, code);
 			}
 		});
+	yield* sql`INSERT INTO child_attempts VALUES(0)`;
+	let appOpened = false;
+	yield* refuse(
+		resolveTransferSource({ app: file }, sql).pipe(
+			Effect.andThen(
+				Effect.sync(() => {
+					appOpened = true;
+				}),
+			),
+		),
+		"transfer_recovery_pending",
+	);
+	assert.equal(appOpened, false);
+	yield* sql`DELETE FROM child_attempts`;
 	const inspect = inspectTransferSource(sql, sql, file);
 	yield* set(
 		"app_store_schema",
