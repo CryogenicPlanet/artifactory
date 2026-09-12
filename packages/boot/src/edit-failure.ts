@@ -42,7 +42,7 @@ const policy = {
 	topic_move_recovery_required: {
 		status: 409,
 		retriable: false,
-		hint: "Historical topic-move evidence needs operator repair. Preserve both legacy tables, page bytes, app outbox and keeper receipts; do not delete evidence to force recovery.",
+		hint: "Historical topic-move tables require the previous compatible image to finish recovery and retirement. Preserve both stores, page bytes and keeper receipts; do not delete tables to bypass this refusal.",
 	},
 	recovery_intents_conflict: {
 		status: 409,

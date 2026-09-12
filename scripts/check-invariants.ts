@@ -11,8 +11,6 @@ function checkInvariants() {
 	const recoveryAccess: Readonly<Record<string, ReadonlyArray<string>>> = {
 		"app-recovery.ts": ["kernel_writer", "mutation_batches", "outbox"],
 		"app-backup.ts": ["kernel_writer"],
-		// Startup-only retirement still checks historical committed evidence; it receives no product-table exemption.
-		"legacy-topic-moves.ts": ["mutation_batches", "outbox"],
 	};
 
 	function workspace(path: string) {

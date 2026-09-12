@@ -16,7 +16,6 @@ import { EditLock, layer as editLockLayer } from "./edit-lock.ts";
 import { Generations, layer as generationsLayer } from "./generations.ts";
 import { SourceFiles, layer as sourceLayer } from "./source-files.ts";
 import { Events, layer as eventsLayer } from "./events.ts";
-import { retainEvents } from "./event-retention.ts";
 import { layer as recoveryLayer } from "./app-recovery.ts";
 import { layer as attemptsLayer, ChildAttempts } from "./child-attempts.ts";
 import { cutover } from "./cutover.ts";
@@ -28,7 +27,7 @@ import { layer as preparationProcessLayer } from "./preparation-process.ts";
 import { makeBackupInventory } from "./backup-inventory.ts";
 import { requestEvents } from "./request-events.ts";
 import { proxy, publicRoute } from "./proxy.ts";
-import { legacyMovePending, retireLegacyTopicMoves } from "./legacy-topic-moves.ts";
+import { hasLegacyTopicMoves } from "./legacy-topic-moves.ts";
 import { layer as kernelBootLayer } from "./kernel-boot.ts";
 import { databaseBackup } from "./database-backup.ts";
 import { headroomPolicyLayer, storageHeadroom } from "./storage-headroom.ts";
@@ -81,8 +80,10 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			const volume = yield* sampleStorageVolume(headroom.sample);
 			yield* volume.run.pipe(Effect.forkScoped);
 			const storage = yield* makeEventStorage(volume.sample);
-			yield* storage.run.pipe(Effect.forkScoped);
-			yield* retainEvents.pipe(Effect.forkScoped);
+			// Historical retirement needs retained event evidence. Keep auth available without pruning it.
+			if (!(yield* hasLegacyTopicMoves(yield* SqlClient.SqlClient))) {
+				yield* storage.run.pipe(Effect.forkScoped);
+			}
 			return eventsLayer(
 				volume.sample.pipe(
 					Effect.flatMap((sample) => headroom.reserve(sample)),
@@ -133,8 +134,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 						.withPermit(
 							Effect.gen(function* () {
 								const intents = yield* recoveryIntents(sql);
-								if (intents.count + Number(yield* legacyMovePending(sql)) > 1)
-									return yield* new RecoveryRejected({ code: "recovery_intents_conflict" });
+								if (intents.count > 1) return yield* new RecoveryRejected({ code: "recovery_intents_conflict" });
 								// Restore may have activated a child before a later recovery step failed.
 								// Withdraw its route and prove closure before selecting any authoritative store again.
 								const active = yield* Ref.get(supervisor.current);
@@ -143,9 +143,10 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 								yield* supervisor.recoverClosure;
 								// With no route and every prior owner closed, queued requests can safely receive unavailable.
 								yield* supervisor.release;
+								if (yield* hasLegacyTopicMoves(sql))
+									return yield* new RecoveryRejected({ code: "topic_move_recovery_required" });
 								yield* (yield* Generations).recover;
 								if (isolated) yield* migrateAppStore({ dataDirectory: options.dataDirectory, filename: appFilename });
-								yield* retireLegacyTopicMoves(options.dataDirectory, appFilename);
 							}),
 						)
 						.pipe(Effect.exit);
