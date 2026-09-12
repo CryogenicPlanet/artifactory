@@ -7,6 +7,7 @@ import { SqlClient } from "effect/unstable/sql/SqlClient";
 import { transferInventory, TransferInventoryError, type TransferInventory } from "@comms/storage/transfer-inventory";
 import { guardianClientLayer } from "@comms/storage/remote-client";
 import { remoteAppKernelOperations } from "../../../boot/src/app-kernel-schema.ts";
+import { validateExtensionLedger } from "../../src/transfer/extension-ledger.ts";
 import { initializeTransferApp } from "../../src/kernel/transfer-app-initialize.ts";
 import { coreJsonColumns, coreSearchObjects, type TransferEngine } from "../../src/transfer/derived-schema.ts";
 import { logicalTransferPlan, TransferPlanError } from "../../src/transfer/logical-plan.ts";
@@ -116,7 +117,7 @@ async function main() {
 					catalogs.push({ engine, sql, inventory, ledgers });
 				}
 				const pairs: string[] = [];
-				const mismatches: { from: TransferEngine; to: TransferEngine; ledger: string }[] = [];
+				const verifiedProofs: { from: TransferEngine; to: TransferEngine; count: number }[] = [];
 				for (const source of catalogs)
 					for (const target of catalogs) {
 						if (source.engine === target.engine) continue;
@@ -162,11 +163,50 @@ async function main() {
 							source.ledgers.extensions.map(({ extension, name }) => ({ extension, name })),
 							target.ledgers.extensions.map(({ extension, name }) => ({ extension, name })),
 						);
-						if (JSON.stringify(source.ledgers.extensions) !== JSON.stringify(target.ledgers.extensions))
-							mismatches.push({ from: source.engine, to: target.engine, ledger: "extension_migrations" });
+						// Replay only the target factories; source SQL is read from their explicit
+						// dialect declaration, never executed against the source for inspection.
+						const replay = yield* initializeTransferApp(target.sql, epoch, frozenSource, source.engine);
+						assert.deepEqual(replay.extensions, target.ledgers.extensions);
+						assert.deepEqual(
+							replay.extensionProofs.map(({ extension, name, sourceChecksum }) => ({
+								extension,
+								name,
+								checksum: sourceChecksum,
+							})),
+							source.ledgers.extensions,
+						);
+						assert.deepEqual(
+							replay.extensionProofs.map(({ extension, name, targetChecksum }) => ({
+								extension,
+								name,
+								checksum: targetChecksum,
+							})),
+							target.ledgers.extensions,
+						);
+						yield* validateExtensionLedger(
+							source.ledgers.extensions,
+							target.ledgers.extensions,
+							replay.extensionProofs,
+						);
+						const alteredSource = source.ledgers.extensions.map((row, index) =>
+							index === 0 ? { ...row, checksum: "0".repeat(64) } : row,
+						);
+						for (const invalid of [
+							validateExtensionLedger(alteredSource, target.ledgers.extensions, replay.extensionProofs),
+							validateExtensionLedger(
+								source.ledgers.extensions,
+								target.ledgers.extensions,
+								replay.extensionProofs.slice(1),
+							),
+						]) {
+							const refusal = yield* invalid.pipe(Effect.result);
+							assert.equal(refusal._tag, "Failure");
+							if (refusal._tag === "Failure") assert.equal(refusal.failure.code, "transfer_extension_ledger_invalid");
+						}
+						verifiedProofs.push({ from: source.engine, to: target.engine, count: replay.extensionProofs.length });
 						pairs.push(`${source.engine}->${target.engine}`);
 					}
-				return { pairs, mismatches };
+				return { pairs, verifiedProofs };
 			}).pipe(
 				Effect.tapError((error) =>
 					Effect.sync(() => {

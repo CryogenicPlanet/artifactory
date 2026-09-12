@@ -16,7 +16,7 @@ it.skipIf(!process.env.COMMS_TRANSFER_APP_SIX_PG || !process.env.COMMS_TRANSFER_
 			Schema.fromJsonString(
 				Schema.Struct({
 					pairs: Schema.Array(Schema.String),
-					mismatches: Schema.Array(Schema.Struct({ from: Schema.String, to: Schema.String, ledger: Schema.String })),
+					verifiedProofs: Schema.Array(Schema.Struct({ from: Schema.String, to: Schema.String, count: Schema.Int })),
 				}),
 			),
 		)(stdout);
@@ -28,8 +28,9 @@ it.skipIf(!process.env.COMMS_TRANSFER_APP_SIX_PG || !process.env.COMMS_TRANSFER_
 			"mysql->sqlite",
 			"mysql->pg",
 		]);
-		// Do not make the source compatible by dropping or normalizing executed extension SQL checksums.
-		expect(result.mismatches).toEqual([]);
+		// Both exact stored checksums and proof key sets were compared in the fixture.
+		expect(result.verifiedProofs.map(({ from, to }) => `${from}->${to}`)).toEqual(result.pairs);
+		expect(result.verifiedProofs.every(({ count }) => count > 0)).toBe(true);
 	},
 	60000,
 );
