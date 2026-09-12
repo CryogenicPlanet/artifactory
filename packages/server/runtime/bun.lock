@@ -46,9 +46,13 @@
         "@effect/sql-sqlite-bun": "4.0.0-rc.113",
         "effect": "4.0.0-rc.113",
       },
+      "devDependencies": {
+        "@effect/platform-bun": "4.0.0-rc.113",
+      },
     },
   },
   "patchedDependencies": {
+    "@effect/sql-pg@4.0.0-rc.113": "patches/@effect%2Fsql-pg@4.0.0-rc.113.patch",
     "@effect/sql-mysql2@4.0.0-rc.113": "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch",
   },
   "packages": {

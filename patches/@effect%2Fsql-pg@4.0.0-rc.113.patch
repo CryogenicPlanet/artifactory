@@ -1,0 +1,46 @@
+diff --git a/dist/PgPool.js b/dist/PgPool.js
+index b630ca98bb67feaeef5464a015273d10df926140..3d37453fdf9888aba4e28f8e752704f831f4f55b 100644
+--- a/dist/PgPool.js
++++ b/dist/PgPool.js
+@@ -6,6 +6,7 @@
+ import * as Clock from "effect/Clock";
+ import * as Context from "effect/Context";
+ import * as Duration from "effect/Duration";
++import * as Exit from "effect/Exit";
+ import * as Effect from "effect/Effect";
+ import * as Pool from "effect/Pool";
+ import { connectionInternals } from "./internal/connection.js";
+@@ -103,7 +104,9 @@ export const make = /*#__PURE__*/Effect.fnUntraced(function* (options) {
+   });
+   const get = Effect.suspend(() => deadConnections.size > 0 ? retry : Effect.flatMap(Pool.get(pool), connection => expired(connection) ? Effect.andThen(Pool.invalidate(pool, connection), retry) : Effect.succeed(connection)));
+   // `pin` reserves the pool item itself, so this needs no help.
+-  const reserve = Effect.flatMap(get, connection => connection.pin);
++  // Registered last, this finalizer invalidates before pin/pool release can admit another borrower.
++  const reserve = Effect.flatMap(get, (connection) => Effect.tap(connection.pin, () =>
++    Effect.addFinalizer((exit) => Exit.isFailure(exit) ? Pool.invalidate(pool, connection) : Effect.void)));
+   // `Pool.use` cannot check the session it hands over before running the
+   // effect, so it is only taken when there is nothing to check: no session is
+   // known dead, and no lifetime can have run out. Otherwise the scoped
+diff --git a/src/PgPool.ts b/src/PgPool.ts
+index 5ea0ebca16f0489a02c6512ae77224bc38d6ea19..d9f7d6f72ac4b2dd16ebf00057f8a8a05acdb1de 100644
+--- a/src/PgPool.ts
++++ b/src/PgPool.ts
+@@ -6,6 +6,7 @@
+ import * as Clock from "effect/Clock"
+ import * as Context from "effect/Context"
+ import * as Duration from "effect/Duration"
++import * as Exit from "effect/Exit"
+ import * as Effect from "effect/Effect"
+ import * as Pool from "effect/Pool"
+ import type * as Scope from "effect/Scope"
+@@ -202,7 +203,9 @@ export const make = Effect.fnUntraced(function*(options: Config): Effect.fn.Retu
+   )
+ 
+   // `pin` reserves the pool item itself, so this needs no help.
+-  const reserve = Effect.flatMap(get, (connection) => connection.pin)
++  // Registered last, this finalizer invalidates before pin/pool release can admit another borrower.
++  const reserve = Effect.flatMap(get, (connection) => Effect.tap(connection.pin, () =>
++    Effect.addFinalizer((exit) => Exit.isFailure(exit) ? Pool.invalidate(pool, connection) : Effect.void)))
+ 
+   // `Pool.use` cannot check the session it hands over before running the
+   // effect, so it is only taken when there is nothing to check: no session is

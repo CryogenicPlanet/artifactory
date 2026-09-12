@@ -48,7 +48,7 @@ const main = Effect.gen(function* () {
 		// Only this fixed disposable database is accepted above. No board schema is opened.
 		yield* raw`DROP TABLE IF EXISTS ${raw(table)}`;
 		yield* raw`CREATE TABLE ${raw(table)} (id INTEGER PRIMARY KEY)`;
-		yield* Effect.addFinalizer(() => raw`DROP TABLE IF EXISTS ${raw(table)}`.pipe(Effect.ignore));
+		yield* Effect.addFinalizer(() => raw`DROP TABLE IF EXISTS ${raw(table)}`.pipe(Effect.orDie));
 		const backendId = (sql: SqlClient.SqlClient) =>
 			(settings.engine === "pg"
 				? sql`SELECT pg_backend_pid()::text AS id`
