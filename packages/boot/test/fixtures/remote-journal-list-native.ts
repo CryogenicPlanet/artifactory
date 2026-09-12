@@ -4,6 +4,7 @@ import { guardianClientLayer } from "@comms/storage/remote-client";
 import { Console, Effect, FileSystem, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { remoteDatabaseJournal, RemoteDatabaseError } from "../../src/remote-database-journal.ts";
+import { readSettings, readStoragePolicy, readPublicPaths } from "../../src/settings-schema.ts";
 import { parseDescriptor } from "@comms/storage/store";
 
 const Settings = Schema.Struct({
@@ -40,6 +41,13 @@ const main = Effect.gen(function* () {
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
 				yield* sql`CREATE TEMPORARY TABLE settings(${sql("key")} VARCHAR(512) PRIMARY KEY,value TEXT)`;
+				const storage = { backup_percent: 25, event_percent: 15, headroom_percent: 10 };
+				assert.equal((yield* readStoragePolicy).backup_percent, 20);
+				assert.deepEqual(yield* readPublicPaths, []);
+				yield* sql`INSERT INTO settings VALUES ('storage_policy',${JSON.stringify(storage)}),('public_paths','["/welcome"]'),('settings_revision','2')`;
+				assert.deepEqual(yield* readSettings, { revision: 2, storage, public_paths: ["/welcome"] });
+				assert.deepEqual(yield* readStoragePolicy, storage);
+				assert.deepEqual(yield* readPublicPaths, ["/welcome"]);
 				const descriptor = yield* parseDescriptor(
 					`${engine === "pg" ? "postgres" : "mysql"}://fixture:fixture@localhost/comms_initialize_boot`,
 				);
