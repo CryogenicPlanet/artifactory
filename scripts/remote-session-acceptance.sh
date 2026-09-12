@@ -29,6 +29,7 @@ CREATE DATABASE comms_app OWNER comms_app;
 CREATE DATABASE comms_schema_guard OWNER comms_app;
 CREATE DATABASE comms_shared_store OWNER comms_app;
 CREATE DATABASE comms_failed_lease OWNER comms_app;
+CREATE DATABASE comms_read_cleanup OWNER comms_app;
 CREATE DATABASE comms_snapshot_boot OWNER comms_app;
 CREATE DATABASE comms_snapshot_app OWNER comms_app;
 CREATE DATABASE comms_schema_core OWNER comms_app;
@@ -54,6 +55,8 @@ CREATE DATABASE comms_shared_store CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as
 GRANT ALL ON comms_shared_store.* TO 'comms_app'@'%';
 CREATE DATABASE comms_failed_lease CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 GRANT ALL ON comms_failed_lease.* TO 'comms_app'@'%';
+CREATE DATABASE comms_read_cleanup CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
+GRANT ALL ON comms_read_cleanup.* TO 'comms_app'@'%';
 CREATE DATABASE comms_snapshot_boot CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 CREATE DATABASE comms_snapshot_app CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 GRANT ALL ON comms_snapshot_boot.* TO 'comms_app'@'%';
@@ -118,7 +121,7 @@ published=$(docker port "$container" "$port/tcp")
 python3 - "$private/client.json" "${published##*:}" <<'PY'
 import json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()); d['port']=int(sys.argv[2]); p.write_text(json.dumps(d))
-for database,name in [('comms_concurrency_app','concurrency-app'),('comms_concurrency_boot','concurrency-boot'),('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect'),('comms_failed_lease','failed-lease'),('comms_snapshot_boot','snapshot-boot'),('comms_snapshot_app','snapshot-app')]:
+for database,name in [('comms_concurrency_app','concurrency-app'),('comms_concurrency_boot','concurrency-boot'),('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect'),('comms_failed_lease','failed-lease'),('comms_read_cleanup','read-cleanup'),('comms_snapshot_boot','snapshot-boot'),('comms_snapshot_app','snapshot-app')]:
  d['database']=database; (p.parent/(name+'.json')).write_text(json.dumps(d))
 PY
 # The intentionally truncated session-attribute case refuses before SQL admission.
@@ -134,6 +137,8 @@ if [ "$attributes" != 32 ]; then
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/remote-dialect-semantics.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_FAILED_LEASE_CONFIG="$private/failed-lease.json" \
     node node_modules/vitest/vitest.mjs run packages/storage/test/failed-lease.test.ts --maxWorkers=1 --reporter=verbose
+  COMMS_TEST_ENGINE="$engine" COMMS_READ_CLEANUP_CONFIG="$private/read-cleanup.json" \
+    node node_modules/vitest/vitest.mjs run packages/server/test/kernel/remote-read-deadline.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_TEST_ENGINE="$engine" COMMS_SNAPSHOT_BOOT_CONFIG="$private/snapshot-boot.json" \
   COMMS_SNAPSHOT_APP_CONFIG="$private/snapshot-app.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/native-read-publication.test.ts --maxWorkers=1 --reporter=verbose

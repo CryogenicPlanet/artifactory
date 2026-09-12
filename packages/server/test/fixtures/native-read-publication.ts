@@ -126,8 +126,8 @@ async function main() {
 				sql`SELECT body FROM (${publishedMessages(sql, ceiling)}) visible WHERE id=${initial.id}`.pipe(
 					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ body: Schema.String })))),
 				);
-			// Deliberately exercise the storage snapshot boundary directly: ordinary ctx.read
-			// still shares Publication's mutation permit and does not promise concurrent writes.
+			// First prove the storage snapshot directly while append is pending. The following
+			// phase exercises ordinary Publication.read admission and cleanup separately.
 			yield* readTransaction(
 				sql,
 				Effect.gen(function* () {
@@ -168,8 +168,68 @@ async function main() {
 				),
 				[{ body: "published-two" }],
 			);
+			phase = "ordinary remote read concurrency";
+			const reading = yield* Deferred.make<void>();
+			const written = yield* Deferred.make<void>();
+			const checked = yield* Deferred.make<void>();
+			const finishRead = yield* Deferred.make<void>();
+			const cleaningRead = yield* Deferred.make<void>();
+			const finishCleanup = yield* Deferred.make<void>();
+			const visibleBefore = (yield* channel.fence).published_through;
+			const reader = yield* publication
+				.read((ceiling) =>
+					Effect.gen(function* () {
+						assert.equal(ceiling, visibleBefore);
+						assert.deepEqual(yield* readImage(ceiling), [{ body: "published-two" }]);
+						yield* Deferred.succeed(reading, undefined);
+						yield* Deferred.await(written);
+						assert.deepEqual(
+							yield* publication.read((nested) => {
+								assert.equal(nested, ceiling);
+								return readImage(nested);
+							}),
+							[{ body: "published-two" }],
+						);
+						yield* Deferred.succeed(checked, undefined);
+						yield* Deferred.await(finishRead);
+					}).pipe(
+						Effect.onExit((exit) =>
+							exit._tag === "Success"
+								? Deferred.succeed(cleaningRead, undefined).pipe(Effect.andThen(Deferred.await(finishCleanup)))
+								: Effect.void,
+						),
+					),
+				)
+				.pipe(Effect.forkScoped);
+			yield* Effect.gen(function* () {
+				yield* Deferred.await(reading).pipe(Effect.raceFirst(Fiber.join(reader)));
+				yield* messages.update(who, initial.id, { body: "published-three" });
+				yield* messages.update(who, initial.id, { body: "published-four" });
+				yield* Deferred.succeed(written, undefined);
+				yield* Deferred.await(checked).pipe(Effect.raceFirst(Fiber.join(reader)));
+				const waiting = yield* Deferred.make<void>();
+				const quiescing = yield* Deferred.succeed(waiting, undefined).pipe(
+					Effect.andThen(publication.quiesce),
+					Effect.forkScoped,
+				);
+				yield* Deferred.await(waiting);
+				yield* Effect.yieldNow;
+				assert.equal(quiescing.pollUnsafe(), undefined);
+				yield* Deferred.succeed(finishRead, undefined);
+				yield* Deferred.await(cleaningRead);
+				assert.equal(quiescing.pollUnsafe(), undefined);
+				yield* Deferred.succeed(finishCleanup, undefined);
+				yield* Fiber.join(reader);
+				yield* Fiber.join(quiescing);
+			}).pipe(
+				Effect.ensuring(Deferred.succeed(written, undefined)),
+				Effect.ensuring(Deferred.succeed(finishRead, undefined)),
+				Effect.ensuring(Deferred.succeed(finishCleanup, undefined)),
+			);
+			assert.deepEqual(yield* publication.read(readImage), [{ body: "published-four" }]);
+
 			const published = yield* events.query({ since: 0, limit: 100, types: ["message.edited"] });
-			assert.equal(published.items.length, 2);
+			assert.equal(published.items.length, 4);
 			assert.equal((yield* events.state).pending_id, null);
 			assert.equal((yield* sql`SELECT * FROM outbox`).length, 0);
 		}).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.provideService(BootChannel, channel));
