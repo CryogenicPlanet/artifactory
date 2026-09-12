@@ -19,6 +19,7 @@
 		"effect": "4.0.0-rc.113"
 	},
 	"devDependencies": {
+		"@effect/sql-mysql2": "4.0.0-rc.113",
 		"@effect/sql-pg": "4.0.0-rc.113"
 	}
 }
