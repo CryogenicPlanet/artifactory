@@ -14,7 +14,7 @@ const run = Effect.gen(function* () {
 	return yield* Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
-		const temporary = yield* fs.makeTempDirectoryScoped();
+		const temporary = yield* fs.makeTempDirectoryScoped({ directory: path.dirname(filename) });
 		const clone = path.join(temporary, "clone.db");
 		const pages = path.join(temporary, "pages");
 		yield* fs.makeDirectory(pages);
