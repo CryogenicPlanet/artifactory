@@ -34,8 +34,7 @@ export const appStoreIdentity = (filename: string, dataDirectory?: string) =>
 				return yield* invalid();
 			return { selected, exists };
 		});
-		// Nonisolated startup already permits a journal-selected replacement without the current file.
-		// Isolated layout's earlier missing-file refusal is deliberately unchanged.
+		// A journal-selected backup may replace an absent file before identity reservation resumes.
 		const selectedBackup = Effect.gen(function* () {
 			const rows = yield* boot`SELECT b.id,b.path,b.engine FROM backups b WHERE b.id IN (
 		 SELECT backup FROM cutover WHERE phase='restoring'
@@ -177,5 +176,5 @@ export const isAppStoreIdentityError = (
 export const appIdentityPolicy = {
 	status: 409,
 	retriable: false,
-	hint: "Preserve both stores and recovery journals. Inspect /_boot/status and the backup catalog; select the matching store and restart. HTTP repair of a missing or foreign live store requires a separate preserved-before-image restore protocol; do not initialize or replace its identity.",
+	hint: "Preserve both stores and recovery journals. Inspect /_boot/status and the backup catalog. A human can restore a matching-board backup after prior owners close and pending publication is resolved; boot preserves the original files. Do not initialize or replace the selected store identity.",
 } as const;

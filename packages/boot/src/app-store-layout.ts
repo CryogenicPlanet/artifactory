@@ -15,6 +15,7 @@ export class AppStoreLayoutError extends Schema.TaggedError<AppStoreLayoutError>
 export const migrateAppStore = Effect.fn("migrateAppStore")(function* (options: {
 	readonly dataDirectory: string;
 	readonly filename: string;
+	readonly allowMissingReady?: boolean;
 }) {
 	const sql = yield* SqlClient.SqlClient;
 	const fs = yield* FileSystem.FileSystem;
@@ -55,14 +56,28 @@ export const migrateAppStore = Effect.fn("migrateAppStore")(function* (options: 
 	const initialized = (yield* sql`SELECT value FROM settings WHERE key='app_store_initialized'`).length > 0;
 	if ((oldExists && newExists) || (oldExists && phase === "ready") || (newExists && phase === undefined))
 		return yield* new AppStoreLayoutError({ code: "app_layout_invalid" });
+	const opaqueRollback =
+		phase === "ready" &&
+		options.allowMissingReady &&
+		(yield* sql`SELECT 1 FROM settings s
+	 JOIN db_restore_requests r ON s.key='restore-before:' || r.proof_id
+	 WHERE r.phase='rollback' AND json_valid(s.value) AND json_extract(s.value,'$.filename')=${path.join(canonical, "store/comms.db")} LIMIT 1`)
+			.length > 0;
 	for (const base of [legacy, filename]) {
 		for (const suffix of ["-wal", "-shm", "-journal"]) {
-			if ((yield* regular(`${base}${suffix}`)) && !(base === legacy ? oldExists : newExists))
+			if (
+				(yield* regular(`${base}${suffix}`)) &&
+				!(base === legacy ? oldExists : newExists) &&
+				!(base === filename && opaqueRollback)
+			)
 				return yield* new AppStoreLayoutError({ code: "app_layout_invalid" });
 		}
 	}
 	if (!oldExists && !newExists) {
-		if (initialized || phase === "moving") return yield* new AppStoreLayoutError({ code: "app_store_missing" });
+		if (initialized || phase === "moving") {
+			if (options.allowMissingReady && phase === "ready") return;
+			return yield* new AppStoreLayoutError({ code: "app_store_missing" });
+		}
 		// Fresh installation: normal recovery creates the database, never this migration.
 		yield* sql`INSERT INTO settings(key,value) VALUES('app_store_layout','ready') ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
 		return;
