@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -90,11 +91,47 @@ async function failingRestart(test: TestContext, boundary: "backup" | "accepted"
 		(await app.post("/api/messages", { topic: "retained", body: "acknowledged before recovery" }, cookie)).status,
 	).toBe(200);
 	await writeFile(join(fixture.root, "fail-control"), "trigger one targeted restart");
-	return { fixture, app, cookie };
+	const expectMutation = async (body: string) => {
+		const response = await app.post("/api/messages", { topic: "retained", body }, cookie);
+		let evidence = "";
+		if (response.status !== 200) {
+			const responseBody = (await response.text()).slice(0, 4096);
+			const status = await fetch(`${app.url}/_boot/status`, { headers: { cookie }, signal: AbortSignal.timeout(1000) })
+				.then((value) => value.json())
+				.then(
+					Schema.decodeUnknownSync(
+						Schema.Struct({
+							child: Schema.Struct({
+								state: Schema.String,
+								generation: Schema.NullOr(Schema.Int),
+								attempt: Schema.Int,
+							}),
+							traffic: Schema.Struct({ frozen: Schema.Boolean }),
+						}),
+					),
+				)
+				.catch(() => "status unavailable");
+			const writer = await fixture
+				.sql("SELECT singleton,substr(epoch,1,12) AS epoch_prefix FROM kernel_writer")
+				.catch(() => "writer evidence unavailable");
+			const sequence = await fixture
+				.sql("SELECT next,published_through,pending_id IS NOT NULL AS pending FROM seq", "boot.db")
+				.catch(() => "sequence evidence unavailable");
+			evidence = JSON.stringify({
+				request: response.headers.get("x-request-id"),
+				responseBody,
+				status,
+				writer,
+				sequence,
+			});
+		}
+		expect(response.status, evidence).toBe(200);
+	};
+	return { fixture, app, cookie, expectMutation };
 }
 
 it("retries a backup's failed health catalog write after positive retirement", async (test) => {
-	const { fixture, app, cookie } = await failingRestart(test, "backup");
+	const { fixture, app, cookie, expectMutation } = await failingRestart(test, "backup");
 	const response = await app.post("/_boot/db/backup", {}, cookie);
 	expect(response.status).toBe(500);
 	await app.ready(cookie);
@@ -108,12 +145,12 @@ it("retries a backup's failed health catalog write after positive retirement", a
 	expect(await fixture.sql("SELECT body FROM messages WHERE topic='retained' ORDER BY seq")).toEqual([
 		{ body: "acknowledged before recovery" },
 	]);
-	expect((await app.post("/api/messages", { topic: "retained", body: "recovered writer" }, cookie)).status).toBe(200);
+	await expectMutation("recovered writer");
 }, 30000);
 
 for (const boundary of ["accepted", "accepted-lookup"] as const) {
 	it(`resolves accepted cutover evidence after ${boundary} failure`, async (test) => {
-		const { fixture, app, cookie } = await failingRestart(test, boundary);
+		const { fixture, app, cookie, expectMutation } = await failingRestart(test, boundary);
 		expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 		const response = await sourcePut(`${app.url}/api/fs/app/accepted.txt`, {
 			method: "PUT",
@@ -128,9 +165,7 @@ for (const boundary of ["accepted", "accepted-lookup"] as const) {
 		expect(await fixture.sql("SELECT body FROM messages WHERE topic='retained' ORDER BY seq")).toEqual([
 			{ body: "acknowledged before recovery" },
 		]);
-		expect(
-			(await app.post("/api/messages", { topic: "retained", body: "accepted generation resumed" }, cookie)).status,
-		).toBe(200);
+		await expectMutation("accepted generation resumed");
 	}, 30000);
 }
 
