@@ -1,4 +1,4 @@
-import { isDescendant } from "@comms/storage/descendant";
+import { isDescendant, on, replacePrefix } from "@comms/storage/dialect";
 import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { EventRecord } from "./events.ts";
@@ -42,9 +42,22 @@ export const projectPublicPath = (sql: SqlClient, event: typeof EventRecord.Type
 		} else if (event.type === "topic.meta") {
 			const value = yield* Schema.decodeUnknownEffect(Metadata)(event.payload);
 			if (value.path !== event.topic) return false;
-			if (pagePath(value.path) && value.meta.public === true)
-				yield* sql`INSERT INTO public_paths(path) VALUES(${value.path}) ON CONFLICT(path) DO NOTHING`;
-			else yield* sql`DELETE FROM public_paths WHERE path=${value.path}`;
+			if (pagePath(value.path) && value.meta.public === true) {
+				const collision = Effect.gen(function* () {
+					const digest = on(sql, {
+						sqlite: () => sql`NULL`,
+						pg: () => sql`encode(sha256(${new TextEncoder().encode(value.path)}::bytea),'hex')`,
+						mysql: () => sql`SHA2(${value.path},256)`,
+					});
+					const rows = yield* sql`SELECT path FROM public_paths WHERE path_hash=${digest}`.pipe(
+						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ path: Schema.String })))),
+					);
+					return rows.some((row) => row.path !== value.path);
+				});
+				if (yield* on(sql, { sqlite: () => Effect.succeed(false), pg: () => collision, mysql: () => collision }))
+					return false;
+				yield* sql`INSERT INTO public_paths(path) VALUES(${value.path}) ${on(sql, { sqlite: () => sql`ON CONFLICT(path) DO NOTHING`, pg: () => sql`ON CONFLICT(path_hash) DO NOTHING`, mysql: () => sql`ON DUPLICATE KEY UPDATE path=path` })}`;
+			} else yield* sql`DELETE FROM public_paths WHERE path=${value.path}`;
 		} else if (event.type === "topic.deleted") {
 			const value = yield* Schema.decodeUnknownEffect(Deletion)(event.payload);
 			if (value.path !== event.topic) return false;
@@ -55,5 +68,5 @@ export const projectPublicPath = (sql: SqlClient, event: typeof EventRecord.Type
 	});
 
 export const movePublicPaths = (sql: SqlClient, from: string, to: string) =>
-	sql`UPDATE public_paths SET path=${to}||substr(path,length(${from})+1)
+	sql`UPDATE public_paths SET path=${replacePrefix(sql, sql`path`, from, to)}
 		WHERE path=${from} OR ${isDescendant(sql, sql`path`, sql`${from}`)}`;

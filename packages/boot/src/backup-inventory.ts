@@ -18,8 +18,7 @@ export const makeBackupInventory = Effect.gen(function* () {
 	return (page: { readonly limit: number; readonly before: typeof BackupCursor.Type | null }) =>
 		Effect.gen(function* () {
 			const rows = yield* sql`SELECT id,engine,reason,bytes,taken_at,published_through,generation FROM backups
-   WHERE (${page.before?.taken_at ?? null} IS NULL OR taken_at < ${page.before?.taken_at ?? null}
-    OR taken_at = ${page.before?.taken_at ?? null} AND id < ${page.before?.id ?? null})
+   WHERE ${page.before === null ? sql`1=1` : sql`(taken_at < ${page.before.taken_at} OR taken_at = ${page.before.taken_at} AND id < ${page.before.id})`}
    ORDER BY taken_at DESC,id DESC LIMIT ${page.limit + 1}`.pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Summary))),
 			);

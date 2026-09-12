@@ -1,6 +1,8 @@
+import { on } from "@comms/storage/dialect";
+import { lockBootWrite } from "./boot-write-lock.ts";
 import { humanAgent } from "./human-agent.ts";
 import { AuthError } from "./auth.ts";
-import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
+import { Clock, Crypto, Effect, Option, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { canonicalProof, authSecrets, refuse } from "./auth-primitives.ts";
 import type { AssertionProof } from "./enrollment.ts";
@@ -30,6 +32,32 @@ export const makeSettings = <E, R>(
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* Events;
 		const { hash } = authSecrets(yield* Crypto.Crypto);
+		const save = (key: string, value: string) =>
+			sql`INSERT INTO settings (${sql("key")},value) VALUES (${key},${value}) ${on(sql, {
+				sqlite: () => sql`ON CONFLICT(${sql("key")}) DO UPDATE SET value=excluded.value`,
+				pg: () => sql`ON CONFLICT(${sql("key")}) DO UPDATE SET value=excluded.value`,
+				mysql: () => sql`AS incoming ON DUPLICATE KEY UPDATE value=incoming.value`,
+			})}`;
+		// Receipt values are text and may contain damaged legacy JSON. Decode the bounded
+		// window without a remote JSON cast turning cleanup into an auth outage.
+		const expireRemote = (first: string, last: string, now: number) =>
+			Effect.gen(function* () {
+				const rows =
+					yield* sql`SELECT ${sql("key")},value FROM settings WHERE ${sql("key")}>=${first} AND ${sql("key")}<=${last}`.pipe(
+						Effect.flatMap(
+							Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String }))),
+						),
+					);
+				for (const row of rows) {
+					const receipt = Schema.decodeUnknownOption(
+						Schema.fromJsonString(
+							Schema.Struct({ expires_at: Schema.Finite, session: Schema.optionalKey(Schema.String) }),
+						),
+					)(row.value);
+					if (Option.isSome(receipt) && receipt.value.expires_at <= now)
+						yield* sql`DELETE FROM settings WHERE ${sql("key")}=${row.key} AND NOT EXISTS (SELECT 1 FROM sessions WHERE id=${receipt.value.session ?? null} AND expires_at>${now})`;
+				}
+			});
 		const current = readSettings.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 		return {
 			settings: current,
@@ -41,6 +69,7 @@ export const makeSettings = <E, R>(
 				mutex.withPermit(
 					sql.withTransaction(
 						Effect.gen(function* () {
+							yield* lockBootWrite(sql);
 							yield* Schema.decodeUnknownEffect(SettingsChange)(params, { onExcessProperty: "error" }).pipe(
 								Effect.mapError(() => new AuthError({ code: "invalid_request" })),
 							);
@@ -55,12 +84,13 @@ export const makeSettings = <E, R>(
 							const expires_at = yield* liveSession;
 							const now = yield* Clock.currentTimeMillis;
 							// Advance a durable bounded key window; live receipts cannot starve expired ones later in the range.
-							const cursorRow = (yield* sql`SELECT value FROM settings WHERE key='settings.receipt_cursor'`.pipe(
-								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ value: Schema.String })))),
-							))[0];
+							const cursorRow =
+								(yield* sql`SELECT value FROM settings WHERE ${sql("key")}='settings.receipt_cursor'`.pipe(
+									Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ value: Schema.String })))),
+								))[0];
 							const cursor = cursorRow?.value ?? "settings.receipt:";
 							const window = (after: string) =>
-								sql`SELECT key FROM settings WHERE key>${after} AND key>='settings.receipt:' AND key<'settings.receipt;' ORDER BY key LIMIT 256`.pipe(
+								sql`SELECT ${sql("key")} FROM settings WHERE ${sql("key")}>${after} AND ${sql("key")}>='settings.receipt:' AND ${sql("key")}<'settings.receipt;' ORDER BY ${sql("key")} LIMIT 256`.pipe(
 									Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ key: Schema.String })))),
 								);
 							let candidates = yield* window(cursor);
@@ -69,16 +99,20 @@ export const makeSettings = <E, R>(
 							const first = candidates[0]?.key;
 							const last = candidates.at(-1)?.key;
 							if (first !== undefined && last !== undefined) {
-								yield* sql`DELETE FROM settings WHERE key>=${first} AND key<=${last}
+								yield* on(sql, {
+									sqlite: () => sql`DELETE FROM settings WHERE ${sql("key")}>=${first} AND ${sql("key")}<=${last}
  AND CASE WHEN json_valid(value) THEN json_extract(value,'$.expires_at') END <= ${now}
- AND NOT EXISTS (SELECT 1 FROM sessions WHERE id=CASE WHEN json_valid(value) THEN json_extract(value,'$.session') END AND expires_at>${now})`;
+ AND NOT EXISTS (SELECT 1 FROM sessions WHERE id=CASE WHEN json_valid(value) THEN json_extract(value,'$.session') END AND expires_at>${now})`,
+									pg: () => expireRemote(first, last, now),
+									mysql: () => expireRemote(first, last, now),
+								});
 							}
 							const nextCursor = last ?? "settings.receipt:";
-							yield* sql`INSERT INTO settings(key,value) VALUES ('settings.receipt_cursor',${nextCursor}) ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
+							yield* save("settings.receipt_cursor", nextCursor);
 							const binding = canonicalSettings(params, session);
 							const digest = yield* hash(canonicalProof(proof));
 							const key = `settings.receipt:${yield* hash(proof.id)}`;
-							const row = (yield* sql`SELECT value FROM settings WHERE key=${key}`.pipe(
+							const row = (yield* sql`SELECT value FROM settings WHERE ${sql("key")}=${key}`.pipe(
 								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ value: Schema.String })))),
 							))[0];
 							if (row) {
@@ -101,10 +135,10 @@ export const makeSettings = <E, R>(
 								["settings_revision", result.revision],
 							] as const) {
 								const encoded = JSON.stringify(value);
-								yield* sql`INSERT INTO settings (key,value) VALUES (${name},${encoded}) ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
+								yield* save(name, encoded);
 							}
 							const receipt = JSON.stringify({ session, expires_at, binding, proof: digest, result });
-							yield* sql`INSERT INTO settings (key,value) VALUES (${key},${receipt})`;
+							yield* sql`INSERT INTO settings (${sql("key")},value) VALUES (${key},${receipt})`;
 							yield* events.writeBoot({
 								at: yield* Clock.currentTimeMillis,
 								type: "settings.changed",

@@ -1,3 +1,4 @@
+import { on } from "@comms/storage/dialect";
 import { humanAgent } from "./human-agent.ts";
 import { decodeRows } from "./decode-rows.ts";
 import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
@@ -121,7 +122,7 @@ export const makeTokens = <E, R>(
 					const bind = (deadline: number) =>
 						keyHash === null
 							? Effect.void
-							: sql`INSERT INTO refresh_idempotency(family,key_hash,predecessor,expires_at) VALUES(${row.family},${keyHash},${row.id},${deadline}) ON CONFLICT(family,key_hash) DO NOTHING`.pipe(
+							: sql`INSERT INTO refresh_idempotency(family,key_hash,predecessor,expires_at) VALUES(${row.family},${keyHash},${row.id},${deadline}) ${on(sql, { sqlite: () => sql`ON CONFLICT(family,key_hash) DO NOTHING`, pg: () => sql`ON CONFLICT(family,key_hash) DO NOTHING`, mysql: () => sql`ON DUPLICATE KEY UPDATE family=family` })}`.pipe(
 									Effect.asVoid,
 								);
 					if (row.rotated_to !== null) {

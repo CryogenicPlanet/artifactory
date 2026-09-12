@@ -1,3 +1,4 @@
+import { distinctFrom, isDescendant, jsonInt, lockRow, on, plannerHint, replacePrefix } from "@comms/storage/dialect";
 import { redactHex } from "./auth-primitives.ts";
 import { decodeRows } from "./decode-rows.ts";
 import { Clock, Context, Deferred, Effect, Layer, Ref, Schema } from "effect";
@@ -85,11 +86,20 @@ const make = Effect.fn("Events")(function* (
 	admitReservation: Effect.Effect<void, StorageRejected | EventStorageRejected>,
 ) {
 	const sql = yield* SqlClient.SqlClient;
-	const state =
-		sql`SELECT next,published_through,pending_id,pending_attempt,pending_from,pending_to FROM seq WHERE singleton=1`.pipe(
+	const readState = (write: boolean) =>
+		sql`SELECT next,published_through,pending_id,pending_attempt,pending_from,pending_to FROM seq WHERE singleton=1 ${write ? lockRow(sql) : sql``}`.pipe(
 			decodeRows(Sequence),
 			Effect.flatMap((rows) => (rows[0] ? Effect.succeed(rows[0]) : Effect.die("Missing sequence row"))),
 		);
+	const state = readState(false);
+	const writeState = readState(true);
+	// Keep SQLite's indexed GLOB form; remote engines use a literal prefix.
+	const prefix = (column: Statement.Fragment, value: string) =>
+		on(sql, {
+			sqlite: () => sql`${column} GLOB ${`${value.replace(/[?*[]/g, (character) => `[${character}]`)}*`}`,
+			pg: () => sql`starts_with(${column}::text,${value}::text)`,
+			mysql: () => sql`BINARY substr(${column},1,char_length(${value}))=BINARY ${value}`,
+		});
 	const stopped = yield* Ref.make(false);
 	const signal = yield* Ref.make(yield* Deferred.make<void>());
 	const notify = Effect.gen(function* () {
@@ -113,7 +123,7 @@ const make = Effect.fn("Events")(function* (
 	const append = (batch: Batch, attempt: string) =>
 		sql.withTransaction(
 			Effect.gen(function* () {
-				const current = yield* state;
+				const current = yield* writeState;
 				const records =
 					yield* sql`SELECT attempt,from_seq,to_seq,state FROM event_batches WHERE id=${batch.transaction}`.pipe(
 						decodeRows(
@@ -166,8 +176,8 @@ const make = Effect.fn("Events")(function* (
 							move.to.startsWith(`${move.from}/`)
 						)
 							return yield* new EventError({ code: "topic_move_invalid" });
-						yield* sql`UPDATE events SET topic=${move.to} || substr(topic,length(${move.from})+1)
-							WHERE topic=${move.from} OR substr(topic,1,length(${move.from})+1)=${`${move.from}/`}`;
+						yield* sql`UPDATE events SET topic=${replacePrefix(sql, sql`topic`, move.from, move.to)}
+							WHERE topic=${move.from} OR ${isDescendant(sql, sql`topic`, move.from)}`;
 						yield* movePublicPaths(sql, move.from, move.to);
 					}
 					const projected = yield* projectPublicPath(sql, event).pipe(
@@ -184,7 +194,7 @@ const make = Effect.fn("Events")(function* (
 	const abort = (transaction: string, attempt: string) =>
 		sql.withTransaction(
 			Effect.gen(function* () {
-				const current = yield* state;
+				const current = yield* writeState;
 				if (current.pending_id !== transaction || current.pending_attempt !== attempt)
 					return yield* new EventError({ code: "reservation_mismatch" });
 				yield* sql`UPDATE event_batches SET state='aborted' WHERE id=${transaction}`;
@@ -196,7 +206,7 @@ const make = Effect.fn("Events")(function* (
 			Effect.gen(function* () {
 				if (!transaction || transaction.length > 128 || !Number.isSafeInteger(count) || count < 1 || count > 256)
 					return yield* new EventError({ code: "reservation_invalid" });
-				const current = yield* state;
+				const current = yield* writeState;
 				const previous =
 					yield* sql`SELECT attempt,from_seq,to_seq,state FROM event_batches WHERE id=${transaction}`.pipe(
 						decodeRows(
@@ -256,10 +266,10 @@ const make = Effect.fn("Events")(function* (
 						if (event.type === "topic.moved") return yield* new EventError({ code: "topic_move_unprepared" });
 						if (event.type === "topic.meta" || event.type === "topic.deleted" || event.type === "pages.public")
 							return yield* new EventError({ code: "public_path_invalid" });
-						const current = yield* state;
+						const current = yield* writeState;
 						if (!Number.isSafeInteger(current.next + 1)) return yield* new EventError({ code: "sequence_exhausted" });
 						yield* sql`INSERT INTO events(seq,transaction_id,event,topic) VALUES(${current.next},NULL,${encode({ ...event, seq: current.next })},${event.topic})`;
-						yield* sql`UPDATE seq SET next=next+1,published_through=CASE WHEN pending_id IS NULL THEN next ELSE published_through END WHERE singleton=1`;
+						yield* sql`UPDATE seq SET next=${current.next + 1},published_through=${current.pending_id === null ? current.next : current.published_through} WHERE singleton=1`;
 					}),
 				)
 				.pipe(Effect.ensuring(notify)),
@@ -274,11 +284,11 @@ const make = Effect.fn("Events")(function* (
 					if (input.since !== undefined && input.since > fence) return yield* new EventError({ code: "cursor_ahead" });
 					// Provenance comes from the immutable writer, never the app-controlled event type.
 					const rows = yield* sql`SELECT events.event, generations.error, generations.stderr FROM events
-					LEFT JOIN generations ON generations.n=json_extract(events.event,'$.generation')
+					LEFT JOIN generations ON generations.n=${jsonInt(sql, sql`events.event`, "generation")}
 						AND events.type='generation.failed' AND generations.status='failed'
 					WHERE transaction_id IS NULL AND seq<=${fence}
-					AND (type GLOB 'generation.*' OR type GLOB 'lock.*' OR type GLOB 'fs.*'
-						OR type GLOB 'backup.*' OR type IN ('db.restored','http.request'))
+					AND (${prefix(sql`type`, "generation.")} OR ${prefix(sql`type`, "lock.")} OR ${prefix(sql`type`, "fs.")}
+						OR ${prefix(sql`type`, "backup.")} OR type IN ('db.restored','http.request'))
 					AND ${input.requestActor === undefined ? sql`1=1` : sql`(type<>'http.request' OR actor=${input.requestActor})`}
 					AND seq>${input.since ?? 0}
 					ORDER BY seq ${input.since === undefined ? sql`DESC` : sql`ASC`} LIMIT ${input.limit + 1}`.pipe(
@@ -333,10 +343,13 @@ const make = Effect.fn("Events")(function* (
 				if (since === fence) return { items: [], cursor: fence, timed_out: false, drained: false };
 				const filters: Array<Statement.Fragment> = [sql`seq>${since}`, sql`seq<=${fence}`];
 				if (input.omitRequestEvents) filters.push(sql`type<>'http.request'`);
-				if (input.topic !== undefined) filters.push(sql`(topic=${input.topic} OR topic GLOB ${`${input.topic}/*`})`);
+				if (input.topic !== undefined)
+					filters.push(sql`(topic=${input.topic} OR ${prefix(sql`topic`, `${input.topic}/`)})`);
 				if (input.requestActor !== undefined) filters.push(sql`(type<>'http.request' OR actor=${input.requestActor})`);
 				if (input.excludeMessageInstance !== undefined)
-					filters.push(sql`(type NOT GLOB 'message.*' OR instance IS NOT ${input.excludeMessageInstance})`);
+					filters.push(
+						sql`(NOT (${prefix(sql`type`, "message.")}) OR ${distinctFrom(sql, sql`instance`, input.excludeMessageInstance)})`,
+					);
 				if (input.agent !== undefined) filters.push(sql`actor=${input.agent}`);
 				if (input.instance !== undefined) filters.push(sql`instance=${input.instance}`);
 				if (input.level !== undefined) filters.push(sql`level=${input.level}`);
@@ -344,9 +357,7 @@ const make = Effect.fn("Events")(function* (
 					filters.push(
 						sql.or(
 							input.types.map((type) =>
-								type.endsWith("*")
-									? sql`type GLOB ${`${type.slice(0, -1).replace(/[?*[]/g, (character) => `[${character}]`)}*`}`
-									: sql`type=${type}`,
+								type.endsWith("*") ? prefix(sql`type`, type.slice(0, -1)) : sql`type=${type}`,
 							),
 						),
 					);
@@ -363,8 +374,8 @@ const make = Effect.fn("Events")(function* (
 				// A nearly caught-up query can inspect at most one page of sequence values; prefix indexes
 				// would instead revisit older matching history because their second key cannot bound that range.
 				let indexed = sql``;
-				if (fence - since <= input.limit + 1) indexed = sql`NOT INDEXED`;
-				else if (index !== undefined) indexed = sql`INDEXED BY ${sql(index)}`;
+				if (fence - since <= input.limit + 1) indexed = plannerHint(sql, null);
+				else if (index !== undefined) indexed = plannerHint(sql, index);
 				// One lookahead distinguishes a full page from exhausted filtered history. Only decode returned rows.
 				const rows =
 					yield* sql`SELECT event,topic FROM events ${indexed} WHERE ${sql.and(filters)} ORDER BY seq LIMIT ${input.limit + 1}`.pipe(

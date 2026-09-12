@@ -1,3 +1,5 @@
+import { on } from "@comms/storage/dialect";
+import { lockBootWrite } from "./boot-write-lock.ts";
 import { makeSettings } from "./settings.ts";
 import { SettingsChange, canonicalSettings } from "./settings-schema.ts";
 import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
@@ -198,6 +200,7 @@ const makeAuth = (config: AuthConfig) =>
 			mutex.withPermit(
 				sql.withTransaction(
 					Effect.gen(function* () {
+						yield* lockBootWrite(sql);
 						if (!(yield* noPasskeys)) return yield* refuse("setup_closed");
 						const state = yield* Ref.get(setup);
 						const challenge = yield* takeChallenge(id, "setup");
@@ -275,7 +278,12 @@ const makeAuth = (config: AuthConfig) =>
 		});
 		const finishLogin = (id: string, response: AuthenticationResponseJSON) =>
 			mutex.withPermit(
-				sql.withTransaction(verifyAssertion(id, response, "login", null).pipe(Effect.andThen(newSession))),
+				sql.withTransaction(
+					lockBootWrite(sql).pipe(
+						Effect.andThen(verifyAssertion(id, response, "login", null)),
+						Effect.andThen(newSession),
+					),
+				),
 			);
 		const startActionAssertion = (
 			action:
@@ -436,15 +444,28 @@ const makeAuth = (config: AuthConfig) =>
 		const authenticateSession = Effect.fn("Auth.authenticateSession")(function* (token: string) {
 			const digest = yield* hash(token);
 			const now = yield* Clock.currentTimeMillis;
-			const rows =
-				yield* sql`UPDATE sessions SET last_seen_at = ${now} WHERE hash = ${digest} AND expires_at > ${now} RETURNING id, expires_at`;
+			const rows = yield* on(sql, {
+				sqlite: () =>
+					sql`UPDATE sessions SET last_seen_at = ${now} WHERE hash = ${digest} AND expires_at > ${now} RETURNING id, expires_at`,
+				pg: () =>
+					sql`UPDATE sessions SET last_seen_at = ${now} WHERE hash = ${digest} AND expires_at > ${now} RETURNING id, expires_at`,
+				mysql: () =>
+					sql.withTransaction(
+						Effect.gen(function* () {
+							yield* sql`UPDATE sessions SET last_seen_at = ${now} WHERE hash = ${digest} AND expires_at > ${now}`;
+							return yield* sql`SELECT id,expires_at FROM sessions WHERE hash=${digest} AND expires_at>${now} FOR UPDATE`;
+						}),
+					),
+			});
 			const session = (yield* Schema.decodeUnknownEffect(Schema.Array(sessionRow))(rows))[0];
 			if (!session) return yield* refuse("session_invalid");
 			return { id: session.id, expiresAt: session.expires_at };
 		});
 		const logout = Effect.fn("Auth.logout")(function* (token: string) {
 			const digest = yield* hash(token);
-			yield* sql`DELETE FROM sessions WHERE hash = ${digest}`;
+			yield* sql.withTransaction(
+				lockBootWrite(sql).pipe(Effect.andThen(sql`DELETE FROM sessions WHERE hash = ${digest}`)),
+			);
 		});
 		const accounts = yield* makeAccountQueries;
 		return {

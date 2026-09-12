@@ -1,3 +1,4 @@
+import { lockBootWrite } from "./boot-write-lock.ts";
 import { humanAgent } from "./human-agent.ts";
 import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
@@ -138,6 +139,7 @@ export const makeEnrollment = <E, R>(
 			mutex.withPermit(
 				sql.withTransaction(
 					Effect.gen(function* () {
+						yield* lockBootWrite(sql);
 						if (!/^[A-Za-z0-9_-]{43}$/.test(secret)) return yield* refuse("device_secret_invalid");
 						const digest = yield* hash(secret);
 						const rows = yield* sql`SELECT * FROM enrollments WHERE id=${id} AND device_secret_hash=${digest}`.pipe(
@@ -185,6 +187,7 @@ export const makeEnrollment = <E, R>(
 		const authenticateAccess = (token: string) =>
 			sql.withTransaction(
 				Effect.gen(function* () {
+					yield* lockBootWrite(sql);
 					if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return yield* refuse("token_invalid");
 					const digest = yield* hash(token),
 						now = yield* Clock.currentTimeMillis;
