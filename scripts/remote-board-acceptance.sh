@@ -127,6 +127,10 @@ PY
 export COMMS_TEST_ORIGIN=http://localhost:8080
 export COMMS_SETUP_CODE_FILE="$private/setup-code"
 bun scripts/remote-board-http.ts prepare http://localhost:8080 "$private/state.json"
+bun scripts/remote-board-http.ts failed-health http://localhost:8080 "$private/state.json"
+marker_path=$(bun -e 'const value = await Bun.file(process.argv[1]).json(); if (!Number.isSafeInteger(value.failedGeneration) || value.failedGeneration < 1 || !/^native-candidate-health-[a-f0-9-]+\.json$/.test(value.marker) || value.markerPath !== `/data/gen/${value.failedGeneration}/source.board/${value.marker}`) process.exit(1); process.stdout.write(value.markerPath)' "$private/state.json.health")
+docker exec "$board" cat "$marker_path" > "$private/state.json.health-marker"
+bun scripts/remote-board-http.ts check-health-marker http://localhost:8080 "$private/state.json"
 docker restart --time 30 "$board" >/dev/null
 wait_for_board
 bun scripts/remote-board-http.ts check-restarted http://localhost:8080 "$private/state.json"

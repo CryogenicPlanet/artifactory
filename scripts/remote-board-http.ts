@@ -2,6 +2,7 @@
 // The harness owns Docker lifecycle; this probe never touches either database directly.
 /* oxlint-disable effecttsgo/async-function, effecttsgo/global-fetch, effecttsgo/process-env, effecttsgo/prefer-schema-over-json */
 import assert from "node:assert/strict";
+import { failedHealth, verifyHealthMarker } from "./remote-board-health.ts";
 import { existsSync } from "node:fs";
 import { readFile, writeFile, stat, rename } from "node:fs/promises";
 import { setTimeout } from "node:timers/promises";
@@ -18,6 +19,8 @@ async function run() {
 		phase === "prepare" ||
 			phase === "prepare-existing" ||
 			phase === "check-restored" ||
+			phase === "failed-health" ||
+			phase === "check-health-marker" ||
 			phase === "check-restarted" ||
 			phase === "diagnose",
 		"Unknown probe phase",
@@ -158,6 +161,14 @@ async function run() {
 			409,
 		);
 	};
+	if (phase === "check-health-marker") {
+		const evidence = Schema.decodeSync(Schema.fromJsonString(Schema.Struct({ marker: Schema.String })))(
+			await readFile(`${stateFile}.health`, "utf8"),
+		);
+		verifyHealthMarker(evidence.marker, await readFile(`${stateFile}.health-marker`, "utf8"));
+		console.log("Native candidate health altered real data before rejection; rollback retained acknowledged data.");
+		return;
+	}
 	if (phase === "diagnose") {
 		const session = Schema.decodeSync(Schema.fromJsonString(Schema.Struct({ cookie: Schema.String })))(
 			await readFile(`${stateFile}.session`, "utf8"),
@@ -191,7 +202,30 @@ async function run() {
 		assert.equal((await stat(stateFile)).mode & 0o077, 0, "Private state file permissions");
 		const state = Schema.decodeSync(Schema.fromJsonString(savedState))(await readFile(stateFile, "utf8"));
 		await verify(state);
+		if (phase === "failed-health") {
+			const evidence = await failedHealth(url, origin, state.cookie, state.message.topic);
+			await verify(state);
+			await writeFile(`${stateFile}.health`, JSON.stringify(evidence), { mode: 0o600 });
+		}
 		if (phase === "check-restarted") {
+			if (existsSync(`${stateFile}.health`)) {
+				const health = Schema.decodeSync(Schema.fromJsonString(Schema.Struct({ written: message })))(
+					await readFile(`${stateFile}.health`, "utf8"),
+				);
+				const retained = Schema.decodeUnknownSync(Schema.Struct({ items: Schema.Array(message) }))(
+					await (
+						await ok(
+							await request(
+								`/api/messages?since=0&wait=0&topic=${encodeURIComponent(health.written.topic)}`,
+								undefined,
+								state.cookie,
+							),
+							"Retain post-health-failure write across restart",
+						)
+					).json(),
+				);
+				assert.deepEqual(retained.items, [health.written]);
+			}
 			const input = { topic: `${state.message.topic}/after-restart`, body: "Fresh write after restart" };
 			const written = Schema.decodeUnknownSync(message)(
 				await (await ok(await request("/api/messages", input, state.cookie), "Fresh post-restart write")).json(),
