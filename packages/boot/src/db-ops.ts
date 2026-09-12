@@ -1,9 +1,9 @@
 import type { RemoteDatabaseError } from "./remote-database-journal.ts";
 import type { RemoteCopyError } from "@comms/storage/remote-copy";
-import type { EventError } from "./events.ts";
+import { EventError } from "./events.ts";
 import { sqliteCopyProcess } from "./sqlite-copy-process.ts";
 import { ChildError } from "./child-process.ts";
-import { appStoreIdentity, verifyAppIdentity } from "./app-store-identity.ts";
+import { appStoreIdentity, isAppStoreIdentityError, verifyAppIdentity } from "./app-store-identity.ts";
 import type { BackupRecord } from "./backup-metadata.ts";
 import { clientLayer } from "@comms/storage/client";
 import type { FileStore, Store } from "@comms/storage/store";
@@ -35,12 +35,71 @@ const make = (store: FileStore, dataDirectory: string) =>
 			}).pipe(Effect.provide(clientLayer(store))),
 		);
 		const sync = (name: string) => Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
+		const verifyCopy = (source: string, legacy: string | null, sidecars = false) =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const adoption = yield* identity.current;
+					const suffixes = sidecars ? ["", "-wal", "-shm", "-journal"] : [""];
+					let required = 0;
+					for (const suffix of suffixes)
+						if (yield* fs.exists(`${source}${suffix}`)) required += Number((yield* fs.stat(`${source}${suffix}`)).size);
+					yield* headroom.check(required);
+					const directory = `${filename}.identity-probe`;
+					yield* fs.remove(directory, { recursive: true, force: true });
+					yield* fs.makeDirectory(directory, { mode: 0o700 });
+					yield* Effect.addFinalizer(() => fs.remove(directory, { recursive: true, force: true }).pipe(Effect.orDie));
+					const selected = path.join(directory, "store.db");
+					for (const suffix of sidecars ? ["", "-wal", "-shm", "-journal"] : [""]) {
+						const name = `${source}${suffix}`;
+						if (!(yield* fs.exists(name))) {
+							if (suffix === "") return yield* new EventError({ code: "app_store_missing" });
+							continue;
+						}
+						if (
+							(yield* fs.realPath(name)) !== path.join(yield* fs.realPath(path.dirname(name)), path.basename(name)) ||
+							(yield* fs.stat(name)).type !== "File"
+						)
+							return yield* new EventError({ code: "app_store_identity_invalid" });
+						yield* fs.copyFile(name, `${selected}${suffix}`);
+					}
+					yield* Effect.scoped(
+						Effect.gen(function* () {
+							const sql = yield* SqlClient.SqlClient;
+							yield* sql.withTransaction(verifyAppIdentity(adoption, legacy === adoption.store_id));
+						}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: selected }))),
+					);
+				}),
+			);
 		const operations = {
+			...([path.resolve(dataDirectory, "comms.db"), path.resolve(dataDirectory, "store/comms.db")].includes(
+				path.resolve(filename),
+			)
+				? {
+						offlineRestore: {
+							filename,
+							verify: (record: Pick<BackupRecord, "path" | "legacy_store_id">) =>
+								verifyCopy(record.path, record.legacy_store_id),
+							status: Effect.gen(function* () {
+								const adoption = yield* identity.current;
+								if (adoption.phase !== "ready") return yield* new EventError({ code: "app_store_identity_invalid" });
+								yield* identity.status;
+								const checked = yield* verifyCopy(filename, null, true).pipe(Effect.result);
+								if (checked._tag === "Failure" && !isAppStoreIdentityError(checked.failure))
+									return yield* checked.failure;
+								let bytes = 0;
+								for (const suffix of ["", "-wal", "-shm", "-journal"])
+									if (yield* fs.exists(`${filename}${suffix}`))
+										bytes += Number((yield* fs.stat(`${filename}${suffix}`)).size);
+								return { needed: checked._tag === "Failure", storeId: adoption.store_id, bytes };
+							}),
+						},
+					}
+				: {}),
 			engine: "sqlite" as const,
 			recoverStaging: copying.recover.pipe(
 				Effect.andThen(
 					Effect.forEach(
-						[".restore-staging", ".restore", ".restore-wal", ".restore-shm", ".restore-journal"],
+						[".identity-probe", ".restore-staging", ".restore", ".restore-wal", ".restore-shm", ".restore-journal"],
 						(suffix) => fs.remove(`${filename}${suffix}`, { recursive: true, force: true }),
 						{ discard: true },
 					),
@@ -85,7 +144,8 @@ const make = (store: FileStore, dataDirectory: string) =>
 						if (isolated) yield* fs.chmod(temporary, 0o660);
 						yield* sync(temporary);
 						// The caller has positive closure evidence for every process that could own these handles.
-						for (const suffix of ["-wal", "-shm"]) yield* fs.remove(`${filename}${suffix}`, { force: true });
+						for (const suffix of ["-wal", "-shm", "-journal"])
+							yield* fs.remove(`${filename}${suffix}`, { force: true });
 						yield* fs.rename(temporary, filename);
 						yield* sync(path.dirname(filename));
 						return store;
@@ -117,6 +177,8 @@ type Rehearsal = ReturnType<Operations["rehearsal"]>;
 /** A common effect shape keeps the coordinator independent of native versus file mechanics. */
 export interface DbOpsService {
 	readonly engine: "sqlite" | "pg" | "mysql";
+	/** SQLite-only opaque before-image repair; remote restore retains its native verification. */
+	readonly offlineRestore?: Operations["offlineRestore"];
 	readonly estimatedBytes: Result<number, Operations["estimatedBytes"]>;
 	readonly recoverStaging: Result<void, Operations["recoverStaging"]>;
 	readonly recoverCopy: Result<void, Operations["recoverCopy"]>;
