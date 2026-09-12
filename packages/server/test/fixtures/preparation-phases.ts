@@ -46,7 +46,7 @@ export async function preparationPhases(root: string) {
 	]);
 	await observe("supervisor.ts", [
 		["prepare_generation", "const choices = yield* prepareGeneration(options);"],
-		["candidate_launch", 'const value = yield* launch(generation, recovery.filename, "candidate");'],
+		["candidate_launch", 'const value = yield* launch(generation, recovery.store, "candidate");'],
 		["writer_recovery", "yield* recovery.prepare(value.attempt.epoch);"],
 		["child_go", 'yield* value.process.control("go");'],
 		["healthy_record", "yield* (yield* Generations).healthy(generation.n);"],
