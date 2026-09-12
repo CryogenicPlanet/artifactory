@@ -20,6 +20,7 @@ type Usage = {
 	readonly deleted: number;
 };
 export type EventStorageStatus =
+	| { readonly status: "unknown"; readonly reason: "remote_capacity_unavailable" }
 	| { readonly status: "unavailable"; readonly reason: string }
 	| (Usage & { readonly status: "within_budget" })
 	| (Usage & {
@@ -31,6 +32,16 @@ export type EventStorageStatus =
 export const makeEventStorage = <R>(volume: Effect.Effect<StorageVolume, never, R>) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		if (sql.onDialectOrElse({ sqlite: () => false, orElse: () => true })) {
+			// The data volume is not the remote database volume. Do not invent a byte
+			// budget or run SQLite reclamation against a remote server.
+			return {
+				prune: Effect.void,
+				admit: Effect.void,
+				status: Effect.succeed<EventStorageStatus>({ status: "unknown", reason: "remote_capacity_unavailable" }),
+				run: Effect.never,
+			};
+		}
 		const fs = yield* FileSystem.FileSystem;
 		const state = yield* Ref.make<EventStorageStatus>({ status: "unavailable", reason: "not_measured" });
 		const measure = Effect.gen(function* () {
@@ -159,7 +170,12 @@ export const makeEventStorage = <R>(volume: Effect.Effect<StorageVolume, never, 
 		const status: Effect.Effect<EventStorageStatus, never, R> = Effect.gen(function* () {
 			const measured = yield* Ref.get(state);
 			const policy = yield* readStoragePolicy.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-			if (measured.status !== "unavailable" && policy.event_percent === measured.event_percent) return measured;
+			if (
+				measured.status !== "unavailable" &&
+				measured.status !== "unknown" &&
+				policy.event_percent === measured.event_percent
+			)
+				return measured;
 			// Refresh only accounting here: admission already owns a SQL transaction, so
 			// checkpointing/reclamation stays in maintenance and never borrows a second connection.
 			const sample = yield* volume;
