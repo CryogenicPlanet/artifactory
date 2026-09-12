@@ -1,3 +1,5 @@
+import { Redacted } from "effect";
+import { render } from "@comms/storage/store";
 import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,6 +19,7 @@ for (const mode of ["confirmed", "uncertain"])
 				STATE: "rehearsal",
 				REHEARSAL_SEQUENCE: "101",
 				WRITER_EPOCH: "test-epoch",
+				APP_STORE: Redacted.value(render({ _tag: "file", filename: filename })),
 				APP_DATABASE: filename,
 				GENERATION: "7",
 			},

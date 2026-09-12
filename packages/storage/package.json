@@ -1,0 +1,17 @@
+{
+	"name": "@comms/storage",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		"./store": "./src/store.ts",
+		"./client": "./src/client.ts"
+	},
+	"scripts": {
+		"check": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@effect/sql-sqlite-bun": "4.0.0-rc.113",
+		"effect": "4.0.0-rc.113"
+	}
+}

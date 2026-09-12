@@ -4,7 +4,7 @@ import { migrateAppStore } from "./app-store-layout.ts";
 import { sourceReverts } from "./source-revert.ts";
 import { SourceRejected } from "./source-schema.ts";
 import { RecoveryRejected, recoveryIntents } from "./recovery-intents.ts";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { clientLayer } from "@comms/storage/client";
 import { Cause, Config, Context, Deferred, Effect, FileSystem, Layer, Logger, Path, Ref, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { HttpRouter } from "effect/unstable/http";
@@ -62,7 +62,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		),
 	).pipe(
 		Layer.provideMerge(
-			SqliteClient.layer({ filename: path.join(options.dataDirectory, "boot.db"), disableWAL: true }).pipe(
+			clientLayer({ _tag: "file", filename: path.join(options.dataDirectory, "boot.db") }).pipe(
 				Layer.provide(
 					Layer.effectDiscard(
 						validateAuthConfig(options.auth).pipe(

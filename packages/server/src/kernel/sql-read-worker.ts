@@ -1,5 +1,5 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { clientLayer } from "@comms/storage/client";
 import { Console, Effect, Schema, Stdio, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { ErrorEnvelope } from "@comms/protocol/errors";
@@ -51,7 +51,7 @@ const run = Effect.gen(function* () {
 		);
 	}).pipe(
 		Effect.provide(
-			SqliteClient.layer({ filename: request.filename, readonly: true, disableWAL: true, busyTimeout: "100 millis" }),
+			clientLayer({ _tag: "file", filename: request.filename }, { readonly: true, busyTimeout: "100 millis" }),
 		),
 	);
 });

@@ -5,7 +5,7 @@ import { extensionCapabilities } from "./ext/core/capabilities.ts";
 // oxlint-disable-next-line effecttsgo/node-builtin-import -- Effect Crypto has no constant-time comparison.
 import { timingSafeEqual } from "node:crypto";
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { clientLayer } from "@comms/storage/client";
 import {
 	Config,
 	Context,
@@ -234,7 +234,7 @@ const server = Effect.gen(function* () {
 						),
 					),
 				);
-			}).pipe(Effect.provide(SqliteClient.layer({ filename: boot.filename, disableWAL: true })));
+			}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: boot.filename })));
 		});
 		yield* application.pipe(
 			Effect.catchCause((cause) =>

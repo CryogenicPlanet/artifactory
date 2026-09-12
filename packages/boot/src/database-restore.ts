@@ -143,7 +143,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				// From here, candidate effects belong to the working store. A crash must reconcile it before rollback.
 				yield* sql`UPDATE db_restore_requests SET phase='working',candidate_epoch=${epoch} WHERE proof_id=${record.proof_id}`;
 				const candidate = yield* supervisor
-					.launch(generation, recovery.filename, "candidate", undefined, epoch)
+					.launch(generation, recovery.store, "candidate", undefined, epoch)
 					.pipe(Effect.provideContext(context));
 				const accepted = yield* interruptible(
 					Effect.gen(function* () {

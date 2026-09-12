@@ -5,12 +5,14 @@ COPY package.json bun.lock ./
 COPY patches ./patches
 COPY packages/boot/package.json packages/boot/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
+COPY packages/storage/package.json packages/storage/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/ui/package.json packages/ui/package.json
 RUN bun install --frozen-lockfile --ignore-scripts
 COPY tsconfig.base.json tsconfig.json ./
 COPY packages/boot packages/boot
 COPY packages/protocol packages/protocol
+COPY packages/storage packages/storage
 COPY packages/server packages/server
 COPY packages/ui packages/ui
 RUN bun run build
@@ -21,11 +23,13 @@ COPY package.json bun.lock ./
 COPY patches ./patches
 COPY packages/boot/package.json packages/boot/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
+COPY packages/storage/package.json packages/storage/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/ui/package.json packages/ui/package.json
 RUN bun install --production --frozen-lockfile --ignore-scripts
 # Protocol is pure TypeScript; Bun resolves its source exports in the immutable image.
 COPY packages/protocol/src packages/protocol/src
+COPY packages/storage/src packages/storage/src
 # Resolve workspace imports to immutable compiled entries, not absent src trees.
 RUN sed -i 's|./src/index.ts|./dist/index.js|' packages/boot/package.json \
     && sed -i 's|./src/start.ts|./dist/start.js|' packages/server/package.json

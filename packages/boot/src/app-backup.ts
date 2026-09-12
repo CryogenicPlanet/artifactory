@@ -1,4 +1,5 @@
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { clientLayer } from "@comms/storage/client";
+import type { FileStore } from "@comms/storage/store";
 import { Config, Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
@@ -9,6 +10,7 @@ const make = (filename: string) =>
 	Effect.gen(function* () {
 		const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
 		const fs = yield* FileSystem.FileSystem;
+		const store: FileStore = { _tag: "file", filename };
 		const path = yield* Path.Path;
 		const headroom = yield* storageHeadroom(path.dirname(filename));
 		const estimatedBytes = Effect.scoped(
@@ -21,7 +23,7 @@ const make = (filename: string) =>
 					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ page_size: Schema.Int })))),
 				);
 				return (counts[0]?.page_count ?? 0) * (sizes[0]?.page_size ?? 0);
-			}).pipe(Effect.provide(SqliteClient.layer({ filename, disableWAL: true }))),
+			}).pipe(Effect.provide(clientLayer(store))),
 		);
 		const sync = (name: string) => Effect.scoped(fs.open(name).pipe(Effect.flatMap((file) => file.sync)));
 		return {
@@ -36,14 +38,14 @@ const make = (filename: string) =>
 						yield* sync(destination);
 						yield* sync(path.dirname(destination));
 						return (yield* fs.stat(destination)).size;
-					}).pipe(Effect.provide(SqliteClient.layer({ filename, disableWAL: true }))),
+					}).pipe(Effect.provide(clientLayer(store))),
 				),
 			prepareClone: (clone: string, epoch: string) =>
 				Effect.scoped(
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
 						yield* sql`UPDATE kernel_writer SET epoch=${epoch} WHERE singleton=1`;
-					}).pipe(Effect.provide(SqliteClient.layer({ filename: clone, disableWAL: true }))),
+					}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: clone }))),
 				),
 			restore: (backup: string) =>
 				Effect.scoped(

@@ -213,7 +213,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					// Read after cloning: the boot allocator includes pruned events and outstanding reservations.
 					const sequence = (yield* events.state).next;
 					const rehearsed = yield* supervisor
-						.launch(generation, clone, "rehearsal", sequence, epoch)
+						.launch(generation, { _tag: "file", filename: clone }, "rehearsal", sequence, epoch)
 						.pipe(Effect.provideContext(context));
 					const report = yield* rehearsed.process.health.pipe(
 						Effect.timeout("30 seconds"),
@@ -243,7 +243,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					}
 					yield* sources.publish(proposal);
 					const candidate = yield* supervisor
-						.launch(generation, recovery.filename, "candidate")
+						.launch(generation, recovery.store, "candidate")
 						.pipe(Effect.provideContext(context));
 					rollback.candidate = candidate;
 					yield* supervisor.freeze;

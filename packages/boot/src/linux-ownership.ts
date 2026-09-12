@@ -1,3 +1,5 @@
+import { Redacted } from "effect";
+import { childStore, render } from "@comms/storage/store";
 import type { PlatformError } from "effect/PlatformError";
 import { Effect, FileSystem, Path } from "effect";
 import type { ChildConfiguration } from "./keeper-configuration.ts";
@@ -104,8 +106,10 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 	}
 	if (yield* fs.exists(`${config.cwd}.board`)) yield* ownTree(`${config.cwd}.board`, 1000, 1003, true);
 	if (yield* fs.exists("/data/pages")) yield* sharePages("/data/pages");
-	const filename = config.env.APP_DATABASE;
-	if (!filename) return yield* Effect.die("Missing app database");
+	const descriptor = config.env.APP_STORE;
+	if (!descriptor) return yield* Effect.die("Missing app store descriptor");
+	const store = yield* childStore(descriptor, config.env.APP_DATABASE).pipe(Effect.orDie);
+	const filename = store.filename;
 	if (config.env.STATE !== "rehearsal") {
 		if (filename !== "/data/store/comms.db") return yield* Effect.die("Invalid live database");
 		// SQLite can create a main file with a stricter mode than the shared directory.
@@ -125,5 +129,12 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 	yield* fs.makeDirectory(directory, { mode: 0o700 });
 	yield* fs.copyFile(filename, `${directory}/comms.db`);
 	yield* ownTree(directory, 1001, 1003, false);
-	return { ...config, env: { ...config.env, APP_DATABASE: `${directory}/comms.db` } };
+	return {
+		...config,
+		env: {
+			...config.env,
+			APP_STORE: Redacted.value(render({ _tag: "file", filename: `${directory}/comms.db` })),
+			APP_DATABASE: `${directory}/comms.db`,
+		},
+	};
 });

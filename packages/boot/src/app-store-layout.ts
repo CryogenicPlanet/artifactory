@@ -1,4 +1,4 @@
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { clientLayer } from "@comms/storage/client";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
@@ -83,7 +83,7 @@ export const migrateAppStore = Effect.fn("migrateAppStore")(function* (options: 
 				);
 				if (result.length !== 1 || result[0]?.busy !== 0 || result[0].log !== result[0].checkpointed)
 					return yield* new AppStoreLayoutError({ code: "app_checkpoint_busy" });
-			}).pipe(Effect.provide(SqliteClient.layer({ filename: legacy, disableWAL: true }))),
+			}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: legacy }))),
 		);
 		yield* sync(legacy);
 		// The checkpoint and handle closure precede removal. No committed WAL bytes are discarded.

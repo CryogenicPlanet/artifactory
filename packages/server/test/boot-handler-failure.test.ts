@@ -44,7 +44,8 @@ it("retains nonretryable boot handler failures through mutation, query, backup a
 							ConfigProvider.layer(
 								ConfigProvider.fromUnknown({
 									WRITER_EPOCH: "epoch",
-									APP_DATABASE: "unused.db",
+									APP_STORE: "file:/unused.db",
+									APP_DATABASE: "/unused.db",
 									GENERATION: "1",
 									STATE: "live",
 									BOOT_URL: "http://localhost",

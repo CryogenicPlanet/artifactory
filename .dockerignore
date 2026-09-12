@@ -11,6 +11,9 @@
 !tsconfig.base.json
 !packages/
 !packages/boot/
+!packages/storage/
+!packages/storage/docs/
+!packages/storage/docs/**
 !packages/protocol/
 !packages/protocol/docs/
 !packages/protocol/docs/**

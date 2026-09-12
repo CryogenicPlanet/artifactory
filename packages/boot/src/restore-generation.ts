@@ -58,7 +58,7 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 			yield* backup.prepareClone(clone, epoch);
 			const report = yield* Effect.acquireUseRelease(
 				supervisor
-					.launch(generation, clone, "rehearsal", (yield* events.state).next, epoch)
+					.launch(generation, { _tag: "file", filename: clone }, "rehearsal", (yield* events.state).next, epoch)
 					.pipe(Effect.provideContext(context)),
 				(rehearsed) =>
 					rehearsed.process.health.pipe(

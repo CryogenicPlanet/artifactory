@@ -102,7 +102,8 @@ it.effect("uses the authenticated channel and allows a backup response beyond th
 				ConfigProvider.layer(
 					ConfigProvider.fromUnknown({
 						WRITER_EPOCH: "epoch",
-						APP_DATABASE: "unused.db",
+						APP_STORE: "file:/unused.db",
+						APP_DATABASE: "/unused.db",
 						GENERATION: "1",
 						STATE: "live",
 						BOOT_URL: "http://localhost",
@@ -136,7 +137,8 @@ it.effect("refuses backup in rehearsal without constructing a live channel", () 
 			ConfigProvider.layer(
 				ConfigProvider.fromUnknown({
 					WRITER_EPOCH: "rehearsal",
-					APP_DATABASE: "unused.db",
+					APP_STORE: "file:/unused.db",
+					APP_DATABASE: "/unused.db",
 					GENERATION: "1",
 					STATE: "rehearsal",
 					REHEARSAL_SEQUENCE: "1",
