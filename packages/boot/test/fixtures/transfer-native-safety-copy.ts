@@ -11,7 +11,8 @@ import { launchRemoteRoot } from "../../src/remote-root-launcher.ts";
 import { remoteRuntime } from "../../src/remote-runtime.ts";
 import { mysqlDatabaseProvision } from "../../src/mysql-database-provision.ts";
 import { postgresDatabaseProvision } from "../../src/postgres-database-provision.ts";
-import { RemoteDatabaseError } from "../../src/remote-database-journal.ts";
+import { RemoteDatabaseError, remoteDatabaseJournal } from "../../src/remote-database-journal.ts";
+import { remoteNativeCopy } from "../../src/remote-native-copy.ts";
 import { transferDumpJournal } from "../../src/transfer-dump-journal.ts";
 import { nativeTransferSafetyCopy } from "../../src/transfer-native-safety-copy.ts";
 
@@ -19,11 +20,11 @@ const Snapshot = Schema.fromJsonString(
 	Schema.Struct({
 		boot: Schema.Struct({
 			settings: Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String })),
-			evidence: Schema.Array(Schema.Struct({ id: Schema.Int, body: Schema.String })),
+			evidence: Schema.Array(Schema.Struct({ id: Schema.Int, body: Schema.String, bytes: Schema.String })),
 		}),
 		app: Schema.Struct({
 			settings: Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String })),
-			evidence: Schema.Array(Schema.Struct({ id: Schema.Int, body: Schema.String })),
+			evidence: Schema.Array(Schema.Struct({ id: Schema.Int, body: Schema.String, bytes: Schema.String })),
 		}),
 	}),
 );
@@ -78,9 +79,15 @@ const program = Effect.gen(function* () {
 							Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String }))),
 						),
 					),
-					evidence: yield* sql`SELECT id,body FROM transfer_safety_evidence ORDER BY id`.pipe(
+					evidence: yield* (
+						store._tag === "postgres"
+							? sql`SELECT id,body,encode(bytes,'hex') AS bytes FROM transfer_safety_evidence ORDER BY id`
+							: sql`SELECT id,body,LOWER(HEX(bytes)) AS bytes FROM transfer_safety_evidence ORDER BY id`
+					).pipe(
 						Effect.flatMap(
-							Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: Schema.Int, body: Schema.String }))),
+							Schema.decodeUnknownEffect(
+								Schema.Array(Schema.Struct({ id: Schema.Int, body: Schema.String, bytes: Schema.String })),
+							),
 						),
 					),
 				};
@@ -108,9 +115,11 @@ const program = Effect.gen(function* () {
 							: yield* sql`SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=${store.database}`;
 					assert.equal(tables.length, 0, "Native safety fixture requires empty dedicated source stores");
 					yield* sql`CREATE TABLE settings(${sql("key")} VARCHAR(255) PRIMARY KEY,value TEXT NOT NULL)`;
-					yield* sql`CREATE TABLE transfer_safety_evidence(id INTEGER PRIMARY KEY,body TEXT NOT NULL)`;
+					yield* store._tag === "postgres"
+						? sql`CREATE TABLE transfer_safety_evidence(id INTEGER PRIMARY KEY,body TEXT NOT NULL,bytes BYTEA NOT NULL)`
+						: sql`CREATE TABLE transfer_safety_evidence(id INTEGER PRIMARY KEY,body TEXT NOT NULL,bytes BLOB NOT NULL)`;
 					yield* sql`INSERT INTO settings(${sql("key")},value) VALUES('fixture',${store.database})`;
-					yield* sql`INSERT INTO transfer_safety_evidence VALUES(1,${`${store.database}: 🐘 café source row`})`;
+					yield* sql`INSERT INTO transfer_safety_evidence VALUES(1,${`${store.database}: 🐘 café source row`},${new Uint8Array([0, 255, 128, 42])})`;
 				}),
 			);
 		yield* fs.writeFileString(`${root}/source-before.json`, yield* Schema.encodeEffect(Snapshot)(yield* snapshot), {
@@ -187,6 +196,58 @@ const program = Effect.gen(function* () {
 		assert.equal(yield* journal.isFinished(file.resource_id), true);
 		assert.equal(yield* principalExists((yield* journal.read(file.resource_id)).principal), false);
 	}
+	yield* Console.error("stage:restore-native-pair");
+	// Test-only rehearsal resources use the existing SQL journal and ordinary distinct-target
+	// owner path. Source safety artifacts were already captured before these temporary intents.
+	const restores = yield* remoteDatabaseJournal(config.boot, root).pipe(
+		Effect.provideService(SqlClient.SqlClient, runtime.bootSql),
+	);
+	const mysqlRestores = mysqlDatabaseProvision(restores);
+	const selectedRestore: Effect.Effect<
+		Effect.Success<typeof postgresDatabaseProvision> | Effect.Success<typeof mysqlRestores>,
+		Effect.Error<typeof postgresDatabaseProvision> | Effect.Error<typeof mysqlRestores>,
+		SqlClient.SqlClient
+	> = config.boot._tag === "postgres" ? postgresDatabaseProvision : mysqlRestores;
+	const restoreProvision = yield* selectedRestore.pipe(Effect.provideService(SqlClient.SqlClient, runtime.bootSql));
+	const native = yield* remoteNativeCopy(runtime);
+	for (const file of captured.receipt.files) {
+		const record = yield* restores.allocate("rehearsal", source[file.store]);
+		const target = yield* restores.credential(record.id);
+		assert.notEqual(target.database, config.boot.database);
+		assert.notEqual(target.database, config.app.database);
+		yield* restoreProvision.createPrincipal(record, target);
+		yield* restoreProvision.createDatabase(record);
+		yield* runtime.withStore(target, selectedRestore.pipe(Effect.flatMap((service) => service.grantSchema(record))));
+		yield* restores.phase(record.id, "allocated", "ready");
+		yield* native({
+			operation: "load",
+			resourceId: record.id,
+			store: target,
+			artifact: {
+				path: yield* journal.pathFor(file.resource_id),
+				engine: config.boot._tag === "postgres" ? "pg" : "mysql",
+			},
+			ownership: config.boot._tag === "postgres" ? "current-role" : "preserve",
+			budgetMs: 30000,
+		});
+		yield* runtime.assertAccountClosed(record.id, target);
+		assert.deepEqual(
+			yield* rows(target),
+			before[file.store],
+			"Restored rows and binary bytes must match the captured source",
+		);
+		const closed = yield* restores.phase(record.id, "ready", "closed");
+		yield* restoreProvision.dropRehearsal(closed);
+		yield* restores.forget(record.id);
+		assert.equal(yield* principalExists(record.principal), false);
+		const remaining =
+			config.boot._tag === "postgres"
+				? yield* runtime.bootSql`SELECT datname FROM pg_database WHERE datname=${target.database}`
+				: yield* runtime.bootSql`SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=${target.database}`;
+		assert.equal(remaining.length, 0);
+	}
+	assert.deepEqual(yield* restores.list, []);
+	assert.deepEqual(yield* safety.verify(captured.path), captured.receipt);
 	assert.deepEqual(yield* journal.list, []);
 	const after = yield* snapshot;
 	assert.deepEqual(after, before, "Native safety copy must not write source rows or recovery intents");

@@ -8,7 +8,7 @@ import { expect, it } from "vitest";
 const configRoot = process.env.COMMS_TRANSFER_SAFETY_CONFIG_ROOT;
 for (const engine of ["pg", "mysql"] as const)
 	it.skipIf(!configRoot)(
-		`${engine} recovers a provisioned dump principal and captures both unchanged stores through native keepers`,
+		`${engine} recovers a provisioned dump principal and restores both safety artifacts through native keepers`,
 		async (test) => {
 			const data = await realpath(await mkdtemp(join(tmpdir(), `comms-transfer-safety-${engine}-`)));
 			// Failure retains the journal and artifacts for explicit principal recovery.
