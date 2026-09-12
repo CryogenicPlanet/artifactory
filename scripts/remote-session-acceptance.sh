@@ -29,10 +29,16 @@ CREATE DATABASE comms_app OWNER comms_app;
 CREATE DATABASE comms_schema_guard OWNER comms_app;
 CREATE DATABASE comms_shared_store OWNER comms_app;
 CREATE DATABASE comms_failed_lease OWNER comms_app;
+CREATE DATABASE comms_read_cleanup OWNER comms_app;
 CREATE DATABASE comms_snapshot_boot OWNER comms_app;
 CREATE DATABASE comms_snapshot_app OWNER comms_app;
 CREATE DATABASE comms_schema_core OWNER comms_app;
 CREATE DATABASE comms_schema_json_crash OWNER comms_app;
+CREATE DATABASE comms_schema_unaccent OWNER comms_app;
+CREATE DATABASE comms_schema_unaccent_fresh OWNER comms_app;
+CREATE DATABASE comms_schema_unaccent_denied OWNER postgres;
+REVOKE ALL ON DATABASE comms_schema_unaccent_denied FROM PUBLIC;
+GRANT CONNECT ON DATABASE comms_schema_unaccent_denied TO comms_app;
 CREATE DATABASE comms_concurrency_app OWNER comms_app;
 CREATE DATABASE comms_concurrency_boot OWNER comms_app;
 REVOKE CONNECT ON DATABASE comms_boot FROM PUBLIC;
@@ -54,6 +60,8 @@ CREATE DATABASE comms_shared_store CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as
 GRANT ALL ON comms_shared_store.* TO 'comms_app'@'%';
 CREATE DATABASE comms_failed_lease CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 GRANT ALL ON comms_failed_lease.* TO 'comms_app'@'%';
+CREATE DATABASE comms_read_cleanup CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
+GRANT ALL ON comms_read_cleanup.* TO 'comms_app'@'%';
 CREATE DATABASE comms_snapshot_boot CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 CREATE DATABASE comms_snapshot_app CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 GRANT ALL ON comms_snapshot_boot.* TO 'comms_app'@'%';
@@ -109,6 +117,7 @@ for attempt in $(seq 1 120); do
 done
 if [ "$engine" = pg ]; then
   docker exec -i "$container" psql -U postgres -v ON_ERROR_STOP=1 < "$private/roles.sql" >/dev/null 2>"$private/provision-errors" || { echo "Database provisioning failed" >&2; exit 1; }
+  docker exec "$container" psql -U postgres -d comms_schema_unaccent_denied -v ON_ERROR_STOP=1 -c 'GRANT USAGE,CREATE ON SCHEMA public TO comms_app' >/dev/null 2>"$private/provision-errors"
   docker exec "$container" psql -U postgres -Atc 'SHOW server_version_num'
 else
   docker exec -i "$container" mysql --defaults-extra-file=/run/secrets/admin.cnf < "$private/roles.sql" >/dev/null 2>"$private/provision-errors" || { echo "Database provisioning failed" >&2; exit 1; }
@@ -118,11 +127,20 @@ published=$(docker port "$container" "$port/tcp")
 python3 - "$private/client.json" "${published##*:}" <<'PY'
 import json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()); d['port']=int(sys.argv[2]); p.write_text(json.dumps(d))
-for database,name in [('comms_concurrency_app','concurrency-app'),('comms_concurrency_boot','concurrency-boot'),('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect'),('comms_failed_lease','failed-lease'),('comms_snapshot_boot','snapshot-boot'),('comms_snapshot_app','snapshot-app')]:
+for database,name in [('comms_concurrency_app','concurrency-app'),('comms_concurrency_boot','concurrency-boot'),('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect'),('comms_failed_lease','failed-lease'),('comms_read_cleanup','read-cleanup'),('comms_snapshot_boot','snapshot-boot'),('comms_snapshot_app','snapshot-app')]:
  d['database']=database; (p.parent/(name+'.json')).write_text(json.dumps(d))
+if d['engine']=='pg':
+ for suffix,name in [('', 'upgrade'),('_fresh','fresh'),('_denied','denied')]:
+  d['database']='comms_schema_unaccent'+suffix; (p.parent/('unaccent-'+name+'.json')).write_text(json.dumps(d))
 PY
 # The intentionally truncated session-attribute case refuses before SQL admission.
 if [ "$attributes" != 32 ]; then
+  if [ "$engine" = pg ]; then
+    COMMS_UNACCENT_FRESH_CONFIG="$private/unaccent-fresh.json" \
+    COMMS_UNACCENT_UPGRADE_CONFIG="$private/unaccent-upgrade.json" \
+    COMMS_UNACCENT_DENIED_CONFIG="$private/unaccent-denied.json" \
+      node node_modules/vitest/vitest.mjs run packages/server/test/postgres-unaccent.test.ts --maxWorkers=1 --reporter=verbose
+  fi
   COMMS_CONCURRENCY_APP_CONFIG="$private/concurrency-app.json" COMMS_CONCURRENCY_BOOT_CONFIG="$private/concurrency-boot.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/native-concurrency.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_REMOTE_CORE_TEST_CONFIG="$private/core.json" \
@@ -134,6 +152,8 @@ if [ "$attributes" != 32 ]; then
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/remote-dialect-semantics.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_FAILED_LEASE_CONFIG="$private/failed-lease.json" \
     node node_modules/vitest/vitest.mjs run packages/storage/test/failed-lease.test.ts --maxWorkers=1 --reporter=verbose
+  COMMS_TEST_ENGINE="$engine" COMMS_READ_CLEANUP_CONFIG="$private/read-cleanup.json" \
+    node node_modules/vitest/vitest.mjs run packages/server/test/kernel/remote-read-deadline.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_TEST_ENGINE="$engine" COMMS_SNAPSHOT_BOOT_CONFIG="$private/snapshot-boot.json" \
   COMMS_SNAPSHOT_APP_CONFIG="$private/snapshot-app.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/native-read-publication.test.ts --maxWorkers=1 --reporter=verbose

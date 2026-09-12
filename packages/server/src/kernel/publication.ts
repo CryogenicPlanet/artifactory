@@ -12,7 +12,7 @@ import { writeSql } from "./sql-write.ts";
 import type { SqlInput } from "./sql-input.ts";
 import type { Identity } from "./identity.ts";
 
-/** One instance owns all app mutation, read and outbox serialization, including extension jobs. */
+/** One instance owns app mutation, snapshot admission and outbox serialization, including extension jobs. */
 const make = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const boot = yield* BootChannel;
@@ -30,7 +30,7 @@ const make = Effect.gen(function* () {
 		yield* assertSqlPublished(sql, boot.epoch, value.published_through);
 		return value;
 	});
-	const read = makeReadSnapshot(sql, boot.epoch, mutex, fence, relay, yield* Effect.scope);
+	const { read, quiesce } = yield* makeReadSnapshot(sql, boot.epoch, mutex, fence, relay, yield* Effect.scope);
 	return {
 		wake,
 		runRelay: <E, R>(pass: Effect.Effect<void, E, R>) =>
@@ -60,7 +60,7 @@ const make = Effect.gen(function* () {
 		recordEvent: <E = never>(input: OperationalEvent, change?: (seq: number) => Effect.Effect<void, E>) =>
 			recordOperationalEvent(mutate, boot, input, change),
 		relay: mutex.withPermit(assertWriterHealthy.pipe(Effect.andThen(relay))),
-		quiesce: mutex.withPermit(Effect.void),
+		quiesce,
 		changed: boot.changed,
 	};
 });

@@ -21,7 +21,7 @@ const Settings = Schema.Struct({
 const [mode, filename, identity = ""] = process.argv.slice(2);
 if (!filename) throw new Error("Missing disposable configuration");
 const settings = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFile(filename, "utf8"));
-if (!/^comms_concurrency_(app|boot)$/.test(settings.database))
+if (!/^comms_concurrency_(?:source_)?(app|boot)$/.test(settings.database))
 	throw new Error("Disposable concurrency database required");
 const input = createInterface({ input: process.stdin });
 const lines = input[Symbol.asyncIterator]();
@@ -66,6 +66,18 @@ const main = Effect.gen(function* () {
 		}
 		return;
 	}
+	if (mode === "source-initialize") {
+		yield* sql`INSERT INTO source_batches(id,agent,at,state) VALUES ('source-left','agent',1,'published'),('source-right','agent',1,'published')`;
+		return;
+	}
+	if (mode === "source-inspect") {
+		assert.deepEqual(yield* sql`SELECT id,state,publishing_guard FROM source_batches ORDER BY id`, [
+			{ id: "source-left", state: "publishing", publishing_guard: 1 },
+			{ id: "source-right", state: "published", publishing_guard: null },
+		]);
+		yield* sql`UPDATE source_batches SET state='published' WHERE id='source-left'`;
+		return;
+	}
 	if (mode === "waiting") {
 		const ids = Schema.decodeSync(Schema.fromJsonString(Schema.Array(Schema.Int)))(identity);
 		yield* Effect.gen(function* () {
@@ -88,6 +100,32 @@ const main = Effect.gen(function* () {
 		yield* emit({ ready: true, pid: process.pid, connection: rows[0]?.id });
 		yield* barrier;
 	});
+	if (mode === "source") {
+		const result = yield* sql
+			.withTransaction(
+				Effect.gen(function* () {
+					yield* ready;
+					yield* sql`UPDATE source_batches SET state='publishing' WHERE id=${identity}`;
+					yield* emit({ held: true });
+					yield* barrier;
+				}),
+			)
+			.pipe(Effect.result);
+		if (identity === "source-left") assert.equal(result._tag, "Success");
+		else {
+			assert.equal(result._tag, "Failure");
+			if (result._tag === "Failure") assert.equal(result.failure.reason._tag, "UniqueViolation");
+		}
+		yield* emit({ committed: result._tag === "Success" });
+		if (identity === "source-right") {
+			// Keep the losing process/client alive: retry only after independent inspection
+			// has verified the rollback and retired the successful publication.
+			yield* barrier;
+			yield* sql.withTransaction(sql`UPDATE source_batches SET state='publishing' WHERE id=${identity}`);
+			assert.deepEqual(yield* sql`SELECT id FROM source_batches WHERE state='publishing'`, [{ id: identity }]);
+		}
+		return;
+	}
 	if (mode === "block") {
 		yield* sql.withTransaction(
 			Effect.gen(function* () {

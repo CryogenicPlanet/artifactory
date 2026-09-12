@@ -4,7 +4,7 @@ import type { Constructor } from "effect/unstable/sql/Statement";
 import { KernelError } from "../../kernel/boot-channel.ts";
 
 /** Parse once; caller text remains bound data, never SQL or search operators. */
-export const searchMessages = (sql: Constructor, query: string, ceiling: number) =>
+export const searchMessages = (sql: Constructor, query: string, ceiling: number, folding = false) =>
 	Effect.gen(function* () {
 		const parts = query.trim().match(/"[^"]*"|[^\s"]+/gu) ?? [];
 		if (
@@ -16,6 +16,7 @@ export const searchMessages = (sql: Constructor, query: string, ceiling: number)
 			parts.some((part) => !/[\p{L}\p{N}]/u.test(part))
 		)
 			return yield* new KernelError({ code: "query_invalid" });
+
 		return on(sql, {
 			sqlite: () => {
 				const expression = parts.map((part) => `"${part.replaceAll('"', "")}"`).join(" AND ");
@@ -31,8 +32,8 @@ export const searchMessages = (sql: Constructor, query: string, ceiling: number)
 				const expression = parts
 					.map((part) =>
 						part.startsWith('"')
-							? sql`phraseto_tsquery('simple',${part.slice(1, -1)})`
-							: sql`plainto_tsquery('simple',${part})`,
+							? sql`phraseto_tsquery('simple',${folding ? sql`public.comms_unaccent(${part.slice(1, -1)})` : sql`${part.slice(1, -1)}`})`
+							: sql`plainto_tsquery('simple',${folding ? sql`public.comms_unaccent(${part})` : sql`${part}`})`,
 					)
 					.reduce((left, right) => sql`(${left} && ${right})`);
 				return sql`id IN (SELECT id FROM messages WHERE

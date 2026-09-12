@@ -24,7 +24,14 @@ export const readIsolationSemantics = (sql: SqlClient) =>
 			assert.equal(rows[0]?.isolation, "repeatable read");
 			return { published_through: 20 };
 		});
-		const read = makeReadSnapshot(sql, "fixture", yield* Semaphore.make(1), fence, Effect.void, yield* Effect.scope);
+		const { read } = yield* makeReadSnapshot(
+			sql,
+			"fixture",
+			yield* Semaphore.make(1),
+			fence,
+			Effect.void,
+			yield* Effect.scope,
+		);
 		assert.equal(
 			yield* read((ceiling) => read((nested) => Effect.succeed(ceiling + nested))).pipe(Effect.provide(healthLayer)),
 			40,

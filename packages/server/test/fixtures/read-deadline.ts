@@ -4,14 +4,25 @@ import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Cause, Console, Deferred, Effect, Fiber, Layer, Ref, Schema, Semaphore } from "effect";
 import { TestClock } from "effect/testing";
 import { Reactivity } from "effect/unstable/reactivity";
-import { SqlClient, Statement } from "effect/unstable/sql";
+import { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "../../src/kernel/boot-channel.ts";
 import { makeReadSnapshot } from "../../src/kernel/read-snapshot.ts";
+import { testStore } from "./test-store.ts";
 import { Lifecycle, assertWriterHealthy, layer as lifecycleLayer } from "../../src/kernel/lifecycle.ts";
 
 const program = Effect.gen(function* () {
 	const mode = process.argv[2];
-	const sql = yield* SqlClient.SqlClient;
+	const engine = yield* Schema.decodeUnknownEffect(Schema.Literals(["sqlite", "pg", "mysql"]))(
+		process.env.COMMS_TEST_ENGINE ?? "sqlite",
+	);
+	const sql = yield* engine === "sqlite"
+		? SqliteClient.make({ filename: ":memory:" })
+		: testStore({
+				engine,
+				config: process.env.COMMS_READ_CLEANUP_CONFIG,
+				database: "comms_read_cleanup",
+				tables: ["changes", "outbox", "kernel_writer"],
+			});
 	const lifecycle = yield* Lifecycle;
 	yield* Ref.set(lifecycle.state, "live");
 	yield* Ref.set(lifecycle.healthy, true);
@@ -26,12 +37,18 @@ const program = Effect.gen(function* () {
 					acquirer: sql.reserve,
 					transactionAcquirer: sql.reserve,
 					transactionService: sql.transactionService,
-					compiler: Statement.makeCompilerSqlite(),
+					compiler: {
+						dialect: engine,
+						compile: (fragment, withoutTransform) => sql`${fragment}`.compile(withoutTransform),
+						get withoutTransform() {
+							return this;
+						},
+					},
 					spanAttributes: [],
 					rollback: "INVALID ROLLBACK",
 				}).pipe(Effect.provide(Reactivity.layer))
 			: sql;
-	const read = makeReadSnapshot(
+	const { read, quiesce } = yield* makeReadSnapshot(
 		client,
 		"owner",
 		mutex,
@@ -53,7 +70,7 @@ const program = Effect.gen(function* () {
 		yield* TestClock.adjust("4 seconds");
 		assert.equal(yield* Ref.get(lifecycle.healthy), false);
 		assert.equal(pending.pollUnsafe(), undefined);
-		const nextOwner = yield* mutex.withPermit(Ref.get(lifecycle.healthy)).pipe(Effect.forkChild);
+		const nextOwner = yield* quiesce.pipe(Effect.andThen(Ref.get(lifecycle.healthy))).pipe(Effect.forkChild);
 		yield* Effect.yieldNow;
 		assert.equal(nextOwner.pollUnsafe(), undefined);
 		yield* Deferred.succeed(cleanupRelease, undefined);
@@ -106,7 +123,7 @@ const program = Effect.gen(function* () {
 			yield* TestClock.adjust("500 millis");
 			assert.equal(yield* Ref.get(lifecycle.healthy), true);
 			assert.equal(pending.pollUnsafe(), undefined);
-			const nextOwner = yield* mutex.withPermit(Effect.void).pipe(Effect.forkChild);
+			const nextOwner = yield* quiesce.pipe(Effect.forkChild);
 			yield* Effect.yieldNow;
 			assert.equal(nextOwner.pollUnsafe(), undefined);
 			yield* Deferred.succeed(cleanupRelease, undefined);
@@ -143,9 +160,9 @@ const program = Effect.gen(function* () {
 					),
 					true,
 				);
-			// Actual invalid rollback left its transaction open; no following writer touched it.
-			assert.deepEqual(yield* sql`SELECT * FROM changes`, [{ value: "must roll back" }]);
-			yield* sql`ROLLBACK`;
+			// SQLite keeps the failed transaction; remote drivers discard its lease before reuse.
+			assert.deepEqual(yield* sql`SELECT * FROM changes`, engine === "sqlite" ? [{ value: "must roll back" }] : []);
+			if (engine === "sqlite") yield* sql`ROLLBACK`;
 		} else {
 			assert.equal(next._tag, "Success");
 			assert.deepEqual(yield* sql`SELECT * FROM changes`, [{ value: "next writer" }]);
@@ -157,8 +174,6 @@ const program = Effect.gen(function* () {
 	yield* Console.log("READ_DEADLINE_VERIFIED");
 }).pipe(
 	Effect.scoped,
-	Effect.provide(
-		Layer.mergeAll(SqliteClient.layer({ filename: ":memory:" }), lifecycleLayer, TestClock.layer(), BunServices.layer),
-	),
+	Effect.provide(Layer.mergeAll(lifecycleLayer, TestClock.layer(), BunServices.layer, Reactivity.layer)),
 );
 program.pipe(BunRuntime.runMain);

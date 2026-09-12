@@ -7,7 +7,7 @@ import { remoteClientLayer } from "../../src/remote-client.ts";
 import { remoteInspectorLayer, RemoteInspector } from "../../src/remote-inspector.ts";
 import { type RemoteConnection, type RemoteSession, attemptTag } from "../../src/remote-session.ts";
 import { readTransaction } from "../../src/dialect.ts";
-import { open } from "../../src/remote-driver.ts";
+import { open, sessions } from "../../src/remote-driver.ts";
 
 const Settings = Schema.Struct({
 	engine: Schema.Literals(["pg", "mysql"]),
@@ -111,6 +111,8 @@ async function main() {
 				const sql = Context.get(context, SqlClient);
 				if (mode === "isolation") {
 					assert.equal(connection.engine, "mysql");
+					const observer = yield* (yield* open(connection, "fixture-observer")).reserve;
+					const tag = yield* attemptTag({ connection, attempt });
 					phase = "default_isolation";
 					assert.deepEqual(yield* readTransaction(sql, sql`SELECT 1 AS accepted`), [{ accepted: 1 }]);
 					phase = "change_all_physical_leases";
@@ -127,22 +129,60 @@ async function main() {
 							return lease;
 						}),
 					);
-					assert.equal(new Set((yield* Ref.get(registered)).map((session) => session.connectionId)).size, 4);
+					const tainted = new Set((yield* Ref.get(registered)).map((session) => session.connectionId));
+					assert.equal(tainted.size, 4);
+					assert.deepEqual(
+						new Set(yield* sessions(observer, "mysql", tag).pipe(Effect.map((rows) => rows.map(([id]) => id)))),
+						tainted,
+					);
 					for (const lease of leases) yield* Scope.close(lease, Exit.void);
 					const registrations = (yield* Ref.get(registered)).length;
 					const entered = yield* Ref.make(false);
 					phase = "reject_changed_isolation";
-					// More attempts than pool slots also prove rejected physical leases are released.
-					for (let index = 0; index < 6; index++) {
+					// Each rejected physical lease must disappear before a fresh default-isolation lease can enter.
+					let remaining = tainted;
+					for (let index = 0; index < tainted.size; index++) {
+						phase = `reject_changed_isolation_${index}`;
 						const denied = yield* readTransaction(sql, Ref.set(entered, true).pipe(Effect.andThen(sql`SELECT 1`))).pipe(
 							Effect.exit,
 						);
 						assert(Exit.isFailure(denied));
 						assert(JSON.stringify(denied).includes("remote_isolation_unsupported"));
 						assert(!JSON.stringify(denied).includes(settings.password));
+						let current = remaining;
+						for (let poll = 0; poll < 100; poll++) {
+							current = new Set(
+								yield* sessions(observer, "mysql", tag).pipe(Effect.map((rows) => rows.map(([id]) => id))),
+							);
+							if (current.size === remaining.size - 1) break;
+							yield* Effect.sleep("50 millis");
+						}
+						assert.equal(current.size, remaining.size - 1);
+						assert([...current].every((id) => remaining.has(id)));
+						remaining = current;
 					}
 					assert.equal(yield* Ref.get(entered), false);
 					assert.equal((yield* Ref.get(registered)).length, registrations);
+					phase = "replacement_default_isolation";
+					const replacement = yield* readTransaction(
+						sql,
+						Ref.set(entered, true).pipe(
+							Effect.andThen(sql<{ readonly id: string; readonly isolation: string }>`
+								SELECT CAST(CONNECTION_ID() AS CHAR) AS id, @@SESSION.transaction_isolation AS isolation
+							`),
+						),
+					);
+					assert.equal(yield* Ref.get(entered), true);
+					assert.equal(replacement.length, 1);
+					assert.equal(replacement[0]?.isolation, "REPEATABLE-READ");
+					const replacementId = replacement[0]?.id;
+					assert(replacementId && !tainted.has(replacementId));
+					assert(
+						(yield* Ref.get(registered)).slice(registrations).some((session) => session.connectionId === replacementId),
+					);
+					assert.deepEqual(yield* sessions(observer, "mysql", tag).pipe(Effect.map((rows) => rows.map(([id]) => id))), [
+						replacementId,
+					]);
 					yield* Scope.close(child, Exit.void);
 					phase = "isolation_pool_closed";
 					let closed = false;
@@ -241,6 +281,26 @@ async function main() {
 						sql.unsafe(unsafe).stream.pipe(Stream.runCollect),
 					])
 						assert(Exit.isFailure(yield* query.pipe(Effect.exit)), "Unsafe integer escaped guarded client");
+					const tag = yield* attemptTag({ connection, attempt });
+					const inspection = yield* observer.reserve;
+					if (connection.engine === "mysql") {
+						phase = "failed_query_leases_discarded";
+						let live = yield* sessions(inspection, "mysql", tag).pipe(Effect.map((rows) => rows.map(([id]) => id)));
+						for (let poll = 0; live.length > 0 && poll < 100; poll++) {
+							yield* Effect.sleep("50 millis");
+							live = yield* sessions(inspection, "mysql", tag).pipe(Effect.map((rows) => rows.map(([id]) => id)));
+						}
+						assert.deepEqual(live, []);
+					}
+					// Failed queries can discard every physical lease. Reopen one before testing live-session refusal.
+					phase = "healthy_lease_after_query_failures";
+					assert.deepEqual(yield* sql`SELECT 1 AS accepted`, [{ accepted: 1 }]);
+					const live = yield* sessions(inspection, connection.engine, tag).pipe(
+						Effect.map((rows) => rows.map(([id]) => id)),
+					);
+					assert(live.length > 0);
+					const admitted = new Set((yield* Ref.get(registered)).map((session) => session.connectionId));
+					assert(live.every((id) => admitted.has(id)));
 				}
 
 				if (mode === "stream") {
@@ -286,6 +346,7 @@ async function main() {
 				assert(
 					Exit.isFailure(yield* inspector.assertNoSessions(Effect.fail("local closure missing")).pipe(Effect.exit)),
 				);
+				phase = "live_sessions_refusal";
 				// Positive local proof alone does not permit acceptance while tagged sessions remain.
 				assert(Exit.isFailure(yield* inspector.assertNoSessions(Effect.void).pipe(Effect.exit)));
 				assert(Exit.isFailure(yield* sql.unsafe(`INSERT INTO ${table} VALUES(4)`).pipe(Effect.exit)));

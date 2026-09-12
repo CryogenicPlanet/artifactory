@@ -1,5 +1,7 @@
 name: Remote session clients
 on:
+  schedule:
+    - cron: "17 8 * * *"
   pull_request:
   push:
     branches: [master]

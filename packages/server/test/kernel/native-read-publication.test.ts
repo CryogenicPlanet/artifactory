@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
 it.skipIf(!process.env.COMMS_SNAPSHOT_APP_CONFIG || !process.env.COMMS_SNAPSHOT_BOOT_CONFIG)(
-	"keeps a native storage snapshot across two actual domain commits and publications",
+	"keeps native storage and ordinary read snapshots across publications and drains read cleanup",
 	async () => {
 		const result = await promisify(execFile)(
 			"bun",

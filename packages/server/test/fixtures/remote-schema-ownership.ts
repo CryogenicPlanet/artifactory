@@ -111,7 +111,7 @@ await Effect.runPromise(
 		);
 		const unaccent = yield* sql`SELECT name FROM pg_available_extensions WHERE name='unaccent'`;
 		if (unaccent.length > 0) {
-			yield* sql`CREATE EXTENSION unaccent`;
+			yield* sql`CREATE EXTENSION IF NOT EXISTS unaccent`;
 			assert.deepEqual(yield* sql`SELECT unaccent('résumé') AS plain`, [{ plain: "resume" }]);
 		}
 		yield* sql.withTransaction(
@@ -153,7 +153,7 @@ await Effect.runPromise(
 		assert.deepEqual(yield* sql`SELECT seq,transaction_id,shipped_at FROM outbox`, [
 			{ seq: 1, transaction_id: "owned-transaction", shipped_at: 1800000000000 },
 		]);
-		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 11);
+		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 12);
 	}).pipe(Effect.scoped, Effect.provide(appLayer)),
 );
 process.stdout.write("separate PostgreSQL roles preserve protected ownership, app migrations and reconnect data\n");

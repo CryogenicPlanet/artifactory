@@ -118,7 +118,7 @@ await Effect.runPromise(
 		assert.deepEqual(JSON.parse(values[0]?.tags ?? "null"), ["雪", "quoted"]);
 		assert.deepEqual(JSON.parse(values[0]?.meta ?? "null"), JSON.parse(domainMeta));
 		assert.equal(values[0]?.previous, previous);
-		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 11);
+		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 12);
 		assert.deepEqual(yield* sql`SELECT updated_seq,mentions,previous_mentions,created_at FROM messages`, [
 			{ updated_seq: 0, mentions: "[]", previous_mentions: "[]", created_at: 1800000000000 },
 		]);
@@ -153,7 +153,7 @@ await Effect.runPromise(
 		yield* initializeRemoteCore(sql, "core-probe");
 		assert.equal((yield* sql`SELECT body FROM messages`)[0]?.body, "résumé ALPHA " + "large ".repeat(15000));
 		assert.deepEqual(yield* sql`SELECT outcome FROM idempotency`, [{ outcome: "original" }]);
-		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 11);
+		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 12);
 	}).pipe(Effect.scoped, Effect.provide(layer)),
 );
 process.stdout.write("core native defaults, long values, receipt hashes, search and reconnect durability passed\n");

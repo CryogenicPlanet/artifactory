@@ -1,5 +1,6 @@
+import { postgresSearchMode } from "./core-search-schema.ts";
 import { searchMessages } from "./search.ts";
-import { isDescendant, jsonArrayHas, nullable } from "@comms/storage/dialect";
+import { isDescendant, jsonArrayHas, nullable, on } from "@comms/storage/dialect";
 import { Message, MessageInput } from "@comms/protocol/messages";
 import { Publication } from "../../kernel/publication.ts";
 import type { Identity } from "../../kernel/identity.ts";
@@ -170,7 +171,15 @@ export const makeMessages = (
 					targets.length === 0
 						? sql`1=0`
 						: sql`EXISTS (SELECT 1 FROM messages mention_source WHERE mention_source.id=visible_messages.id AND ${sql.or(targets.map((target) => jsonArrayHas(sql, mentions, target)))})`;
-				const bodyMatch = input.q === undefined ? sql`1=1` : yield* searchMessages(sql, input.q, ceiling);
+				const folding =
+					input.q === undefined
+						? false
+						: yield* on(sql, {
+								sqlite: () => Effect.succeed(false),
+								mysql: () => Effect.succeed(false),
+								pg: () => postgresSearchMode(sql).pipe(Effect.map((mode) => mode === "folded")),
+							});
+				const bodyMatch = input.q === undefined ? sql`1=1` : yield* searchMessages(sql, input.q, ceiling, folding);
 				const items =
 					yield* sql`WITH visible_messages AS (${publishedMessages(sql, ceiling)}) SELECT * FROM visible_messages WHERE deleted_at IS NULL AND seq>${since} AND seq<=${ceiling}
    AND ((${input.topic === undefined && targets.length === 0 ? 1 : 0}=1) OR ${topicMatch} OR ${mentionMatch})
