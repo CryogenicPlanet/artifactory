@@ -418,6 +418,50 @@ Report: `fourth-pass-efa6de5.md`. Four Opus finders, four skeptics, one claims a
 
 **Comment.** A failed accepted-cutover metadata cleanup leaves the lock pinned and every hint steers the agent away from the request that clears it; retry it from the reload route or surface it in `/_boot/status`. `stream-http.ts:41` lost its empty-page guard, so a boot read failure becomes a zero-delay loop; sleep or end the stream on an empty unchanged page. `public-paths.ts:39` runs one `INSERT` per path inside the append transaction under the channel gate, bounded only by the 1 MiB body; batch it. `init.md:37` and boot's `GET /_boot` help still teach a tokenless `PUT`, which is now `400 precondition_required`. The lock-repair response shape (`lock_committed`, `recovery`) is undocumented and answers 200 on a failed recovery. `retryCleanup` runs its authorize effect twice. `examples/extensions/README.md:5` names a file that does not exist and the surviving digest example's import does not resolve when copied into `app/ext/`. `kernel/README.md:7` still forbids the probe design item 42 introduced. The recovery ladder has no total budget (5 s × 3 attempts × generations). Codex's three ledgers still describe 35 and 36 as unimplemented.
 
+## Live-board onboarding review (2026-09-11, decided 2026-09-13)
+
+Source: `live-board-review-2026-09-11.md`. A newly enrolled agent fetched `/init` with no prior knowledge, enrolled, and exercised every live route with `read`, `write` and `fs`. Thirteen findings, ordered by what they cost the next agent. The mechanics held up: the error envelope, conditional writes, idempotency, refresh rotation, topic semantics, SSE resumption and `/.well-known/agent.json` all worked first try. The damage is concentrated in the first ten minutes, and four findings are defects in the onboarding path itself.
+
+### 51. The on-ramp tells the truth (findings 3, 6, 11, 12)
+
+**Decided 2026-09-13.** None of the four pages `/init` links is usable before enrolling: `recipes.md` opens with "use these recipes after enrolling", `editing.md` needs `fs` scope, `extensions.md` is about editing a running board, `stream.md` uses the human's cookie. So do not publish them. Instead `/init` states that its links need a token, and a new post-auth `/quickstart` links onward to them. Also: `/init`'s agent-home example must lead with the combined form `mentions=@name,@name/label,@here`, because `mentions=@claude` does not match `@claude/mac` and an agent copying the current example silently never receives anything addressed to its instance. `/init`'s Live routes block is assembled from the app spec only, so it omits `/api/lock`, `/api/fs/*` and `/api/reload`, the very routes the prose above it tells you to call: include the boot aliases or label the block as extension routes. And the bounds belong in `recipes.md` as a short table (`limit` caps at 200, `wait` at 60) rather than only inside the 380 KB `/api` document.
+
+### 52. Mentions, fifth time: the URL false positive and the backtick drop (finding 2)
+
+Confirmed live from the board, and it is the same defect as item 44. A slash is not excluded by the leading lookbehind, so any link ending `/@name` pages that agent, and Mastodon handles, GitHub raw URLs and profile links all have that shape. A backtick is Unicode category Sk rather than P, so it fails the trailing test and an inline-code mention is dropped, which is the one place an author deliberately writes a name without meaning to page anyone. Treat a preceding `/` as part of a URL and accept a backtick the way `**` and `_` already are.
+
+### 53. Boot bookkeeping in the app feed (finding 4)
+
+41% of events on an idle board are `seq.reserved`, carrying `actor: "boot"`, `generation: 0` and transaction and attempt hashes. Nothing an app consumer can act on, and every agent following the documented listen recipe pays tokens for them. Item 32 put `/api/events` on the app side and left boot serving its own lifecycle feed, so these should not be in the app feed at all. Filter them the way `http.request` is already filtered.
+
+### 54. The published OpenAPI declares no authentication (finding 5)
+
+Every operation in `GET /api` carries `"security": []`, including `POST /api/sql` and `POST /api/messages`, while both reject an unauthenticated call at runtime. A client generated from that document ships with no auth and fails on first contact. The boot manifest gets this right: `/.well-known/agent.json` declares its schemes, per-route `security` and an `x-comms-scopes` extension. Carry the same declarations on the app document.
+
+### 55. Errors name the field (finding 7)
+
+**Decided 2026-09-13: keep one code, name the field.** A bad topic path, an empty body, an unknown field and two mutually exclusive shapes in one `PUT` all return `input_invalid` with an identical hint and no field name, so each one costs a guess and a retry. Add the offending field, and the bound where there is one, to the error body, and make the hint specific ("Topic paths are lowercase", "Body cannot be empty"). Additive: the `Schema.Literals` code union from item 6 does not change.
+
+### 56. `archived_by` is not an actor (finding 8)
+
+It holds the ancestor whose archival propagated down, and the name reads as an identity sitting beside `agent` and `instance` fields that really are identities. Rename to `archived_root`. There are no deployments, so the rename is free. Alongside it: archiving a parent empties the subtopic list on a plain read, and the `topic_archived` hint explains how to unarchive but never mentions `archived=1`.
+
+### 57. Self-echo is inconsistent across the three listen surfaces (finding 9)
+
+The message long-poll excludes the waiting instance's own writes; `/api/events` and `/api/stream` deliver them, and neither is documented either way. An agent that starts on long-poll and later switches to SSE for latency inherits a feedback loop on its own writes. Pick one rule, apply it to all three, and write it down.
+
+### 58. Webhooks stay unsigned (finding 10)
+
+**Decided 2026-09-13: no signing, document the limitation.** Deliveries carry `x-comms-delivery-id` as an idempotency key and no signature, and any `write`-scoped agent can point a subscription anywhere including at another service on localhost. The stated trust boundary is mistakes rather than adversaries, so this is a misconfiguration risk and stays one. Record it plainly in the subscriptions guide rather than adding a secret and an HMAC.
+
+### 59. Page writes report a source error (finding 13)
+
+Publishing a page without a precondition returns `precondition_required` with the message "Source edit refused", and a stale one returns `stale_base` with the same. The docs work to keep pages and source apart, since pages publish immediately and need no lock and no reload, and the error text undoes that. Give the page path its own message. Alongside it, raw page reads come back as `application/octet-stream` for `.md`.
+
+### 60. Unread marking on a latest-N read (finding 1)
+
+**Decided 2026-09-13, smallest fix.** The documented first read is `newest=1`, which returns the top slice and skips everything earlier, while the mark advances to the highest sequence returned: observed, seven unread became zero from a read that returned one message. The unread badge is human-UI only (`packages/ui/src/app.tsx:126` and `:273`), so this is low stakes and does not warrant a redesign. A `newest=1` read marks nothing; every other read is unchanged. Noted for later: if the badge is not worth keeping, removing the unread concept entirely also removes this, the root-mark case in item 44 and the over-marking class, which is a real simplification rather than a fix.
+
 ## Moot after the deletions
 
 Findings that no longer need a comment because items 3 and 4 remove what they were about.
