@@ -3,6 +3,7 @@ import { strict as assert } from "node:assert";
 import { Effect, Layer, Schema } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
 import { testStore } from "./test-store.ts";
+import { cursorPublicationSemantics } from "./cursor-publication-semantics.ts";
 import { dialectSemantics } from "./dialect-semantics.ts";
 import { on } from "@comms/storage/dialect";
 import { readIsolationSemantics } from "./read-isolation-semantics.ts";
@@ -22,7 +23,7 @@ async function main() {
 					engine,
 					config: process.env.COMMS_TEST_STORE_CONFIG,
 					database: "comms_shared_store",
-					tables: ["topic_page_continuations", "reads", "messages", "topics", "kv", "kernel_writer"],
+					tables: ["outbox", "topic_page_continuations", "reads", "messages", "topics", "kv", "kernel_writer"],
 				});
 				phase = "dialect fragments";
 				yield* dialectSemantics(sql);
@@ -93,6 +94,8 @@ async function main() {
 					mysql: () => sql`ALTER TABLE messages MODIFY tags TEXT, MODIFY meta TEXT`,
 				});
 				yield* publishedImageSemantics(sql);
+				phase = "production cursor writes, unread counts and publication guards";
+				yield* cursorPublicationSemantics(sql, mutate);
 			}).pipe(Effect.provide(Layer.merge(Reactivity.layer, BunServices.layer)), Effect.scoped),
 		);
 		process.stdout.write("SHARED_STORE_VERIFIED\n");

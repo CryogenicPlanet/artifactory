@@ -73,7 +73,7 @@ export const rehearseRestoreGeneration = Effect.fn("rehearseRestoreGeneration")(
 			// Rehearsal never publishes its private sequence space into boot.
 			const epoch = `restore-rehearsal-${proofId}`;
 			const report = yield* Effect.acquireUseRelease(
-				backup.rehearsal({ _tag: "file", filename: path.join(temporary, "app.db") }, epoch, artifact),
+				backup.rehearsal({ _tag: "file", filename: path.resolve(temporary, "app.db") }, epoch, artifact),
 				(clone) =>
 					Effect.gen(function* () {
 						return yield* Effect.acquireUseRelease(

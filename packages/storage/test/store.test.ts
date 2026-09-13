@@ -164,11 +164,12 @@ it("supports an old image alias without permitting missing or conflicting select
 		filename: "/tmp/a b.db",
 	});
 	for (const [raw, legacy, variable] of [
-		[undefined, undefined, "APP_STORE"],
+		[undefined, undefined, "APP_STORE or APP_DATABASE"],
 		[undefined, "relative.db", "APP_DATABASE"],
 		["file:/a/../b", "/b", "APP_STORE"],
 	] as const) {
 		const result = await Effect.runPromise(childStore(raw, legacy).pipe(Effect.result));
 		expect(result).toMatchObject({ _tag: "Failure", failure: { code: "store_descriptor_invalid", variable } });
+		if (result._tag === "Failure") expect(result.failure.message).toBe(`${variable}: store_descriptor_invalid`);
 	}
 });

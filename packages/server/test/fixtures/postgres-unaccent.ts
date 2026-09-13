@@ -38,6 +38,8 @@ try {
 			yield* sql`CREATE TABLE kernel_writer(singleton INTEGER PRIMARY KEY,epoch VARCHAR(64) NOT NULL)`;
 			yield* sql`INSERT INTO kernel_writer VALUES (1,'unaccent-probe')`;
 			yield* sql`CREATE TABLE outbox(seq BIGINT PRIMARY KEY,transaction_id VARCHAR(256) NOT NULL,event TEXT NOT NULL,shipped_at BIGINT)`;
+			// This core-only fixture supplies the pre-core14 kernel registration table.
+			yield* sql`CREATE TABLE protected_sql_tables(name VARCHAR(128) PRIMARY KEY)`;
 			if (mode === "fresh") yield* initializeRemoteCore(sql, "unaccent-probe");
 			else yield* remoteMigrate(sql, "core_migrations", remoteCoreSteps(sql).slice(0, 11));
 			const prior = '{ "body": "naïve café", "untouched": [ 1, null ] }';
@@ -100,7 +102,7 @@ try {
 			assert.equal(altered.failure, "undo_wrapper_probe");
 			phase = "restart";
 			yield* initializeRemoteCore(sql, "unaccent-probe");
-			assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 13);
+			assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 14);
 			assert.equal((yield* postgresSearchMode(sql)) === "folded", folding);
 		}).pipe(Effect.provide(layer), Effect.scoped),
 	);

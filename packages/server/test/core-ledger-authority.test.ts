@@ -14,12 +14,15 @@ it("uses the recorded core prefix for conditional upgrades when its mirror lags"
 	await app.stop();
 	await fixture.sql("UPDATE messages SET mentions='[\"@codex.\"]' WHERE topic='ledger'");
 	// Rung ten must run as an upgrade from nine, not from the obsolete mirror.
+	// Restore the pre-core14 registry shape alongside the historical ledger prefix.
+	await fixture.sql("ALTER TABLE protected_sql_tables DROP COLUMN extension");
+	await fixture.sql("ALTER TABLE protected_sql_tables DROP COLUMN migration");
 	await fixture.sql("DELETE FROM core_migrations WHERE migration_id>=10");
 	await fixture.sql("PRAGMA user_version=1");
 	const before = await fixture.sql("SELECT migration_id,name FROM core_migrations ORDER BY migration_id");
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
-	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 13 }]);
+	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 14 }]);
 	expect(
 		await fixture.sql("SELECT migration_id,name FROM core_migrations WHERE migration_id<10 ORDER BY migration_id"),
 	).toEqual(before);
@@ -44,12 +47,15 @@ it("advances SQLite core ten without rewriting encoded domain values or retry re
 		`UPDATE messages SET tags='[ "one", "雪" ]',meta='{ "nested": { "nil": null } }',previous='{ "body": "prior" }' WHERE topic='json-upgrade'`,
 	);
 	const before = await fixture.sql("SELECT * FROM messages WHERE topic='json-upgrade'");
+	// Restore the pre-core14 registry shape alongside the historical ledger prefix.
+	await fixture.sql("ALTER TABLE protected_sql_tables DROP COLUMN extension");
+	await fixture.sql("ALTER TABLE protected_sql_tables DROP COLUMN migration");
 	await fixture.sql("DELETE FROM core_migrations WHERE migration_id>=11");
 	await fixture.sql("PRAGMA user_version=10");
 	const resumed = await fixture.launch();
 	await resumed.ready(cookie);
 	expect(await fixture.sql("SELECT * FROM messages WHERE topic='json-upgrade'")).toEqual(before);
-	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 13 }]);
+	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 14 }]);
 	expect(await fixture.sql("SELECT name FROM core_migrations WHERE migration_id=11")).toEqual([
 		{ name: "domain_json" },
 	]);

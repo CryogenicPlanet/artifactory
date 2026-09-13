@@ -12,7 +12,12 @@ const main = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	yield* sql`CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)`;
 	yield* sql`PRAGMA synchronous=FULL`;
-	const before = yield* restoreBeforeImage(root, `${root}/${process.argv[5] ?? "comms.db"}`);
+	const before = yield* restoreBeforeImage(
+		root,
+		`${root}/${process.argv[5] ?? (mode?.startsWith("isolated-") ? "store/comms.db" : "comms.db")}`,
+	);
+	if (mode === "isolated-construct") return "constructed";
+	if (mode === "isolated-prepare") return yield* before.prepare(storeId);
 	if (mode === "prepare" || mode === "uncommitted" || mode === "prepare-pause") {
 		const manifest = yield* before.prepare(storeId);
 		if (mode === "prepare-pause") {

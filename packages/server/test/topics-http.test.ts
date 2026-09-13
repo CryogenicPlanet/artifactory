@@ -37,6 +37,8 @@ it("migrates schema v1 preserving existing conversation and idempotency records"
 		"DROP INDEX IF EXISTS outbox_unshipped",
 		"DROP INDEX IF EXISTS outbox_transaction",
 		"DROP TABLE topic_page_continuations",
+		"ALTER TABLE protected_sql_tables DROP COLUMN extension",
+		"ALTER TABLE protected_sql_tables DROP COLUMN migration",
 		"DROP TABLE IF EXISTS core_migrations",
 		"PRAGMA user_version=1",
 	])
@@ -47,7 +49,7 @@ it("migrates schema v1 preserving existing conversation and idempotency records"
 	const root = await (await fetch(resumed.url + "/api/topics?mark=0", { headers: { cookie } })).json();
 	expect(root.messages.filter((message: { topic: string }) => message.topic !== "system")).toEqual([existing]);
 	expect(await (await resumed.post("/api/messages", input, cookie, "existing-key")).json()).toEqual(existing);
-	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 13 }]);
+	expect(await fixture.sql("PRAGMA user_version")).toEqual([{ user_version: 14 }]);
 	expect(await fixture.sql("SELECT migration_id,name FROM core_migrations ORDER BY migration_id")).toEqual(
 		[
 			"messages",
@@ -63,6 +65,7 @@ it("migrates schema v1 preserving existing conversation and idempotency records"
 			"domain_json",
 			"search_diacritics",
 			"mention_symbol_boundaries",
+			"protection_ownership",
 		].map((name, index) => ({ migration_id: index + 1, name })),
 	);
 	expect(await fixture.sql("SELECT archived_at FROM topics WHERE path<>'system'")).toEqual([

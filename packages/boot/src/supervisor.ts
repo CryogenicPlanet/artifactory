@@ -4,7 +4,20 @@ import { recoveryIntents } from "./recovery-intents.ts";
 import { SqlClient } from "effect/unstable/sql";
 import { render, StoreError, type Store } from "@comms/storage/store";
 import { logRedactor } from "./log-redaction.ts";
-import { Cause, Config, Crypto, Effect, FileSystem, Path, Queue, Ref, Schema, Scope, Semaphore } from "effect";
+import {
+	Cause,
+	Config,
+	Crypto,
+	Duration,
+	Effect,
+	FileSystem,
+	Path,
+	Queue,
+	Ref,
+	Schema,
+	Scope,
+	Semaphore,
+} from "effect";
 import { HttpServer } from "effect/unstable/http";
 import { prepareGeneration, snapshotStoreEntry, type ApplicationSource } from "./application.ts";
 import { AppRecovery } from "./app-recovery.ts";
@@ -137,6 +150,9 @@ export const supervise = Effect.fn("supervise")(function* (
 		epochOverride?: string,
 	) =>
 		Effect.gen(function* () {
+			const copyBudget = yield* Config.Duration("REHEARSAL_COPY_BUDGET").pipe(
+				Config.withDefault(Duration.seconds(store._tag === "file" ? 30 : 120)),
+			);
 			yield* assertClosure;
 			const owners = yield* ChildAttempts;
 			const secret = Buffer.from(yield* crypto.randomBytes(32)).toString("hex");
@@ -168,6 +184,7 @@ export const supervise = Effect.fn("supervise")(function* (
 					...(remoteConfiguration ? { remote: remoteConfiguration } : {}),
 					env: {
 						PORT: "0",
+						REHEARSAL_COPY_BUDGET: `${Duration.toMillis(copyBudget)} millis`,
 						BOOT_SECRET: secret,
 						WRITER_EPOCH: epoch,
 						GENERATION: String(generation.n),

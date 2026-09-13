@@ -153,7 +153,7 @@ await Effect.runPromise(
 		assert.deepEqual(yield* sql`SELECT seq,transaction_id,shipped_at FROM outbox`, [
 			{ seq: 1, transaction_id: "owned-transaction", shipped_at: 1800000000000 },
 		]);
-		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 13);
+		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 14);
 	}).pipe(Effect.scoped, Effect.provide(appLayer)),
 );
 process.stdout.write("separate PostgreSQL roles preserve protected ownership, app migrations and reconnect data\n");

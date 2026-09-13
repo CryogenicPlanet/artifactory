@@ -82,7 +82,7 @@ GRANT SELECT ON performance_schema.threads TO 'comms_app'@'%';
 GRANT SELECT ON performance_schema.session_account_connect_attrs TO 'comms_app'@'%';
 """
 # Each parity case owns an initially empty app/boot pair; no shared test tables.
-parity_databases=['comms_mutation_app','comms_mutation_boot','comms_read_marks']
+parity_databases=['comms_mutation_app','comms_mutation_boot','comms_read_marks','comms_protection']
 parity_databases += [f'comms_outbox_{mode}_{side}' for mode in ['pending','incomplete','bounded'] for side in ['app','boot']]
 for database in parity_databases:
  if engine=='pg':
@@ -142,7 +142,7 @@ import json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text()); d['port']=int(sys.argv[2]); p.write_text(json.dumps(d))
 for database,name in [('comms_collation_boot','collation'),('comms_concurrency_app','concurrency-app'),('comms_concurrency_boot','concurrency-boot'),('comms_schema_guard','guard'),('comms_schema_core','core'),('comms_schema_json_crash','json-crash'),('comms_shared_store','dialect'),('comms_search_mysql','mysql-search'),('comms_failed_lease','failed-lease'),('comms_read_cleanup','read-cleanup'),('comms_snapshot_boot','snapshot-boot'),('comms_snapshot_app','snapshot-app')]:
  d['database']=database; (p.parent/(name+'.json')).write_text(json.dumps(d))
-for database,name in [('comms_mutation_app','mutation-app'),('comms_mutation_boot','mutation-boot'),('comms_read_marks','read-marks')]:
+for database,name in [('comms_mutation_app','mutation-app'),('comms_mutation_boot','mutation-boot'),('comms_read_marks','read-marks'),('comms_protection','protection')]:
  d['database']=database; (p.parent/(name+'.json')).write_text(json.dumps(d))
 for mode in ['pending','incomplete','bounded']:
  for side in ['app','boot']:
@@ -153,6 +153,10 @@ if d['engine']=='pg':
   d['database']='comms_schema_unaccent'+suffix; (p.parent/('unaccent-'+name+'.json')).write_text(json.dumps(d))
 PY
 # The intentionally truncated session-attribute case refuses before SQL admission.
+if [ "$engine" = pg ]; then
+  COMMS_PG_JSON_TEST_CONFIG="$private/client.json" \
+    node node_modules/vitest/vitest.mjs run packages/storage/test/remote-json.test.ts --maxWorkers=1 --reporter=verbose
+fi
 if [ "$attributes" != 32 ]; then
   if [ "$engine" = pg ]; then
     COMMS_UNACCENT_FRESH_CONFIG="$private/unaccent-fresh.json" \
@@ -184,6 +188,9 @@ if [ "$attributes" != 32 ]; then
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/portable-mutation-durability.test.ts --maxWorkers=1 --reporter=verbose
   COMMS_TEST_ENGINE="$engine" COMMS_OUTBOX_CONFIG_DIR="$private" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/portable-outbox.test.ts --maxWorkers=1 --reporter=verbose
+  COMMS_PROTECTION_ENGINE="$engine" COMMS_PROTECTION_CONFIG="$private/protection.json" \
+  COMMS_PROTECTION_DATABASE=comms_protection \
+    node node_modules/vitest/vitest.mjs run packages/server/test/protection-lifecycle.test.ts --maxWorkers=1 --reporter=verbose -t "^$engine preserves protection"
   COMMS_READ_MARK_ENGINE="$engine" COMMS_READ_MARK_CONFIG="$private/read-marks.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/portable-read-marks.test.ts --maxWorkers=1 --reporter=verbose -t 'native read marks'
   COMMS_TEST_ENGINE="$engine" COMMS_SNAPSHOT_BOOT_CONFIG="$private/snapshot-boot.json" \

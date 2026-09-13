@@ -261,7 +261,15 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 									yield* migrateAppStore({
 										dataDirectory: options.dataDirectory,
 										filename: configuration.app.filename,
-										allowMissingReady: (yield* (yield* AppRecovery).identityStatus).adoption_phase === "ready",
+										allowMissingReady: yield* Effect.gen(function* () {
+											const status = yield* (yield* AppRecovery).identityStatus;
+											return status.adoption_phase === "ready";
+										}).pipe(
+											// A diagnostic cannot disarm repair; authoritative reservation still validates after journal recovery.
+											Effect.catchTag("EventError", (error) =>
+												error.code === "app_store_identity_invalid" ? Effect.succeed(false) : Effect.fail(error),
+											),
+										),
 									});
 								yield* (yield* DbOps).recoverStaging;
 							}),

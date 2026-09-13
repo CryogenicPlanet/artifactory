@@ -41,6 +41,10 @@ await Effect.runPromise(
 			yield* sql`CREATE TABLE kernel_writer(singleton INTEGER PRIMARY KEY,epoch VARCHAR(64) NOT NULL)`;
 			yield* sql`INSERT INTO kernel_writer VALUES(1,'json-crash')`;
 			yield* sql`CREATE TABLE outbox(seq BIGINT PRIMARY KEY,transaction_id VARCHAR(256) NOT NULL,event TEXT NOT NULL,shipped_at BIGINT)`;
+			// This core-only fixture supplies the pre-core14 kernel registration table.
+			yield* settings.engine === "pg"
+				? sql`CREATE TABLE protected_sql_tables(name VARCHAR(128) PRIMARY KEY)`
+				: sql`CREATE TABLE protected_sql_tables(name VARCHAR(128) PRIMARY KEY) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`;
 			yield* remoteMigrate(sql, "core_migrations", remoteCoreSteps(sql).slice(0, 10));
 			yield* sql`INSERT INTO topics(path,name,meta,last_seq,created_at) VALUES('retained','Retained',${meta},1,1800000000000)`;
 			yield* sql`INSERT INTO messages(id,seq,topic,agent,instance,body,tags,meta,created_at,previous) VALUES('retained',1,'retained','agent','instance','body',${tags},${meta},1800000000000,${previous})`;
@@ -81,7 +85,7 @@ await Effect.runPromise(
 				]);
 		}
 		yield* initializeRemoteCore(sql, "json-crash");
-		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 13);
+		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 14);
 		assert.deepEqual(
 			yield* types(),
 			Array.from({ length: 3 }, () => ({ type: settings.engine === "pg" ? "jsonb" : "json" })),
