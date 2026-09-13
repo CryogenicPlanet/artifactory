@@ -103,6 +103,7 @@ probe() {
     --entrypoint /usr/local/bin/bun "$prefix-$1" \
     /opt/comms/packages/server/test/fixtures/remote-tls.ts "$2" "$3"
 }
+probe trusted seed database.test
 probe trusted pass database.test
 probe untrusted deny database.test
 # Successful queries bracket trust and hostname refusals using the same credentials.
