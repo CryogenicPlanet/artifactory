@@ -33,8 +33,10 @@ const program = Effect.gen(function* () {
 			{
 				extension: "example.ts",
 				name: "create",
-				sourceChecksum: hash("CREATE TABLE extension_data(value TEXT)"),
-				targetChecksum: hash("CREATE TABLE extension_data(value TEXT)"),
+				sourceChecksum: hash(JSON.stringify(["CREATE TABLE extension_data(value TEXT)", true, null])),
+				sourceLegacyChecksum: hash("CREATE TABLE extension_data(value TEXT)"),
+				targetChecksum: hash(JSON.stringify(["CREATE TABLE extension_data(value TEXT)", true, null])),
+				targetLegacyChecksum: hash("CREATE TABLE extension_data(value TEXT)"),
 			},
 		]);
 	yield* transferExtensionMigrations(sql, "offline", `${root}/good`);
@@ -82,8 +84,10 @@ const program = Effect.gen(function* () {
 			{
 				extension: "example.ts",
 				name: "portable",
-				sourceChecksum: hash("CREATE TABLE portable_data(value VARCHAR(32))"),
-				targetChecksum: hash("CREATE TABLE portable_data(value TEXT)"),
+				sourceChecksum: hash(JSON.stringify(["CREATE TABLE portable_data(value VARCHAR(32))", false, null])),
+				sourceLegacyChecksum: hash("CREATE TABLE portable_data(value VARCHAR(32))"),
+				targetChecksum: hash(JSON.stringify(["CREATE TABLE portable_data(value TEXT)", false, null])),
+				targetLegacyChecksum: hash("CREATE TABLE portable_data(value TEXT)"),
 			},
 		]);
 	const duplicate = yield* run(
@@ -94,6 +98,50 @@ const program = Effect.gen(function* () {
     }`,
 	);
 	assert.equal(duplicate._tag, "Failure");
+
+	const changedOptions = yield* run("changed-options", registration.replace("protect: true", "protect: false"));
+	assert.equal(changedOptions._tag, "Failure");
+	const legacy = hash("CREATE TABLE extension_data(value TEXT)");
+	yield* sql`UPDATE extension_migrations SET checksum=${legacy} WHERE name='create'`;
+	yield* sql`UPDATE protected_sql_tables SET extension=NULL,migration=NULL WHERE name='extension_data'`;
+	yield* transferExtensionMigrations(sql, "offline", `${root}/good`);
+	assert.deepEqual(yield* sql`SELECT checksum FROM extension_migrations WHERE name='create'`, [{ checksum: legacy }]);
+	assert.deepEqual(yield* sql`SELECT extension,migration FROM protected_sql_tables WHERE name='extension_data'`, [
+		{ extension: null, migration: null },
+	]);
+
+	assert.equal(
+		(yield* run(
+			"duplicate-options",
+			`import { Effect } from "${import.meta.resolve("effect")}"; export default api => Effect.gen(function* () {
+		yield* api.migrate("create", "CREATE TABLE extension_data(value TEXT)", {protect: false});
+		yield* api.migrate("create", "CREATE TABLE extension_data(value TEXT)", {protect: true});
+	});`,
+		))._tag,
+		"Failure",
+	);
+
+	const releaseSource = `import { Effect } from "${import.meta.resolve("effect")}"; export default api => Effect.gen(function* () {
+		yield* api.migrate("create_release", "CREATE TABLE release_data(value TEXT)", {protect: true});
+		yield* api.migrate("release", "UPDATE release_data SET value=value", {unprotect: "release_data"});
+	});`;
+	const release = yield* run("release", releaseSource);
+	assert.equal(release._tag, "Success");
+	if (release._tag === "Success") {
+		const proof = release.success.find((row) => row.name === "release");
+		assert(proof);
+		assert.equal(proof.sourceLegacyChecksum, undefined);
+		assert.equal(proof.targetLegacyChecksum, undefined);
+		assert.equal(
+			proof.targetChecksum,
+			hash(JSON.stringify(["UPDATE release_data SET value=value", false, "release_data"])),
+		);
+	}
+	yield* sql`UPDATE extension_migrations SET checksum=${hash("UPDATE release_data SET value=value")} WHERE name='release'`;
+	assert.equal(
+		(yield* transferExtensionMigrations(sql, "offline", `${root}/release`).pipe(Effect.result))._tag,
+		"Failure",
+	);
 
 	yield* Console.log("TRANSFER_EXTENSION_REPLAY_VERIFIED");
 }).pipe(Effect.scoped, Effect.provide(memoryStoreLayer()), Effect.provide(BunServices.layer));

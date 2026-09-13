@@ -63,3 +63,42 @@ it("returns one canonical order independent of engine catalog ordering", async (
 	const result = await Effect.runPromise(validateExtensionLedger(rows, rows.toReversed(), proofs.toReversed()));
 	expect(result.map((row) => row.extension)).toEqual(["a", "z", "é", "🦋"]);
 });
+
+it("resolves mixed legacy and current receipts without changing frozen evidence", async () => {
+	const { source, target, proofs } = fixture();
+	const declarations = proofs.map((proof) =>
+		Object.freeze({ ...proof, sourceChecksum: "c".repeat(64), sourceLegacyChecksum: proof.sourceChecksum }),
+	);
+	const before = JSON.stringify({ source, target, declarations });
+	expect(await Effect.runPromise(validateExtensionLedger(source, target, declarations))).toEqual(proofs);
+	expect(JSON.stringify({ source, target, declarations })).toBe(before);
+	for (const candidate of ["a".repeat(63), `${"a".repeat(64)}\n`, "g".repeat(64)]) {
+		expect(
+			(
+				await Effect.runPromise(
+					Effect.result(
+						validateExtensionLedger(
+							source,
+							target,
+							declarations.map((row) => ({ ...row, sourceLegacyChecksum: candidate })),
+						),
+					),
+				)
+			)._tag,
+		).toBe("Failure");
+	}
+	// A different current options digest is neither the declared digest nor its SQL-only legacy receipt.
+	expect(
+		(
+			await Effect.runPromise(
+				Effect.result(
+					validateExtensionLedger(
+						source.map((row) => ({ ...row, checksum: "d".repeat(64) })),
+						target,
+						declarations,
+					),
+				),
+			)
+		)._tag,
+	).toBe("Failure");
+});

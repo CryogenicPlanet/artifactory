@@ -37,24 +37,33 @@ export const validateExtensionLedger = (
 		const to = yield* index(target);
 		if (from.size !== proofs.length || to.size !== proofs.length) return yield* invalid();
 		const seen = new Set<string>();
+		const resolved: ExtensionMigrationProof[] = [];
 		for (const proof of proofs) {
 			const id = key(proof);
 			if (
 				!validKey(proof) ||
 				!validHash(proof.sourceChecksum) ||
 				!validHash(proof.targetChecksum) ||
+				(proof.sourceLegacyChecksum !== undefined && !validHash(proof.sourceLegacyChecksum)) ||
+				(proof.targetLegacyChecksum !== undefined && !validHash(proof.targetLegacyChecksum)) ||
 				seen.has(id) ||
-				from.get(id) !== proof.sourceChecksum ||
-				to.get(id) !== proof.targetChecksum
+				!from.has(id) ||
+				!to.has(id) ||
+				(from.get(id) !== proof.sourceChecksum && from.get(id) !== proof.sourceLegacyChecksum) ||
+				(to.get(id) !== proof.targetChecksum && to.get(id) !== proof.targetLegacyChecksum)
 			)
 				return yield* invalid();
 			seen.add(id);
+			resolved.push({
+				extension: proof.extension,
+				name: proof.name,
+				sourceChecksum: from.get(id) ?? "",
+				targetChecksum: to.get(id) ?? "",
+			});
 		}
-		return proofs
-			.map((proof) => ({ ...proof }))
-			.sort(
-				(a, b) =>
-					Buffer.compare(Buffer.from(a.extension), Buffer.from(b.extension)) ||
-					Buffer.compare(Buffer.from(a.name), Buffer.from(b.name)),
-			);
+		return resolved.sort(
+			(a, b) =>
+				Buffer.compare(Buffer.from(a.extension), Buffer.from(b.extension)) ||
+				Buffer.compare(Buffer.from(a.name), Buffer.from(b.name)),
+		);
 	});

@@ -1,3 +1,4 @@
+import { prepareTransferTable, copyTransferTable } from "@comms/storage/transfer-copy";
 import { postgresSearchDeclarations } from "../../src/transfer/search-capability.ts";
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
@@ -18,6 +19,7 @@ interface Catalog {
 	readonly engine: TransferEngine;
 	readonly sql: SqlClient;
 	readonly inventory: TransferInventory;
+	readonly legacyTable: string;
 	readonly ledgers: Effect.Success<ReturnType<typeof initializeTransferApp>>;
 }
 const settings = Schema.fromJsonString(
@@ -39,8 +41,8 @@ async function main() {
 		const mysql = Schema.decodeSync(settings)(await readFile(process.env.COMMS_TRANSFER_APP_SIX_MYSQL ?? "", "utf8"));
 		assert.equal(pg.engine, "pg");
 		assert.equal(mysql.engine, "mysql");
-		assert.equal(pg.database, "comms_transfer_app_six");
-		assert.equal(mysql.database, "comms_transfer_app_six");
+		assert.match(pg.database, /^comms_transfer_app_six(?:_[a-z0-9]+)?$/);
+		assert.match(mysql.database, /^comms_transfer_app_six(?:_[a-z0-9]+)?$/);
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem;
@@ -82,9 +84,26 @@ async function main() {
 						yield* sql`INSERT INTO kernel_writer VALUES(1,${epoch})`;
 					if (!(yield* sql`SELECT singleton FROM store_identity`).length)
 						yield* sql`INSERT INTO store_identity VALUES(1,'12345678-1234-4123-8123-123456789abc',1,NULL)`;
+					const initialized = yield* initializeTransferApp(sql, epoch, frozenSource);
+					const protectedRows = yield* sql<{
+						name: string;
+						extension: string;
+						migration: string;
+					}>`SELECT name,extension,migration FROM protected_sql_tables WHERE extension IS NOT NULL ORDER BY name`;
+					const legacyOwner = protectedRows[0];
+					assert(legacyOwner);
+					const legacyProof = initialized.extensionProofs.find(
+						(proof) => proof.extension === legacyOwner.extension && proof.name === legacyOwner.migration,
+					);
+					assert(legacyProof?.targetLegacyChecksum);
+					// Reconstruct one historical SQL-only receipt and its unknown ownership, retaining other modern receipts.
+					yield* sql`UPDATE extension_migrations SET checksum=${legacyProof.targetLegacyChecksum} WHERE extension=${legacyOwner.extension} AND name=${legacyOwner.migration}`;
+					yield* sql`UPDATE protected_sql_tables SET extension=NULL,migration=NULL WHERE name=${legacyOwner.name}`;
 					const ledgers = yield* initializeTransferApp(sql, epoch, frozenSource);
-					assert.equal(ledgers.core.length, 12);
-					assert.equal(ledgers.core.at(-1)?.name, "search_diacritics");
+					assert(ledgers.extensions.some((row) => row.checksum === legacyProof.targetLegacyChecksum));
+					assert(ledgers.extensions.some((row) => row.checksum !== legacyProof.targetLegacyChecksum));
+					assert.equal(ledgers.core.length, 14);
+					assert.equal(ledgers.core.at(-1)?.name, "protection_ownership");
 					assert(ledgers.extensions.length > 0);
 					stage = `${engine}:inventory`;
 					const inventory = yield* sql.withTransaction(
@@ -119,7 +138,7 @@ async function main() {
 							assert.equal(refused._tag, "Failure");
 						}
 					}
-					catalogs.push({ engine, sql, inventory, ledgers });
+					catalogs.push({ engine, sql, inventory, ledgers, legacyTable: legacyOwner.name });
 				}
 				const pairs: string[] = [];
 				const verifiedProofs: { from: TransferEngine; to: TransferEngine; count: number }[] = [];
@@ -170,29 +189,34 @@ async function main() {
 						);
 						// Replay only the target factories; source SQL is read from their explicit
 						// dialect declaration, never executed against the source for inspection.
+						stage = `${source.engine}->${target.engine}:replay`;
 						const replay = yield* initializeTransferApp(target.sql, epoch, frozenSource, source.engine);
 						assert.deepEqual(replay.extensions, target.ledgers.extensions);
-						assert.deepEqual(
-							replay.extensionProofs.map(({ extension, name, sourceChecksum }) => ({
-								extension,
-								name,
-								checksum: sourceChecksum,
-							})),
-							source.ledgers.extensions,
-						);
-						assert.deepEqual(
-							replay.extensionProofs.map(({ extension, name, targetChecksum }) => ({
-								extension,
-								name,
-								checksum: targetChecksum,
-							})),
-							target.ledgers.extensions,
-						);
-						yield* validateExtensionLedger(
+						stage = `${source.engine}->${target.engine}:resolve`;
+						const resolved = yield* validateExtensionLedger(
 							source.ledgers.extensions,
 							target.ledgers.extensions,
 							replay.extensionProofs,
 						);
+						assert.deepEqual(
+							resolved.map(({ extension, name, sourceChecksum }) => ({ extension, name, checksum: sourceChecksum })),
+							source.ledgers.extensions,
+						);
+						assert.deepEqual(
+							resolved.map(({ extension, name, targetChecksum }) => ({ extension, name, checksum: targetChecksum })),
+							target.ledgers.extensions,
+						);
+						stage = `${source.engine}->${target.engine}:unknown-owner`;
+						assert.equal(
+							(yield* target.sql`SELECT name FROM protected_sql_tables WHERE name=${target.legacyTable} AND extension IS NULL AND migration IS NULL`)
+								.length,
+							1,
+						);
+						stage = `${source.engine}->${target.engine}:registry-plan`;
+						const registry = plan.tables.find((table) => table.name === "protected_sql_tables");
+						assert(registry?.columns.some((column) => column.name === "extension"));
+						assert(registry?.columns.some((column) => column.name === "migration"));
+
 						const alteredSource = source.ledgers.extensions.map((row, index) =>
 							index === 0 ? { ...row, checksum: "0".repeat(64) } : row,
 						);
@@ -208,6 +232,22 @@ async function main() {
 							assert.equal(refusal._tag, "Failure");
 							if (refusal._tag === "Failure") assert.equal(refusal.failure.code, "transfer_extension_ledger_invalid");
 						}
+						stage = `${source.engine}->${target.engine}:copy-protection`;
+						const shape = target.inventory.tables.find((table) => table.name === "protected_sql_tables");
+						assert(registry && shape);
+						const sourceRegistry =
+							yield* source.sql`SELECT name,extension,migration FROM protected_sql_tables ORDER BY name`;
+						const prepared = yield* prepareTransferTable(source.sql, target.sql, registry, shape);
+						yield* target.sql`DELETE FROM protected_sql_tables`;
+						yield* copyTransferTable(source.sql, target.sql, registry, shape, prepared);
+						assert.deepEqual(
+							yield* target.sql`SELECT name,extension,migration FROM protected_sql_tables ORDER BY name`,
+							sourceRegistry,
+						);
+						assert.deepEqual(
+							yield* source.sql`SELECT name,extension,migration FROM protected_sql_tables ORDER BY name`,
+							sourceRegistry,
+						);
 						verifiedProofs.push({ from: source.engine, to: target.engine, count: replay.extensionProofs.length });
 						pairs.push(`${source.engine}->${target.engine}`);
 					}

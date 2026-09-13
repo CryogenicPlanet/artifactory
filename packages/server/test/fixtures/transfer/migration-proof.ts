@@ -17,7 +17,21 @@ const proof: MigrationProof = {
 	initialized_at: 1,
 	epoch: "a".repeat(64),
 	generation: { n: 2, entry_file: "server.ts", snapshot_dir: `${root}/snapshot` },
-	result: { core: [{ migration_id: 1, name: "core" }], editable: [], extensions: [], extensionProofs: [] },
+	result: {
+		core: [{ migration_id: 1, name: "core" }],
+		editable: [],
+		extensions: [{ extension: "example.ts", name: "create", checksum: "b".repeat(64) }],
+		extensionProofs: [
+			{
+				extension: "example.ts",
+				name: "create",
+				sourceChecksum: "a".repeat(64),
+				targetChecksum: "b".repeat(64),
+				sourceLegacyChecksum: "c".repeat(64),
+				targetLegacyChecksum: "d".repeat(64),
+			},
+		],
+	},
 	safetyReceipt: `${root}/transfers/${selection.transfer_id}/safety/12345678-1234-4234-8234-123456789abe/receipt.json`,
 };
 const run =

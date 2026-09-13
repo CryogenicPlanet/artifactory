@@ -46,7 +46,7 @@ const program = Effect.gen(function* () {
 			}),
 		),
 	)(yield* runTransferApp(options));
-	assert.equal(result.core.at(-1)?.migration_id, 12);
+	assert.equal(result.core.at(-1)?.migration_id, 14);
 	assert(result.extensionProofs.length > 0);
 	assert.equal(yield* fs.readFileString(path.join(root, "attempts", `${options.attempt}.closed`)), options.attempt);
 	assert.equal((yield* runTransferApp(options).pipe(Effect.result))._tag, "Failure");

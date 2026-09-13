@@ -1,4 +1,5 @@
-import { Cause, Crypto, Effect, FileSystem, Path, Schema, Semaphore } from "effect";
+import { extensionChecksums } from "./extension-checksum.ts";
+import { Cause, Effect, FileSystem, Path, Schema, Semaphore } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
 import type { Api } from "./extension-api.ts";
@@ -25,6 +26,8 @@ export interface ExtensionMigrationProof {
 	readonly name: string;
 	readonly sourceChecksum: string;
 	readonly targetChecksum: string;
+	readonly sourceLegacyChecksum?: string;
+	readonly targetLegacyChecksum?: string;
 }
 
 /** Replay trusted frozen factories for migrations only. Imports and arbitrary JS are not sandboxed.
@@ -36,12 +39,7 @@ export const transferExtensionMigrations = (
 	sourceEngine: MigrationEngine = migrationEngine(sql),
 ) =>
 	Effect.gen(function* () {
-		const crypto = yield* Crypto.Crypto;
 		const proofs: ExtensionMigrationProof[] = [];
-		const hash = (statement: string) =>
-			crypto
-				.digest("SHA-256", new TextEncoder().encode(statement))
-				.pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
 		if ((yield* fs.realPath(directory)) !== directory)
@@ -76,11 +74,15 @@ export const transferExtensionMigrations = (
 										const [name, declaration, options] = args;
 										const sourceStatement = migrationSql(declaration, sourceEngine);
 										const targetStatement = migrationSql(declaration, migrationEngine(sql));
+										const source = yield* extensionChecksums(sourceStatement, options);
+										const target = yield* extensionChecksums(targetStatement, options);
 										const proof = {
 											extension: entry.name,
 											name,
-											sourceChecksum: yield* hash(sourceStatement),
-											targetChecksum: yield* hash(targetStatement),
+											sourceChecksum: source.checksum,
+											...(source.legacyChecksum ? { sourceLegacyChecksum: source.legacyChecksum } : {}),
+											targetChecksum: target.checksum,
+											...(target.legacyChecksum ? { targetLegacyChecksum: target.legacyChecksum } : {}),
 										};
 										const prior = proofs.find((row) => row.extension === entry.name && row.name === name);
 										if (

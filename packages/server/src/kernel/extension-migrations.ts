@@ -1,7 +1,8 @@
+import { extensionChecksums } from "./extension-checksum.ts";
 import { migrationWarnings } from "./migration-portability.ts";
 import { on } from "@comms/storage/dialect";
 import { assertNoPendingMigration, mysqlMigration } from "./migration-intent.ts";
-import { Crypto, Effect, Schema, Semaphore } from "effect";
+import { Effect, Schema, Semaphore } from "effect";
 import { preserveMigrationState } from "./migration-state.ts";
 import type { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
@@ -19,9 +20,12 @@ export const migrationEngine = (sql: SqlClient.SqlClient): MigrationEngine =>
 /** Loader-only migrations share the startup writer fence; they never publish candidate events. */
 export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, extension: string) =>
 	Effect.gen(function* () {
-		const crypto = yield* Crypto.Crypto;
 		const gate = yield* Semaphore.make(1);
-		return (name: string, declaration: MigrationSql, options?: { readonly protect?: boolean; readonly unprotect?: string }) =>
+		return (
+			name: string,
+			declaration: MigrationSql,
+			options?: { readonly protect?: boolean; readonly unprotect?: string },
+		) =>
 			Effect.gen(function* () {
 				const warnings = yield* migrationWarnings;
 				const report = warnings && typeof declaration === "string" ? warnings.record(name, extension) : Effect.void;
@@ -45,17 +49,7 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 					: undefined;
 				if (options?.protect && table === undefined)
 					return yield* new KernelError({ code: "extension_migration_invalid" });
-				const legacyChecksum = Buffer.from(
-					yield* crypto.digest("SHA-256", new TextEncoder().encode(statement)),
-				).toString("hex");
-				const checksum = Buffer.from(
-					yield* crypto.digest(
-						"SHA-256",
-						new TextEncoder().encode(
-							JSON.stringify([statement, options?.protect ?? false, options?.unprotect ?? null]),
-						),
-					),
-				).toString("hex");
+				const { checksum, legacyChecksum } = yield* extensionChecksums(statement, options);
 				const mysql = on(sql, { sqlite: () => false, pg: () => false, mysql: () => true });
 				const prior = sql.withTransaction(
 					Effect.gen(function* () {
@@ -110,7 +104,9 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 				});
 				if (mysql) {
 					if (yield* prior) return;
-					return yield* mysqlMigration(sql, epoch, extension, name, sql.withTransaction(operation), receipt).pipe(Effect.andThen(report));
+					return yield* mysqlMigration(sql, epoch, extension, name, sql.withTransaction(operation), receipt).pipe(
+						Effect.andThen(report),
+					);
 				}
 				const applied = yield* sql.withTransaction(
 					Effect.gen(function* () {
