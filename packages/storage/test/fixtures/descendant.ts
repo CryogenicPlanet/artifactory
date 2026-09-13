@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { clientLayer } from "../../src/client.ts";
-import { isDescendant } from "../../src/descendant.ts";
+import { isDescendant } from "../../src/dialect.ts";
 
 const rows = await Effect.runPromise(
 	Effect.gen(function* () {

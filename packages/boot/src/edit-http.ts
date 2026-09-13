@@ -1,3 +1,5 @@
+import type { ChildError } from "./child-process.ts";
+import type { RecoveryRejected } from "./recovery-intents.ts";
 import { captureRefusal } from "./auth-primitives.ts";
 import { bootRoute } from "./boot-route.ts";
 import { requestBytes } from "./request-bytes.ts";
@@ -27,7 +29,11 @@ export interface Editing {
 	readonly cutover: Cutover;
 	readonly withPagePublication: <A, E, R>(
 		effect: Effect.Effect<A, E, R>,
-	) => Effect.Effect<A, E | SourceRejected | SqlError | Schema.SchemaError, R>;
+	) => Effect.Effect<
+		A,
+		E | SourceRejected | EditRejected | ChildError | RecoveryRejected | SqlError | Schema.SchemaError,
+		R
+	>;
 }
 
 export const editRoute = (
@@ -49,34 +55,38 @@ export const editRoute = (
 			return null;
 		if (!identity.scopes.includes("fs")) return yield* new AuthError({ code: "scope_required" });
 		return yield* Effect.gen(function* () {
-			let writable = editing.writable;
+			const writable = editing.writable;
 			const repairLock =
 				!writable &&
 				identity.kind === "human" &&
 				route === "/_boot/lock" &&
 				["POST", "DELETE"].includes(request.method);
-			if (!writable && identity.kind === "human" && route === "/_boot/revert" && request.method === "POST") {
-				yield* humanSession(auth, request);
-				yield* editing.retryRecovery(Effect.asVoid(humanSession(auth, request)));
-				yield* humanSession(auth, request);
-				writable = true;
-			}
+			const repairRevert =
+				!writable && identity.kind === "human" && route === "/_boot/revert" && request.method === "POST";
 			if (!writable && identity.kind === "human" && route === "/_boot/lock" && request.method === "GET") {
 				if (url.search) return errorResponse("unsupported_query", 400);
 				return HttpServerResponse.jsonUnsafe({ lock: yield* editing.lock.snapshot });
 			}
-			if (!writable && !repairLock && (request.method !== "GET" || !route.startsWith("/_boot/fs/")))
+			if (!writable && !repairLock && !repairRevert && (request.method !== "GET" || !route.startsWith("/_boot/fs/")))
 				return errorResponse("editing_unavailable", 503);
 			if (writable && route === "/_boot/lock" && ["POST", "DELETE"].includes(request.method))
 				yield* editing.retryRecovery(Effect.asVoid(authenticate(auth, request)));
 			// Failed recovery permits committed-source diagnostics, without lock expiry or staged-overlay mutation.
-			const known = writable ? (yield* editing.lock.inspect).value : repairLock ? yield* editing.lock.snapshot : null;
+			const known = writable
+				? (yield* editing.lock.inspect).value
+				: repairLock || repairRevert
+					? yield* editing.lock.snapshot
+					: null;
 			const owner = (): Ownership => ({ id: known?.id ?? "", family: identity.id });
 			const authoritative = <A, E, R>(operation: Effect.Effect<A, E, R>) =>
 				Effect.gen(function* () {
 					const current = yield* authenticate(auth, request);
 					return yield* operation.pipe(
-						Effect.provideService(EditAuthority, { ...current, ...(repairLock ? { repairLock: true } : {}) }),
+						Effect.provideService(EditAuthority, {
+							...current,
+							...(repairLock ? { repairLock: true } : {}),
+							...(repairRevert ? { repairRevert: true } : {}),
+						}),
 					);
 				});
 			const lockResponse = <A, E, R>(operation: Effect.Effect<A, E, R>) =>
@@ -109,7 +119,7 @@ export const editRoute = (
 					if (repairLock) yield* humanSession(auth, request);
 					return HttpServerResponse.jsonUnsafe(
 						{ lock, ...(recovery ? { lock_committed: true, recovery } : {}) },
-						{ headers: { "cache-control": "no-store" } },
+						{ status: recovery?.status === "failed" ? 503 : 200, headers: { "cache-control": "no-store" } },
 					);
 				});
 			if (route === "/_boot/reset") {
@@ -197,7 +207,12 @@ export const editRoute = (
 				const undo = input;
 				const perform = (revertRequest?: string) =>
 					Effect.gen(function* () {
-						const currentLock = revertRequest === undefined ? known : (yield* editing.lock.inspect).value;
+						const currentLock =
+							revertRequest === undefined
+								? known
+								: repairRevert
+									? yield* editing.lock.snapshot
+									: (yield* editing.lock.inspect).value;
 						const owner = (): Ownership => ({ id: currentLock?.id ?? "", family: identity.id });
 						if (identity.kind === "human" && !(yield* editing.source.undoTargetsPages(undo)))
 							return HttpServerResponse.jsonUnsafe(
@@ -249,7 +264,40 @@ export const editRoute = (
 							),
 						);
 					});
-				if (key === undefined) return yield* perform();
+				const completeRepair = <E, R>(operation: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>) =>
+					operation.pipe(
+						Effect.flatMap((response) =>
+							Effect.gen(function* () {
+								if (!repairRevert || response.status >= 400 || response.body._tag !== "Uint8Array") return response;
+								const result = yield* Schema.decodeEffect(
+									Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+								)(new TextDecoder().decode(response.body.body));
+								if (result.status !== "live" && result.published !== true) return response;
+								const recovery = yield* editing.retryRecovery(Effect.asVoid(humanSession(auth, request))).pipe(
+									Effect.as({ status: "ready" as const }),
+									Effect.catchCause((cause) =>
+										Cause.hasInterruptsOnly(cause)
+											? Effect.failCause(cause)
+											: Effect.succeed({
+													status: "failed" as const,
+													error: {
+														code: "recovery_failed",
+														message: "Source revert committed; recovery still needs repair.",
+														hint: "Inspect /_boot/status and recovery journals; do not repeat the revert with a new key.",
+														retriable: false,
+													},
+												}),
+									),
+								);
+								yield* humanSession(auth, request);
+								return HttpServerResponse.jsonUnsafe(
+									{ ...result, revert_committed: true, recovery },
+									{ headers: { "cache-control": "no-store" } },
+								);
+							}),
+						),
+					);
+				if (key === undefined) return yield* completeRepair(perform());
 				const selector = yield* Schema.encodeEffect(
 					Schema.fromJsonString(
 						Schema.Struct({
@@ -265,14 +313,16 @@ export const editRoute = (
 					version: input.version ?? null,
 					generation: input.generation ?? null,
 				});
-				return yield* editing.reverts.run(
-					{ family: identity.id, key },
-					selector,
-					Effect.gen(function* () {
-						const current = yield* authenticate(auth, request);
-						if (!current.scopes.includes("fs")) return yield* new AuthError({ code: "scope_required" });
-					}),
-					(id) => perform(id).pipe(Effect.catchCause(editFailure)),
+				return yield* completeRepair(
+					editing.reverts.run(
+						{ family: identity.id, key },
+						selector,
+						Effect.gen(function* () {
+							const current = yield* authenticate(auth, request);
+							if (!current.scopes.includes("fs")) return yield* new AuthError({ code: "scope_required" });
+						}),
+						(id) => perform(id).pipe(Effect.catchCause(editFailure)),
+					),
 				);
 			}
 			if (

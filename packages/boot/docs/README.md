@@ -25,6 +25,8 @@ Keep these boundaries intact when changing boot:
 - After an accepted generation, recovery preserves the current database. Unresolved journals block conflicting changes.
 - Forward verified identity to the child, never the caller's credentials. Browser mutations require the configured origin.
 
+A complete public-page policy is bounded by the 1 MiB event-append body limit. Its atomic replacement holds the publication channel gate for one DELETE and one INSERT per 500 paths (at most 500 parameters per statement); it adds no separate page-count limit. The byte limit bounds work, not wall-clock latency.
+
 Local development runs under one OS user. The image separates boot, app and build users; see [deployment](../../../docs/deployment.md) for its limits. [Storage](storage.md) describes capacity admission, protected artifacts and retention.
 
 SQLite is the default; PostgreSQL/MySQL runtime integration is wired but complete board/image acceptance remains in progress. Configure both stores together and provision the required roles using [deployment](../../../docs/deployment.md#choose-a-database) and the [operator guide](../sql/README.md). Remote recovery depends on database availability; it does not make boot independent of that server.

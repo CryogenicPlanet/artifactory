@@ -16,6 +16,8 @@ export class RemoteMigrationError extends Schema.TaggedError<RemoteMigrationErro
 }) {}
 export interface RemoteOperation<E = never, R = never> {
 	readonly name: string;
+	/** Idempotent data reconciliation may already satisfy its content postcondition. DDL retains ownership refusal. */
+	readonly kind?: "data";
 	readonly run: Effect.Effect<void, E, R>;
 	readonly postcondition: Effect.Effect<boolean, E, R>;
 }
@@ -101,6 +103,17 @@ export const remoteMigrate = <E, R, E2 = never, R2 = never>(
 			return yield* invalid();
 		return applied.length;
 	});
+	const runOperation = (operation: RemoteOperation<E, R>) =>
+		operation.kind === "data"
+			? sql.withTransaction(
+					Effect.gen(function* () {
+						yield* beforeOperation;
+						yield* operation.run;
+						if (!(yield* operation.postcondition))
+							return yield* new RemoteMigrationError({ code: "migration_postcondition_failed", ledger });
+					}),
+				)
+			: operation.run;
 	const pg = sql.withTransaction(
 		Effect.gen(function* () {
 			yield* sql`SELECT pg_advisory_xact_lock(hashtext(current_database()),hashtext(${ledger}))`;
@@ -109,9 +122,10 @@ export const remoteMigrate = <E, R, E2 = never, R2 = never>(
 			for (const step of steps.slice(applied)) {
 				for (const operation of step.operations) {
 					yield* beforeOperation;
-					if (yield* operation.postcondition)
+					const complete = yield* operation.postcondition;
+					if (complete && operation.kind !== "data")
 						return yield* new RemoteMigrationError({ code: "migration_unowned_object", ledger });
-					yield* operation.run;
+					if (!complete) yield* runOperation(operation);
 					if (!(yield* operation.postcondition))
 						return yield* new RemoteMigrationError({ code: "migration_postcondition_failed", ledger });
 				}
@@ -186,10 +200,11 @@ export const remoteMigrate = <E, R, E2 = never, R2 = never>(
 						yield* beforeOperation;
 						const complete = yield* operation.postcondition;
 						if (current.active === null) {
-							if (complete) return yield* new RemoteMigrationError({ code: "migration_unowned_object", ledger });
+							if (complete && operation.kind !== "data")
+								return yield* new RemoteMigrationError({ code: "migration_unowned_object", ledger });
 							yield* sql`UPDATE ${sql(intent)} SET active=${operation.name} WHERE singleton=1`;
 						}
-						if (!complete) yield* operation.run;
+						if (!complete) yield* runOperation(operation);
 						if (!(yield* operation.postcondition))
 							return yield* new RemoteMigrationError({ code: "migration_postcondition_failed", ledger });
 						yield* sql`UPDATE ${sql(intent)} SET operation=${index + 1},active=NULL WHERE singleton=1`;

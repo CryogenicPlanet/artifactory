@@ -95,3 +95,111 @@ One later sample used **100,000 rows × 1,024 body bytes** (102,400,000 payload 
 | Target database allocation         | 127,342,271 bytes | 118,095,872 bytes |
 
 The source reports are `/tmp/comms-benchmark-100k-pg.json` and `/tmp/comms-benchmark-100k-mysql.json` on the measurement host. They record `transfer_downtime_ms: null`. These times cover native dump/load only; they exclude provisioning, ownership, logical conversion, startup, health and traffic downtime. This single local sample does not establish a managed-server capacity or freeze budget, and no additional HTTP traffic result is implied. The earlier 10,000-row and HTTP samples above remain separate historical evidence.
+
+## Guarded lease overhead and read budget
+
+Run the opt-in lease diagnostic against a fresh, dedicated loopback database with
+session metadata visibility. Use the same private connection-file shape and
+`comms_benchmark_` naming rule as copy mode. The MySQL server must expose full
+session connect attributes and use REPEATABLE READ; PostgreSQL must disable
+prepared transactions. No schema or business data is created or changed.
+
+```sh
+COMMS_DISPOSABLE_BENCHMARK=1 bun scripts/remote-lease-benchmark.ts \
+  /private/connection.json /private/lease-report.json
+```
+
+The diagnostic measures 200 raw pooled `SELECT 1` calls, the first registered
+query, 200 warm guarded pooled calls, then 200 calls on one retained guarded
+lease. It uses the real inspector and `remoteOwner` receipt implementation and
+checks that the retained lease acquires exactly once. The report separates new
+session receipt persistence from repeated-session acknowledgment, and retains
+private ownership artifacts after closing the measured pool and inspector.
+This is an in-process mechanism measurement: it excludes the guardian's IPC,
+process scheduling, TLS and external network delay. A low raw baseline does not
+prove that an unguarded client is safe for application use.
+
+The steady-state acquisition path is:
+
+1. Borrow a physical connection from the four-connection pool.
+2. Execute one identity statement on that connection. MySQL checks its isolation
+   and connect attribute in this same statement.
+3. Send registration to the immutable guardian. Its inspector executes one
+   identity statement on its pinned connection, inside that inspector instance's
+   admission semaphore.
+4. Acknowledge the matching ownership receipt before application SQL is allowed.
+
+The semaphore is per inspector service instance, not process-global. A fresh
+physical session requires a synced temporary receipt, rename and directory
+sync. A matching session already in that owner's receipt is acknowledged without
+rewriting or syncing the receipt. Every pooled acquisition still revalidates both
+identities. Statements inside one transaction, stream or explicit reserved lease
+share that acquisition; they do not repeat registration for each statement.
+Consequently, “a fresh lease and durable write for every statement” overstates
+the cost of pooled reuse and multi-statement transactions.
+
+For warm prepared statements, let `R` be database round-trip time, `I` guardian
+IPC/scheduling time, `Q` the application statement count, `W` pool/admission/lock
+wait, and `F` new-session receipt persistence (zero on already-recorded reuse).
+An independent guarded query costs approximately `3R + I + W + F`: two serial
+identity statements plus the query. A transaction adds identity only once, plus
+its BEGIN, COMMIT, isolation prelude and body statements. These are SQL request
+counts, not universal wire-packet counts; new connections, first prepared
+statements, server work and transport negotiation add costs.
+
+At runtime checkpoint `deea721`, an ordinary read with no pending topic move and
+an initialized cached boot fence performs two app acquisitions: the outbox move
+probe, then the pinned read transaction. Counting the existing writer/publication
+checks, BEGIN/COMMIT and PostgreSQL's isolation prelude gives approximately
+`(13 + Q)R + 2I + W + F` for PostgreSQL and `(12 + Q)R + 2I + W + F` for MySQL.
+This explicitly includes both publication-check calls currently made by the
+read snapshot and its fence callback. The cached fence normally avoids a boot
+HTTP request; cold fence initialization, pending-move relay and background work
+add separate costs. For illustration only, `Q=1` and an assumed `R=20ms` give
+280ms/260ms of database round trips before waits, IPC and execution time. At
+`R=100ms`, that component alone becomes 1.4s/1.3s. These assumed RTTs are not
+measured managed-database acceptance results.
+
+The read's three-second deadline starts at invocation, including admission
+wait, acquisitions and statements. At four seconds, an operation that still
+holds database ownership marks the writer unhealthy; returning a timeout never
+proves the connection closed. The driver's five-second identity and registration
+caps are individual safeguards, not five seconds of extra allowance beyond the
+read deadline. Cleanup and positive ownership closure may take longer than a
+response deadline. Quiesce waits for admitted read cleanup; it cannot just sum
+query averages or release an unresolved lease. Cutover separately allows ten
+seconds for freeze acknowledgment and traffic drain, with the existing keeper
+and session-closure proofs still required. No deadline or ownership check is
+changed by this benchmark.
+
+### Local lease sample, 12 September 2026
+
+One sequential sample per engine on macOS arm64, PostgreSQL 18.6 and Oracle
+MySQL 8.4.11. The launcher used Node 22.22.3; the package worker used Bun 1.4.0.
+The implementation is based on runtime `deea721`. Another acceptance lane could
+run concurrently; this is not an idle-machine or managed-network capacity test.
+
+| Milliseconds                                       | PostgreSQL mean / p95 | MySQL mean / p95 |
+| -------------------------------------------------- | --------------------: | ---------------: |
+| Raw pooled query, 200 calls                        |         0.090 / 0.140 |    0.107 / 0.215 |
+| Warm guarded pooled query, 200 calls               |         0.269 / 0.566 |    0.299 / 0.602 |
+| Query on retained guarded lease, 200 calls         |         0.026 / 0.046 |    0.032 / 0.051 |
+| Repeated-session receipt acknowledgment, 201 calls |         0.036 / 0.078 |    0.035 / 0.073 |
+
+The first registered query took 5.664ms on PostgreSQL and 3.413ms on MySQL;
+its actual receipt persistence took 0.843ms and 0.999ms respectively. Those are
+single observations, not distributions. Each engine completed 601 timed queries,
+202 registration callbacks and exactly one durable physical-session record. The
+200 retained-lease queries caused exactly one acquisition in total. Pool closure
+and the inspector's registered-session absence check completed before the owner
+receipt was closed. The private source reports are
+`/tmp/comms-lease-cost-pg-report.json` and
+`/tmp/comms-lease-cost-mysql-report.json` on the measurement host.
+
+Warm guarded minus raw mean was approximately 0.179ms/0.192ms in this local
+sample. The raw pooled baseline and retained-lease operation use different client
+paths; their difference is not a pure network or persistence measurement. Real
+child registration adds guardian IPC and process scheduling, which this fixture
+does not simulate. These samples close the missing mechanism/cost accounting;
+they do not establish full-board latency, concurrent admission throughput or a
+worst-case freeze guarantee.

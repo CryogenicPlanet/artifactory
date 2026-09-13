@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
-import { Clock, Console, Effect, Layer, Schema } from "effect";
+import { Clock, Console, Effect, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpServerResponse } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
@@ -62,44 +62,16 @@ const main = Effect.gen(function* () {
 			const replay = yield* call(restarted);
 			assert.deepEqual(replay.body, first.body);
 			assert.equal(calls, 1);
-			yield* TestClock.adjust("10 days");
-			assert.equal(yield* restarted.prune, 0);
-			yield* TestClock.adjust("1 millis");
-			assert.equal(yield* restarted.prune, 1);
+			yield* TestClock.adjust("365 days");
 			yield* call(restarted);
-			assert.equal(calls, 2);
+			assert.equal(calls, 1);
+			assert.deepEqual(yield* records, firstRows);
 		} else if (scenario === "legacy") {
 			yield* put("legacy", terminal);
-			assert.equal(yield* service.prune, 0);
-			const stamped = yield* Schema.decodeEffect(recordSchema)((yield* records)[0]?.value ?? "");
-			assert.equal(stamped.completed_at, 1000);
-			yield* TestClock.adjust("29 days");
-			const restarted = yield* sourceReverts;
-			assert.equal(yield* restarted.prune, 0);
-			yield* TestClock.adjust("1 day");
-			assert.equal(yield* restarted.prune, 0);
-			yield* TestClock.adjust("1 millis");
-			assert.equal(yield* restarted.prune, 1);
-		} else if (scenario === "pending") {
-			yield* put("pending", { ...terminal, outcome: null, created_at: 0, completed_at: 0 });
-			yield* put("missing-page", { ...terminal, page_batch: "missing", completed_at: 0 });
-			yield* put("page-pending", { ...terminal, outcome: null, page_batch: "publishing", completed_at: 0 });
-			yield* put("terminal", { ...terminal, completed_at: 0 });
-			yield* sql`INSERT INTO source_batches(id,lock_id,agent,at,state) VALUES('publishing',NULL,'human',0,'publishing')`;
-			yield* TestClock.adjust("31 days");
-			assert.equal(yield* service.prune, 0);
-			yield* sql`UPDATE source_batches SET state='published' WHERE id='publishing'`;
-			yield* sql`INSERT INTO cutover(singleton,candidate,lock_id,family,phase) VALUES(1,1,'held','human','accepted')`;
-			assert.equal(yield* service.prune, 0);
-			yield* sql`DELETE FROM cutover`;
-			assert.equal(yield* service.prune, 1);
-			assert.equal((yield* records).length, 3);
-		} else if (scenario === "bounded") {
-			for (let i = 0; i < 260; i++) yield* put(String(i).padStart(4, "0"), { ...terminal, completed_at: 0 });
-			yield* TestClock.adjust("31 days");
-			assert.equal(yield* service.prune, 256);
-			assert.equal((yield* records).length, 4);
-			assert.equal(yield* service.prune, 4);
+			const original = yield* records;
+			yield* TestClock.adjust("365 days");
+			yield* (yield* sourceReverts).recover;
+			assert.deepEqual(yield* records, original);
 		} else if (scenario === "accept-rollback") {
 			const pending = { ...terminal, outcome: null, created_at: 1000, completed_at: null };
 			yield* put("rollback", pending);
@@ -117,11 +89,15 @@ const main = Effect.gen(function* () {
 			assert.equal(saved.outcome, null);
 		} else if (scenario === "restart-seed") {
 			yield* put("restart", { ...terminal, completed_at: 1000, created_at: 1000 });
-		} else if (scenario === "restart-prune") {
-			yield* TestClock.setTime(1000 + 30 * day);
-			assert.equal(yield* service.prune, 0);
-			yield* TestClock.adjust("1 millis");
-			assert.equal(yield* service.prune, 1);
+		} else if (scenario === "restart-read") {
+			yield* TestClock.setTime(1000 + 365 * day);
+			yield* service.recover;
+			assert.equal((yield* records).length, 1);
+			assert.deepEqual(yield* Schema.decodeEffect(recordSchema)((yield* records)[0]?.value ?? ""), {
+				created_at: 1000,
+				completed_at: 1000,
+				outcome: terminal.outcome,
+			});
 		} else throw Error("Unknown scenario");
 		yield* Console.log(`retention ${scenario} passed ${yield* Clock.currentTimeMillis}`);
 	}).pipe(Effect.provide(SqliteClient.layer({ filename: `${root}/boot.db` })), Effect.provide(TestClock.layer()));

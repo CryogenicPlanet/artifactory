@@ -106,6 +106,24 @@ it("lists backup metadata with a human session and rejects every Authorization h
 			{ id: "legacy", provenance: { kind: "legacy_adoption", store_id: null } },
 		],
 	});
+
+	const expected = "12345678-1234-4234-8234-123456789abc";
+	await fixture.sql(`UPDATE backups SET legacy_store_id='${expected}' WHERE id='legacy'`, "boot.db");
+	expect(await (await fetch(url, { headers: { cookie } })).json()).toMatchObject({
+		items: [
+			{ id: "new", provenance: { kind: "not_recorded", store_id: null } },
+			{ id: "legacy", provenance: { kind: "legacy_adoption", store_id: expected } },
+		],
+	});
+	await fixture.sql(
+		"UPDATE backups SET legacy_store_id='postgres://user:secret@host/private' WHERE id='legacy'",
+		"boot.db",
+	);
+	const malformed = await (await fetch(url, { headers: { cookie } })).json();
+	expect(malformed).toMatchObject({
+		items: [{ id: "new" }, { id: "legacy", provenance: { kind: "legacy_adoption", store_id: null } }],
+	});
+	expect(JSON.stringify(malformed)).not.toContain("secret");
 	for (const method of ["POST", "PUT", "PATCH", "DELETE"])
 		expect((await fetch(url, { method, headers: { cookie, origin: "https://comms.test" } })).status).toBe(501);
 }, 20000);

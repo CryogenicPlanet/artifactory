@@ -8,7 +8,6 @@
 		"./store-transfer-receipt": "./src/store-transfer-receipt.ts",
 		"./store-transfer-schema": "./src/store-transfer-schema.ts",
 		"./client": "./src/client.ts",
-		"./descendant": "./src/descendant.ts",
 		"./dialect": "./src/dialect.ts",
 		"./remote-client": "./src/remote-client.ts",
 		"./remote-inspector": "./src/remote-inspector.ts",

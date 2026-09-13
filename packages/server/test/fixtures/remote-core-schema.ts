@@ -38,8 +38,8 @@ await Effect.runPromise(
 		yield* remoteMigrate(sql, "core_migrations", remoteCoreSteps(sql).slice(0, 10));
 		const key = JSON.stringify(["key", '"\\'.repeat(200) + "héllo\\x雪😀"]);
 		yield* sql`INSERT INTO idempotency(instance,${sql("key")},kind,input_hash,outcome,expires_at) VALUES ('probe',${key},'message.created','hash','original',1900000000000)`;
-		const body = "résumé ALPHA " + "large ".repeat(15000);
-		const previous = JSON.stringify({ body: "earlier BETA" });
+		const body = "résumé ALPHA ~~@codex~~ https://host/@ignored " + "large ".repeat(15000);
+		const previous = JSON.stringify({ body: "earlier BETA `@prior` mailto:@ignored" });
 		yield* sql`INSERT INTO messages(id,seq,topic,agent,instance,body,tags,meta,created_at,previous) VALUES ('m_probe',1,'test','probe','probe',${body},'[]','{}',1800000000000,${previous})`;
 		yield* sql`INSERT INTO topics(path,name,meta,last_seq,created_at) VALUES ('test','Test','[]',1,1800000000000)`;
 		const invalidJson = yield* initializeRemoteCore(sql, "core-probe").pipe(Effect.result);
@@ -118,9 +118,9 @@ await Effect.runPromise(
 		assert.deepEqual(JSON.parse(values[0]?.tags ?? "null"), ["雪", "quoted"]);
 		assert.deepEqual(JSON.parse(values[0]?.meta ?? "null"), JSON.parse(domainMeta));
 		assert.equal(values[0]?.previous, previous);
-		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 12);
+		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 13);
 		assert.deepEqual(yield* sql`SELECT updated_seq,mentions,previous_mentions,created_at FROM messages`, [
-			{ updated_seq: 0, mentions: "[]", previous_mentions: "[]", created_at: 1800000000000 },
+			{ updated_seq: 0, mentions: '["@codex"]', previous_mentions: '["@prior"]', created_at: 1800000000000 },
 		]);
 		const receipt = yield* sql`SELECT ${sql("key")},key_hash,outcome FROM idempotency`;
 		assert.deepEqual(receipt, [{ key, key_hash: createHash("sha256").update(key).digest("hex"), outcome: "original" }]);
@@ -153,10 +153,10 @@ await Effect.runPromise(
 		yield* initializeRemoteCore(sql, "core-probe");
 		assert.equal(
 			(yield* sql`SELECT body FROM messages WHERE id='m_probe'`)[0]?.body,
-			"résumé ALPHA " + "large ".repeat(15000),
+			"résumé ALPHA ~~@codex~~ https://host/@ignored " + "large ".repeat(15000),
 		);
 		assert.deepEqual(yield* sql`SELECT outcome FROM idempotency`, [{ outcome: "original" }]);
-		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 12);
+		assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 13);
 		for (const [id, seq] of [
 			["Case", 2],
 			["case", 3],
@@ -178,7 +178,7 @@ await Effect.runPromise(
 			}
 			assert.equal(
 				(yield* sql`SELECT body FROM messages WHERE id='m_probe'`)[0]?.body,
-				"résumé ALPHA " + "large ".repeat(15000),
+				"résumé ALPHA ~~@codex~~ https://host/@ignored " + "large ".repeat(15000),
 			);
 		}
 	}).pipe(Effect.scoped, Effect.provide(layer)),

@@ -1,3 +1,4 @@
+import { reindexMentions, mentionsCurrent } from "./message-mentions.ts";
 import { assertCoreIdentifierCollations } from "./core-identifier-schema.ts";
 import { on } from "@comms/storage/dialect";
 import { indexShape, remoteMigrate, tableShape, type RemoteStep } from "@comms/storage/remote-migrations";
@@ -302,6 +303,13 @@ export const remoteCoreSteps = (
 		{ id: 10, name: "mention_punctuation", operations: [] },
 		{ id: 11, name: "domain_json", operations: coreJsonOperations(sql) },
 		{ id: 12, name: "search_diacritics", operations: mysql ? [] : [postgresSearchOperation(sql)] },
+		{
+			id: 13,
+			name: "mention_symbol_boundaries",
+			operations: [
+				{ name: "reindex_mentions", kind: "data", run: reindexMentions(sql), postcondition: mentionsCurrent(sql) },
+			],
+		},
 	];
 };
 
