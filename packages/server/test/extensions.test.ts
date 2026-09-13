@@ -1,3 +1,4 @@
+import { agentHeader, instanceHeader } from "@comms/protocol/headers";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -42,7 +43,7 @@ export default api => {${core ? "api.mount(CoreApi,coreHandlers(api));" : ""}api
 	const cookie = await app.login();
 	await app.ready(cookie);
 	const get = (path: string) =>
-		fetch(`${app.url}${path}`, { headers: { cookie, "x-comms-agent": "spoof", "x-comms-instance": "spoof" } });
+		fetch(`${app.url}${path}`, { headers: { cookie, [agentHeader]: "spoof", [instanceHeader]: "spoof" } });
 	expect((await fetch(`${app.url}/api/example`)).status).toBe(401);
 	const identity = await (await get("/api/example")).json();
 	expect(identity).toMatchObject({ agent: "rahul" });

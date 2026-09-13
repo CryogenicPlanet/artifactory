@@ -1,3 +1,4 @@
+import { baseVersionHeader } from "@comms/protocol/headers";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -19,7 +20,7 @@ it.for(["append", "crash", "logout", "cancel"] as const)(
 		const history = await fixture.sql("SELECT * FROM source_batches ORDER BY id", "boot.db");
 		const current = await fetch(target, { headers });
 		expect(current.status).toBe(200);
-		const baseVersion = current.headers.get("x-comms-base-version");
+		const baseVersion = current.headers.get(baseVersionHeader);
 		if (!baseVersion) throw Error("Missing source base version");
 		await current.arrayBuffer();
 		await fixture.hold();

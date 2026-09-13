@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { Effect, Schema } from "effect";
 import { HttpClientRequest } from "effect/unstable/http";
 import { BoardError } from "./board-api.ts";
@@ -135,6 +136,6 @@ export const deletePasskey = (id: string) =>
 		yield* accountRequest(
 			HttpClientRequest.delete(
 				new URL(`/_boot/auth/passkeys/${encodeURIComponent(id)}`, window.location.origin).href,
-			).pipe(HttpClientRequest.bodyJsonUnsafe({}), HttpClientRequest.setHeader("x-comms-assertion", proof)),
+			).pipe(HttpClientRequest.bodyJsonUnsafe({}), HttpClientRequest.setHeader(assertionHeader, proof)),
 		);
 	});

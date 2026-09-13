@@ -1,3 +1,4 @@
+import { readinessHeader } from "@comms/protocol/headers";
 import { Cause, Crypto, Effect, Ref, Schema, type Scope } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
@@ -11,7 +12,7 @@ class RolledBack extends Schema.TaggedError<RolledBack>()("HealthRolledBack", {}
 export const readinessRoute = HttpRouter.add(
 	"GET",
 	"/_kernel/readiness",
-	Effect.succeed(HttpServerResponse.empty({ status: 200, headers: { "x-comms-readiness": "kernel" } })),
+	Effect.succeed(HttpServerResponse.empty({ status: 200, headers: { [readinessHeader]: "kernel" } })),
 );
 
 /** Exercise kernel mutation and publication-aware reads, then confirm rollback before aborting. */

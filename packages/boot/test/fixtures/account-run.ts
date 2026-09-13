@@ -1,3 +1,4 @@
+import { agentHeader, authKindHeader } from "@comms/protocol/headers";
 import { layer as durableEventsLayer } from "../../src/events.ts";
 /* oxlint-disable effecttsgo/node-builtin-import */
 import assert from "node:assert/strict";
@@ -124,7 +125,7 @@ const run = Effect.gen(function* () {
 		for (const path of ["/_boot/enrollments", "/_boot/tokens"]) {
 			for (const headers of [
 				{},
-				{ "x-comms-auth-kind": "human", "x-comms-agent": "rahul" },
+				{ [authKindHeader]: "human", [agentHeader]: "rahul" },
 				{ authorization: `Bearer ${"a".repeat(43)}` },
 				{ cookie, authorization: `Bearer ${"a".repeat(43)}` },
 				{ cookie: `${cookie}; ${cookie}` },

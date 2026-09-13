@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { Effect, Schema } from "effect";
 import { HttpClientRequest } from "effect/unstable/http";
 import { accountPost, accountRequest } from "./account-api.ts";
@@ -12,7 +13,7 @@ export const breakEditLock = (id: string) =>
 		yield* accountRequest(
 			HttpClientRequest.delete(new URL("/_boot/lock?break=1", window.location.origin).href).pipe(
 				HttpClientRequest.bodyJsonUnsafe(body),
-				HttpClientRequest.setHeader("x-comms-assertion", proof),
+				HttpClientRequest.setHeader(assertionHeader, proof),
 			),
 		);
 	});

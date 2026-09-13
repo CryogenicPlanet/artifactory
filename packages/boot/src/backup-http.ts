@@ -1,3 +1,4 @@
+import { tokenExpiresHeader } from "@comms/protocol/headers";
 import { RemoteDatabaseError } from "./remote-db-ops.ts";
 import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { isAppStoreIdentityError, appIdentityPolicy, transferPolicy } from "./app-store-identity.ts";
@@ -196,7 +197,7 @@ export const backupRoute = (
 					headers: {
 						"cache-control": "no-store",
 						"x-content-type-options": "nosniff",
-						"x-comms-token-expires": String(session.expiresAt),
+						[tokenExpiresHeader]: String(session.expiresAt),
 					},
 				});
 			}),

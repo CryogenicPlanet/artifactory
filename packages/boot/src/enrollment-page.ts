@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 const escape = (value: string) =>
 	value.replace(/[&<>"']/g, (character) =>
 		character === "&"
@@ -49,7 +50,7 @@ export const approvalClient = `(() => {
    const r = credential.response;
    const response = {id:credential.id,rawId:encode(credential.rawId),type:credential.type,clientExtensionResults:credential.getClientExtensionResults(),response:{clientDataJSON:encode(r.clientDataJSON),authenticatorData:encode(r.authenticatorData),signature:encode(r.signature),...(r.userHandle ? {userHandle:encode(r.userHandle)} : {})}};
    const proof = encode(new TextEncoder().encode(JSON.stringify({id:started.id,response})));
-   await post("/_boot/enroll/"+params.id+"/approve",{decision,scopes:params.scopes,long_lived:params.long_lived},{"x-comms-assertion":proof});
+   await post("/_boot/enroll/"+params.id+"/approve",{decision,scopes:params.scopes,long_lived:params.long_lived},{"${assertionHeader}":proof});
    form.hidden = true; status.textContent = decision === "approve" ? "Approved. Return to your agent to collect its credentials." : "Denied. No credentials will be issued.";
   } catch(error) { status.textContent = error instanceof Error ? error.message : "Approval failed."; }
   finally { buttons.forEach(button => button.disabled = false); }

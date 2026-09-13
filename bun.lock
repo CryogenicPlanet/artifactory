@@ -22,6 +22,7 @@
       "name": "@comms/boot",
       "version": "0.0.0",
       "dependencies": {
+        "@comms/protocol": "workspace:*",
         "@comms/storage": "workspace:*",
         "@effect/platform-bun": "4.0.0-rc.113",
         "@effect/sql-sqlite-bun": "4.0.0-rc.113",

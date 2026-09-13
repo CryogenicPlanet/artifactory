@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { sourcePut } from "./source-put.ts";
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -55,7 +56,7 @@ export async function resetFixture(test: TestContext) {
 					cookie: resetCookie,
 					origin: "https://comms.test",
 					"content-type": "application/json",
-					"x-comms-assertion": proof,
+					[assertionHeader]: proof,
 				},
 				body: "{}",
 			});

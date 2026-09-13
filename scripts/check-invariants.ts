@@ -42,6 +42,10 @@ function checkInvariants() {
 				const allowed =
 					((owner === "boot" || owner === "server") && dependency === "storage") ||
 					((owner === "server" || owner === "ui") && dependency === "protocol") ||
+					// Boot does not depend on the protocol package, but the header family is one shared
+					// wire contract and a second copy of it is how a producer drifts from its consumer.
+					// The module is a leaf of plain constants, so keep the exception to that one file.
+					(owner === "boot" && specifier === "@comms/protocol/headers") ||
 					(owner === "server" &&
 						dependency === "boot" &&
 						(label === `packages${sep}server${sep}src${sep}start.ts` ||

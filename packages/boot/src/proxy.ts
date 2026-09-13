@@ -1,3 +1,21 @@
+import {
+	agentHeader,
+	authKindHeader,
+	baseVersionHeader,
+	headerLabel,
+	headerPrefix,
+	initHeader,
+	initStaleHeader,
+	initVersionHeader,
+	instanceHeader,
+	labelHeader,
+	publicPageHeader,
+	requestIdHeader,
+	scopesHeader,
+	tokenExpiresHeader,
+	traceparentHeader,
+} from "@comms/protocol/headers";
+import { redactHex } from "./auth-primitives.ts";
 import { recoveryRoute } from "./recovery-http.ts";
 import { settingsRoute } from "./settings-http.ts";
 import { recoveryManifest } from "./route-discovery.ts";
@@ -50,7 +68,7 @@ POST /_boot/tokens mints a pair with a human session and fresh token.mint assert
 GET /_boot/auth/passkeys lists keys; passkey.add and passkey.delete assertions authorize key changes.
 POST /_boot/tokens/:family/revoke requires a human session and fresh token.revoke passkey assertion.
 POST /api/lock acquires the editor; GET/PUT/DELETE /api/fs/app/<path> reads or stages source.
-Save X-Comms-Base-Version from GET; PUT ?reload=0&baseVersion=<token> stages raw bytes.
+Save ${headerLabel(baseVersionHeader)} from GET; PUT ?reload=0&baseVersion=<token> stages raw bytes.
 Use baseVersion=null only for an absent file. POST /api/reload rehearses and cuts over. Failed edits retain the repair lock.
 POST /api/reload?release=1 releases the lock after a successful edit.
 POST /api/revert {} undoes the latest app batch; {path}, {batch}, or {version} selects retained source history.
@@ -201,9 +219,7 @@ export const proxy = Effect.gen(function* () {
 				)
 					return yield* new AuthError({ code: "origin_invalid" });
 				const expires = (response: HttpServerResponse.HttpServerResponse) =>
-					identity
-						? HttpServerResponse.setHeader(response, "x-comms-token-expires", String(identity.expiresAt))
-						: response;
+					identity ? HttpServerResponse.setHeader(response, tokenExpiresHeader, String(identity.expiresAt)) : response;
 				if (identity) {
 					const edited = yield* editRoute(
 						{ ...editing, writable: (yield* Ref.get(phase))._tag === "Ready" },
@@ -337,7 +353,7 @@ export const proxy = Effect.gen(function* () {
 						([name]) =>
 							!hopHeaders.includes(name) &&
 							!connectionHeaders.has(name) &&
-							!name.startsWith("x-comms-") &&
+							!name.startsWith(headerPrefix) &&
 							!name.startsWith("x-forwarded-") &&
 							![
 								"host",
@@ -358,21 +374,21 @@ export const proxy = Effect.gen(function* () {
 					{
 						headers: {
 							...headers,
-							...(request.headers["x-comms-init"] && /^[a-f0-9]{64}$/.test(request.headers["x-comms-init"])
-								? { "x-comms-init": request.headers["x-comms-init"] }
+							...(request.headers[initHeader] && /^[a-f0-9]{64}$/.test(request.headers[initHeader])
+								? { [initHeader]: request.headers[initHeader] }
 								: {}),
-							...(publicPage !== null && !identity ? { "x-comms-public-page": publicPage } : {}),
+							...(publicPage !== null && !identity ? { [publicPageHeader]: publicPage } : {}),
 							"x-boot-secret": destination.secret,
-							"x-comms-request-id": requestId,
-							...(observed ? { "x-comms-traceparent": observed.trace } : {}),
+							[requestIdHeader]: requestId,
+							...(observed ? { [traceparentHeader]: observed.trace } : {}),
 							...(identity
 								? {
-										"x-comms-agent": identity.agent,
-										"x-comms-auth-kind": identity.kind,
-										"x-comms-instance": identity.id,
-										"x-comms-scopes": identity.scopes.join(","),
-										"x-comms-label": identity.label,
-										"x-comms-token-expires": String(identity.expiresAt),
+										[agentHeader]: identity.agent,
+										[authKindHeader]: identity.kind,
+										[instanceHeader]: identity.id,
+										[scopesHeader]: identity.scopes.join(","),
+										[labelHeader]: identity.label,
+										[tokenExpiresHeader]: String(identity.expiresAt),
 									}
 								: {}),
 						},
@@ -405,7 +421,7 @@ export const proxy = Effect.gen(function* () {
 										!hopHeaders.includes(name) &&
 										!connection.has(name) &&
 										name !== "x-boot-secret" &&
-										(!name.startsWith("x-comms-") || ["x-comms-init-version", "x-comms-init-stale"].includes(name)) &&
+										(!name.startsWith(headerPrefix) || [initVersionHeader, initStaleHeader].includes(name)) &&
 										name !== "set-cookie",
 								),
 							);

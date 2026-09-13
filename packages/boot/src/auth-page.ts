@@ -1,3 +1,4 @@
+import { requestIdHeader } from "@comms/protocol/headers";
 /** Immutable boot UI: it remains usable when editable app code cannot start. */
 export const authPage = (setup: boolean) => `<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -27,7 +28,7 @@ export const authClient = `(() => {
   let response;
   try { response = await fetch(path, {method:"POST", redirect:"manual", headers:{"content-type":"application/json"}, body:JSON.stringify(body)}); }
   catch { throw new Error("The authentication request could not reach the board. Check your connection and sharing-service sign-in."); }
-  const id = response.headers.get("x-comms-request-id");
+  const id = response.headers.get("${requestIdHeader}");
   requestId = /^[a-f0-9]{32}$/.test(id || "") ? id : "";
   progress(step + " response", "Reading the authentication response…");
   if (response.type === "opaqueredirect" || response.redirected || (response.status >= 300 && response.status < 400))

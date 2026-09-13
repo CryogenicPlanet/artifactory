@@ -1,3 +1,4 @@
+import { agentHeader, assertionHeader } from "@comms/protocol/headers";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -67,8 +68,8 @@ describe("real Bun boot proxy", () => {
 			{
 				cookie: `${app.cookie}; other=private`,
 				origin: "https://comms.test",
-				"x-comms-agent": "forged",
-				"x-comms-assertion": "fresh-proof",
+				[agentHeader]: "forged",
+				[assertionHeader]: "fresh-proof",
 				"x-forwarded-for": "remote",
 				"x-boot-secret": "forged",
 				connection: "x-hop",

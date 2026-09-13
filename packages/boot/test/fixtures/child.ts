@@ -1,3 +1,17 @@
+import {
+	agentHeader,
+	assertionHeader,
+	authKindHeader,
+	instanceHeader,
+	kernelProtocolHeader,
+	labelHeader,
+	requestIdHeader,
+	scopesHeader,
+	spanHeader,
+	tokenExpiresHeader,
+	traceparentHeader,
+	writerEpochHeader,
+} from "@comms/protocol/headers";
 // Real Bun child fixture: intentionally independent of the production Effect server.
 export function serve(mode: string) {
 	if (mode === "exit") throw new Error("fixture startup failed");
@@ -21,7 +35,7 @@ export function serve(mode: string) {
 			if (url.pathname === "/health" || url.pathname === "/_kernel/ping")
 				return new Response("ok", {
 					status: mode === "unhealthy" ? 500 : 200,
-					headers: { "x-comms-writer-epoch": process.env.WRITER_EPOCH ?? "", "x-comms-kernel-protocol": "2" },
+					headers: { [writerEpochHeader]: process.env.WRITER_EPOCH ?? "", [kernelProtocolHeader]: "2" },
 				});
 			if (url.pathname === "/cancelled") return new Response(String(cancelled));
 			if (url.pathname === "/hold-stream")
@@ -53,15 +67,15 @@ export function serve(mode: string) {
 						body: await request.text(),
 						authorization: request.headers.get("authorization"),
 						cookie: request.headers.get("cookie"),
-						assertion: request.headers.get("x-comms-assertion"),
-						kind: request.headers.get("x-comms-auth-kind"),
-						expires: request.headers.get("x-comms-token-expires"),
-						agent: request.headers.get("x-comms-agent"),
-						instance: request.headers.get("x-comms-instance"),
-						scopes: request.headers.get("x-comms-scopes"),
-						label: request.headers.get("x-comms-label"),
-						requestId: request.headers.get("x-comms-request-id"),
-						trace: request.headers.get("x-comms-traceparent"),
+						assertion: request.headers.get(assertionHeader),
+						kind: request.headers.get(authKindHeader),
+						expires: request.headers.get(tokenExpiresHeader),
+						agent: request.headers.get(agentHeader),
+						instance: request.headers.get(instanceHeader),
+						scopes: request.headers.get(scopesHeader),
+						label: request.headers.get(labelHeader),
+						requestId: request.headers.get(requestIdHeader),
+						trace: request.headers.get(traceparentHeader),
 						publicTrace: request.headers.get("traceparent"),
 						traceState: request.headers.get("tracestate"),
 						baggage: request.headers.get("baggage"),
@@ -72,7 +86,7 @@ export function serve(mode: string) {
 					},
 					{
 						headers: {
-							"x-comms-span": encodeURIComponent(
+							[spanHeader]: encodeURIComponent(
 								JSON.stringify({ topic: "private/topic", message_id: "m_private", extension: "private.ts" }),
 							),
 						},

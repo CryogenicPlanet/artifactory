@@ -1,3 +1,4 @@
+import { rehearsalReportHeader } from "@comms/protocol/headers";
 import { Effect } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { expect, it } from "vitest";
@@ -7,7 +8,7 @@ const decode = (value: unknown, version = "1") =>
 	Effect.runPromise(
 		readRehearsalReport(
 			HttpServerResponse.toClientResponse(
-				HttpServerResponse.jsonUnsafe(value, { headers: { "x-comms-rehearsal-report": version } }),
+				HttpServerResponse.jsonUnsafe(value, { headers: { [rehearsalReportHeader]: version } }),
 			),
 		),
 	);

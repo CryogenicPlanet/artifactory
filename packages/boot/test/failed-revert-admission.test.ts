@@ -1,3 +1,4 @@
+import { kernelProtocolHeader, writerEpochHeader } from "@comms/protocol/headers";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
@@ -21,7 +22,7 @@ async function fixture(test: TestContext) {
 		`
 const server = Bun.serve({hostname:'127.0.0.1',port:0,fetch(request) {
 if (request.headers.get('x-boot-secret') !== process.env.BOOT_SECRET) return new Response(null,{status:403});
-return new Response('original',{headers:{'x-comms-writer-epoch':process.env.WRITER_EPOCH??'','x-comms-kernel-protocol':'2'}});
+return new Response('original',{headers:{'${writerEpochHeader}':process.env.WRITER_EPOCH??'','${kernelProtocolHeader}':'2'}});
 }}); console.log('COMMS_CHILD_PORT='+server.port);`,
 	);
 	const sql = async (statement: string, store = "boot.db"): Promise<unknown> =>

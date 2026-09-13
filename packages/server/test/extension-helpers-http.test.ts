@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { cp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -43,7 +44,7 @@ it("serves human-only extension pages and preserves isolated scratch data and at
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": assertion },
+				headers: { origin: "https://comms.test", "content-type": "application/json", [assertionHeader]: assertion },
 				body: JSON.stringify({ decision: params.decision, scopes: params.scopes, long_lived: params.long_lived }),
 			})
 		).status,

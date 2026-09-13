@@ -12,6 +12,7 @@
 		"build": "bun build src/index.ts src/child-keeper.ts src/preparation-keeper.ts src/deployment-layout.ts src/sqlite-copy-worker.ts src/sqlite-copy-keeper.ts --target=bun --packages=external --outdir=dist"
 	},
 	"dependencies": {
+		"@comms/protocol": "workspace:*",
 		"@comms/storage": "workspace:*",
 		"@effect/platform-bun": "4.0.0-rc.113",
 		"@effect/sql-sqlite-bun": "4.0.0-rc.113",

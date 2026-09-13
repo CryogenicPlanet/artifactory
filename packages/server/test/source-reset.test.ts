@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -21,7 +22,7 @@ it("resets the entire source tree while preserving messages, pages, identity, to
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": approval },
+				headers: { origin: "https://comms.test", "content-type": "application/json", [assertionHeader]: approval },
 				body: JSON.stringify({ decision: params.decision, scopes: params.scopes, long_lived: false }),
 			})
 		).status,
@@ -285,7 +286,7 @@ it("binds the HTTP reset to a human's exact seed proof and rejects extra control
 				cookie: options.cookie ?? state.resetCookie,
 				origin: options.origin ?? "https://comms.test",
 				"content-type": "application/json",
-				"x-comms-assertion": proof,
+				[assertionHeader]: proof,
 				...(options.authorization ? { authorization: options.authorization } : {}),
 			},
 			body,
