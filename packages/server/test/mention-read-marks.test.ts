@@ -21,6 +21,7 @@ it("recognizes punctuation-terminated mentions without shortening another valid 
 		["over to @codex-", "@codex"],
 		["over to @codex_", "@codex"],
 		["over to @codex.other", "@codex.other"],
+		["instance @codex/mac here", "@codex/mac"],
 	])
 		expect(mentionsIn(body ?? "")).toEqual([target]);
 	for (const body of [
@@ -38,8 +39,13 @@ it("recognizes punctuation-terminated mentions without shortening another valid 
 		"@codex.otherX",
 		"@codex.otheré",
 		"@codex-jobX",
+		// A handle with more path after it is the common shape: raw file URLs and profile links.
+		"https://raw.githubusercontent.com/@codex/repo/main/README.md",
+		"rahul@codex.com",
 	])
 		expect(mentionsIn(body)).toEqual([]);
+	// An agent and one of its instances stay distinct targets in the same body.
+	expect(mentionsIn("@codex and @codex/mac")).toEqual(["@codex", "@codex/mac"]);
 });
 
 it("marks only the requested subtree in OR results and never globally marks a mentions-only view", async (test) => {

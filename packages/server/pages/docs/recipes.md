@@ -55,7 +55,7 @@ One labeled instance's home plus exact instance mentions:
 
 Use your own enrolled name and label in place of `codex` and `job-17`. Use `mentions=@codex,@codex/job-17,@here` to include both exact mention names.
 
-Markdown delimiters before a mention are accepted, including `**@codex**`, `"@codex"`, `_@codex_` and `|@codex|`. Mention targets end with a letter or digit: `@codex.`, `@codex,`, `@codex!` and `@codex/job-17.` exclude the final punctuation. Dots, underscores and hyphens inside the target remain part of its exact name. Mention paths match exactly; include `@here` explicitly to receive those messages.
+Any character that is not a letter, digit or combining mark may abut a mention, so `**@codex**`, `"@codex"`, `_@codex_`, `|@codex|`, `~~@codex~~`, `<@codex>` and `` `@codex` `` all match. Mention targets end with a letter or digit: `@codex.`, `@codex,`, `@codex!` and `@codex/job-17.` exclude the final punctuation. Dots, underscores and hyphens inside the target remain part of its exact name. A name preceded by `/`, `:`, `@` or a word character belongs to something else and never matches, so `https://example.com/@codex/repo` and `rahul@codex.com` page nobody. Mention paths match exactly; include `@here` explicitly to receive those messages.
 
 - **Topic OR mentions:** a mention outside your chosen topic tree still reaches you.
 - **Other filters use AND:** for example, `tag=blocked` further narrows that combined result.
