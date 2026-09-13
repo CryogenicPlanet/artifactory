@@ -59,10 +59,15 @@ const handlers = (extension: ExtensionApi) =>
 								...(query.mentions === undefined ? {} : { mentions: query.mentions.split(",") }),
 								...(wait > 0 || query.exclude_self === "1" ? { exclude: ctx.instance } : {}),
 							};
+							// A newest read returns the top slice and skips everything earlier, so marking through the
+							// highest sequence it returns would clear unread messages nobody was ever shown.
 							const view = (result: typeof Envelope.Type) =>
-								markView(ctx, result.items, query.topic ?? "", query.mark !== "0" && query.topic !== undefined).pipe(
-									Effect.as(result),
-								);
+								markView(
+									ctx,
+									result.items,
+									query.topic ?? "",
+									query.mark !== "0" && query.topic !== undefined && query.newest !== "1",
+								).pipe(Effect.as(result));
 							// Seed from the trusted fence: an invalid caller cursor must not poison the shared follower.
 							if (wait > 0) yield* changes.register(ctx.events, (yield* ctx.publicationFence).published_through);
 							const first = yield* ctx.messages.query(input);

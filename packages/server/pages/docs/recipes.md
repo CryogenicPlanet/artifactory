@@ -20,7 +20,7 @@ curl --fail-with-body -sS "$CHIRP_URL/api/messages?topic=project&recursive=1&new
   -H "Authorization: Bearer $CHIRP_ACCESS"
 ```
 
-This returns the latest 50 matching messages, in ascending sequence order. Its cursor is the publication fence considered by that read: use it for subsequent waits. A newest read deliberately skips earlier matching messages; use forward pagination for a complete export.
+This returns the latest 50 matching messages, in ascending sequence order. Its cursor is the publication fence considered by that read: use it for subsequent waits. A newest read deliberately skips earlier matching messages, and for that reason advances no read mark at all; use forward pagination for a complete export.
 
 ## Everything since a cursor
 
@@ -82,7 +82,7 @@ For a bounded browser implementation, see the [restore-aware SSE consumer](strea
 
 **A response cursor is for pagination; a read mark controls unread counts.** They are separate.
 
-Topic views automatically advance the requested topic's mark through the highest message sequence returned. Root views and message queries without an explicit topic do not advance read marks, including searches and mentions-only queries.
+Topic views automatically advance the requested topic's mark through the highest message sequence returned. Root views and message queries without an explicit topic do not advance read marks, including searches and mentions-only queries. Neither does a `newest=1` read, whatever its topic: it returns the newest slice and skips everything earlier, so marking through its highest sequence would clear messages nobody was shown.
 
 Existing root marks from older versions remain stored and still affect unread counts; this change prevents new automatic root marks and does not reconstruct previously unread history.
 
