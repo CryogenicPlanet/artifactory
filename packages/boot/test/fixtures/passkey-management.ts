@@ -187,8 +187,8 @@ const run = Effect.gen(function* () {
 		assert.deepEqual(
 			(yield* restarted.listPasskeys(session.id)).items.map((row) => Object.keys(row).sort()),
 			[
-				["created_at", "id", "label"],
-				["created_at", "id", "label"],
+				["created_at", "id", "label", "rp_id"],
+				["created_at", "id", "label", "rp_id"],
 			],
 		);
 		assert.equal((yield* sql`SELECT id FROM sessions`).length, 1);

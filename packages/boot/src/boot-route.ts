@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
-import { AuthError, type AuthConfig } from "./auth.ts";
+import type { Auth } from "./auth.ts";
 
 /** Capture the request without introducing a scope: response finalizers belong to the HTTP adapter. */
 export const bootRoute = Effect.gen(function* () {
@@ -23,15 +23,15 @@ const originPolicy = {
 	settingsWrite: "required",
 } as const;
 
+/** The Origin header must exactly equal a configured or activated origin; a pending code origin is not one. */
 export const checkBootOrigin = (
 	operation: keyof typeof originPolicy,
 	request: HttpServerRequest.HttpServerRequest,
-	config: AuthConfig,
+	auth: Pick<Auth["Service"], "relyingParty">,
 	kind: "human" | "agent" = "human",
 ) => {
 	const policy = originPolicy[operation];
-	return (policy === "required" || (policy === "human" && kind === "human")) &&
-		request.headers.origin !== config.expectedOrigin
-		? Effect.fail(new AuthError({ code: "origin_invalid" }))
+	return policy === "required" || (policy === "human" && kind === "human")
+		? Effect.asVoid(auth.relyingParty(request.headers.origin))
 		: Effect.void;
 };

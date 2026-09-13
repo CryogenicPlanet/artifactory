@@ -2,7 +2,7 @@ import { remoteMigrate, indexShape, RemoteMigrationError } from "@comms/storage/
 import { Effect } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { eventTables } from "./boot-event-tables.ts";
-import { authTables } from "./boot-auth-tables.ts";
+import { authTables, passkeyRpId } from "./boot-auth-tables.ts";
 import { runtimeTables } from "./boot-runtime-tables.ts";
 import { sourceTables } from "./boot-source-tables.ts";
 
@@ -22,6 +22,7 @@ export const initializeBootTables = (sql: SqlClient, engine: "pg" | "mysql") =>
 			...runtimeTables(sql, engine),
 			...sourceTables(sql, engine),
 		];
+		const rpId = passkeyRpId(sql, engine);
 		const index = (step: number, table: string, name: string, columns: readonly string[], unique = false) => ({
 			step,
 			name,
@@ -60,6 +61,7 @@ export const initializeBootTables = (sql: SqlClient, engine: "pg" | "mysql") =>
 			"store_identity",
 			"backup_engine",
 			"sqlite_copy_ownership",
+			"passkey_origins",
 		] as const;
 		yield* remoteMigrate(
 			sql,
@@ -68,6 +70,7 @@ export const initializeBootTables = (sql: SqlClient, engine: "pg" | "mysql") =>
 				id: offset + 1,
 				name,
 				operations: [
+					...(offset === 19 ? [rpId.operation] : []),
 					...tables
 						.filter((table) => table.step === offset + 1)
 						.map((table) => ({ ...table, run: table.run.pipe(Effect.asVoid) })),
@@ -90,7 +93,7 @@ export const initializeBootTables = (sql: SqlClient, engine: "pg" | "mysql") =>
 		);
 		// These are the final remote table definitions, not historical migration
 		// operations. Recheck on reopen so an applied ledger cannot hide drift.
-		for (const table of tables) {
+		for (const table of [...tables.filter((table) => table.name !== "passkeys"), rpId.final]) {
 			if (!(yield* table.postcondition))
 				return yield* new RemoteMigrationError({ code: "migration_postcondition_failed", ledger: "boot_migrations" });
 		}

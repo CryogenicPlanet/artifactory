@@ -22,7 +22,7 @@ const run = Effect.gen(function* () {
 			.digest("SHA-256", new TextEncoder().encode(secret))
 			.pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
 	if (process.argv[3] !== "resume") {
-		yield* sql`INSERT INTO passkeys VALUES('saved','unused',0,'[]','saved',1)`;
+		yield* sql`INSERT INTO passkeys(id,public_key,counter,transports,label,created_at) VALUES('saved','unused',0,'[]','saved',1)`;
 		yield* sql`INSERT INTO sessions(id,hash,created_at,expires_at) VALUES('human',${yield* hash("b".repeat(43))},2,9999999999999)`;
 		// A real v9 session has no presence column. Migration must retain its hash and leave unknown activity null.
 		yield* sql`ALTER TABLE child_attempts DROP COLUMN boot_id`;
@@ -51,6 +51,9 @@ const run = Effect.gen(function* () {
 		yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 		yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
 		yield* sql`ALTER TABLE backups DROP COLUMN legacy_store_id`;
+		yield* sql`DROP TABLE auth_origins`;
+		yield* sql`DROP TABLE passkey_codes`;
+		yield* sql`ALTER TABLE passkeys DROP COLUMN rp_id`;
 		yield* sql`DROP TABLE IF EXISTS boot_migrations`;
 		yield* sql`ALTER TABLE backups DROP COLUMN engine`;
 		yield* sql`PRAGMA user_version=9`;

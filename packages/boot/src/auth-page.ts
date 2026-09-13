@@ -1,15 +1,25 @@
 import { requestIdHeader } from "@comms/protocol/headers";
 /** Immutable boot UI: it remains usable when editable app code cannot start. */
-export const authPage = (setup: boolean) => `<!doctype html>
+export const authPage = (mode: "setup" | "login" | "code") => {
+	const setup = mode !== "login";
+	const heading = mode === "setup" ? "Create your passkey" : mode === "code" ? "Add a passkey" : "Welcome back";
+	const intro =
+		mode === "setup"
+			? "Enter the setup code from the bootloader logs. Your password manager will save a passkey for this board."
+			: mode === "code"
+				? "Enter the one-time code shown in your board's account page. Your password manager will save a passkey for this address, and you will be signed in."
+				: "Use your passkey to sign in to your board.";
+	return `<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${setup ? "Set up" : "Sign in to"} chirp</title>
+<title>${mode === "setup" ? "Set up" : mode === "code" ? "Add a passkey to" : "Sign in to"} chirp</title>
 <style>body{font:17px/1.6 system-ui,sans-serif;max-width:28rem;margin:12vh auto;padding:1.5rem;color:#20251f;background:#f5f5ef}h1{line-height:1.2}label,input,button{display:block}input,button{font:inherit;padding:.7rem;width:100%;box-sizing:border-box;margin:.7rem 0}button{border:0;background:#244933;color:white;border-radius:.35rem;cursor:pointer}button:disabled{opacity:.5}a{color:#244933}#status{min-height:3em}</style>
-<main><p>chirp</p><h1>${setup ? "Create your passkey" : "Welcome back"}</h1>
-<p>${setup ? "Enter the setup code from the bootloader logs. Your password manager will save a passkey for this board." : "Use your passkey to sign in to your board."}</p>
-<form id="auth" data-mode="${setup ? "setup" : "login"}">${setup ? '<label for="code">Setup code</label><input id="code" name="code" required autocomplete="off" spellcheck="false">' : ""}
+<main><p>chirp</p><h1>${heading}</h1>
+<p>${intro}</p>
+<form id="auth" data-mode="${mode}">${setup ? `<label for="code">${mode === "code" ? "One-time code" : "Setup code"}</label><input id="code" name="code" required autocomplete="off" spellcheck="false">` : ""}
 <button type="submit">${setup ? "Create passkey" : "Sign in with passkey"}</button></form>
 <p id="status" role="status" aria-live="polite"></p><a href="/_boot">Recovery help</a></main>
 <script src="/_boot/auth/client.js" defer></script></html>`;
+};
 
 // Kept as static JavaScript so source and bundled boot use the same immutable asset.
 export const authClient = `(() => {
@@ -38,7 +48,7 @@ export const authClient = `(() => {
   catch { throw new Error("The board or sharing proxy returned an unreadable response (HTTP " + response.status + "). Check the connection and sign-in page."); }
   if (!result || typeof result !== "object") throw new Error("The board returned an invalid authentication response.");
   if (!response.ok) {
-   const messages = {setup_code_invalid:"That setup code is incorrect. Check the latest code in the bootloader logs.", setup_closed:"Setup is complete. Open /auth/login to sign in.", setup_required:"Create your first passkey at /setup.", challenge_invalid:"This passkey request expired or was already used. Try again.", origin_invalid:"This address does not match the configured public origin.", authentication_invalid:"The passkey could not be verified. Try again.", registration_invalid:"The passkey could not be registered. Try again.", boot_unavailable:"The boot authentication store is unavailable. Check the bootloader logs."};
+   const messages = {setup_code_invalid:"That setup code is incorrect. Check the latest code in the bootloader logs.", setup_closed:"Setup is complete. Open /auth/login to sign in.", setup_required:"Create your first passkey at /setup.", challenge_invalid:"This passkey request expired or was already used. Try again.", origin_invalid:"This address is not an allowed origin for this board, or the code is bound to a different address.", passkey_code_invalid:"That code is incorrect, expired or already used. Generate a new code from a signed-in session.", authentication_invalid:"The passkey could not be verified. Try again.", registration_invalid:"The passkey could not be registered. Try again.", boot_unavailable:"The boot authentication store is unavailable. Check the bootloader logs."};
    const code = result.error?.code;
    errorCode = typeof code === "string" && /^[a-z_]{1,64}$/.test(code) ? code : "";
    throw new Error((Object.hasOwn(messages, errorCode) ? messages[errorCode] : null) || "Authentication was refused (HTTP " + response.status + "). Check the board configuration or sign in again.");
@@ -65,8 +75,9 @@ export const authClient = `(() => {
   progress("browser", "Checking passkey support…");
   try {
    if (!window.isSecureContext || !navigator.credentials) throw new Error("Passkeys require HTTPS or http://localhost.");
-   const setup = form.dataset.mode === "setup";
-   const path = "/_boot/auth/" + (setup ? "setup" : "login");
+   const mode = form.dataset.mode;
+   const setup = mode !== "login";
+   const path = mode === "code" ? "/_boot/auth/passkey-code" : "/_boot/auth/" + (setup ? "setup" : "login");
    const input = setup ? {code:document.getElementById("code").value.trim()} : {};
    const started = await post(path + "/options", input, "options");
    progress("options decode", "Preparing the passkey request…");
@@ -81,7 +92,7 @@ export const authClient = `(() => {
    if (!credential) throw new Error("No passkey was returned. Try again.");
    progress("credential encode", "Preparing passkey verification…");
    await post(path + "/verify", {id:started.id, response:serialize(credential)}, "verify");
-   window.location.assign(setup ? "/auth/login" + (next === "/" ? "" : "?next=" + encodeURIComponent(next)) : next);
+   window.location.assign(mode === "setup" ? "/auth/login" + (next === "/" ? "" : "?next=" + encodeURIComponent(next)) : next);
   } catch (error) {
    const names = ["NotAllowedError", "SecurityError", "InvalidStateError", "NotSupportedError", "AbortError", "TypeError", "UnknownError", "Error", "InvalidCharacterError"];
    const name = names.includes(error?.name) ? error.name : "Error";

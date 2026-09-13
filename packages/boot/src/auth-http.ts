@@ -1,6 +1,6 @@
 import { assertionHeader, requestIdHeader, tokenExpiresHeader } from "@comms/protocol/headers";
 import { humanAgent } from "./human-agent.ts";
-import { bootRoute, checkBootOrigin } from "./boot-route.ts";
+import { bootRoute } from "./boot-route.ts";
 import { requestBytes } from "./request-bytes.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
 import { isSqlError } from "effect/unstable/sql/SqlError";
@@ -9,6 +9,7 @@ import { TrafficError } from "./traffic.ts";
 import { Cause, Console, Effect, Option, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
+import { configuredParties, validRelyingParty } from "./auth-origins.ts";
 import { PasskeyRegistrationResponse } from "./passkey-management-schema.ts";
 import { authClient, authPage } from "./auth-page.ts";
 
@@ -47,7 +48,7 @@ const policy = {
 	},
 	auth_configuration_invalid: {
 		status: 401,
-		hint: "Correct RP_ID and PUBLIC_ORIGIN in the boot configuration before authenticating.",
+		hint: "Correct RP_ID and PUBLIC_ORIGIN, or PUBLIC_ORIGINS, in the boot configuration before authenticating.",
 	},
 	authentication_failed: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
 	authentication_invalid: { status: 401, hint: "Use /setup for first setup or /auth/login to sign in." },
@@ -83,9 +84,22 @@ const policy = {
 		hint: "Correct the JSON body and query using the documented authentication operation. New enrollment hosts and token labels must be 1–64 lowercase letters, digits, dot, underscore or hyphen, starting with a letter or digit.",
 	},
 	last_passkey: { status: 409, hint: "Register another passkey before deleting the last registered key." },
+	origin_has_passkeys: {
+		status: 409,
+		hint: "Delete the passkeys bound to this origin's RP ID first; inspect /_boot/auth/passkeys.",
+	},
 	origin_invalid: {
 		status: 403,
-		hint: "Send this action from the configured PUBLIC_ORIGIN with its exact Origin header.",
+		hint: "Send this action from a configured or activated origin with its exact Origin header; a code bound to an origin redeems only there. Inspect /_boot/auth/origins.",
+	},
+	origin_not_found: { status: 404, hint: "Inspect /_boot/auth/origins and select an activated runtime origin." },
+	origin_protected: {
+		status: 409,
+		hint: "Configured origins and the origin this request came from cannot be removed. Remove it from another origin.",
+	},
+	passkey_code_invalid: {
+		status: 401,
+		hint: "Ask the signed-in human for a new add-passkey code; codes expire, are single-use and allow three wrong attempts.",
 	},
 	passkey_exists: { status: 409, hint: "Use the registered passkey or choose a different authenticator." },
 	passkey_not_found: { status: 404, hint: "Inspect /_boot/auth/passkeys and select an existing passkey." },
@@ -196,25 +210,14 @@ export const authFailure = <E, R>(effect: Effect.Effect<HttpServerResponse.HttpS
 		}),
 	);
 
-export const validateAuthConfig = (config: AuthConfig) =>
-	Effect.try({
-		try: () => {
-			const origin = new URL(config.expectedOrigin);
-			const rp = new URL(`https://${config.rpId}`);
-			if (
-				origin.origin !== config.expectedOrigin ||
-				origin.username ||
-				origin.password ||
-				rp.hostname !== config.rpId ||
-				rp.port ||
-				rp.pathname !== "/" ||
-				!(origin.hostname === config.rpId || origin.hostname.endsWith(`.${config.rpId}`)) ||
-				!(origin.protocol === "https:" || (origin.protocol === "http:" && origin.hostname === "localhost"))
-			)
-				throw new Error("Invalid relying party or public origin");
-		},
-		catch: () => new AuthError({ code: "auth_configuration_invalid" }),
-	});
+/** Every configured origin must pass the relying-party rules, and no origin may be listed twice. */
+export const validateAuthConfig = (config: AuthConfig) => {
+	const parties = configuredParties(config);
+	return parties.every(validRelyingParty) &&
+		new Set(parties.map((party) => party.expectedOrigin)).size === parties.length
+		? Effect.void
+		: Effect.fail(new AuthError({ code: "auth_configuration_invalid" }));
+};
 
 // The Bun fetch adapter does not enforce HttpIncomingMessage.MaxBodySize on JSON bodies.
 export const body = <A>(schema: Schema.ConstraintDecoder<A>) =>
@@ -238,6 +241,29 @@ export const sessionToken = (request: HttpServerRequest.HttpServerRequest) => {
 	const value = values[0]?.slice(sessionCookie.length + 1);
 	return value && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : null;
 };
+
+/** A successful passkey sign-in or code redemption issues the human session cookie. */
+export const sessionResponse = (session: { readonly token: string; readonly expiresAt: number }) =>
+	HttpServerResponse.jsonUnsafe(
+		{ expires_at: session.expiresAt },
+		{ headers: { [tokenExpiresHeader]: String(session.expiresAt) } },
+	).pipe(
+		HttpServerResponse.setCookieUnsafe(sessionCookie, session.token, {
+			httpOnly: true,
+			secure: true,
+			sameSite: "strict",
+			path: "/",
+			maxAge: 30 * 24 * 60 * 60,
+		}),
+	);
+
+export const pageHeaders = Object.freeze({
+	"cache-control": "no-store",
+	"content-security-policy":
+		"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+	"x-content-type-options": "nosniff",
+	"referrer-policy": "no-referrer",
+});
 
 export const authenticate = (auth: Auth["Service"], request: HttpServerRequest.HttpServerRequest) =>
 	Effect.gen(function* () {
@@ -273,7 +299,7 @@ export const assertionProof = (request: HttpServerRequest.HttpServerRequest) =>
 	});
 
 /** Exact boot-owned entry points; other /auth and /_boot paths remain private. */
-export const authRoute = (auth: Auth["Service"], config: AuthConfig, requestId: string) =>
+export const authRoute = (auth: Auth["Service"], requestId: string) =>
 	Effect.gen(function* () {
 		const { request, url } = yield* bootRoute;
 		const path = url.pathname;
@@ -310,45 +336,28 @@ export const authRoute = (auth: Auth["Service"], config: AuthConfig, requestId: 
 					}
 					if (path === "/setup" && !setupOpen)
 						return HttpServerResponse.empty({ status: 404, headers: { "cache-control": "no-store" } });
-					return HttpServerResponse.text(authPage(path === "/setup"), {
+					return HttpServerResponse.text(authPage(path === "/setup" ? "setup" : "login"), {
 						contentType: "text/html",
-						headers: {
-							"cache-control": "no-store",
-							"content-security-policy":
-								"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
-							"x-content-type-options": "nosniff",
-							"referrer-policy": "no-referrer",
-						},
+						headers: pageHeaders,
 					});
 				}
-				yield* checkBootOrigin("authWrite", request, config);
+				const party = yield* auth.relyingParty(request.headers.origin);
+				const ceremonies = auth.at(party);
 				if (path === "/_boot/auth/setup/options") {
 					const input = yield* body(Schema.Struct({ code: Schema.String }));
-					return HttpServerResponse.jsonUnsafe(yield* auth.startSetup(input.code));
+					return HttpServerResponse.jsonUnsafe(yield* ceremonies.startSetup(input.code));
 				}
 				if (path === "/_boot/auth/setup/verify") {
 					const input = yield* body(registration);
-					return HttpServerResponse.jsonUnsafe(yield* auth.finishSetup(input.id, input.response));
+					return HttpServerResponse.jsonUnsafe(yield* ceremonies.finishSetup(input.id, input.response));
 				}
 				if (path === "/_boot/auth/login/options") {
 					yield* body(Schema.Struct({}));
-					return HttpServerResponse.jsonUnsafe(yield* auth.startLogin);
+					return HttpServerResponse.jsonUnsafe(yield* ceremonies.startLogin);
 				}
 				if (path === "/_boot/auth/login/verify") {
 					const input = yield* body(authentication);
-					const session = yield* auth.finishLogin(input.id, input.response);
-					return HttpServerResponse.jsonUnsafe(
-						{ expires_at: session.expiresAt },
-						{ headers: { [tokenExpiresHeader]: String(session.expiresAt) } },
-					).pipe(
-						HttpServerResponse.setCookieUnsafe(sessionCookie, session.token, {
-							httpOnly: true,
-							secure: true,
-							sameSite: "strict",
-							path: "/",
-							maxAge: 30 * 24 * 60 * 60,
-						}),
-					);
+					return sessionResponse(yield* ceremonies.finishLogin(input.id, input.response));
 				}
 				if (request.headers.authorization !== undefined) return yield* new AuthError({ code: "session_invalid" });
 				yield* authenticate(auth, request);

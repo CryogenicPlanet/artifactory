@@ -1,7 +1,7 @@
 import { on } from "@comms/storage/dialect";
 import { lockBootWrite } from "./boot-write-lock.ts";
 import { makeSettings } from "./settings.ts";
-import { SettingsChange, canonicalSettings } from "./settings-schema.ts";
+import { canonicalSettings } from "./settings-schema.ts";
 import { authSecrets, refuse, committed, captureRefusal } from "./auth-primitives.ts";
 // Effect Crypto has no constant-time comparison primitive.
 // oxlint-disable-next-line effecttsgo/node-builtin-import
@@ -19,34 +19,23 @@ import { SqlClient } from "effect/unstable/sql";
 import { makeEnrollment, type AssertionProof } from "./enrollment.ts";
 import { makeAccountQueries } from "./account-queries.ts";
 import { makePasskeyManagement } from "./passkey-management.ts";
-import {
-	canonicalPasskeyAdd,
-	canonicalPasskeyDelete,
-	validPasskeyLabel,
-	validPasskeyId,
-	type AddPasskey,
-	type DeletePasskey,
-} from "./passkey-management-schema.ts";
-import { makeDatabaseRestoreAuth, resolveRestoreTarget } from "./database-restore-auth.ts";
-import {
-	canonicalDatabaseRestore,
-	canonicalGenerationRestore,
-	validDatabaseRestore,
-	validRestoreSelection,
-	type DatabaseRestore,
-	type GenerationRestore,
-} from "./database-restore-schema.ts";
+import { makeDatabaseRestoreAuth } from "./database-restore-auth.ts";
+import { canonicalDatabaseRestore, canonicalGenerationRestore } from "./database-restore-schema.ts";
 import { canonicalSourceReset, validSeedDigest } from "./source-reset-schema.ts";
 import { makeTokenMint } from "./token-mint.ts";
-import { canonicalMint, validMint, type MintBinding } from "./token-mint-schema.ts";
+import { canonicalMint } from "./token-mint-schema.ts";
 import { makeTokens } from "./tokens.ts";
-import { makeLockBreak, canonicalLockBreak, validLockId, type BreakLock } from "./lock-break.ts";
-import { canonicalRevocation, validFamily, type RevokeFamily } from "./refresh-schema.ts";
-import { canonicalDecision, validDecision, type EnrollmentDecision } from "./enrollment-schema.ts";
+import { makeLockBreak, canonicalLockBreak, type BreakLock } from "./lock-break.ts";
+import { canonicalRevocation, type RevokeFamily } from "./refresh-schema.ts";
+import { canonicalDecision, type EnrollmentDecision } from "./enrollment-schema.ts";
+import { allowedParties, makeOriginManagement, type RelyingParty } from "./auth-origins.ts";
+import { makeActionAssertions, restartBinding } from "./action-assertions.ts";
+import { makePasskeyCodes } from "./passkey-code.ts";
+import type { RemoveOrigin } from "./passkey-code-schema.ts";
 
-export interface AuthConfig {
-	readonly rpId: string;
-	readonly expectedOrigin: string;
+/** The top-level origin is the primary one; boot generates absolute URLs from it. */
+export interface AuthConfig extends RelyingParty {
+	readonly additionalOrigins?: ReadonlyArray<RelyingParty>;
 }
 
 export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
@@ -71,7 +60,11 @@ export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
 		"idempotency_conflict",
 		"invalid_request",
 		"last_passkey",
+		"origin_has_passkeys",
 		"origin_invalid",
+		"origin_not_found",
+		"origin_protected",
+		"passkey_code_invalid",
 		"passkey_exists",
 		"passkey_not_found",
 		"refresh_invalid",
@@ -97,7 +90,12 @@ const challengeRow = Schema.Struct({
 	setup_generation: Schema.NullOr(Schema.String),
 	expires_at: Schema.Finite,
 });
-const passkeyRow = Schema.Struct({ id: Schema.String, public_key: Schema.String, counter: Schema.Finite });
+const passkeyRow = Schema.Struct({
+	id: Schema.String,
+	public_key: Schema.String,
+	counter: Schema.Finite,
+	rp_id: Schema.NullOr(Schema.String),
+});
 const sessionRow = Schema.Struct({ id: Schema.String, expires_at: Schema.Finite });
 const same = (left: string, right: string) => {
 	const a = Buffer.from(left);
@@ -142,6 +140,15 @@ const makeAuth = (config: AuthConfig) =>
 		yield* sql`DELETE FROM auth_challenges WHERE ceremony = 'setup'`;
 		yield* setupState;
 
+		const allowed = allowedParties(sql, config);
+		/** Resolve an exact Origin header against configured and activated origins. */
+		const relyingParty = (origin: string | undefined) =>
+			allowed.pipe(
+				Effect.flatMap((parties) => {
+					const party = parties.find((item) => item.expectedOrigin === origin);
+					return party ? Effect.succeed(party) : refuse("origin_invalid");
+				}),
+			);
 		const saveChallenge = Effect.fn("Auth.saveChallenge")(function* (
 			challenge: string,
 			ceremony: string,
@@ -171,7 +178,7 @@ const makeAuth = (config: AuthConfig) =>
 			yield* sql`INSERT INTO sessions (id, hash, created_at, expires_at, last_seen_at) VALUES (${id}, ${digest}, ${now}, ${expiresAt}, ${now})`;
 			return { token, id, expiresAt };
 		});
-		const startSetup = (code: string) =>
+		const startSetup = (party: RelyingParty) => (code: string) =>
 			mutex.withPermit(
 				Effect.gen(function* () {
 					const state = yield* setupState;
@@ -185,7 +192,7 @@ const makeAuth = (config: AuthConfig) =>
 						try: () =>
 							generateRegistrationOptions({
 								rpName: "chirp",
-								rpID: config.rpId,
+								rpID: party.rpId,
 								userName: "human",
 								userID: new TextEncoder().encode("comms-human"),
 								attestationType: "none",
@@ -196,7 +203,7 @@ const makeAuth = (config: AuthConfig) =>
 					return { id: yield* saveChallenge(options.challenge, "setup", state.generation), options };
 				}),
 			);
-		const finishSetup = (id: string, response: RegistrationResponseJSON) =>
+		const finishSetup = (party: RelyingParty) => (id: string, response: RegistrationResponseJSON) =>
 			mutex.withPermit(
 				sql.withTransaction(
 					Effect.gen(function* () {
@@ -210,8 +217,8 @@ const makeAuth = (config: AuthConfig) =>
 								verifyRegistrationResponse({
 									response,
 									expectedChallenge: challenge.challenge,
-									expectedOrigin: config.expectedOrigin,
-									expectedRPID: config.rpId,
+									expectedOrigin: party.expectedOrigin,
+									expectedRPID: party.rpId,
 									requireUserVerification: true,
 								}),
 							catch: () => new AuthError({ code: "registration_invalid" }),
@@ -224,8 +231,8 @@ const makeAuth = (config: AuthConfig) =>
 							credential.transports ?? [],
 						);
 						const now = yield* Clock.currentTimeMillis;
-						yield* sql`INSERT INTO passkeys (id, public_key, counter, transports, label, created_at)
-			VALUES (${credential.id}, ${publicKey}, ${credential.counter}, ${transports}, 'First passkey', ${now})`;
+						yield* sql`INSERT INTO passkeys (id, public_key, counter, transports, label, created_at, rp_id)
+			VALUES (${credential.id}, ${publicKey}, ${credential.counter}, ${transports}, 'First passkey', ${now}, ${party.rpId})`;
 						yield* sql`DELETE FROM auth_challenges WHERE ceremony = 'setup'`;
 						// Clear before commit so interruption cannot retain the old setup code.
 						// A failed commit safely requires a fresh code on the next setup attempt.
@@ -234,34 +241,45 @@ const makeAuth = (config: AuthConfig) =>
 					}),
 				),
 			);
-		const startLogin = mutex.withPermit(
-			Effect.gen(function* () {
-				if (yield* noPasskeys) return yield* refuse("setup_required");
-				const options = yield* Effect.tryPromise({
-					try: () => generateAuthenticationOptions({ rpID: config.rpId, userVerification: "required" }),
-					catch: () => new AuthError({ code: "authentication_failed" }),
-				});
-				return { id: yield* saveChallenge(options.challenge, "login", null), options };
-			}),
-		);
+		const startLogin = (party: RelyingParty) =>
+			mutex.withPermit(
+				Effect.gen(function* () {
+					if (yield* noPasskeys) return yield* refuse("setup_required");
+					const options = yield* Effect.tryPromise({
+						try: () => generateAuthenticationOptions({ rpID: party.rpId, userVerification: "required" }),
+						catch: () => new AuthError({ code: "authentication_failed" }),
+					});
+					return { id: yield* saveChallenge(options.challenge, "login", null), options };
+				}),
+			);
+		/** A passkey verifies only under the RP ID it was registered with. Login also pins the request's origin;
+		 * action proofs accept any allowed origin of that RP ID, since the proof, not the route, names the passkey.
+		 * A passkey stored before boot recorded RP IDs is tried under the configured primary RP ID and stamped only
+		 * once its signature proves that RP ID, so a mistaken configuration never permanently mislabels it. */
 		const verifyAssertion = Effect.fn("Auth.verifyAssertion")(function* (
 			id: string,
 			response: AuthenticationResponseJSON,
 			ceremony: string,
 			binding: string | null,
+			party?: RelyingParty,
 		) {
 			const challenge = yield* takeChallenge(id, ceremony);
 			if (challenge.setup_generation !== binding) return yield* refuse("challenge_invalid");
-			const rows = yield* sql`SELECT id, public_key, counter FROM passkeys WHERE id = ${response.id}`;
+			const rows = yield* sql`SELECT id, public_key, counter, rp_id FROM passkeys WHERE id = ${response.id}`;
 			const credential = (yield* Schema.decodeUnknownEffect(Schema.Array(passkeyRow))(rows))[0];
-			if (!credential) return yield* refuse("authentication_invalid");
+			const rpId = credential?.rp_id ?? config.rpId;
+			if (!credential || (party && party.rpId !== rpId)) return yield* refuse("authentication_invalid");
+			const origins = party
+				? [party.expectedOrigin]
+				: (yield* allowed).filter((item) => item.rpId === rpId).map((item) => item.expectedOrigin);
+			if (!origins.length) return yield* refuse("authentication_invalid");
 			const verified = yield* Effect.tryPromise({
 				try: () =>
 					verifyAuthenticationResponse({
 						response,
 						expectedChallenge: challenge.challenge,
-						expectedOrigin: config.expectedOrigin,
-						expectedRPID: config.rpId,
+						expectedOrigin: origins,
+						expectedRPID: rpId,
 						requireUserVerification: true,
 						credential: {
 							id: credential.id,
@@ -273,71 +291,24 @@ const makeAuth = (config: AuthConfig) =>
 			});
 			if (!verified.verified) return yield* refuse("authentication_invalid");
 			if (challenge.expires_at <= (yield* Clock.currentTimeMillis)) return yield* refuse("challenge_invalid");
-			yield* sql`UPDATE passkeys SET counter = ${verified.authenticationInfo.newCounter} WHERE id = ${credential.id}`;
+			yield* sql`UPDATE passkeys SET counter = ${verified.authenticationInfo.newCounter}, rp_id = ${rpId} WHERE id = ${credential.id}`;
 			yield* sql`DELETE FROM auth_challenges WHERE id = ${id}`;
 		});
-		const finishLogin = (id: string, response: AuthenticationResponseJSON) =>
+		const finishLogin = (party: RelyingParty) => (id: string, response: AuthenticationResponseJSON) =>
 			mutex.withPermit(
 				sql.withTransaction(
 					lockBootWrite(sql).pipe(
-						Effect.andThen(verifyAssertion(id, response, "login", null)),
+						Effect.andThen(verifyAssertion(id, response, "login", null, party)),
 						Effect.andThen(newSession),
 					),
 				),
 			);
-		const startActionAssertion = (
-			action:
-				| "enrollment.decide"
-				| "token.revoke"
-				| "lock.break"
-				| "passkey.add"
-				| "passkey.delete"
-				| "token.mint"
-				| "db.restore"
-				| "generation.restore"
-				| "boot.restart"
-				| "app.reset"
-				| "settings.change",
-			binding: string,
-		) =>
-			mutex.withPermit(
-				Effect.gen(function* () {
-					if (yield* noPasskeys) return yield* refuse("setup_required");
-					const nonce = yield* random;
-					const bytes = yield* crypto.digest("SHA-256", new TextEncoder().encode(`${action}${binding}${nonce}`));
-					const challenge = Buffer.from(bytes).toString("base64url");
-					// A newly created, not-yet-authorized discoverable credential must not be offered for this proof.
-					const allowed =
-						action === "passkey.add"
-							? yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: Schema.String })))(
-									yield* sql`SELECT id FROM passkeys`,
-								)
-							: undefined;
-					const options = yield* Effect.tryPromise({
-						try: () =>
-							generateAuthenticationOptions({
-								rpID: config.rpId,
-								userVerification: "required",
-								challenge,
-								...(allowed ? { allowCredentials: allowed.map(({ id }) => ({ id })) } : {}),
-							}),
-						catch: () => new AuthError({ code: "authentication_failed" }),
-					});
-					return { id: yield* saveChallenge(options.challenge, action, binding), options };
-				}),
-			);
+		const actions = yield* makeActionAssertions(mutex, noPasskeys, saveChallenge, random, config.rpId);
 		const settings = yield* makeSettings(
 			(params, proof, session) =>
 				verifyAssertion(proof.id, proof.response, "settings.change", canonicalSettings(params, session)),
 			mutex,
 		);
-		const startSettingsAssertion = (params: SettingsChange, session: string) =>
-			Schema.is(SettingsChange)(params) && params.patch.event_retention === undefined
-				? startActionAssertion("settings.change", canonicalSettings(params, session))
-				: refuse("invalid_request");
-		const restartBinding = (sessionId: string) => JSON.stringify({ session: sessionId });
-		const startRestartAssertion = (sessionId: string) =>
-			startActionAssertion("boot.restart", restartBinding(sessionId));
 		const authorizeRestart = (proof: AssertionProof, sessionId: string) =>
 			mutex.withPermit(
 				committed(
@@ -350,31 +321,19 @@ const makeAuth = (config: AuthConfig) =>
 					}).pipe(captureRefusal(Schema.is(AuthError))),
 				),
 			);
-		const startEnrollmentAssertion = (params: EnrollmentDecision) =>
-			validDecision(params)
-				? startActionAssertion("enrollment.decide", canonicalDecision(params))
-				: refuse("invalid_request");
-		const startRevocationAssertion = (params: RevokeFamily) =>
-			validFamily(params.family)
-				? startActionAssertion("token.revoke", canonicalRevocation(params))
-				: refuse("invalid_request");
-		const startLockBreakAssertion = (params: BreakLock) =>
-			validLockId(params.id)
-				? startActionAssertion("lock.break", canonicalLockBreak(params))
-				: refuse("invalid_request");
-		const startPasskeyAddAssertion = (params: AddPasskey, sessionId: string) =>
-			validPasskeyLabel(params.label) && validPasskeyId(params.registration)
-				? canonicalPasskeyAdd(params, sessionId).pipe(
-						Effect.flatMap((binding) => startActionAssertion("passkey.add", binding)),
-					)
-				: refuse("invalid_request");
-		const startPasskeyDeleteAssertion = (params: DeletePasskey, sessionId: string) =>
-			validPasskeyId(params.id)
-				? startActionAssertion("passkey.delete", canonicalPasskeyDelete(params, sessionId))
-				: refuse("invalid_request");
 		const passkeys = yield* makePasskeyManagement(
-			config,
 			(action, binding, proof) => verifyAssertion(proof.id, proof.response, action, binding),
+			mutex,
+		);
+		const origins = yield* makeOriginManagement(
+			config,
+			(binding, proof) => verifyAssertion(proof.id, proof.response, "origin.remove", binding),
+			mutex,
+		);
+		const codes = yield* makePasskeyCodes(
+			config,
+			(binding, proof) => verifyAssertion(proof.id, proof.response, "passkey.code", binding),
+			newSession,
 			mutex,
 		);
 		const breakLock = yield* makeLockBreak(
@@ -382,26 +341,10 @@ const makeAuth = (config: AuthConfig) =>
 				verifyAssertion(proof.id, proof.response, "lock.break", canonicalLockBreak(params)),
 			mutex,
 		);
-		const startMintAssertion = (params: MintBinding) =>
-			validMint(params) ? startActionAssertion("token.mint", canonicalMint(params)) : refuse("invalid_request");
 		const mint = yield* makeTokenMint(
 			(params, proof) => verifyAssertion(proof.id, proof.response, "token.mint", canonicalMint(params)),
 			mutex,
 		);
-		const startDatabaseRestoreAssertion = (params: DatabaseRestore, sessionId: string) =>
-			validDatabaseRestore(params)
-				? startActionAssertion("db.restore", canonicalDatabaseRestore(params, sessionId))
-				: refuse("invalid_request");
-		const startGenerationRestoreAssertion = (params: GenerationRestore, sessionId: string) =>
-			Effect.gen(function* () {
-				if (!validRestoreSelection(params)) return yield* refuse("invalid_request");
-				const target = yield* resolveRestoreTarget(params).pipe(Effect.provideService(SqlClient.SqlClient, sql));
-				return yield* startActionAssertion("generation.restore", canonicalGenerationRestore(params, sessionId, target));
-			});
-		const startSourceResetAssertion = (seedDigest: string, sessionId: string) =>
-			validSeedDigest(seedDigest)
-				? startActionAssertion("app.reset", canonicalSourceReset(seedDigest, sessionId))
-				: refuse("invalid_request");
 		const authorizeSourceReset = (seedDigest: string, proof: AssertionProof, sessionId: string) =>
 			mutex.withPermit(
 				committed(
@@ -467,34 +410,43 @@ const makeAuth = (config: AuthConfig) =>
 				lockBootWrite(sql).pipe(Effect.andThen(sql`DELETE FROM sessions WHERE hash = ${digest}`)),
 			);
 		});
+		/** Ceremonies whose browser options or registration are bound to one origin's RP ID. */
+		const at = (party: RelyingParty) => ({
+			...actions(party),
+			startSetup: startSetup(party),
+			finishSetup: finishSetup(party),
+			startLogin: startLogin(party),
+			finishLogin: finishLogin(party),
+			startPasskeyRegistration: (label: string, sessionId: string) =>
+				passkeys.startPasskeyRegistration(label, sessionId, party),
+			finishPasskeyRegistration: (
+				params: Parameters<typeof passkeys.finishPasskeyRegistration>[0],
+				proof: AssertionProof,
+				sessionId: string,
+			) => passkeys.finishPasskeyRegistration(params, proof, sessionId, party),
+			removeOrigin: (params: RemoveOrigin, proof: AssertionProof, sessionId: string) =>
+				origins.removeOrigin(params, proof, sessionId, party),
+		});
 		const accounts = yield* makeAccountQueries;
 		return {
 			...accounts,
 			...settings,
-			startSettingsAssertion,
 			...enrollment,
 			...tokens,
-			...passkeys,
-			startPasskeyAddAssertion,
-			startPasskeyDeleteAssertion,
+			listPasskeys: passkeys.listPasskeys,
+			deletePasskey: passkeys.deletePasskey,
+			listOrigins: origins.listOrigins,
+			...codes,
 			...mint,
-			startMintAssertion,
-			startRestartAssertion,
 			authorizeRestart,
-			startDatabaseRestoreAssertion,
-			startGenerationRestoreAssertion,
-			startSourceResetAssertion,
 			authorizeSourceReset,
 			authorizeDatabaseRestore,
-			startLockBreakAssertion,
 			breakLock,
-			startRevocationAssertion,
-			startEnrollmentAssertion,
+			relyingParty,
+			// HTTP routes use at() with the request's origin; these direct members use the primary origin.
+			...at({ rpId: config.rpId, expectedOrigin: config.expectedOrigin }),
+			at,
 			setupOpen: mutex.withPermit(Effect.map(setupState, (state) => state !== null)),
-			startSetup,
-			finishSetup,
-			startLogin,
-			finishLogin,
 			authenticateSession,
 			logout,
 		};

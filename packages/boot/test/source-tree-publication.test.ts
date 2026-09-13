@@ -122,6 +122,9 @@ describe("typed source tree publication", () => {
 			"ALTER TABLE generations DROP COLUMN backup_id",
 			"ALTER TABLE edit_lock DROP COLUMN reset_pin",
 			"ALTER TABLE backups DROP COLUMN legacy_store_id",
+			"DROP TABLE auth_origins",
+			"DROP TABLE passkey_codes",
+			"ALTER TABLE passkeys DROP COLUMN rp_id",
 			"DROP TABLE IF EXISTS boot_migrations",
 			"ALTER TABLE backups DROP COLUMN engine",
 			"PRAGMA user_version=12",
@@ -135,7 +138,7 @@ describe("typed source tree publication", () => {
 		expect(await env.sql("SELECT previous_directory,directory FROM versions")).toEqual([
 			{ previous_directory: 0, directory: 0 },
 		]);
-		expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 19 }]);
+		expect(await env.sql("PRAGMA user_version")).toEqual([{ user_version: 20 }]);
 	});
 
 	it.for(["file to directory", "directory to file"] as const)(

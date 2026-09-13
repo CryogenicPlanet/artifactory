@@ -76,7 +76,14 @@ await Effect.runPromise(
 			yield* expectFailure(sql`INSERT INTO seq(singleton,${sql("next")},published_through) VALUES (2,1,0)`);
 			yield* initializeBootTables(sql, settings.engine);
 			assert.equal((yield* sql`SELECT path FROM staging WHERE lock_id='fixture'`)[0]?.path, path);
-			assert.equal((yield* sql`SELECT migration_id FROM boot_migrations`).length, 19);
+			assert.equal((yield* sql`SELECT migration_id FROM boot_migrations`).length, 20);
+			assert.deepEqual(yield* sql`SELECT rp_id FROM passkeys WHERE id=${credential}`, [{ rp_id: null }]);
+			yield* sql`UPDATE passkeys SET rp_id='comms.test' WHERE id=${credential}`;
+			yield* sql`INSERT INTO auth_origins(origin,rp_id,created_at) VALUES ('https://new.comms.test','new.comms.test',1)`;
+			yield* expectFailure(
+				sql`INSERT INTO auth_origins(origin,rp_id,created_at) VALUES ('https://new.comms.test','other',1)`,
+			);
+			yield* sql`INSERT INTO passkey_codes(id,hash,origin,failures,expires_at,created_at) VALUES ('code',${"a".repeat(64)},NULL,0,1,1)`;
 			process.stdout.write("boot native constraints, long values, binary, sequence and reopen durability passed\n");
 		}
 	}).pipe(Effect.scoped, Effect.provide(layer)),
@@ -92,6 +99,8 @@ await Effect.runPromise(
 			`pages/${"雪😀segment/".repeat(600)}file.md`,
 		);
 		assert.equal((yield* sql`SELECT id FROM passkeys`)[0]?.id, "A".repeat(6000));
+		assert.deepEqual(yield* sql`SELECT rp_id FROM passkeys`, [{ rp_id: "comms.test" }]);
+		assert.deepEqual(yield* sql`SELECT origin FROM auth_origins`, [{ origin: "https://new.comms.test" }]);
 	}).pipe(Effect.scoped, Effect.provide(layer)),
 );
 process.stdout.write("boot native constraints, long values, binary, sequence and reopen durability passed\n");

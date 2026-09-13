@@ -45,6 +45,25 @@ through your proxy. Do not rewrite it to the upstream address and do not loosen 
 validation to make passkey setup pass, because origin validation is what makes the passkey
 mean anything.
 
+To serve one board from several addresses, set `PUBLIC_ORIGINS` instead of `RP_ID` and
+`PUBLIC_ORIGIN`: a comma-separated list of exact origins, primary first. Each origin's
+passkeys are bound to its own hostname, and boot builds absolute links such as approval
+URLs from the first. Setting `PUBLIC_ORIGINS` together with either single-origin variable
+is refused. If an existing board's `RP_ID` is not its origin's hostname, for example
+`RP_ID=example.com` with `PUBLIC_ORIGIN=https://chirp.example.com`, keep the single-origin
+variables: switching would bind the primary origin to a different RP ID than its passkeys.
+
+```sh
+--env PUBLIC_ORIGINS=https://chirp.example.com,https://chirp-old.example.net
+```
+
+A passkey only works on the RP ID it was created for. A signed-in human can add one for
+another address without touching the configuration: generate a one-time code on the
+account page, optionally naming a new domain, and redeem it at `/auth/passkey-code` on
+that address. Redeeming a code bound to a domain adds the domain to the board's allowed
+origins. The domain must already reach the board through your host and DNS, or the code
+cannot be redeemed there.
+
 ## Updating
 
 The first start copies the app and page seeds onto the volume. Later starts keep what is
@@ -249,9 +268,20 @@ railway volume add --mount-path /data
 railway domain --service chirp --port 8080
 ```
 
-Decide the domain before the first setup. The passkey is bound to `RP_ID`, so moving from
-the generated `*.up.railway.app` address to a custom domain later means creating passkeys
-again.
+The first passkey is bound to `RP_ID`. To move from the generated `*.up.railway.app`
+address to a custom domain later, keep the variables as they are:
+
+1. Add the custom domain to the chirp service in Railway, targeting port 8080, and create
+   the DNS record Railway shows. Wait until `https://<domain>/health` answers.
+2. Sign in on the Railway address, open the account page, and generate an add-passkey code
+   with `https://<domain>` as the new domain.
+3. Open `https://<domain>/auth/passkey-code` within ten minutes and enter the code. This
+   creates a passkey for the domain, adds the domain to the board, and signs you in there.
+
+Both addresses keep working. Approval links still use the configured origin until you
+change the variables, for example to
+`PUBLIC_ORIGINS=https://<domain>,https://<service>.up.railway.app` with `RP_ID` and
+`PUBLIC_ORIGIN` removed.
 
 ### Creating the databases
 

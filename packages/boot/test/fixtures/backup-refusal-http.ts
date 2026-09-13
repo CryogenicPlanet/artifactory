@@ -28,7 +28,7 @@ const program = Effect.gen(function* () {
 		const crypto = yield* Crypto.Crypto;
 		const session = "b".repeat(43);
 		const hash = Buffer.from(yield* crypto.digest("SHA-256", new TextEncoder().encode(session))).toString("hex");
-		yield* sql`INSERT INTO passkeys VALUES('fixture','unused',0,'[]','fixture',1)`;
+		yield* sql`INSERT INTO passkeys(id,public_key,counter,transports,label,created_at) VALUES('fixture','unused',0,'[]','fixture',1)`;
 		yield* sql`INSERT INTO sessions(id,hash,created_at,expires_at) VALUES('fixture',${hash},1,9999999999999)`;
 		yield* Effect.gen(function* () {
 			const auth = yield* Auth;
@@ -68,7 +68,7 @@ const program = Effect.gen(function* () {
 						const response = yield* (
 							internal
 								? eventRoute(events, attempts, null, gate, route, Effect.succeed(true), capture)
-								: backupRoute(auth, inventory, capture, { rpId: "comms.test", expectedOrigin: "https://comms.test" })
+								: backupRoute(auth, inventory, capture)
 						).pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
 						assert.ok(response);
 						assert.equal(

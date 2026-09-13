@@ -48,9 +48,12 @@ const run = Effect.gen(function* () {
 		yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;
 		yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 		yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
+		yield* sql`DROP TABLE auth_origins`;
+		yield* sql`DROP TABLE passkey_codes`;
+		yield* sql`ALTER TABLE passkeys DROP COLUMN rp_id`;
 		yield* sql`DROP TABLE IF EXISTS boot_migrations`;
 		yield* sql`PRAGMA user_version=6`;
-		yield* sql`INSERT INTO passkeys VALUES('saved','public-key',4,'[]','label',12)`;
+		yield* sql`INSERT INTO passkeys(id,public_key,counter,transports,label,created_at) VALUES('saved','public-key',4,'[]','label',12)`;
 		yield* sql`INSERT INTO sessions(id,hash,created_at,expires_at) VALUES('session','hash',1,9999999999999)`;
 		yield* sql`INSERT INTO auth_challenges VALUES('challenge','signed','login',NULL,9999999999999)`;
 		yield* sql`INSERT INTO edit_lock(singleton,id,holder_family,agent,since,expires,ttl_seconds,note) VALUES(1,'lock','family','codex',0,9999999999999,900,'unfinished')`;
@@ -74,7 +77,7 @@ const run = Effect.gen(function* () {
 		for (const table of tables)
 			before.push(
 				yield* sql.unsafe(
-					`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : table === "edit_lock" ? "singleton,id,holder_family,agent,since,expires,ttl_seconds,note,cutover_in_flight,pending_release" : table === "source_changes" ? "batch,path,before,before_sha,before_mode,desired,desired_sha,desired_mode" : "*"} FROM ${table}`,
+					`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : table === "edit_lock" ? "singleton,id,holder_family,agent,since,expires,ttl_seconds,note,cutover_in_flight,pending_release" : table === "source_changes" ? "batch,path,before,before_sha,before_mode,desired,desired_sha,desired_mode" : table === "passkeys" ? "id,public_key,counter,transports,label,created_at" : "*"} FROM ${table}`,
 				),
 			);
 
@@ -83,14 +86,14 @@ const run = Effect.gen(function* () {
 		for (const table of tables)
 			after.push(
 				yield* sql.unsafe(
-					`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : table === "edit_lock" ? "singleton,id,holder_family,agent,since,expires,ttl_seconds,note,cutover_in_flight,pending_release" : table === "source_changes" ? "batch,path,before,before_sha,before_mode,desired,desired_sha,desired_mode" : "*"} FROM ${table}`,
+					`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : table === "edit_lock" ? "singleton,id,holder_family,agent,since,expires,ttl_seconds,note,cutover_in_flight,pending_release" : table === "source_changes" ? "batch,path,before,before_sha,before_mode,desired,desired_sha,desired_mode" : table === "passkeys" ? "id,public_key,counter,transports,label,created_at" : "*"} FROM ${table}`,
 				),
 			);
 		assert.deepEqual(after, before);
 		assert.deepEqual(yield* sql`SELECT before_directory,desired_directory FROM source_changes`, [
 			{ before_directory: 0, desired_directory: 0 },
 		]);
-		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 20 }]);
 		assert.equal((yield* sql`SELECT * FROM tokens`).length, 0);
 		assert.equal((yield* sql`SELECT * FROM enrollments`).length, 0);
 		return;

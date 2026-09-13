@@ -3,7 +3,7 @@ import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { isAppStoreIdentityError, appIdentityPolicy, transferPolicy } from "./app-store-identity.ts";
 import { Effect, Schema } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
-import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
+import { AuthError, type Auth } from "./auth.ts";
 import { SourceRejected } from "./source-schema.ts";
 import { assertionProof, authErrorResponse, authFailure, body, humanSession } from "./auth-http.ts";
 import type { AssertionProof } from "./enrollment.ts";
@@ -13,7 +13,7 @@ import type { DatabaseRestore } from "./database-restore.ts";
 const Selector = Schema.Union([Schema.Struct({ backup: Schema.String }), Schema.Struct({ id: Schema.String })]);
 
 /** Human-only database rollback remains available through the immutable listener. */
-export const databaseRestoreRoute = (restore: DatabaseRestore, auth: Auth["Service"], config: AuthConfig) =>
+export const databaseRestoreRoute = (restore: DatabaseRestore, auth: Auth["Service"]) =>
 	Effect.gen(function* () {
 		const { request, url } = yield* bootRoute;
 		if (url.pathname !== "/_boot/db/restore") return null;
@@ -22,7 +22,7 @@ export const databaseRestoreRoute = (restore: DatabaseRestore, auth: Auth["Servi
 				const session = yield* humanSession(auth, request);
 				if (request.method !== "POST")
 					return HttpServerResponse.empty({ status: 405, headers: { allow: "POST", "cache-control": "no-store" } });
-				yield* checkBootOrigin("databaseRestore", request, config);
+				yield* checkBootOrigin("databaseRestore", request, auth);
 				if (url.search) return yield* new AuthError({ code: "invalid_request" });
 				const input = yield* body(Selector);
 				const key = request.headers["idempotency-key"];

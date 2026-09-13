@@ -7,6 +7,7 @@ import { HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
 import { assertionProof, humanSession, authFailure, authErrorResponse, body } from "./auth-http.ts";
 import { AddPasskey, DeletePasskey } from "./passkey-management-schema.ts";
+import { PasskeyCodeParams, RemoveOrigin } from "./passkey-code-schema.ts";
 import { MintBinding } from "./token-mint-schema.ts";
 import { DatabaseRestoreInput, databaseRestoreParams, GenerationRestoreParams } from "./database-restore-schema.ts";
 import { BreakLock } from "./lock-break.ts";
@@ -22,6 +23,8 @@ const challengeInput = Schema.Union([
 	Schema.Struct({ action: Schema.Literal("db.restore"), params: DatabaseRestoreInput }),
 	Schema.Struct({ action: Schema.Literal("passkey.add"), params: AddPasskey }),
 	Schema.Struct({ action: Schema.Literal("passkey.delete"), params: DeletePasskey }),
+	Schema.Struct({ action: Schema.Literal("passkey.code"), params: PasskeyCodeParams }),
+	Schema.Struct({ action: Schema.Literal("origin.remove"), params: RemoveOrigin }),
 	Schema.Struct({ action: Schema.Literal("token.mint"), params: MintBinding }),
 	Schema.Struct({ action: Schema.Literal("enrollment.decide"), params: EnrollmentDecision }),
 	Schema.Struct({ action: Schema.Literal("token.revoke"), params: RevokeFamily }),
@@ -83,57 +86,69 @@ export const enrollmentRoute = (auth: Auth["Service"], config: AuthConfig, editi
 						yield* Effect.sleep("100 millis");
 					}
 				}
-				yield* checkBootOrigin("enrollmentHuman", request, config);
+				yield* checkBootOrigin("enrollmentHuman", request, auth);
 				if (url.search) return yield* new AuthError({ code: "invalid_request" });
 				if (challenge) {
 					const input = yield* body(challengeInput);
+					// Browser options name the RP ID of the origin the human is using.
+					const ceremonies = auth.at(yield* auth.relyingParty(request.headers.origin));
+					if (input.action === "passkey.code" || input.action === "origin.remove") {
+						const session = yield* humanSession(auth, request);
+						return HttpServerResponse.jsonUnsafe(
+							yield* input.action === "passkey.code"
+								? ceremonies.startPasskeyCodeAssertion(input.params, session.id)
+								: ceremonies.startOriginRemoveAssertion(input.params, session.id),
+						);
+					}
 					if (input.action === "passkey.add" || input.action === "passkey.delete") {
 						const session = yield* humanSession(auth, request);
 						return HttpServerResponse.jsonUnsafe(
 							yield* input.action === "passkey.add"
-								? auth.startPasskeyAddAssertion(input.params, session.id)
-								: auth.startPasskeyDeleteAssertion(input.params, session.id),
+								? ceremonies.startPasskeyAddAssertion(input.params, session.id)
+								: ceremonies.startPasskeyDeleteAssertion(input.params, session.id),
 						);
 					}
 					if (input.action === "settings.change") {
 						const session = yield* humanSession(auth, request);
-						return HttpServerResponse.jsonUnsafe(yield* auth.startSettingsAssertion(input.params, session.id));
+						return HttpServerResponse.jsonUnsafe(yield* ceremonies.startSettingsAssertion(input.params, session.id));
 					}
 					if (input.action === "app.reset") {
 						const session = yield* humanSession(auth, request);
 						const editor = editing;
 						if (!editor) return authErrorResponse("boot_unavailable", 503);
 						return HttpServerResponse.jsonUnsafe(
-							yield* auth.startSourceResetAssertion(yield* editor.cutover.seedDigest, session.id),
+							yield* ceremonies.startSourceResetAssertion(yield* editor.cutover.seedDigest, session.id),
 						);
 					}
 					if (input.action === "generation.restore") {
 						const session = yield* humanSession(auth, request);
-						return HttpServerResponse.jsonUnsafe(yield* auth.startGenerationRestoreAssertion(input.params, session.id));
+						return HttpServerResponse.jsonUnsafe(
+							yield* ceremonies.startGenerationRestoreAssertion(input.params, session.id),
+						);
 					}
 					if (input.action === "boot.restart") {
 						const session = yield* humanSession(auth, request);
-						return HttpServerResponse.jsonUnsafe(yield* auth.startRestartAssertion(session.id));
+						return HttpServerResponse.jsonUnsafe(yield* ceremonies.startRestartAssertion(session.id));
 					}
 					if (input.action === "db.restore") {
 						const session = yield* humanSession(auth, request);
 						return HttpServerResponse.jsonUnsafe(
-							yield* auth.startDatabaseRestoreAssertion(databaseRestoreParams(input.params), session.id),
+							yield* ceremonies.startDatabaseRestoreAssertion(databaseRestoreParams(input.params), session.id),
 						);
 					}
 					if (input.action === "token.mint") {
 						yield* humanSession(auth, request);
-						return HttpServerResponse.jsonUnsafe(yield* auth.startMintAssertion(input.params));
+						return HttpServerResponse.jsonUnsafe(yield* ceremonies.startMintAssertion(input.params));
 					}
 					if (input.action === "lock.break") {
 						yield* humanSession(auth, request);
-						return HttpServerResponse.jsonUnsafe(yield* auth.startLockBreakAssertion(input.params));
+						return HttpServerResponse.jsonUnsafe(yield* ceremonies.startLockBreakAssertion(input.params));
 					}
 					if (input.action === "token.revoke") {
 						yield* humanSession(auth, request);
-						return HttpServerResponse.jsonUnsafe(yield* auth.startRevocationAssertion(input.params));
+						return HttpServerResponse.jsonUnsafe(yield* ceremonies.startRevocationAssertion(input.params));
 					}
-					return HttpServerResponse.jsonUnsafe(yield* auth.startEnrollmentAssertion(input.params));
+					return HttpServerResponse.jsonUnsafe(yield* ceremonies.startEnrollmentAssertion(input.params));
 				}
 				if (decide) {
 					const input = yield* body(decisionInput);

@@ -35,6 +35,7 @@ const bootNames = [
 	"store_identity",
 	"backup_engine",
 	"sqlite_copy_ownership",
+	"passkey_origins",
 ] as const;
 const coreNames = [
 	"messages",
@@ -103,7 +104,7 @@ const main = Effect.gen(function* () {
 		]);
 		yield* bootSql`SELECT legacy_store_id,engine,generation FROM backups LIMIT 0`;
 		yield* bootSql`SELECT reset_pin,pending_release FROM edit_lock LIMIT 0`;
-		if (engine === "sqlite") assert.deepEqual(yield* bootSql`PRAGMA user_version`, [{ user_version: 19 }]);
+		if (engine === "sqlite") assert.deepEqual(yield* bootSql`PRAGMA user_version`, [{ user_version: 20 }]);
 	}).pipe(Effect.provideService(SqlClient.SqlClient, bootSql));
 	const sql = yield* scratch();
 	yield* Effect.gen(function* () {

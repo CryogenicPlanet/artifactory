@@ -260,7 +260,9 @@ const run = Effect.gen(function* () {
 			const before: unknown[] = [];
 			for (const table of tables)
 				before.push(
-					yield* sql.unsafe(`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : "*"} FROM ${table}`),
+					yield* sql.unsafe(
+						`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : table === "passkeys" ? "id,public_key,counter,transports,label,created_at" : "*"} FROM ${table}`,
+					),
 				);
 			yield* sql`DROP TABLE mint_receipts`;
 			yield* sql`DROP TABLE refresh_receipts`;
@@ -287,16 +289,21 @@ const run = Effect.gen(function* () {
 			yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;
 			yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 			yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
+			yield* sql`DROP TABLE auth_origins`;
+			yield* sql`DROP TABLE passkey_codes`;
+			yield* sql`ALTER TABLE passkeys DROP COLUMN rp_id`;
 			yield* sql`DROP TABLE IF EXISTS boot_migrations`;
 			yield* sql`PRAGMA user_version=7`;
 			yield* initializeBootSchema;
 			const after: unknown[] = [];
 			for (const table of tables)
 				after.push(
-					yield* sql.unsafe(`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : "*"} FROM ${table}`),
+					yield* sql.unsafe(
+						`SELECT ${table === "sessions" ? "id,hash,created_at,expires_at" : table === "passkeys" ? "id,public_key,counter,transports,label,created_at" : "*"} FROM ${table}`,
+					),
 				);
 			assert.deepEqual(after, before);
-			assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
+			assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 20 }]);
 			yield* auth.refreshTokens(original.refresh);
 		}
 	});

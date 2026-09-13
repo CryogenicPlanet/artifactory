@@ -7,6 +7,9 @@ const failure = Schema.Struct({ error: Schema.Struct({ code: Schema.String }) })
 const explanation = (code: string) => {
 	if (code === "last_passkey") return "Keep at least one passkey. Add another before removing this one.";
 	if (code === "session_invalid") return "Your session expired. Sign in again, then reload this page.";
+	if (code === "origin_has_passkeys") return "Remove the passkeys for this domain before removing the domain.";
+	if (code === "origin_protected") return "Configured domains and the domain you are using cannot be removed here.";
+	if (code === "origin_invalid") return "That domain is not valid. Use https://host with no path.";
 	if (code === "passkey_exists") return "This passkey is already registered. Choose a different authenticator.";
 	if (code === "challenge_invalid" || code === "assertion_invalid")
 		return "The passkey confirmation expired or was used. Refresh the account list before trying again.";
@@ -60,7 +63,14 @@ export const accountPost = (path: string, body: unknown, proof?: string, key?: s
 		),
 	);
 const Passkeys = Schema.Struct({
-	items: Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String, created_at: Schema.Int })),
+	items: Schema.Array(
+		Schema.Struct({
+			id: Schema.String,
+			label: Schema.String,
+			created_at: Schema.Int,
+			rp_id: Schema.NullOr(Schema.String),
+		}),
+	),
 	can_delete: Schema.Boolean,
 });
 const Families = Schema.Struct({

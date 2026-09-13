@@ -188,6 +188,12 @@ it("adopts an older boot store with an empty grant projection without guessing f
 	for (const column of ["source_generation", "prior_generation", "source_batch"])
 		await app.sql(`ALTER TABLE db_restore_requests DROP COLUMN ${column}`);
 	await app.sql("ALTER TABLE backups DROP COLUMN legacy_store_id");
+	for (const statement of [
+		"DROP TABLE auth_origins",
+		"DROP TABLE passkey_codes",
+		"ALTER TABLE passkeys DROP COLUMN rp_id",
+	])
+		await app.sql(statement);
 	await app.sql("DROP TABLE IF EXISTS boot_migrations");
 	await app.sql("ALTER TABLE backups DROP COLUMN engine");
 	await app.sql("PRAGMA user_version=13");

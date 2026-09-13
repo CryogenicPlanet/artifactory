@@ -203,6 +203,19 @@ export const initializeBootSchema = Effect.gen(function* () {
 			}),
 		},
 		{ id: 19, name: "sqlite_copy_ownership", run: Effect.void },
+		{
+			id: 20,
+			name: "passkey_origins",
+			run: Effect.gen(function* () {
+				// Existing rows stay NULL here; Auth backfills them with the configured primary RP ID when it starts.
+				yield* sql`ALTER TABLE passkeys ADD COLUMN rp_id TEXT`;
+				yield* sql`CREATE TABLE auth_origins (origin TEXT PRIMARY KEY, rp_id TEXT NOT NULL, created_at INTEGER NOT NULL)`;
+				yield* sql`CREATE TABLE passkey_codes (
+			id TEXT PRIMARY KEY, hash TEXT NOT NULL, origin TEXT, failures INTEGER NOT NULL,
+			expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+		)`;
+			}),
+		},
 	];
 	const supported = steps.length;
 	const readVersion = sql`PRAGMA user_version`.pipe(

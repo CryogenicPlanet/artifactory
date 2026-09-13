@@ -24,7 +24,7 @@ const proof: AssertionProof = {
 const run = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	yield* initializeBootSchema;
-	yield* sql`INSERT INTO passkeys VALUES('key','public-key',0,'[]','key',0)`;
+	yield* sql`INSERT INTO passkeys(id,public_key,counter,transports,label,created_at) VALUES('key','public-key',0,'[]','key',0)`;
 	const mutex = yield* Semaphore.make(1);
 	const refusal = new AuthError({ code: "authentication_invalid" });
 	// The verifier seam simulates a late failure after consuming the proof and updating its counter.
@@ -40,7 +40,6 @@ const run = Effect.gen(function* () {
 		const fault = yield* extra.pipe(Effect.exit);
 		const cause = Exit.isFailure(fault) ? Cause.combine(Cause.fail(refusal), fault.cause) : Cause.fail(refusal);
 		const passkeys = yield* makePasskeyManagement(
-			{ rpId: "comms.test", expectedOrigin: "https://comms.test" },
 			() =>
 				Effect.gen(function* () {
 					yield* sql`DELETE FROM auth_challenges WHERE id='proof'`;

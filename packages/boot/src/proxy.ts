@@ -35,6 +35,7 @@ import { Auth, AuthError } from "./auth.ts";
 import { authenticate, authErrorResponse, authFailure, authRoute, sessionCookie } from "./auth-http.ts";
 import { editRoute } from "./edit-http.ts";
 import { passkeyManagementRoute } from "./passkey-management-http.ts";
+import { passkeyCodeRoute } from "./passkey-code-http.ts";
 import { accountRoute } from "./account-http.ts";
 import { tokenMintRoute } from "./token-mint-http.ts";
 import { tokenRoute } from "./token-http.ts";
@@ -66,6 +67,8 @@ POST /auth/refresh rotates a refresh credential; retry with the same Idempotency
 GET /_boot/enrollments and /_boot/tokens list account metadata for the human session.
 POST /_boot/tokens mints a pair with a human session and fresh token.mint assertion; keep the exact proof for retries.
 GET /_boot/auth/passkeys lists keys; passkey.add and passkey.delete assertions authorize key changes.
+POST /_boot/auth/passkey-code {origin?} with a passkey.code assertion issues a 10-minute one-time code; redeem it at /auth/passkey-code.
+A code bound to a new origin activates that origin when redeemed there. GET/DELETE /_boot/auth/origins lists or removes runtime origins.
 POST /_boot/tokens/:family/revoke requires a human session and fresh token.revoke passkey assertion.
 POST /api/lock acquires the editor; GET/PUT/DELETE /api/fs/app/<path> reads or stages source.
 Save ${headerLabel(baseVersionHeader)} from GET; PUT ?reload=0&baseVersion=<token> stages raw bytes.
@@ -154,27 +157,29 @@ export const proxy = Effect.gen(function* () {
 		if ((yield* Ref.get(phase))._tag === "Stopping") return authErrorResponse("boot_unavailable", 503);
 		const recoveryResponse = yield* recoveryRoute(auth);
 		if (recoveryResponse) return recoveryResponse;
-		const settingsResponse = yield* settingsRoute(auth, authConfig);
+		const settingsResponse = yield* settingsRoute(auth);
 		if (settingsResponse) return settingsResponse;
-		const restarted = yield* restartRoute(auth, authConfig, restart);
+		const restarted = yield* restartRoute(auth, restart);
 		if (restarted) return restarted;
-		const authResponse = yield* authRoute(auth, authConfig, requestId);
+		const authResponse = yield* authRoute(auth, requestId);
 		if (authResponse) return authResponse;
-		const passkeyResponse = yield* passkeyManagementRoute(auth, authConfig);
+		const passkeyResponse = yield* passkeyManagementRoute(auth);
 		if (passkeyResponse) return passkeyResponse;
+		const passkeyCodeResponse = yield* passkeyCodeRoute(auth);
+		if (passkeyCodeResponse) return passkeyCodeResponse;
 		const enrollmentResponse = yield* enrollmentRoute(auth, authConfig, editing);
 		if (enrollmentResponse) return enrollmentResponse;
 		if ((yield* Ref.get(phase))._tag !== "Ready" && request.method === "POST" && path === "/_boot/db/backup")
 			return authErrorResponse("boot_unavailable", 503);
-		const backupResponse = yield* backupRoute(auth, backups, captures, authConfig);
+		const backupResponse = yield* backupRoute(auth, backups, captures);
 		if (backupResponse) return backupResponse;
-		const restored = yield* databaseRestoreRoute(restores, auth, authConfig);
+		const restored = yield* databaseRestoreRoute(restores, auth);
 		if (restored) return restored;
 		const accountResponse = yield* accountRoute(auth);
 		if (accountResponse) return accountResponse;
-		const mintResponse = yield* tokenMintRoute(auth, authConfig);
+		const mintResponse = yield* tokenMintRoute(auth);
 		if (mintResponse) return mintResponse;
-		const tokenResponse = yield* tokenRoute(auth, authConfig);
+		const tokenResponse = yield* tokenRoute(auth);
 		if (tokenResponse) return tokenResponse;
 		const explicitCredential =
 			request.headers.authorization !== undefined ||
@@ -212,12 +217,8 @@ export const proxy = Effect.gen(function* () {
 			Effect.gen(function* () {
 				let identity = !isPublic || explicitCredential ? yield* authenticate(auth, request) : null;
 				if (observed) yield* observed.attribute(identity, 0);
-				if (
-					identity?.kind === "human" &&
-					!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
-					request.headers.origin !== authConfig.expectedOrigin
-				)
-					return yield* new AuthError({ code: "origin_invalid" });
+				if (identity?.kind === "human" && !["GET", "HEAD", "OPTIONS"].includes(request.method))
+					yield* auth.relyingParty(request.headers.origin);
 				const expires = (response: HttpServerResponse.HttpServerResponse) =>
 					identity ? HttpServerResponse.setHeader(response, tokenExpiresHeader, String(identity.expiresAt)) : response;
 				if (identity) {

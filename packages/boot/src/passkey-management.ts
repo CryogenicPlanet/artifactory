@@ -3,7 +3,8 @@ import { committed, captureRefusal } from "./auth-primitives.ts";
 import { generateRegistrationOptions, verifyRegistrationResponse } from "@simplewebauthn/server";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { AuthError, type AuthConfig } from "./auth.ts";
+import { AuthError } from "./auth.ts";
+import type { RelyingParty } from "./auth-origins.ts";
 import type { AssertionProof } from "./enrollment.ts";
 import {
 	canonicalPasskeyAdd,
@@ -15,7 +16,12 @@ import {
 	type DeletePasskey,
 } from "./passkey-management-schema.ts";
 
-const item = Schema.Struct({ id: Schema.String, label: Schema.String, created_at: Schema.Finite });
+const item = Schema.Struct({
+	id: Schema.String,
+	label: Schema.String,
+	created_at: Schema.Finite,
+	rp_id: Schema.NullOr(Schema.String),
+});
 const challengeRow = Schema.Struct({
 	challenge: Schema.String,
 	setup_generation: Schema.NullOr(Schema.String),
@@ -24,7 +30,6 @@ const challengeRow = Schema.Struct({
 
 /** Composes with Auth's single mutex and boot transaction; registration state survives restart. */
 export const makePasskeyManagement = <E, R>(
-	config: AuthConfig,
 	verify: (
 		action: "passkey.add" | "passkey.delete",
 		binding: string,
@@ -45,12 +50,12 @@ export const makePasskeyManagement = <E, R>(
 			mutex.withPermit(
 				Effect.gen(function* () {
 					yield* liveSession(sessionId);
-					const rows = yield* sql`SELECT id, label, created_at FROM passkeys ORDER BY created_at, id`;
+					const rows = yield* sql`SELECT id, label, created_at, rp_id FROM passkeys ORDER BY created_at, id`;
 					const items = yield* Schema.decodeUnknownEffect(Schema.Array(item))(rows);
 					return { items, can_delete: items.length > 1 };
 				}),
 			);
-		const startPasskeyRegistration = (label: string, sessionId: string) =>
+		const startPasskeyRegistration = (label: string, sessionId: string, party: RelyingParty) =>
 			mutex.withPermit(
 				sql.withTransaction(
 					Effect.gen(function* () {
@@ -65,7 +70,7 @@ export const makePasskeyManagement = <E, R>(
 							try: () =>
 								generateRegistrationOptions({
 									rpName: "chirp",
-									rpID: config.rpId,
+									rpID: party.rpId,
 									userName: "human",
 									userID: new TextEncoder().encode("comms-human"),
 									attestationType: "none",
@@ -85,7 +90,12 @@ export const makePasskeyManagement = <E, R>(
 					}),
 				),
 			);
-		const finishPasskeyRegistration = (params: AddPasskey, proof: AssertionProof, sessionId: string) =>
+		const finishPasskeyRegistration = (
+			params: AddPasskey,
+			proof: AssertionProof,
+			sessionId: string,
+			party: RelyingParty,
+		) =>
 			mutex.withPermit(
 				committed(
 					sql,
@@ -103,13 +113,14 @@ export const makePasskeyManagement = <E, R>(
 							challenge.expires_at <= (yield* Clock.currentTimeMillis)
 						)
 							return yield* new AuthError({ code: "challenge_invalid" });
+						// The authenticator signs the RP ID hash, so a ceremony started on another origin fails here.
 						const result = yield* Effect.tryPromise({
 							try: () =>
 								verifyRegistrationResponse({
 									response: params.response,
 									expectedChallenge: challenge.challenge,
-									expectedOrigin: config.expectedOrigin,
-									expectedRPID: config.rpId,
+									expectedOrigin: party.expectedOrigin,
+									expectedRPID: party.rpId,
 									requireUserVerification: true,
 								}),
 							catch: () => new AuthError({ code: "registration_invalid" }),
@@ -125,8 +136,8 @@ export const makePasskeyManagement = <E, R>(
 						const transports = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(
 							credential.transports ?? [],
 						);
-						yield* sql`INSERT INTO passkeys (id,public_key,counter,transports,label,created_at)
-				VALUES (${credential.id},${publicKey},${credential.counter},${transports},${params.label},${now})`;
+						yield* sql`INSERT INTO passkeys (id,public_key,counter,transports,label,created_at,rp_id)
+				VALUES (${credential.id},${publicKey},${credential.counter},${transports},${params.label},${now},${party.rpId})`;
 						yield* sql`DELETE FROM auth_challenges WHERE id=${params.registration}`;
 						return { credentialId: credential.id };
 					}).pipe(captureRefusal(Schema.is(AuthError))),

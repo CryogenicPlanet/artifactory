@@ -173,7 +173,25 @@ const routes = [
 		"post",
 		["/_boot/auth/challenge"],
 		"action-dependent",
-		`Create {action,params} challenge for enrollment.decide, token.mint, token.revoke, lock.break, db.restore, generation.restore, boot.restart, app.reset, settings.change, passkey.add or passkey.delete. Exact Origin required; all except enrollment.decide require a human session. Complete using ${headerLabel(assertionHeader)}: base64url JSON {id,response}.`,
+		`Create {action,params} challenge for enrollment.decide, token.mint, token.revoke, lock.break, db.restore, generation.restore, boot.restart, app.reset, settings.change, passkey.add, passkey.delete, passkey.code or origin.remove. Exact Origin required; all except enrollment.decide require a human session. Browser options use the RP ID of the request's origin. Complete using ${headerLabel(assertionHeader)}: base64url JSON {id,response}.`,
+	],
+	[
+		"get",
+		["/auth/passkey-code"],
+		"public",
+		"Page for redeeming a one-time add-passkey code on this origin; registers a passkey bound to its RP ID and signs the human in.",
+	],
+	[
+		"post",
+		["/_boot/auth/passkey-code/options"],
+		"public",
+		"Start code redemption with {code} and exact Origin: an allowed origin, or the origin the code is bound to. Refuses bearer credentials and boards with no passkey. A wrong code or origin consumes one of three attempts.",
+	],
+	[
+		"post",
+		["/_boot/auth/passkey-code/verify"],
+		"public",
+		"Finish redemption with {id,response} registration proof and the same exact Origin. Adds the passkey, activates a bound origin, consumes the code and issues a secure human session cookie.",
 	],
 	[
 		"get",
@@ -217,6 +235,25 @@ const routes = [
 		["/_boot/auth/passkeys/{id}"],
 		"human",
 		`Delete a passkey with {}, exact Origin and a fresh passkey.delete ${headerLabel(assertionHeader)}. The last key cannot be deleted.`,
+	],
+	[
+		"post",
+		["/_boot/auth/passkey-code"],
+		"human",
+		`Create a one-time add-passkey code with {origin?}, exact Origin and a fresh passkey.code ${headerLabel(assertionHeader)} bound to that body. Returns {code,origin,expires_at} once; the code lasts 10 minutes and replaces any earlier code. An origin (https, or http://localhost; RP ID is its hostname) stays pending and grants nothing until the code is redeemed from it. The host must already route that domain to this board.`,
+	],
+	["delete", ["/_boot/auth/passkey-code"], "human", "Revoke the live add-passkey code with {} and exact Origin."],
+	[
+		"get",
+		["/_boot/auth/origins"],
+		"human",
+		"List allowed browser origins: configured (not removable), runtime origins activated by a redeemed code, and a pending code origin, each with its RP ID and passkey count.",
+	],
+	[
+		"delete",
+		["/_boot/auth/origins"],
+		"human",
+		`Remove a runtime origin with {origin}, exact Origin and a fresh origin.remove ${headerLabel(assertionHeader)}. Refuses configured origins, the request's own origin, and origins whose RP ID still has passkeys.`,
 	],
 ] as const satisfies ReadonlyArray<readonly [string, readonly string[], Access, string]>;
 

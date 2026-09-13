@@ -1,5 +1,5 @@
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
-import { Config, Effect, Layer, Path } from "effect";
+import { Config, Effect, Layer, Option, Path } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { boot } from "../../src/index.ts";
 
@@ -12,12 +12,21 @@ const main = Effect.gen(function* () {
 	const dependenciesDirectory = yield* Config.String("DEPENDENCIES_DIRECTORY").pipe(
 		Config.withDefault(installedDependencies),
 	);
+	// Optional extra configured origin for multi-origin authentication tests.
+	const additional = yield* Config.option(Config.String("ADDITIONAL_ORIGIN"));
 	return yield* boot({
 		dataDirectory,
 		seedDirectory: path.dirname(entry),
 		entryFile: path.basename(entry),
 		dependenciesDirectory,
-		auth: { rpId: "comms.test", expectedOrigin: "https://comms.test" },
+		auth: {
+			rpId: "comms.test",
+			expectedOrigin: "https://comms.test",
+			additionalOrigins: Option.toArray(additional).map((origin) => ({
+				rpId: new URL(origin).hostname,
+				expectedOrigin: origin,
+			})),
+		},
 	}).pipe(
 		Effect.provide(
 			Layer.mergeAll(

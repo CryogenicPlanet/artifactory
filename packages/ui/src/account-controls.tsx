@@ -5,6 +5,7 @@ import { type BoardError } from "./board-api.ts";
 import { getPasskeys } from "./account-api.ts";
 import { addPasskey, deletePasskey } from "./account-passkeys.ts";
 import { AccountSettings } from "./account-settings.tsx";
+import { AccountOrigins } from "./account-origins.tsx";
 import { AccountTokens } from "./account-tokens.tsx";
 import { Alert } from "./ui/alert.tsx";
 import { Button } from "./ui/button.tsx";
@@ -54,7 +55,10 @@ export function AccountControls() {
 				</SectionHeading>
 				{passkeys?.items.map((passkey) => (
 					<article className="flex items-center justify-between gap-3 border-b border-border py-4" key={passkey.id}>
-						<strong className="min-w-0 wrap-anywhere">{passkey.label}</strong>
+						<span className="min-w-0 wrap-anywhere">
+							<strong>{passkey.label}</strong>
+							{passkey.rp_id && <span className="text-muted-foreground"> · {passkey.rp_id}</span>}
+						</span>
 						<Button
 							variant="outline"
 							size="sm"
@@ -95,7 +99,7 @@ export function AccountControls() {
 								placeholder="Backup security key"
 							/>
 							<p className="mt-1.5 text-[10px] leading-relaxed text-subtle">
-								First create the new passkey, then confirm using one already registered to this board.
+								First create the new passkey, then confirm using one already registered for this address.
 							</p>
 							<Button className="mt-3.5" variant="outline" size="sm" type="submit" disabled={busy || !label.trim()}>
 								Add passkey
@@ -117,6 +121,7 @@ export function AccountControls() {
 					</Alert>
 				)}
 			</section>
+			<AccountOrigins />
 			<AccountTokens />
 			<AccountSettings />
 		</div>

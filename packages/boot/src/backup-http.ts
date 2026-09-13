@@ -9,7 +9,7 @@ import { isHttpClientError } from "effect/unstable/http/HttpClientError";
 import { ChildError } from "./child-process.ts";
 import { Cause, Effect, Schema } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
-import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
+import { AuthError, type Auth } from "./auth.ts";
 import { authErrorResponse, authFailure, authenticate, body, humanSession } from "./auth-http.ts";
 import type { DatabaseBackup } from "./database-backup.ts";
 import { StorageRejected } from "./storage-headroom.ts";
@@ -17,12 +17,7 @@ import { ArtifactRetentionRejected } from "./artifact-retention.ts";
 import { BackupCursor, type BackupInventory } from "./backup-inventory.ts";
 
 /** GET /_boot/db/backups lists retained catalog metadata for a live human session, even without an app. */
-export const backupRoute = (
-	auth: Auth["Service"],
-	list: BackupInventory,
-	service: DatabaseBackup,
-	config: AuthConfig,
-) =>
+export const backupRoute = (auth: Auth["Service"], list: BackupInventory, service: DatabaseBackup) =>
 	Effect.gen(function* () {
 		const { request, url } = yield* bootRoute;
 		const create = url.pathname === "/_boot/db/backup" && request.method === "POST";
@@ -34,7 +29,7 @@ export const backupRoute = (
 						const identity = yield* authenticate(auth, request);
 						if (identity.kind !== "human" && !identity.scopes.includes("fs"))
 							return yield* new AuthError({ code: "scope_required" });
-						yield* checkBootOrigin("backupWrite", request, config, identity.kind);
+						yield* checkBootOrigin("backupWrite", request, auth, identity.kind);
 					});
 					yield* authorize;
 					if (url.search) return yield* new AuthError({ code: "invalid_request" });

@@ -1,11 +1,11 @@
 import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { Effect, Schema } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
-import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
+import { AuthError, type Auth } from "./auth.ts";
 import { assertionProof, humanSession, authFailure, body } from "./auth-http.ts";
 import { PasskeyRegistrationResponse } from "./passkey-management-schema.ts";
 
-export const passkeyManagementRoute = (auth: Auth["Service"], config: AuthConfig) =>
+export const passkeyManagementRoute = (auth: Auth["Service"]) =>
 	Effect.gen(function* () {
 		const { request, url } = yield* bootRoute;
 		const path = url.pathname;
@@ -17,13 +17,14 @@ export const passkeyManagementRoute = (auth: Auth["Service"], config: AuthConfig
 		if (!list && !start && !finish && !remove) return null;
 		return yield* authFailure(
 			Effect.gen(function* () {
-				yield* checkBootOrigin(list ? "passkeyRead" : "passkeyWrite", request, config);
+				yield* checkBootOrigin(list ? "passkeyRead" : "passkeyWrite", request, auth);
 				if (url.search) return yield* new AuthError({ code: "invalid_request" });
 				const session = yield* humanSession(auth, request);
 				if (list) return HttpServerResponse.jsonUnsafe(yield* auth.listPasskeys(session.id));
 				if (start) {
 					const input = yield* body(Schema.Struct({ label: Schema.String }));
-					return HttpServerResponse.jsonUnsafe(yield* auth.startPasskeyRegistration(input.label, session.id));
+					const party = yield* auth.relyingParty(request.headers.origin);
+					return HttpServerResponse.jsonUnsafe(yield* auth.at(party).startPasskeyRegistration(input.label, session.id));
 				}
 				if (finish) {
 					const input = yield* body(
@@ -31,11 +32,13 @@ export const passkeyManagementRoute = (auth: Auth["Service"], config: AuthConfig
 					);
 					const proof = yield* assertionProof(request);
 					return HttpServerResponse.jsonUnsafe(
-						yield* auth.finishPasskeyRegistration(
-							{ registration: input.id, label: input.label, response: input.response },
-							proof,
-							session.id,
-						),
+						yield* auth
+							.at(yield* auth.relyingParty(request.headers.origin))
+							.finishPasskeyRegistration(
+								{ registration: input.id, label: input.label, response: input.response },
+								proof,
+								session.id,
+							),
 					);
 				}
 				if (remove) {

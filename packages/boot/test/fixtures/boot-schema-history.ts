@@ -53,14 +53,23 @@ const main = Effect.gen(function* () {
 				const historical18 = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(
 					yield* fs.readFileString(path.join(directory, "v18.catalog.json")),
 				);
-				const current = (yield* catalog).filter((row) => row.tbl_name !== "boot_migrations");
-				assert.deepEqual(current, historical18, "Only the migration ledger may change the historical v18 catalog");
+				// Step 20 adds passkey RP IDs and the origin and code tables; nothing else in the v18 catalog may change.
+				const added = ["boot_migrations", "auth_origins", "passkey_codes"];
+				const current = (yield* catalog)
+					.filter((row) => !added.includes(String(row.tbl_name)))
+					.map((row) =>
+						row.name === "passkeys" && typeof row.sql === "string"
+							? { ...row, sql: row.sql.replace(/, rp_id TEXT\)$/, ")") }
+							: row,
+					);
+				assert.deepEqual(current, historical18, "Only step 20 and the ledger may change the historical v18 catalog");
+				assert.deepEqual(yield* sql`SELECT rp_id FROM passkeys`, [{ rp_id: null }]);
 				const receipts = yield* sql`SELECT migration_id FROM boot_migrations ORDER BY migration_id`;
 				assert.deepEqual(
 					receipts.map((row) => row.migration_id),
-					Array.from({ length: 19 }, (_, n) => n + 1),
+					Array.from({ length: 20 }, (_, n) => n + 1),
 				);
-				assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
+				assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 20 }]);
 				assert.deepEqual(yield* sql`SELECT id,legacy_store_id,engine FROM backups`, [
 					{ id: "historical-backup", legacy_store_id: null, engine: "sqlite" },
 				]);

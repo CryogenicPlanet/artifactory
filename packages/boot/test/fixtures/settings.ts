@@ -139,7 +139,7 @@ const run = Effect.gen(function* () {
 		assert.equal((yield* sql`SELECT * FROM events WHERE type='settings.changed'`).length, 1);
 	} else if (scenario === "http") {
 		const route = (method: string, headers: Record<string, string>, data?: unknown) =>
-			settingsRoute(auth, { rpId: "comms.test", expectedOrigin: "https://comms.test" }).pipe(
+			settingsRoute(auth).pipe(
 				Effect.provideService(
 					HttpServerRequest.HttpServerRequest,
 					HttpServerRequest.fromWeb(
@@ -201,7 +201,7 @@ const run = Effect.gen(function* () {
 			},
 			body: stream,
 		});
-		const pending = yield* settingsRoute(auth, { rpId: "comms.test", expectedOrigin: "https://comms.test" }).pipe(
+		const pending = yield* settingsRoute(auth).pipe(
 			Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(request)),
 			Effect.forkScoped,
 		);
