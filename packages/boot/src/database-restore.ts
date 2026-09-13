@@ -1,16 +1,17 @@
+import { resolveRestoreTarget } from "./database-restore-auth.ts";
 import { snapshotStoreEntry } from "./application.ts";
 import { lockBootWrite } from "./boot-write-lock.ts";
-import { remoteRestoreSelection } from "./remote-restore-selection.ts";
+import { RemoteDatabaseError } from "./remote-db-ops.ts";
 import { restoreBeforeImage } from "./restore-before-image.ts";
 import { humanAgent } from "./human-agent.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
-import { Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
+import { Cause, Clock, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { artifactRetention, ArtifactRetentionRejected } from "./artifact-retention.ts";
 import { storageHeadroom, StorageRejected } from "./storage-headroom.ts";
 import { DbOps } from "./db-ops.ts";
 import { AppRecovery } from "./app-recovery.ts";
-import { Auth } from "./auth.ts";
+import { Auth, AuthError } from "./auth.ts";
 import { BackupRecord, backupPath, backupRelativePath } from "./backup-metadata.ts";
 import { ChildAttempts } from "./child-attempts.ts";
 import { ChildError } from "./child-process.ts";
@@ -47,7 +48,6 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 	const beforeImage = offlineRestore
 		? yield* restoreBeforeImage(recovery.dataDirectory, offlineRestore.filename)
 		: null;
-	const remoteBefore = backup.engine === "sqlite" ? null : yield* remoteRestoreSelection(recovery);
 	const freshEpoch = crypto.randomBytes(32).pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
 	const read = (id: string) =>
 		sql`SELECT * FROM db_restore_requests WHERE proof_id=${id}`.pipe(
@@ -128,28 +128,13 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 		Effect.gen(function* () {
 			yield* supervisor.assertClosure;
 			const preserved = beforeImage ? yield* beforeImage.read(record.proof_id) : null;
-			const original = remoteBefore ? yield* remoteBefore.read(record.proof_id) : null;
-			if (!record.safety_backup && !preserved && !original)
-				return yield* new ChildError({ code: "restore_safety_backup_missing" });
+			if (!record.safety_backup && !preserved) return yield* new ChildError({ code: "restore_safety_backup_missing" });
 			if (record.phase !== "rollback") {
-				// A candidate may have opened the selected store. Reconcile that store before selecting its replacement.
-				if (!original || (yield* events.state).pending_id !== null)
-					yield* recovery.prepare(yield* freshEpoch, record.candidate_epoch ?? undefined);
+				// Reconcile the working store before selecting its replacement.
+				yield* recovery.prepare(yield* freshEpoch, record.candidate_epoch ?? undefined);
 				yield* sql`UPDATE db_restore_requests SET phase='rollback' WHERE proof_id=${record.proof_id}`;
 			}
-			// The replacement app must republish its grants before activation can expose its pages.
 			yield* sql`DELETE FROM public_paths`;
-			if (original) {
-				yield* sql.withTransaction(
-					Effect.gen(function* () {
-						yield* recovery.selectRestored(original);
-						yield* sql`UPDATE db_restore_requests SET phase='failed',failure='offline_restore_not_accepted' WHERE proof_id=${record.proof_id}`;
-					}),
-				);
-				yield* releaseLock(record);
-				yield* supervisor.fail(Cause.fail(new ChildError({ code: "restore_recovery_required" })));
-				return;
-			}
 			if (preserved && beforeImage) {
 				const identity = yield* recovery.identityStatus;
 				if (!identity.app_store_id) return yield* new ChildError({ code: "restore_recovery_required" });
@@ -160,15 +145,7 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				return;
 			}
 			if (!record.safety_backup) return yield* new ChildError({ code: "restore_safety_backup_missing" });
-			const restored = yield* backup.restoreInto(yield* saved(record.safety_backup));
-			if (restored._tag !== "file")
-				yield* sql.withTransaction(
-					Effect.gen(function* () {
-						yield* lockBootWrite(sql);
-						yield* recovery.selectRestored(restored);
-						yield* sql`UPDATE db_restore_requests SET phase='failed',failure='restore_not_accepted' WHERE proof_id=${record.proof_id}`;
-					}),
-				);
+			yield* backup.restoreInto(yield* saved(record.safety_backup));
 			yield* recovery.prepare(yield* freshEpoch);
 			yield* sql`UPDATE db_restore_requests SET phase='failed',failure='restore_not_accepted' WHERE proof_id=${record.proof_id}`;
 			yield* releaseLock(record);
@@ -177,12 +154,6 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 		Effect.uninterruptibleMask((interruptible) =>
 			Effect.gen(function* () {
 				yield* supervisor.assertClosure;
-				const original = remoteBefore ? yield* remoteBefore.read(record.proof_id) : null;
-				if (original) {
-					const selected = yield* recovery.store;
-					if (selected._tag === "file" || selected.database !== original.database)
-						return yield* new ChildError({ code: "restore_recovery_required" });
-				}
 				const generation = yield* selectGeneration(record);
 				yield* snapshotStoreEntry(generation, recovery.dataDirectory, yield* recovery.store);
 				const target = yield* saved(record.backup);
@@ -190,16 +161,8 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 					return yield* new ChildError({ code: "restore_backup_changed" });
 				// The replacement app must republish its grants before activation can expose its pages.
 				yield* sql`DELETE FROM public_paths`;
-				const restored = yield* backup.restoreInto(target);
+				yield* backup.restoreInto(target);
 				const epoch = yield* freshEpoch;
-				if (restored._tag !== "file")
-					yield* sql.withTransaction(
-						Effect.gen(function* () {
-							yield* lockBootWrite(sql);
-							yield* recovery.selectRestored(restored);
-							yield* sql`UPDATE db_restore_requests SET phase='working',candidate_epoch=${epoch} WHERE proof_id=${record.proof_id}`;
-						}),
-					);
 				yield* recovery.prepare(epoch);
 				// From here, candidate effects belong to the working store. A crash must reconcile it before rollback.
 				yield* sql`UPDATE db_restore_requests SET phase='working',candidate_epoch=${epoch} WHERE proof_id=${record.proof_id}`;
@@ -279,7 +242,6 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 		Effect.gen(function* () {
 			yield* completeSource(record);
 			if (record.phase === "failed" && beforeImage && (yield* beforeImage.read(record.proof_id))) return;
-			if (record.phase === "failed" && remoteBefore && (yield* remoteBefore.read(record.proof_id))) return;
 			if (yield* Ref.get(supervisor.current)) return;
 			yield* supervisor.start(yield* selectGeneration(record)).pipe(Effect.provideContext(context));
 		});
@@ -316,6 +278,16 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 		});
 	const recover = supervisor.operationGate.withPermit(
 		Effect.gen(function* () {
+			if (backup.engine !== "sqlite") {
+				const pending = yield* sql`SELECT proof_id FROM db_restore_requests
+					WHERE phase IN ('authorized','restoring','working','rollback') OR lock_id IS NOT NULL LIMIT 1`;
+				const prior = yield* sql`SELECT s.${sql("key")} FROM settings s
+					LEFT JOIN db_restore_requests r ON s.${sql("key")}=CONCAT('restore-remote-before:',r.proof_id)
+					WHERE s.${sql("key")} LIKE 'restore-remote-before:%' AND (r.phase IS NULL OR r.phase<>'restored') LIMIT 1`;
+				if (pending.length || prior.length)
+					return yield* new RemoteDatabaseError({ code: "remote_restore_recovery_required" });
+				return;
+			}
 			yield* supervisor.assertClosure;
 			if (beforeImage) yield* beforeImage.recoverUnrecorded;
 			const records =
@@ -324,8 +296,6 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 				);
 			for (const record of records) yield* resume(record);
 			yield* Ref.set(ready, true);
-			if (remoteBefore && (yield* remoteBefore.blocksStartup))
-				return yield* new ChildError({ code: "restore_recovery_required" });
 			// An opaque rollback is a repaired selection journal, not an app eligible to restart.
 			if (
 				offlineRestore &&
@@ -339,204 +309,192 @@ export const databaseRestore = Effect.fn("databaseRestore")(function* (superviso
 		}).pipe(Effect.asVoid),
 	);
 	const restore = (params: RestoreSelection, proof: AssertionProof, sessionId: string) =>
-		supervisor.operationGate.withPermit(
-			Effect.gen(function* () {
-				const pending = yield* recoveryIntents(sql);
-				if (!(yield* Ref.get(ready)) || pending.cutover)
-					return yield* new ChildError({ code: "restore_recovery_required" });
-				if (
-					pending.source &&
-					!(yield* sql`SELECT proof_id FROM db_restore_requests
+		backup.engine !== "sqlite"
+			? Effect.gen(function* () {
+					const now = yield* Clock.currentTimeMillis;
+					if (!(yield* sql`SELECT id FROM sessions WHERE id=${sessionId} AND expires_at>${now}`).length)
+						return yield* new AuthError({ code: "session_invalid" });
+					yield* resolveRestoreTarget(params).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+					// An unsupported operation consumes no assertion and creates no restore intent.
+					return yield* new RemoteDatabaseError({ code: "provider_restore_required" });
+				})
+			: supervisor.operationGate.withPermit(
+					Effect.gen(function* () {
+						const pending = yield* recoveryIntents(sql);
+						if (!(yield* Ref.get(ready)) || pending.cutover)
+							return yield* new ChildError({ code: "restore_recovery_required" });
+						if (
+							pending.source &&
+							!(yield* sql`SELECT proof_id FROM db_restore_requests
 					WHERE phase='restored' AND source_batch IN (SELECT id FROM source_batches WHERE state='publishing')
 					AND (proof_id=${proof.id} OR (session_id=${sessionId} AND idempotency_key=${params.idempotency_key ?? null}))`)
-						.length
-				)
-					return yield* new ChildError({ code: "restore_recovery_required" });
-				yield* supervisor.assertClosure;
-				const record = yield* auth.authorizeDatabaseRestore(params, proof, sessionId);
-				if (record.phase === "restored" || record.phase === "failed") {
-					yield* completeSource(record);
-					if (record.phase === "restored" && record.source_generation !== null && record.lock_id !== null)
-						yield* restart(record);
-					yield* releaseLock(record);
-					return receipt(record);
-				}
-				if (pending.source || record.phase !== "authorized")
-					return yield* new ChildError({ code: "restore_recovery_required" });
-				const prior = yield* Ref.get(supervisor.current);
-				let priorClosed = false;
-				let offlineNeeded = false;
-				const close = Effect.gen(function* () {
-					yield* supervisor.withdraw;
-					if (prior && !priorClosed) {
-						yield* stop(prior);
-						priorClosed = true;
-					}
-				});
-				const prepare = Effect.gen(function* () {
-					const target = yield* saved(record.backup);
-					const offline = prior || !offlineRestore ? null : yield* offlineRestore.status;
-					const remoteRepair = prior === null && remoteBefore !== null;
-					offlineNeeded = remoteRepair || (offline?.needed ?? false);
-					if (remoteRepair) {
-						yield* remoteBefore.current;
-						if ((yield* events.state).pending_id !== null)
-							return yield* new ChildError({ code: "restore_recovery_required" });
-					}
-					if (offlineNeeded && offlineRestore) {
-						if ((yield* events.state).pending_id !== null)
+								.length
+						)
 							return yield* new ChildError({ code: "restore_recovery_required" });
 						yield* supervisor.assertClosure;
-						yield* offlineRestore.verify(target);
-					}
-					const estimated = remoteRepair ? 0 : offline?.needed ? offline.bytes : yield* backup.estimatedBytes;
-					yield* retention.prune(yield* headroom.sample, estimated, prior ? [prior.generation.n] : []);
-					// Reserve room for both the safety copy and temporary restore copy before selecting replacement.
-					yield* headroom.check(estimated + target.bytes);
-					const generation =
-						prior?.generation ??
-						(yield* generations.list).find((item) => item.good === 1 && item.snapshot_dir !== null);
-					if (!generation) return yield* new ChildError({ code: "restore_snapshot_missing" });
-					if (record.source_generation === null)
-						yield* snapshotStoreEntry(generation, recovery.dataDirectory, yield* recovery.store);
-					// Pin another holder without consuming their staging; record and pin commit together.
-					yield* sql.withTransaction(
-						Effect.gen(function* () {
-							yield* lockBootWrite(sql);
-							const current = (yield* lock.inspect).value;
-							const held =
-								current ??
-								(yield* lock.acquire(`boot:restore:${record.proof_id}`, "boot", { note: "Database restore" })).value;
-							yield* lock.pin({ id: held.id, family: held.holder_family });
-							yield* sql`UPDATE db_restore_requests SET generation=${generation.n},prior_generation=${generation.n},lock_id=${held.id},lock_family=${held.holder_family},lock_owned=${current ? 0 : 1} WHERE proof_id=${record.proof_id}`;
-						}),
-					);
-					if (record.source_generation !== null)
-						yield* prepareRestoreGeneration(yield* read(record.proof_id), target, supervisor).pipe(
-							Effect.provideContext(preparationContext),
-						);
-					else
-						yield* rehearseRestoreGeneration(generation, target, record.proof_id, supervisor).pipe(
-							Effect.provideContext(preparationContext),
-						);
-					yield* supervisor.freeze;
-					if (prior) yield* prior.process.control("frozen").pipe(Effect.catch(() => close));
-					yield* supervisor.child.traffic.drained.pipe(Effect.timeout("5 seconds"));
-					if (remoteRepair) {
-						yield* supervisor.child.traffic.requests.freeze;
-						yield* supervisor.child.traffic.requests.drained.pipe(Effect.timeout("5 seconds"));
-						yield* close;
-						yield* supervisor.assertClosure;
-						yield* sql.withTransaction(
-							Effect.gen(function* () {
-								yield* lockBootWrite(sql);
+						const record = yield* auth.authorizeDatabaseRestore(params, proof, sessionId);
+						if (record.phase === "restored" || record.phase === "failed") {
+							yield* completeSource(record);
+							if (record.phase === "restored" && record.source_generation !== null && record.lock_id !== null)
+								yield* restart(record);
+							yield* releaseLock(record);
+							return receipt(record);
+						}
+						if (pending.source || record.phase !== "authorized")
+							return yield* new ChildError({ code: "restore_recovery_required" });
+						const prior = yield* Ref.get(supervisor.current);
+						let priorClosed = false;
+						let offlineNeeded = false;
+						const close = Effect.gen(function* () {
+							yield* supervisor.withdraw;
+							if (prior && !priorClosed) {
+								yield* stop(prior);
+								priorClosed = true;
+							}
+						});
+						const prepare = Effect.gen(function* () {
+							const target = yield* saved(record.backup);
+							const offline = prior || !offlineRestore ? null : yield* offlineRestore.status;
+							offlineNeeded = offline?.needed ?? false;
+							if (offlineNeeded && offlineRestore) {
 								if ((yield* events.state).pending_id !== null)
 									return yield* new ChildError({ code: "restore_recovery_required" });
-								yield* remoteBefore.record(record.proof_id);
-								yield* sql`UPDATE db_restore_requests SET phase='restoring' WHERE proof_id=${record.proof_id}`;
-							}),
-						);
-						return;
-					}
-					if (offline?.needed && beforeImage) {
-						yield* supervisor.child.traffic.requests.freeze;
-						yield* supervisor.child.traffic.requests.drained.pipe(Effect.timeout("5 seconds"));
-						yield* close;
-						yield* supervisor.assertClosure;
-						if ((yield* events.state).pending_id !== null)
-							return yield* new ChildError({ code: "restore_recovery_required" });
-						const preserved = yield* beforeImage.prepare(offline.storeId);
-						yield* sql.withTransaction(
-							Effect.gen(function* () {
-								yield* beforeImage.record(record.proof_id, preserved);
-								yield* sql`UPDATE db_restore_requests SET phase='restoring' WHERE proof_id=${record.proof_id}`;
-							}),
-						);
-						return;
-					}
-					yield* recovery.prepare(prior?.attempt.epoch ?? (yield* freshEpoch));
-					const id = yield* crypto.randomUUIDv4;
-					const directory = path.join(recovery.dataDirectory, "backups");
-					yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
-					const filename = backupPath(path, recovery.dataDirectory, id, backup.engine);
-					const fence = (yield* events.state).published_through;
-					const frozenEstimate = yield* backup.estimatedBytes;
-					yield* retention.prune(yield* headroom.sample, frozenEstimate, [generation.n]);
-					yield* headroom.check(frozenEstimate + target.bytes);
-					const bytes = Number(yield* backup.clone({ _tag: "file", filename: filename }));
-					const at = (yield* DateTime.nowAsDate).getTime();
-					yield* sql.withTransaction(
-						Effect.gen(function* () {
-							yield* lockBootWrite(sql);
-							yield* sql`INSERT INTO backups(id,engine,path,reason,bytes,taken_at,published_through,generation)
+								yield* supervisor.assertClosure;
+								yield* offlineRestore.verify(target);
+							}
+							const estimated = offline?.needed ? offline.bytes : yield* backup.estimatedBytes;
+							yield* retention.prune(yield* headroom.sample, estimated, prior ? [prior.generation.n] : []);
+							// Reserve room for both the safety copy and temporary restore copy before selecting replacement.
+							yield* headroom.check(estimated + target.bytes);
+							const generation =
+								prior?.generation ??
+								(yield* generations.list).find((item) => item.good === 1 && item.snapshot_dir !== null);
+							if (!generation) return yield* new ChildError({ code: "restore_snapshot_missing" });
+							if (record.source_generation === null)
+								yield* snapshotStoreEntry(generation, recovery.dataDirectory, yield* recovery.store);
+							// Pin another holder without consuming their staging; record and pin commit together.
+							yield* sql.withTransaction(
+								Effect.gen(function* () {
+									yield* lockBootWrite(sql);
+									const current = (yield* lock.inspect).value;
+									const held =
+										current ??
+										(yield* lock.acquire(`boot:restore:${record.proof_id}`, "boot", { note: "Database restore" }))
+											.value;
+									yield* lock.pin({ id: held.id, family: held.holder_family });
+									yield* sql`UPDATE db_restore_requests SET generation=${generation.n},prior_generation=${generation.n},lock_id=${held.id},lock_family=${held.holder_family},lock_owned=${current ? 0 : 1} WHERE proof_id=${record.proof_id}`;
+								}),
+							);
+							if (record.source_generation !== null)
+								yield* prepareRestoreGeneration(yield* read(record.proof_id), target, supervisor).pipe(
+									Effect.provideContext(preparationContext),
+								);
+							else
+								yield* rehearseRestoreGeneration(generation, target, record.proof_id, supervisor).pipe(
+									Effect.provideContext(preparationContext),
+								);
+							yield* supervisor.freeze;
+							if (prior) yield* prior.process.control("frozen").pipe(Effect.catch(() => close));
+							yield* supervisor.child.traffic.drained.pipe(Effect.timeout("5 seconds"));
+							if (offline?.needed && beforeImage) {
+								yield* supervisor.child.traffic.requests.freeze;
+								yield* supervisor.child.traffic.requests.drained.pipe(Effect.timeout("5 seconds"));
+								yield* close;
+								yield* supervisor.assertClosure;
+								if ((yield* events.state).pending_id !== null)
+									return yield* new ChildError({ code: "restore_recovery_required" });
+								const preserved = yield* beforeImage.prepare(offline.storeId);
+								yield* sql.withTransaction(
+									Effect.gen(function* () {
+										yield* beforeImage.record(record.proof_id, preserved);
+										yield* sql`UPDATE db_restore_requests SET phase='restoring' WHERE proof_id=${record.proof_id}`;
+									}),
+								);
+								return;
+							}
+							yield* recovery.prepare(prior?.attempt.epoch ?? (yield* freshEpoch));
+							const id = yield* crypto.randomUUIDv4;
+							const directory = path.join(recovery.dataDirectory, "backups");
+							yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
+							const filename = backupPath(path, recovery.dataDirectory, id, backup.engine);
+							const fence = (yield* events.state).published_through;
+							const frozenEstimate = yield* backup.estimatedBytes;
+							yield* retention.prune(yield* headroom.sample, frozenEstimate, [generation.n]);
+							yield* headroom.check(frozenEstimate + target.bytes);
+							const bytes = Number(yield* backup.clone({ _tag: "file", filename: filename }));
+							const at = (yield* DateTime.nowAsDate).getTime();
+							yield* sql.withTransaction(
+								Effect.gen(function* () {
+									yield* lockBootWrite(sql);
+									yield* sql`INSERT INTO backups(id,engine,path,reason,bytes,taken_at,published_through,generation)
 						VALUES(${id},${backup.engine},${filename},'pre-restore',${bytes},${at},${fence},${generation.n})`;
-							yield* events.writeBoot({
-								at,
-								type: "backup.taken",
-								level: "info",
-								actor: "boot",
-								instance: null,
-								generation: generation.n,
-								request_id: null,
-								topic: null,
-								message_id: null,
-								payload: { id, reason: "pre-restore", bytes, published_through: fence },
-							});
-							yield* sql`UPDATE db_restore_requests SET safety_backup=${id} WHERE proof_id=${record.proof_id}`;
-						}),
-					);
-					yield* supervisor.child.traffic.requests.freeze;
-					// Retiring the child closes even stalled reads. Boot-owned SQLite readers share operationGate.
-					yield* supervisor.child.traffic.requests.drained.pipe(Effect.timeout("5 seconds"), Effect.ignore);
-					yield* close;
-					yield* supervisor.assertClosure;
-					yield* sql`UPDATE db_restore_requests SET phase='restoring' WHERE proof_id=${record.proof_id}`;
-				});
-				return yield* Effect.gen(function* () {
-					const prepared = yield* prepare.pipe(Effect.interruptible, Effect.exit);
-					if (prepared._tag === "Failure") {
-						yield* backup.recoverCopy;
-						yield* supervisor.assertClosure;
-						const latest = yield* read(record.proof_id);
-						if (latest.phase !== "authorized") return yield* Effect.failCause(prepared.cause);
-						// No replacement was selected. Resume the authoritative current store, never the requested backup.
-						if (latest.generation !== null) yield* close;
-						const cause = Cause.findError(prepared.cause);
-						const failure =
-							cause._tag === "Success" &&
-							((Schema.is(ChildError)(cause.success) && cause.success.code === "backup_engine_mismatch") ||
-								Schema.is(StorageRejected)(cause.success) ||
-								Schema.is(ArtifactRetentionRejected)(cause.success))
-								? cause.success.code
-								: "restore_preparation_failed";
-						yield* sql`UPDATE db_restore_requests SET phase='failed',failure=${failure} WHERE proof_id=${record.proof_id}`;
-						yield* releaseLock(latest);
-						if (offlineNeeded) yield* supervisor.fail(prepared.cause);
-						else if (latest.generation !== null) yield* restart(yield* read(record.proof_id));
-						return receipt(yield* read(record.proof_id));
-					}
-					yield* resume(yield* read(record.proof_id));
-					return receipt(yield* read(record.proof_id));
-				}).pipe(
-					// Reopening admission is safe only after failed coordinator work has lost its route.
-					Effect.tapCause(() =>
-						Effect.gen(function* () {
-							const active = yield* Ref.get(supervisor.current);
-							yield* supervisor.withdraw;
-							if (active) yield* stop(active);
-						}),
+									yield* events.writeBoot({
+										at,
+										type: "backup.taken",
+										level: "info",
+										actor: "boot",
+										instance: null,
+										generation: generation.n,
+										request_id: null,
+										topic: null,
+										message_id: null,
+										payload: { id, reason: "pre-restore", bytes, published_through: fence },
+									});
+									yield* sql`UPDATE db_restore_requests SET safety_backup=${id} WHERE proof_id=${record.proof_id}`;
+								}),
+							);
+							yield* supervisor.child.traffic.requests.freeze;
+							// Retiring the child closes even stalled reads. Boot-owned SQLite readers share operationGate.
+							yield* supervisor.child.traffic.requests.drained.pipe(Effect.timeout("5 seconds"), Effect.ignore);
+							yield* close;
+							yield* supervisor.assertClosure;
+							yield* sql`UPDATE db_restore_requests SET phase='restoring' WHERE proof_id=${record.proof_id}`;
+						});
+						return yield* Effect.gen(function* () {
+							const prepared = yield* prepare.pipe(Effect.interruptible, Effect.exit);
+							if (prepared._tag === "Failure") {
+								yield* backup.recoverCopy;
+								yield* supervisor.assertClosure;
+								const latest = yield* read(record.proof_id);
+								if (latest.phase !== "authorized") return yield* Effect.failCause(prepared.cause);
+								// No replacement was selected. Resume the authoritative current store, never the requested backup.
+								if (latest.generation !== null) yield* close;
+								const cause = Cause.findError(prepared.cause);
+								const failure =
+									cause._tag === "Success" &&
+									((Schema.is(ChildError)(cause.success) && cause.success.code === "backup_engine_mismatch") ||
+										Schema.is(StorageRejected)(cause.success) ||
+										Schema.is(ArtifactRetentionRejected)(cause.success))
+										? cause.success.code
+										: "restore_preparation_failed";
+								yield* sql`UPDATE db_restore_requests SET phase='failed',failure=${failure} WHERE proof_id=${record.proof_id}`;
+								yield* releaseLock(latest);
+								if (offlineNeeded) yield* supervisor.fail(prepared.cause);
+								else if (latest.generation !== null) yield* restart(yield* read(record.proof_id));
+								return receipt(yield* read(record.proof_id));
+							}
+							yield* resume(yield* read(record.proof_id));
+							return receipt(yield* read(record.proof_id));
+						}).pipe(
+							// Reopening admission is safe only after failed coordinator work has lost its route.
+							Effect.tapCause(() =>
+								Effect.gen(function* () {
+									const active = yield* Ref.get(supervisor.current);
+									yield* supervisor.withdraw;
+									if (active) yield* stop(active);
+								}),
+							),
+							Effect.ensuring(supervisor.release),
+						);
+					}).pipe(
+						Effect.uninterruptible,
+						Effect.tapCause((cause) =>
+							Effect.gen(function* () {
+								if (!(yield* Ref.get(supervisor.current))) yield* supervisor.fail(cause);
+							}),
+						),
 					),
-					Effect.ensuring(supervisor.release),
 				);
-			}).pipe(
-				Effect.uninterruptible,
-				Effect.tapCause((cause) =>
-					Effect.gen(function* () {
-						if (!(yield* Ref.get(supervisor.current))) yield* supervisor.fail(cause);
-					}),
-				),
-			),
-		);
 	return { restore, recover };
 });
 export type DatabaseRestore = Effect.Success<ReturnType<typeof databaseRestore>>;

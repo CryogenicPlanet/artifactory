@@ -2,12 +2,13 @@ import { BunServices } from "@effect/platform-bun";
 import { Cause, Effect, Layer, Schema } from "effect";
 import { FetchHttpClient, HttpServerResponse } from "effect/unstable/http";
 import { expect, test } from "vitest";
+import { RemoteDatabaseError } from "../src/remote-db-ops.ts";
 import { AuthError } from "../src/auth.ts";
 import { databaseRestoreResponse } from "../src/database-restore-http.ts";
 import type { DatabaseRestore } from "../src/database-restore.ts";
 import { SourceRejected } from "../src/source-schema.ts";
 
-const responseFor = (cause: Cause.Cause<SourceRejected | AuthError>) =>
+const responseFor = (cause: Cause.Cause<SourceRejected | AuthError | RemoteDatabaseError>) =>
 	Effect.gen(function* () {
 		const restore: DatabaseRestore = { recover: Effect.void, restore: () => Effect.failCause(cause) };
 		const response = yield* databaseRestoreResponse(
@@ -67,5 +68,14 @@ for (const scenario of ["conflict with defect", "defect", "missing backup with d
 		expect(result.error.code).toBe("handler_failed");
 		expect(result.error.message).not.toContain("private verifier diagnostic");
 		expect(result.error.hint).not.toContain("private verifier diagnostic");
+	});
+}
+
+for (const code of ["provider_restore_required", "remote_restore_recovery_required"] as const) {
+	test(`returns provider guidance for ${code}`, async () => {
+		const result = await Effect.runPromise(responseFor(Cause.fail(new RemoteDatabaseError({ code }))));
+		expect(result.status).toBe(409);
+		expect(result.error.code).toBe(code);
+		expect(result.error.hint).toMatch(/provider/);
 	});
 }

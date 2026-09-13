@@ -1,3 +1,4 @@
+import { RemoteDatabaseError } from "./remote-db-ops.ts";
 import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { isAppStoreIdentityError, appIdentityPolicy, transferPolicy } from "./app-store-identity.ts";
 import { Effect, Schema } from "effect";
@@ -50,6 +51,15 @@ export const databaseRestoreResponse = (
 				const reason = cause.reasons.length === 1 ? cause.reasons[0] : undefined;
 				if (reason?._tag !== "Fail") return Effect.failCause(cause);
 				const error = reason.error;
+				if (Schema.is(RemoteDatabaseError)(error))
+					return Effect.succeed(
+						HttpServerResponse.jsonUnsafe(
+							{
+								error: { code: error.code, message: error.message, hint: error.message, retriable: false },
+							},
+							{ status: 409, headers: { "cache-control": "no-store" } },
+						),
+					);
 				if (isAppStoreIdentityError(error))
 					return Effect.succeed(
 						HttpServerResponse.jsonUnsafe(
