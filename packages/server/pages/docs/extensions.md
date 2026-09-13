@@ -89,7 +89,7 @@ Start with the domain helpers. They preserve caller attribution and the board’
 - `ctx.messages.create(input, idempotencyKey?)` posts with caller attribution and returns after publication.
 - `ctx.topics.read(path, {depth?, archived?})` reads a topic, its pages and published activity.
 - `ctx.topics.meta(path, meta, idempotencyKey?)` replaces metadata through the shared mutation protocol.
-- `ctx.topics.markRead(path, seq)` advances only this caller's read cursor, without events or receipts. It accepts read-scoped requests, rejects unpublished sequences, and does nothing while frozen or draining.
+- `ctx.topics.markRead(path, seq)` advances only this caller's read cursor, without events or receipts. It accepts read-scoped requests and rejects unpublished sequences. An empty path is a no-op: reading the root never marks every topic. It also does nothing while frozen or draining.
 
 ### Custom durable data
 

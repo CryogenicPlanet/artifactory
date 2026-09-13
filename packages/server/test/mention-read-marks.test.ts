@@ -1,3 +1,5 @@
+import { cp, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { expect, it } from "vitest";
 import { mentionsIn } from "../src/ext/core/message-mentions.ts";
 import { conversation } from "./fixtures/conversation.ts";
@@ -5,6 +7,10 @@ import { conversation } from "./fixtures/conversation.ts";
 it("recognizes punctuation-terminated mentions without shortening another valid target", () => {
 	for (const [body, target] of [
 		["**@codex**", "@codex"],
+		["~~@codex~~", "@codex"],
+		["`@codex`", "@codex"],
+		["<@codex>", "@codex"],
+		["😀@codex😀", "@codex"],
 		['"@codex"', "@codex"],
 		["_@codex_", "@codex"],
 		["|@codex|", "@codex"],
@@ -18,6 +24,9 @@ it("recognizes punctuation-terminated mentions without shortening another valid 
 	])
 		expect(mentionsIn(body ?? "")).toEqual([target]);
 	for (const body of [
+		"mailto:@codex",
+		"https://example.test/@codex",
+		"/@codex",
 		"x@codex",
 		"é@codex",
 		"x\u0301@codex",
@@ -150,3 +159,20 @@ it("reindexes both historical mention images on upgrade without changing message
 	).toEqual(receipts);
 	expect(await (await resumed.post("/api/messages", input, cookie, "historical-mention")).json()).toEqual(original);
 }, 30000);
+
+it("leaves root read marks untouched when an extension calls markRead", async (test) => {
+	const fixture = await conversation(test);
+	const seed = join(fixture.root, "seed");
+	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
+	await writeFile(
+		join(seed, "ext/root-read.ts"),
+		`import {Effect} from "effect";
+ export default api => api.route("GET","/api/root-read",{description:"Exercise empty-root read marks",scope:"read",handler:(_request,ctx)=>Effect.gen(function*(){yield* ctx.topics.markRead("",0);return Response.json({ok:true});})});`,
+	);
+	const app = await fixture.launch(join(seed, "server.ts"));
+	await app.setup();
+	const cookie = await app.login();
+	await app.ready(cookie);
+	expect((await fetch(app.url + "/api/root-read", { headers: { cookie } })).status).toBe(200);
+	expect(await fixture.sql("SELECT * FROM reads")).toEqual([]);
+});

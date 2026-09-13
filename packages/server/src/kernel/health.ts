@@ -1,10 +1,18 @@
 import { Cause, Crypto, Effect, Ref, Schema, type Scope } from "effect";
+import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
 import { BootChannel, KernelError } from "./boot-channel.ts";
 import { HealthProbe, layer as probeLayer, rehearsalLayer } from "./health-probe.ts";
 import { Publication } from "./publication.ts";
 
 class RolledBack extends Schema.TaggedError<RolledBack>()("HealthRolledBack", {}) {}
+
+/** Reserved kernel route; dispatch readiness must reach this handler rather than a product endpoint. */
+export const readinessRoute = HttpRouter.add(
+	"GET",
+	"/_kernel/readiness",
+	Effect.succeed(HttpServerResponse.empty({ status: 200, headers: { "x-comms-readiness": "kernel" } })),
+);
 
 /** Exercise kernel mutation and publication-aware reads, then confirm rollback before aborting. */
 export const probeHealth = <E = never, R = never>(
