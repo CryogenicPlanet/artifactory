@@ -40,11 +40,11 @@ jobs:
           test "$(bun --version)" = 1.4.0
           bun install --frozen-lockfile
       - name: Build actual immutable board image
-        run: docker build --platform linux/amd64 --tag comms:remote-board .
+        run: docker build --platform linux/amd64 --tag chirp:remote-board .
       - name: Verify private CA TLS with real clients and native copies
-        run: bash scripts/remote-tls-acceptance.sh '${{ matrix.engine }}' comms:remote-board
+        run: bash scripts/remote-tls-acceptance.sh '${{ matrix.engine }}' chirp:remote-board
       - name: Exercise board against native database
-        run: bash scripts/remote-board-acceptance.sh '${{ matrix.engine }}' comms:remote-board
+        run: bash scripts/remote-board-acceptance.sh '${{ matrix.engine }}' chirp:remote-board
 
   repair:
     runs-on: ubuntu-24.04
@@ -75,6 +75,6 @@ jobs:
           test "$(bun --version)" = 1.4.0
           bun install --frozen-lockfile
       - name: Build actual immutable board image
-        run: docker build --platform linux/amd64 --tag comms:remote-board .
+        run: docker build --platform linux/amd64 --tag chirp:remote-board .
       - name: Verify repair and publication shutdown with real guarded boards
-        run: bash scripts/remote-repair-acceptance.sh '${{ matrix.engine }}' comms:remote-board
+        run: bash scripts/remote-repair-acceptance.sh '${{ matrix.engine }}' chirp:remote-board
