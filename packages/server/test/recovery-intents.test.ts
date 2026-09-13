@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -122,7 +123,7 @@ it.for([insertCutover, insertRestore, insertSource] as const)(
 					cookie,
 					origin: "https://comms.test",
 					"content-type": "application/json",
-					"x-chirp-assertion": proof,
+					[assertionHeader]: proof,
 				},
 				body: JSON.stringify({ backup }),
 			});

@@ -1,3 +1,10 @@
+import {
+	agentHeader,
+	authKindHeader,
+	instanceHeader,
+	publicPageHeader,
+	requestIdHeader,
+} from "@comms/protocol/headers";
 import { Effect, Redacted } from "effect";
 import { render } from "@comms/storage/store";
 import { spawn } from "node:child_process";
@@ -47,7 +54,7 @@ it("never proxies public or authenticated kernel namespace aliases to a live chi
 		for (const headers of [
 			{},
 			{ cookie: app.cookie, origin: "https://comms.test" },
-			{ authorization: "Bearer invalid", "x-chirp-agent": "rahul" },
+			{ authorization: "Bearer invalid", [agentHeader]: "rahul" },
 		]) {
 			expect(await post(app.url, path, headers), path).toBe(403);
 		}
@@ -96,13 +103,7 @@ it("rejects caller metadata even with the correct secret on direct child control
 	});
 	await expect.poll(() => /COMMS_CHILD_PORT=(\d+)/.exec(output)?.[1]).toBeTruthy();
 	const url = `http://127.0.0.1:${/COMMS_CHILD_PORT=(\d+)/.exec(output)?.[1]}`;
-	for (const name of [
-		"x-chirp-request-id",
-		"x-chirp-agent",
-		"x-chirp-auth-kind",
-		"x-chirp-instance",
-		"x-chirp-public-page",
-	]) {
+	for (const name of [requestIdHeader, agentHeader, authKindHeader, instanceHeader, publicPageHeader]) {
 		expect(await post(url, "/_kernel/control", { "x-boot-secret": secret, [name]: "injected" })).toBe(403);
 	}
 	const trusted = await fetch(`${url}/_kernel/control`, {

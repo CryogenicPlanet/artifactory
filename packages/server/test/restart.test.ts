@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ const headers = (cookie: string, proof: string) => ({
 	cookie,
 	origin: "https://comms.test",
 	"content-type": "application/json",
-	"x-chirp-assertion": proof,
+	[assertionHeader]: proof,
 });
 const restart = (app: App, cookie: string, proof: string) =>
 	fetch(`${app.url}/_boot/restart`, {

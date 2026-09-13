@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -31,7 +32,7 @@ it("loads optional profile, roster and deletion policies through public capabili
 			(
 				await fetch(`${app.url}/_boot/enroll/${enrolled.id}/approve`, {
 					method: "POST",
-					headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": proof },
+					headers: { origin: "https://comms.test", "content-type": "application/json", [assertionHeader]: proof },
 					body: JSON.stringify({ decision: "approve", scopes, long_lived: false }),
 				})
 			).status,

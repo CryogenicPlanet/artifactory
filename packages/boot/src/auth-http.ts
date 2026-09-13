@@ -1,3 +1,4 @@
+import { assertionHeader, requestIdHeader, tokenExpiresHeader } from "@comms/protocol/headers";
 import { humanAgent } from "./human-agent.ts";
 import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { requestBytes } from "./request-bytes.ts";
@@ -262,7 +263,7 @@ export const humanSession = (auth: Auth["Service"], request: HttpServerRequest.H
 
 export const assertionProof = (request: HttpServerRequest.HttpServerRequest) =>
 	Effect.gen(function* () {
-		const header = request.headers["x-chirp-assertion"];
+		const header = request.headers[assertionHeader];
 		if (!header || header.length > 16_384 || !/^[A-Za-z0-9_-]+$/.test(header))
 			return yield* new AuthError({ code: "assertion_invalid" });
 		return yield* Schema.decodeEffect(Schema.fromJsonString(authentication))(
@@ -338,7 +339,7 @@ export const authRoute = (auth: Auth["Service"], config: AuthConfig, requestId: 
 					const session = yield* auth.finishLogin(input.id, input.response);
 					return HttpServerResponse.jsonUnsafe(
 						{ expires_at: session.expiresAt },
-						{ headers: { "x-chirp-token-expires": String(session.expiresAt) } },
+						{ headers: { [tokenExpiresHeader]: String(session.expiresAt) } },
 					).pipe(
 						HttpServerResponse.setCookieUnsafe(sessionCookie, session.token, {
 							httpOnly: true,
@@ -365,7 +366,7 @@ export const authRoute = (auth: Auth["Service"], config: AuthConfig, requestId: 
 				);
 			}).pipe(Effect.map(HttpServerResponse.setHeader("cache-control", "no-store"))),
 		).pipe(
-			Effect.map(HttpServerResponse.setHeader("x-chirp-request-id", requestId)),
+			Effect.map(HttpServerResponse.setHeader(requestIdHeader, requestId)),
 			Effect.tap((response) =>
 				post
 					? Console.error(

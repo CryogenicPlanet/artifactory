@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { Schema } from "effect";
 import { readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -163,7 +164,7 @@ it("refuses a foreign agent and wrong Origin without changing borrowed staging",
 			cookie: state.cookie,
 			origin: "https://comms.test",
 			"content-type": "application/json",
-			"x-chirp-assertion": proof,
+			[assertionHeader]: proof,
 		},
 		body: JSON.stringify(params),
 	});

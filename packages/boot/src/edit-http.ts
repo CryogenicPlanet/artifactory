@@ -1,3 +1,4 @@
+import { baseVersionHeader } from "@comms/protocol/headers";
 import type { ChildError } from "./child-process.ts";
 import type { RecoveryRejected } from "./recovery-intents.ts";
 import { captureRefusal } from "./auth-primitives.ts";
@@ -373,7 +374,7 @@ export const editRoute = (
 							subject === "page" && name.toLowerCase().endsWith(".md")
 								? "text/markdown; charset=utf-8"
 								: "application/octet-stream",
-						"x-chirp-base-version": image.sha ?? "",
+						[baseVersionHeader]: image.sha ?? "",
 						etag: `"${image.sha}"`,
 						"cache-control": "no-store",
 					},

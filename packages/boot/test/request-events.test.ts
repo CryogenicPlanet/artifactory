@@ -1,3 +1,4 @@
+import { agentHeader, assertionHeader, requestIdHeader, spanHeader, traceparentHeader } from "@comms/protocol/headers";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { createHash, randomBytes } from "node:crypto";
@@ -67,17 +68,17 @@ it("records child requests and authentication refusals without query, body, cred
 		method: "POST",
 		headers: {
 			"content-type": "text/plain",
-			"x-chirp-agent": "forged",
-			"x-chirp-request-id": "forged",
-			"x-chirp-assertion": "assertion-secret",
+			[agentHeader]: "forged",
+			[requestIdHeader]: "forged",
+			[assertionHeader]: "assertion-secret",
 			traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
 			tracestate: "credential=secret",
 			baggage: "credential=secret",
-			"x-chirp-traceparent": "forged",
+			[traceparentHeader]: "forged",
 		},
 		body: "body-secret",
 	});
-	expect(response.headers.get("x-chirp-span")).toBeNull();
+	expect(response.headers.get(spanHeader)).toBeNull();
 	const echo: unknown = await response.json();
 	if (typeof echo !== "object" || !echo || !("requestId" in echo)) throw new Error("Missing request id");
 	expect(echo).toMatchObject({
@@ -111,7 +112,7 @@ it("records child requests and authentication refusals without query, body, cred
 		app.cookie,
 	])
 		expect(JSON.stringify(logged)).not.toContain(secret);
-	for (const headers of [{ "x-chirp-agent": "forged" }, { authorization: "Bearer invalid", "x-chirp-agent": "forged" }])
+	for (const headers of [{ [agentHeader]: "forged" }, { authorization: "Bearer invalid", [agentHeader]: "forged" }])
 		expect((await fetch(`${app.url}/echo`, { headers })).status).toBe(401);
 	await app.fetch(`${app.url}/health`);
 	await app.fetch(`${app.url}/_boot/status`);
@@ -297,8 +298,8 @@ it("records boot auth and enrollment failures and app-down replies once without 
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
-				"x-chirp-agent": "forged",
-				"x-chirp-assertion": "assertion-secret",
+				[agentHeader]: "forged",
+				[assertionHeader]: "assertion-secret",
 			},
 			body: JSON.stringify({ name: "forged", secret: "body-secret" }),
 		});

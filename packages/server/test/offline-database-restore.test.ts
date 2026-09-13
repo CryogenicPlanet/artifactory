@@ -1,3 +1,4 @@
+import { assertionHeader, headerLabel } from "@comms/protocol/headers";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -77,7 +78,7 @@ for (const scenario of [
 					cookie,
 					origin: "https://comms.test",
 					"content-type": "application/json",
-					"X-Chirp-Assertion": proof,
+					[headerLabel(assertionHeader)]: proof,
 				},
 				body: JSON.stringify({ backup: saved.id }),
 			});

@@ -1,3 +1,4 @@
+import { agentHeader } from "@comms/protocol/headers";
 import { Console, Effect } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { publicRoute } from "../../src/proxy.ts";
@@ -8,7 +9,7 @@ const response = await Effect.runPromise(
 			HttpServerRequest.HttpServerRequest,
 			HttpServerRequest.fromWeb(
 				new Request("http://localhost/.well-known/agent.json", {
-					headers: { authorization: "Bearer invalid", "x-chirp-agent": "forged", "x-boot-secret": "private" },
+					headers: { authorization: "Bearer invalid", [agentHeader]: "forged", "x-boot-secret": "private" },
 				}),
 			),
 		),

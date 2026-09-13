@@ -1,3 +1,4 @@
+import { assertionHeader, headerLabel } from "@comms/protocol/headers";
 import { sourcePut } from "./source-put.ts";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -122,7 +123,7 @@ export default (api: Api) => Effect.gen(function* () {
 					headers: {
 						...headers(restoreCookie),
 						"content-type": "application/json",
-						"X-Chirp-Assertion": proof,
+						[headerLabel(assertionHeader)]: proof,
 						...(key ? { "Idempotency-Key": key } : {}),
 					},
 					body: JSON.stringify({ generation: target, withDb: true }),

@@ -1,3 +1,4 @@
+import { scopesHeader } from "@comms/protocol/headers";
 import type { OpenAPISpec } from "effect/unstable/httpapi/OpenApi";
 
 export type RouteScope = "read" | "write" | "fs";
@@ -15,12 +16,12 @@ const credentials: ReadonlyArray<Record<string, ReadonlyArray<string>>> = [
 const secured = (operation: object, scope: RouteScope | "public") => ({
 	...operation,
 	security: scope === "public" ? [] : credentials.map((scheme) => ({ ...scheme })),
-	"x-chirp-scopes": scope === "public" ? [] : [scope],
+	[scopesHeader]: scope === "public" ? [] : [scope],
 });
 
 /**
  * Declare, per operation, the credentials it accepts and the scope it needs, matching the
- * `security` and `x-chirp-scopes` boot already publishes for its own routes. The spec is assembled
+ * `security` and scopes boot already publishes for its own routes. The spec is assembled
  * by mutation here and in the extension document, so this stamps in place too.
  */
 export const applySecurity = (

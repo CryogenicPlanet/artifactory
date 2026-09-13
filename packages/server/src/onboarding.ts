@@ -1,3 +1,4 @@
+import { initHeader, initStaleHeader, initVersionHeader, scopesHeader } from "@comms/protocol/headers";
 import type { OpenAPISpec } from "effect/unstable/httpapi/OpenApi";
 import { Crypto, Effect, Layer, Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi";
@@ -72,9 +73,9 @@ export const orientation = (markdownOnly: boolean, spec: OpenAPISpec) =>
 		const crypto = yield* Crypto.Crypto;
 		const version = Buffer.from(yield* crypto.digest("SHA-256", new TextEncoder().encode(source))).toString("hex");
 		let text = `${stable}\n\nVersion ${version}.\n`;
-		if (request.headers["x-chirp-scopes"]?.split(",").includes("read")) {
+		if (request.headers[scopesHeader]?.split(",").includes("read")) {
 			const who = yield* identity("read");
-			text += `\nYou are <code>${escapeHtml(`${who.agent}@${who.label ?? ""}`)}</code>. Scopes: ${escapeHtml(request.headers["x-chirp-scopes"] ?? "")}.\n`;
+			text += `\nYou are <code>${escapeHtml(`${who.agent}@${who.label ?? ""}`)}</code>. Scopes: ${escapeHtml(request.headers[scopesHeader] ?? "")}.\n`;
 		}
 		const html = !markdownOnly && (request.headers.accept ?? "").includes("text/html");
 		return HttpServerResponse.text(html ? pages.render(text, "init.md", { rawHref: "/init.md" }) : text, {
@@ -82,10 +83,8 @@ export const orientation = (markdownOnly: boolean, spec: OpenAPISpec) =>
 			headers: {
 				"cache-control": "no-store",
 				vary: "Accept, Authorization, Cookie",
-				"x-chirp-init-version": version,
-				...(request.headers["x-chirp-init"] && request.headers["x-chirp-init"] !== version
-					? { "x-chirp-init-stale": "1" }
-					: {}),
+				[initVersionHeader]: version,
+				...(request.headers[initHeader] && request.headers[initHeader] !== version ? { [initStaleHeader]: "1" } : {}),
 			},
 		});
 	}).pipe(
@@ -106,7 +105,7 @@ export const quickstart = (markdownOnly: boolean) =>
 		const who = yield* identity("read");
 		const pages = yield* Pages;
 		const source = yield* pages.read("quickstart.md");
-		const text = `${source}\nYou are <code>${escapeHtml(`${who.agent}@${who.label}`)}</code>. Scopes: ${escapeHtml(request.headers["x-chirp-scopes"] ?? "")}.\n`;
+		const text = `${source}\nYou are <code>${escapeHtml(`${who.agent}@${who.label}`)}</code>. Scopes: ${escapeHtml(request.headers[scopesHeader] ?? "")}.\n`;
 		const html = !markdownOnly && (request.headers.accept ?? "").includes("text/html");
 		return HttpServerResponse.text(html ? pages.render(text, "quickstart.md", { rawHref: "/quickstart.md" }) : text, {
 			contentType: html ? "text/html; charset=utf-8" : "text/markdown; charset=utf-8",

@@ -1,4 +1,5 @@
 /* oxlint-disable effecttsgo/node-builtin-import */
+import { assertionHeader, authKindHeader, instanceHeader } from "@comms/protocol/headers";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -87,7 +88,7 @@ it("manages passkeys with the child down and refuses bearer, forged identity, re
 	expect((await list()).can_delete).toBe(false);
 	for (const headers of [
 		{},
-		{ "x-chirp-auth-kind": "human", "x-chirp-instance": "forged" },
+		{ [authKindHeader]: "human", [instanceHeader]: "forged" },
 		{ authorization: `Bearer ${"a".repeat(43)}` },
 		{ ...human, authorization: `Bearer ${"a".repeat(43)}` },
 	]) {
@@ -118,7 +119,7 @@ it("manages passkeys with the child down and refuses bearer, forged identity, re
 		).toString("base64url");
 	};
 	const addProof = await proof("passkey.add", { registration: start.id, label: add.label, response: registration });
-	const signed = { ...human, "x-chirp-assertion": addProof };
+	const signed = { ...human, [assertionHeader]: addProof };
 	expect((await send("/_boot/auth/passkeys/verify", add, human)).status).toBe(401);
 	expect(
 		(
@@ -132,9 +133,9 @@ it("manages passkeys with the child down and refuses bearer, forged identity, re
 	expect(
 		(
 			await send("/_boot/auth/passkeys/verify", add, {
-				"x-chirp-assertion": addProof,
+				[assertionHeader]: addProof,
 				"x-boot-secret": "forged",
-				"x-chirp-auth-kind": "human",
+				[authKindHeader]: "human",
 			})
 		).status,
 	).not.toBe(200);
@@ -148,7 +149,7 @@ it("manages passkeys with the child down and refuses bearer, forged identity, re
 	expect(keys.items).toHaveLength(2);
 	expect(keys.items.find((row) => row.id === second.id)?.label).toBe("Hardware key");
 	const removeProof = await proof("passkey.delete", { id: second.id });
-	const deleteHeaders = { ...human, "x-chirp-assertion": removeProof };
+	const deleteHeaders = { ...human, [assertionHeader]: removeProof };
 	expect((await send(`/_boot/auth/passkeys/${first.id}`, {}, deleteHeaders, "DELETE")).status).toBe(401);
 	// Send half the body, revoke its session, then allow the signed request to finish.
 	let finishBody: (() => void) | undefined;
@@ -197,7 +198,7 @@ it("manages passkeys with the child down and refuses bearer, forged identity, re
 		const deleted = await send(
 			`/_boot/auth/passkeys/${id}`,
 			{},
-			{ cookie: newCookie, "x-chirp-assertion": signedDelete },
+			{ cookie: newCookie, [assertionHeader]: signedDelete },
 			"DELETE",
 		);
 		expect(deleted.status).toBe(status);

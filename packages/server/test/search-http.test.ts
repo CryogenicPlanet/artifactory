@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
@@ -77,7 +78,7 @@ it("searches Unicode words and phrases across topic boundaries with cursor, edit
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrolled.id}/approve`, {
 				method: "POST",
-				headers: { "content-type": "application/json", origin: "https://comms.test", "x-chirp-assertion": proof },
+				headers: { "content-type": "application/json", origin: "https://comms.test", [assertionHeader]: proof },
 				body: JSON.stringify({ decision: params.decision, scopes: params.scopes, long_lived: params.long_lived }),
 			})
 		).status,

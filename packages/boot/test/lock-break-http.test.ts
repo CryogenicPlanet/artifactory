@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -110,7 +111,7 @@ it("requires a fresh human proof bound to the observed lock and preserves a repl
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 				method: "POST",
-				headers: { ...human, "x-chirp-assertion": await proof("enrollment.decide", decision) },
+				headers: { ...human, [assertionHeader]: await proof("enrollment.decide", decision) },
 				body: JSON.stringify({ decision: decision.decision, scopes: decision.scopes, long_lived: false }),
 			})
 		).status,
@@ -153,9 +154,9 @@ it("requires a fresh human proof bound to the observed lock and preserves a repl
 	}
 	expect((await breakLock(lock.id, human)).status).toBe(401);
 	const signed = await proof("lock.break", { id: lock.id });
-	const signedHuman = { ...human, "x-chirp-assertion": signed };
+	const signedHuman = { ...human, [assertionHeader]: signed };
 	for (const headers of [
-		{ cookie: session.cookie, "content-type": "application/json", "x-chirp-assertion": signed },
+		{ cookie: session.cookie, "content-type": "application/json", [assertionHeader]: signed },
 		{ ...signedHuman, origin: "https://evil.test" },
 	])
 		expect((await breakLock(lock.id, headers)).status).toBe(403);
@@ -164,13 +165,13 @@ it("requires a fresh human proof bound to the observed lock and preserves a repl
 		{ ...bearer, origin: human.origin },
 		{ ...human, ...bearer },
 	]) {
-		expect((await breakLock(lock.id, { ...headers, "x-chirp-assertion": signed })).status).toBe(401);
+		expect((await breakLock(lock.id, { ...headers, [assertionHeader]: signed })).status).toBe(401);
 	}
 	expect(
 		(
 			await breakLock(lock.id, {
 				...human,
-				"x-chirp-assertion": await proof("token.revoke", { family: lock.holder_family }),
+				[assertionHeader]: await proof("token.revoke", { family: lock.holder_family }),
 			})
 		).status,
 	).toBe(401);
@@ -187,6 +188,6 @@ it("requires a fresh human proof bound to the observed lock and preserves a repl
 	expect(await inspect()).toEqual(replacement);
 	// A newly signed but stale observation must not break a later acquisition either.
 	const stale = await proof("lock.break", { id: lock.id });
-	expect((await breakLock(lock.id, { ...human, "x-chirp-assertion": stale })).status).toBe(423);
+	expect((await breakLock(lock.id, { ...human, [assertionHeader]: stale })).status).toBe(423);
 	expect(await inspect()).toEqual(replacement);
 });

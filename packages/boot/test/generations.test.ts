@@ -1,3 +1,4 @@
+import { kernelProtocolHeader, writerEpochHeader } from "@comms/protocol/headers";
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
@@ -30,7 +31,7 @@ const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) 
  if (request.headers.get("x-boot-secret") !== process.env.BOOT_SECRET) return new Response(null, { status: 403 });
  const path = new URL(request.url).pathname;
  if (path === "/_kernel/control") return new Response("ok");
- if (path === "/health" || path === "/_kernel/ping") return new Response("ok",{headers:{"x-chirp-writer-epoch":process.env.WRITER_EPOCH??"","x-chirp-kernel-protocol":"2"}});
+ if (path === "/health" || path === "/_kernel/ping") return new Response("ok",{headers:{"${writerEpochHeader}":process.env.WRITER_EPOCH??"","${kernelProtocolHeader}":"2"}});
  if (path === "/crash") { setTimeout(() => process.exit(7), 10); return new Response("exiting"); }
  return Response.json({ message, content: await Bun.file("content.txt").text(), generation: process.env.GENERATION });
 }});
@@ -217,7 +218,7 @@ describe("durable boot generations in real Bun and SQLite", () => {
 const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch() {
  process.kill(Number(process.env.PARENT_PID), "SIGTERM");
  await Bun.sleep(50);
- return new Response("ok",{headers:{"x-chirp-writer-epoch":process.env.WRITER_EPOCH??"","x-chirp-kernel-protocol":"2"}});
+ return new Response("ok",{headers:{"${writerEpochHeader}":process.env.WRITER_EPOCH??"","${kernelProtocolHeader}":"2"}});
 }});
 console.log("COMMS_CHILD_PORT=" + server.port);
 setTimeout(() => process.exit(0), 400);

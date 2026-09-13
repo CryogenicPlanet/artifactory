@@ -1,3 +1,4 @@
+import { assertionHeader, headerLabel } from "@comms/protocol/headers";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -40,7 +41,12 @@ it("keeps isolated restore admission armed after an invalid adoption diagnostic 
 		const proof = await isolated.signedAssertion("db.restore", { backup: backup.id }, cookie);
 		const response = await fetch(`${isolated.url}/_boot/db/restore`, {
 			method: "POST",
-			headers: { cookie, origin: "https://comms.test", "content-type": "application/json", "X-Chirp-Assertion": proof },
+			headers: {
+				cookie,
+				origin: "https://comms.test",
+				"content-type": "application/json",
+				[headerLabel(assertionHeader)]: proof,
+			},
 			body: JSON.stringify({ backup: backup.id }),
 		});
 		const body = await response.text();

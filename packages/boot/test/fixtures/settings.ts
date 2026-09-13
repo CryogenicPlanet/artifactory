@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { Auth, layer as authLayer } from "../../src/auth.ts";
 import { layer as eventsLayer } from "../../src/events.ts";
 import { layer as lockLayer } from "../../src/edit-lock.ts";
@@ -167,7 +168,7 @@ const run = Effect.gen(function* () {
 				{
 					cookie,
 					origin: "https://comms.test",
-					"x-chirp-assertion": Buffer.from(JSON.stringify(proof)).toString("base64url"),
+					[assertionHeader]: Buffer.from(JSON.stringify(proof)).toString("base64url"),
 				},
 				params,
 			))?.status,
@@ -196,7 +197,7 @@ const run = Effect.gen(function* () {
 			headers: {
 				cookie: `${sessionCookie}=${session.token}`,
 				origin: "https://comms.test",
-				"x-chirp-assertion": Buffer.from(JSON.stringify(proof)).toString("base64url"),
+				[assertionHeader]: Buffer.from(JSON.stringify(proof)).toString("base64url"),
 			},
 			body: stream,
 		});

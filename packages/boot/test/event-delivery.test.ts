@@ -1,3 +1,4 @@
+import { agentHeader, authKindHeader } from "@comms/protocol/headers";
 import { spawn } from "node:child_process";
 import { request } from "node:http";
 import { once } from "node:events";
@@ -210,7 +211,7 @@ it("private child queries cannot widen request diagnostics with absent or forged
 	await app.post("/emit", event({ type: "http.request", actor: "claude", payload: { path: "/other" } }));
 	for (const suffix of ["", "&request_actor=codex", "&request_actor=claude"]) {
 		const response = await app.get(`/_boot/events?since=0&types=http.request${suffix}`, {
-			headers: { "x-boot-secret": "fixture-secret", "x-chirp-agent": "claude", "x-chirp-auth-kind": "human" },
+			headers: { "x-boot-secret": "fixture-secret", [agentHeader]: "claude", [authKindHeader]: "human" },
 		});
 		expect(await json(response)).toMatchObject({ items: [], cursor: 2 });
 	}

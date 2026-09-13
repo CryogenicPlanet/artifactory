@@ -1,3 +1,4 @@
+import { baseVersionHeader } from "@comms/protocol/headers";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -243,7 +244,7 @@ it("hides deleted page ancestry at the published fence while retaining raw files
 	test.onTestFinished(() => controller.abort());
 	const current = await get("/api/fs/pages/gone/deep/readme.md");
 	expect(current.status).toBe(200);
-	const baseVersion = current.headers.get("x-chirp-base-version");
+	const baseVersion = current.headers.get(baseVersionHeader);
 	if (!baseVersion) throw Error("Missing source base version");
 	await current.arrayBuffer();
 	await fixture.hold();

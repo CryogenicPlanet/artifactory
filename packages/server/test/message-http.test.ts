@@ -1,3 +1,4 @@
+import { agentHeader, assertionHeader, authKindHeader } from "@comms/protocol/headers";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
@@ -17,7 +18,7 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 			(
 				await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 					method: "POST",
-					headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": proof },
+					headers: { origin: "https://comms.test", "content-type": "application/json", [assertionHeader]: proof },
 					body: JSON.stringify({ decision: "approve", scopes, long_lived: false }),
 				})
 			).status,
@@ -34,8 +35,8 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 			headers: {
 				authorization: `Bearer ${access}`,
 				"content-type": "application/json",
-				"x-chirp-auth-kind": "human",
-				"x-chirp-agent": "rahul",
+				[authKindHeader]: "human",
+				[agentHeader]: "rahul",
 				...(key ? { "idempotency-key": key } : {}),
 			},
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),

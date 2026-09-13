@@ -1,3 +1,4 @@
+import { publicPageHeader } from "@comms/protocol/headers";
 import { Messages } from "./ext/core/messages.ts";
 import { Cause, Effect, FileSystem, Layer, Option, Scope, Stream } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse, Mime } from "effect/unstable/http";
@@ -44,11 +45,11 @@ const page = Effect.gen(function* () {
 		try: () => decodeURIComponent(url.pathname.slice("/p".length).replace(/^\//, "").replace(/\/$/, "")),
 		catch: () => new PageRejected({ code: "page_path_invalid" }),
 	});
-	const publicPage = yield* Effect.try(() => decodeURIComponent(request.headers["x-chirp-public-page"] ?? "")).pipe(
+	const publicPage = yield* Effect.try(() => decodeURIComponent(request.headers[publicPageHeader] ?? "")).pipe(
 		Effect.orElseSucceed(() => null),
 	);
 	const anonymous =
-		request.headers["x-chirp-public-page"] !== undefined &&
+		request.headers[publicPageHeader] !== undefined &&
 		publicPage === name &&
 		(request.method === "GET" || request.method === "HEAD");
 	if (!anonymous) yield* identity("read");

@@ -1,3 +1,4 @@
+import { kernelProtocolHeader, writerEpochHeader } from "@comms/protocol/headers";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -7,8 +8,8 @@ function serve() {
 	if (!filename) throw new Error("Missing disposable database");
 	let delayed = false;
 	const headers = {
-		"x-chirp-writer-epoch": process.env.WRITER_EPOCH ?? "",
-		"x-chirp-kernel-protocol": "2",
+		[writerEpochHeader]: process.env.WRITER_EPOCH ?? "",
+		[kernelProtocolHeader]: "2",
 	};
 	const server = Bun.serve({
 		hostname: "127.0.0.1",

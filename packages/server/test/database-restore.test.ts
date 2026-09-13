@@ -1,3 +1,4 @@
+import { assertionHeader, headerLabel } from "@comms/protocol/headers";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { basename, join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -95,7 +96,7 @@ it("restores only the selected app data, keeps a fresh safety copy and staging, 
 				cookie,
 				origin: "https://comms.test",
 				"content-type": "application/json",
-				"X-Chirp-Assertion": proof,
+				[headerLabel(assertionHeader)]: proof,
 				"Idempotency-Key": key,
 			},
 			body: JSON.stringify({ id: saved.id }),
@@ -209,7 +210,12 @@ it("rolls a failed candidate health check back to the fresh safety copy and reco
 	const request = () =>
 		fetch(`${app.url}/_boot/db/restore`, {
 			method: "POST",
-			headers: { cookie, origin: "https://comms.test", "content-type": "application/json", "X-Chirp-Assertion": proof },
+			headers: {
+				cookie,
+				origin: "https://comms.test",
+				"content-type": "application/json",
+				[headerLabel(assertionHeader)]: proof,
+			},
 			body: JSON.stringify({ backup: saved.id }),
 		});
 	const response = await request();
@@ -269,7 +275,12 @@ it("refuses replacement and stays unavailable across restart when the prior owne
 	const proof = await app.signedAssertion("db.restore", { backup: saved.id }, cookie);
 	const response = await fetch(`${app.url}/_boot/db/restore`, {
 		method: "POST",
-		headers: { cookie, origin: "https://comms.test", "content-type": "application/json", "X-Chirp-Assertion": proof },
+		headers: {
+			cookie,
+			origin: "https://comms.test",
+			"content-type": "application/json",
+			[headerLabel(assertionHeader)]: proof,
+		},
 		body: JSON.stringify({ backup: saved.id }),
 	});
 	expect(response.status).toBeGreaterThanOrEqual(400);
@@ -328,7 +339,12 @@ it("closes the candidate and rolls back to fresh data when the restore HTTP requ
 	const pending = fetch(`${app.url}/_boot/db/restore`, {
 		method: "POST",
 		signal: controller.signal,
-		headers: { cookie, origin: "https://comms.test", "content-type": "application/json", "X-Chirp-Assertion": proof },
+		headers: {
+			cookie,
+			origin: "https://comms.test",
+			"content-type": "application/json",
+			[headerLabel(assertionHeader)]: proof,
+		},
 		body: JSON.stringify({ backup: saved.id }),
 	}).catch(() => null);
 	await expect.poll(() => readFile(marker, "utf8").catch(() => ""), { timeout: 10000 }).not.toBe("");

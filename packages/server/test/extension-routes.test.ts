@@ -1,3 +1,4 @@
+import { agentHeader, assertionHeader } from "@comms/protocol/headers";
 import { refusalSchema } from "./fixtures/openapi-refusal.ts";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -43,7 +44,7 @@ export default api => {
 	await app.setup();
 	const cookie = await app.login();
 	await app.ready(cookie);
-	const get = (path: string) => fetch(`${app.url}${path}`, { headers: { cookie, "x-chirp-agent": "spoof" } });
+	const get = (path: string) => fetch(`${app.url}${path}`, { headers: { cookie, [agentHeader]: "spoof" } });
 	const result = await (await get("/api/route-demo/hello%20world?tag=one&tag=two&since=12")).json();
 	expect(result).toMatchObject({
 		agent: "rahul",
@@ -115,7 +116,7 @@ export default api => {
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": proof },
+				headers: { origin: "https://comms.test", "content-type": "application/json", [assertionHeader]: proof },
 				body: JSON.stringify({ decision: params.decision, scopes: params.scopes, long_lived: params.long_lived }),
 			})
 		).status,

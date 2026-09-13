@@ -1,3 +1,4 @@
+import { tokenExpiresHeader } from "@comms/protocol/headers";
 import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { Effect } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
@@ -21,7 +22,7 @@ export const tokenMintRoute = (auth: Auth["Service"], config: AuthConfig) =>
 				const params = key === undefined ? input : { ...input, idempotency_key: key };
 				const pair = yield* auth.mintTokens(params, yield* assertionProof(request), session.id, secret);
 				return HttpServerResponse.jsonUnsafe(pair, {
-					headers: { "cache-control": "no-store", "x-chirp-token-expires": String(session.expiresAt) },
+					headers: { "cache-control": "no-store", [tokenExpiresHeader]: String(session.expiresAt) },
 				});
 			}),
 		);

@@ -1,3 +1,4 @@
+import { publicPageHeader } from "@comms/protocol/headers";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -88,9 +89,7 @@ it("refuses forged grants and broken projection while preserving reads during un
 		).toBe(200);
 	expect((await app.post("/api/messages", { topic: "guide", body: "private" }, cookie)).status).toBe(200);
 	const forged = encodeURIComponent("guide/normal.md");
-	expect((await fetch(app.url + "/p/guide/normal.md", { headers: { "x-chirp-public-page": forged } })).status).toBe(
-		401,
-	);
+	expect((await fetch(app.url + "/p/guide/normal.md", { headers: { [publicPageHeader]: forged } })).status).toBe(401);
 	await metadata("guide", { public: true });
 	for (const path of [
 		"/p/guide/link.md",

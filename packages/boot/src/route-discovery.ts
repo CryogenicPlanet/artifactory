@@ -1,3 +1,4 @@
+import { assertionHeader, authExtension, headerLabel, scopesHeader } from "@comms/protocol/headers";
 import type { Schema } from "effect";
 
 type Access = "public" | "read" | "fs" | "human" | "proof" | "device-secret" | "refresh-token" | "action-dependent";
@@ -13,7 +14,7 @@ const routes = [
 		"post",
 		["/_boot/settings"],
 		"human",
-		"Change {revision,patch} with exact Origin and a fresh settings.change X-Chirp-Assertion bound to that body and session. patch may contain storage or public_paths. Calendar retention is retired: new event_retention changes are refused with invalid_request; only previously accepted exact signed retries remain readable. Repeat the exact proof and body after a lost response to read the first accepted result; it never reapplies over a later change.",
+		`Change {revision,patch} with exact Origin and a fresh settings.change ${headerLabel(assertionHeader)} bound to that body and session. patch may contain storage or public_paths. Calendar retention is retired: new event_retention changes are refused with invalid_request; only previously accepted exact signed retries remain readable. Repeat the exact proof and body after a lost response to read the first accepted result; it never reapplies over a later change.`,
 	],
 	["get", ["/health"], "public", "Bootloader liveness, independent of the app."],
 	["head", ["/health"], "public", "Bootloader liveness without a response body."],
@@ -46,13 +47,13 @@ const routes = [
 		"post",
 		["/_boot/restart"],
 		"human",
-		"Restart boot with strict {}, exact Origin and a fresh boot.restart X-Chirp-Assertion bound to params {}. Returns 202 {status:restarting}, then exits gracefully for the external supervisor to relaunch. A lost response is uncertain; no idempotency replay.",
+		`Restart boot with strict {}, exact Origin and a fresh boot.restart ${headerLabel(assertionHeader)} bound to params {}. Returns 202 {status:restarting}, then exits gracefully for the external supervisor to relaunch. A lost response is uncertain; no idempotency replay.`,
 	],
 	[
 		"post",
 		["/_boot/reset"],
 		"human",
-		"Reset source to the captured image seed with strict {}, no query parameters, exact Origin and a fresh app.reset X-Chirp-Assertion from params {} bound to that seed and session. Rehearses and cuts over; preserves messages, pages and identities. Returns {generation,status,lock,error?,stderr?}; a lost response is uncertain and the proof is single-use.",
+		`Reset source to the captured image seed with strict {}, no query parameters, exact Origin and a fresh app.reset ${headerLabel(assertionHeader)} from params {} bound to that seed and session. Rehearses and cuts over; preserves messages, pages and identities. Returns {generation,status,lock,error?,stderr?}; a lost response is uncertain and the proof is single-use.`,
 	],
 	["get", ["/_boot/db/backups"], "human", "List retained app database backups; optional limit and before cursor."],
 	[
@@ -65,7 +66,7 @@ const routes = [
 		"post",
 		["/_boot/db/restore"],
 		"human",
-		"Restore {backup} (or {id}) with exact Origin and a fresh db.restore X-Chirp-Assertion. Optional Idempotency-Key binds retries.",
+		`Restore {backup} (or {id}) with exact Origin and a fresh db.restore ${headerLabel(assertionHeader)}. Optional Idempotency-Key binds retries.`,
 	],
 	[
 		"get",
@@ -96,7 +97,7 @@ const routes = [
 		"delete",
 		["/_boot/lock", "/api/lock"],
 		"fs",
-		"Release your edit lock. ?break=1 instead requires a human session and fresh lock.break X-Chirp-Assertion bound to the observed lock.",
+		`Release your edit lock. ?break=1 instead requires a human session and fresh lock.break ${headerLabel(assertionHeader)} bound to the observed lock.`,
 	],
 	[
 		"post",
@@ -108,7 +109,7 @@ const routes = [
 		"post",
 		["/_boot/revert", "/api/revert"],
 		"fs",
-		"Restore source with {} or one selector {path}, {batch}, {version}, {generation}. App undo requires your lock and empty staging. Optional Idempotency-Key. For {generation,withDb:true}, a human session, exact Origin and fresh generation.restore X-Chirp-Assertion bound to the exact generation, backup and optional Idempotency-Key are required; restores both source and that backup.",
+		`Restore source with {} or one selector {path}, {batch}, {version}, {generation}. App undo requires your lock and empty staging. Optional Idempotency-Key. For {generation,withDb:true}, a human session, exact Origin and fresh generation.restore ${headerLabel(assertionHeader)} bound to the exact generation, backup and optional Idempotency-Key are required; restores both source and that backup.`,
 	],
 	[
 		"get",
@@ -138,7 +139,7 @@ const routes = [
 		"post",
 		["/_boot/enroll/{id}/approve"],
 		"proof",
-		"Approve or deny with {decision,scopes,long_lived}, exact Origin and a fresh enrollment.decide X-Chirp-Assertion. No prior session required.",
+		`Approve or deny with {decision,scopes,long_lived}, exact Origin and a fresh enrollment.decide ${headerLabel(assertionHeader)}. No prior session required.`,
 	],
 	[
 		"post",
@@ -172,7 +173,7 @@ const routes = [
 		"post",
 		["/_boot/auth/challenge"],
 		"action-dependent",
-		"Create {action,params} challenge for enrollment.decide, token.mint, token.revoke, lock.break, db.restore, generation.restore, boot.restart, app.reset, settings.change, passkey.add or passkey.delete. Exact Origin required; all except enrollment.decide require a human session. Complete using X-Chirp-Assertion: base64url JSON {id,response}.",
+		`Create {action,params} challenge for enrollment.decide, token.mint, token.revoke, lock.break, db.restore, generation.restore, boot.restart, app.reset, settings.change, passkey.add or passkey.delete. Exact Origin required; all except enrollment.decide require a human session. Complete using ${headerLabel(assertionHeader)}: base64url JSON {id,response}.`,
 	],
 	[
 		"get",
@@ -190,13 +191,13 @@ const routes = [
 		"post",
 		["/_boot/tokens", "/api/tokens"],
 		"human",
-		"Mint a token pair with exact Origin and a fresh token.mint X-Chirp-Assertion. Optional Idempotency-Key must be bound in the challenge.",
+		`Mint a token pair with exact Origin and a fresh token.mint ${headerLabel(assertionHeader)}. Optional Idempotency-Key must be bound in the challenge.`,
 	],
 	[
 		"post",
 		["/_boot/tokens/{family}/revoke", "/api/tokens/{family}/revoke"],
 		"human",
-		"Revoke a family with {}, exact Origin and a fresh token.revoke X-Chirp-Assertion.",
+		`Revoke a family with {}, exact Origin and a fresh token.revoke ${headerLabel(assertionHeader)}.`,
 	],
 	["get", ["/_boot/auth/passkeys"], "human", "List registered passkey metadata."],
 	[
@@ -209,13 +210,13 @@ const routes = [
 		"post",
 		["/_boot/auth/passkeys/verify"],
 		"human",
-		"Finish registration with {id,label,response}, exact Origin and a fresh passkey.add X-Chirp-Assertion.",
+		`Finish registration with {id,label,response}, exact Origin and a fresh passkey.add ${headerLabel(assertionHeader)}.`,
 	],
 	[
 		"delete",
 		["/_boot/auth/passkeys/{id}"],
 		"human",
-		"Delete a passkey with {}, exact Origin and a fresh passkey.delete X-Chirp-Assertion. The last key cannot be deleted.",
+		`Delete a passkey with {}, exact Origin and a fresh passkey.delete ${headerLabel(assertionHeader)}. The last key cannot be deleted.`,
 	],
 ] as const satisfies ReadonlyArray<readonly [string, readonly string[], Access, string]>;
 
@@ -227,14 +228,14 @@ export const recoveryManifest = () => {
 				...boot[path],
 				[method]: {
 					description,
-					"x-chirp-auth": access,
+					[authExtension]: access,
 					security:
 						access === "human"
 							? [{ commsBootSession: [] }]
 							: access === "fs" || access === "read"
 								? [{ commsBootSession: [] }, { commsBootAccess: [] }]
 								: [],
-					"x-chirp-scopes": access === "fs" || access === "read" ? [access] : [],
+					[scopesHeader]: access === "fs" || access === "read" ? [access] : [],
 					parameters: [...path.matchAll(/\{([^}]+)\}/g)].map((match) => ({
 						name: match[0].slice(1, -1),
 						in: "path",
@@ -257,7 +258,7 @@ export const recoveryManifest = () => {
 				commsBootAccess: {
 					type: "http",
 					scheme: "bearer",
-					description: "Enrolled access token; required scopes are given by x-chirp-scopes.",
+					description: `Enrolled access token; required scopes are given by ${scopesHeader}.`,
 				},
 			},
 		},

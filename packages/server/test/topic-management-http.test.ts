@@ -1,3 +1,4 @@
+import { assertionHeader, scopesHeader } from "@comms/protocol/headers";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -133,7 +134,7 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": proof },
+				headers: { origin: "https://comms.test", "content-type": "application/json", [assertionHeader]: proof },
 				body: JSON.stringify({ decision: params.decision, scopes: params.scopes, long_lived: params.long_lived }),
 			})
 		).status,
@@ -148,7 +149,7 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 				headers: {
 					authorization: `Bearer ${access}`,
 					"content-type": "application/json",
-					"x-chirp-scopes": "read,write",
+					[scopesHeader]: "read,write",
 				},
 				body: JSON.stringify({ meta: {} }),
 			})

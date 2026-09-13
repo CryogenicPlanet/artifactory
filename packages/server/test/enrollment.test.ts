@@ -1,4 +1,5 @@
 /* oxlint-disable effecttsgo/global-date -- Native HTTP integration uses the real process wall clock. */
+import { agentHeader, assertionHeader, authKindHeader, scopesHeader } from "@comms/protocol/headers";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -32,7 +33,7 @@ it("enrolls two agents with signed approval, isolates scopes and attribution, ke
 		const assertion = await app.assertion(params);
 		const decision = await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 			method: "POST",
-			headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": assertion },
+			headers: { origin: "https://comms.test", "content-type": "application/json", [assertionHeader]: assertion },
 			body: JSON.stringify({ decision: params.decision, scopes, long_lived }),
 		});
 		expect(decision.status).toBe(200);
@@ -63,9 +64,9 @@ it("enrolls two agents with signed approval, isolates scopes and attribution, ke
 			headers: {
 				authorization: `Bearer ${access}`,
 				"content-type": "application/json",
-				"x-chirp-agent": "rahul",
-				"x-chirp-auth-kind": "human",
-				"x-chirp-scopes": "admin",
+				[agentHeader]: "rahul",
+				[authKindHeader]: "human",
+				[scopesHeader]: "admin",
 			},
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),
 		});
@@ -165,7 +166,7 @@ it("rejects unknown action fields, binds grants, requires exact Origin, and appr
 	const decide = (input: unknown, origin = "https://comms.test", assertion = proof) =>
 		fetch(`${down.url}/_boot/enroll/${enrollment.id}/approve`, {
 			method: "POST",
-			headers: { origin, "content-type": "application/json", "x-chirp-assertion": assertion },
+			headers: { origin, "content-type": "application/json", [assertionHeader]: assertion },
 			body: JSON.stringify(input),
 		});
 	const input = { decision: params.decision, scopes: params.scopes, long_lived: false };
@@ -189,7 +190,7 @@ it("rejects unknown action fields, binds grants, requires exact Origin, and appr
 		(
 			await fetch(`${down.url}/_boot/enroll/${denial.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": denyProof },
+				headers: { origin: "https://comms.test", "content-type": "application/json", [assertionHeader]: denyProof },
 				body: JSON.stringify({ decision: "deny", scopes: [], long_lived: false }),
 			})
 		).status,
