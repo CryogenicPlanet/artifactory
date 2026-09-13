@@ -4,6 +4,7 @@ import {
 	kernelProtocolHeader,
 	readinessHeader,
 	rehearsalReportHeader,
+	requestIdHeader,
 	writerEpochHeader,
 } from "@comms/protocol/headers";
 import { MigrationWarnings, layer as migrationWarningsLayer } from "./kernel/migration-portability.ts";
@@ -207,7 +208,7 @@ const server = Effect.gen(function* () {
 							const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method);
 							// Boot strips caller metadata and forwards this identifier only after admission.
 							// A frozen control can overtake that already-admitted request on the loopback connection.
-							const forwarded = /^[a-f0-9]{32}$/.test(request.headers["x-comms-request-id"] ?? "");
+							const forwarded = /^[a-f0-9]{32}$/.test(request.headers[requestIdHeader] ?? "");
 							if (
 								!(yield* Ref.get(lifecycle.healthy)) ||
 								!["accepted", "live", "frozen"].includes(state) ||

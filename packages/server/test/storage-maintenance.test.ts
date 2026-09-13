@@ -1,3 +1,4 @@
+import { requestIdHeader } from "@comms/protocol/headers";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, readFile } from "node:fs/promises";
 import { request } from "node:http";
@@ -142,14 +143,14 @@ it("drains an admitted body before capture while a concurrent source reload wait
 	for (const secret of [undefined, "wrong"]) {
 		const denied = await fetch(`http://127.0.0.1:${child.port}/api/messages`, {
 			method: "POST",
-			headers: { "x-comms-request-id": "a".repeat(32), ...(secret ? { "x-boot-secret": secret } : {}) },
+			headers: { [requestIdHeader]: "a".repeat(32), ...(secret ? { "x-boot-secret": secret } : {}) },
 			body: "{}",
 		});
 		expect(denied.status).toBe(403);
 	}
 	const forged = fetch(`${app.url}/api/does-not-exist`, {
 		method: "POST",
-		headers: { cookie, origin: "https://comms.test", "x-comms-request-id": "a".repeat(32) },
+		headers: { cookie, origin: "https://comms.test", [requestIdHeader]: "a".repeat(32) },
 		body: "{}",
 	}).then(
 		(response) => ({ response, error: null }),
