@@ -32,7 +32,7 @@ async function fixture(test: TestContext) {
 const owner = (lock: Lock) => ({ id: lock.id, family: lock.holder_family });
 
 describe("durable edit ownership and staging", () => {
-	it.for(["cutover", "restore", "source", "ownerless-source"])(
+	it.for(["cutover", "restore", "source", "ownerless-source", "ownerless-uppercase-source"])(
 		"refuses repair expiry under contradictory %s ownership",
 		async (kind, test) => {
 			const env = await fixture(test);
@@ -48,8 +48,10 @@ describe("durable edit ownership and staging", () => {
 				);
 			if (kind === "source")
 				await env.sql(`INSERT INTO source_batches VALUES('source','${lock.id}','boot',0,'publishing')`);
-			if (kind === "ownerless-source")
+			if (kind === "ownerless-source" || kind === "ownerless-uppercase-source")
 				await env.sql("INSERT INTO source_batches VALUES('source',NULL,'boot',0,'publishing')");
+			if (kind === "ownerless-uppercase-source")
+				await env.sql("INSERT INTO source_changes(batch,path) VALUES('source','Pages/private')");
 			const before = await env.sql("SELECT * FROM staging");
 			for (const op of ["acquire", "release", "break"])
 				expect(await env.call({ op, ...owner(lock), repair: true })).toMatchObject({
