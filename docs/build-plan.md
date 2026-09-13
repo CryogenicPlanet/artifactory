@@ -9,11 +9,15 @@ Transfer `3db1bc0` composes runtime `ae04432` and lower PR3 `92fbd7b`, PR4 `0d84
 | Work | Current state / remaining dependency |
 | --- | --- |
 | Base repair and ownership | Items 44–50 are integrated, including safe failed-state revert, ownerless publication repair, reserved-route readiness and retained source outcomes. Final regression acceptance is pending. |
-| Protection and migrations | Core13 reindexes mentions; core14 adds protection ownership/retirement. Target checks and shared declaration checksums compose with portable histories and transfer proofs. Historic IDs remain unchanged. PR7's duplicate-entry/SQL-target backport is pending; complete registry lifecycle remains in runtime. |
+| Protection and migrations | Core13 reindexes mentions; core14 adds protection ownership/retirement. Target checks and shared declaration checksums compose with portable histories and transfer proofs. Historic IDs remain unchanged. PR7/8 duplicate-entry/SQL-target backports `44b3dc8`/`176dfa65` pass check/review with focused tests pending; complete registry lifecycle remains in runtime. |
 | Latest database nits | Relative rehearsal paths, isolated repair admission, engine-specific backup caller budgets, portable cursor/publication SQL and raw-JSON CI wiring are integrated. |
-| Validation | Full suite running at exact `3db1bc0`, actual Node 22.22.3, two workers. Final combined/native/Linux/image/recovery CI acceptance is pending; record synthetic merge commits separately from branch heads. |
+| Validation | Full suite at exact `3db1bc0` finished with failures; corrected acceptance follows focused verification. Hosted results below are terminal; final corrected acceptance is pending; record synthetic merge commits separately from branch heads. |
 
 Scope remains boot lifecycle, auth and recovery with preserved messages, pages, identities and source versioning. Broader direct-DDL, custom MySQL schema objects, failed-clone retention and full engine parity remain separate design limitations. Local lease/recovery measurements do not promise a universal deadline when closure is unproved. The older accepted results below are historical evidence, not acceptance of this wave.
+
+Hosted CI is terminal: PR3/4/7/8 pass all checks. PR9 Linux has 1,090 passes/3 failures/96 skips; PR10 has 1,263 passes/2 failures/123 skips. All native boards/repair, image/QEMU and remote checks pass; all 12 transfer scenarios pass. Search-fixture schema duplication, retired-reactions initialization and PR9's six-revert aggregate deadline have assigned follow-ups. Exact tested merge hashes and run links are in the [review ledger](stack-review-status.md).
+
+Local exact `3db1bc0` finished **1,253 passed, 12 failed, 123 skipped**, across **275 passed, 9 failed, 47 skipped files**, in **2,719.06s**, with actual Node 22.22.3 and two workers. It overlapped confirmed 30m01s machine sleep. Extraordinary sleep-correlated durations are not uninterrupted execution; other failures still require their own assertion evidence and awake verification. No blanket sleep diagnosis or final pass is claimed.
 
 ## Accepted database checkpoint before this review wave
 

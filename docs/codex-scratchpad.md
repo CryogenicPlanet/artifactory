@@ -4,11 +4,15 @@ This is the handoff and remaining-work ledger for Codex. Implementation resumed 
 
 ## Current handoff — integrated review fixes, acceptance pending
 
-Frozen test checkout: transfer `3db1bc0`, composing runtime `ae04432` and lower heads PR3 `92fbd7b`, PR4 `0d84963`, PR7 `0085b6a`, PR8 `f1f16e6`. PR2 merged older `2bb3922`; PR3 carries its later descriptor follow-ups. Do not edit the checkout while its full suite runs with actual Node 22.22.3 and two workers.
+Frozen test checkout: transfer `3db1bc0`, composing runtime `ae04432` and lower heads PR3 `92fbd7b`, PR4 `0d84963`, PR7 `0085b6a`, PR8 `f1f16e6`. PR2 merged older `2bb3922`; PR3 carries its later descriptor follow-ups. The full suite at this checkpoint is terminal with failures; a corrected run follows focused verification.
 
 Repair admission 46 and protection lifecycle 48 are implemented, not pending writers. Core13 is the mention reindex; core14 owns protection provenance/retirement. Transfer proofs and receipt checksums include protection options. Isolated repair, backup caller budgets and native cursor/JSON follow-ups are composed. The [review ledger](stack-review-status.md) distinguishes exact lower fixes, later-runtime dispositions and refuted allegations.
 
-Remaining acceptance: finish the combined suite and CI, resolve any actual failures, then record tested heads/merge commits and update PR bodies. Do not substitute old full-suite totals or isolated focused passes. Owner SPEC/tech/database/review files and running dogfood data remain protected. Historical sections below intentionally preserve old failures and unintegrated handoff evidence; their status does not override this paragraph.
+Remaining acceptance: verify the terminal local/CI failures and rerun the corrected combined suite, then record tested heads/merge commits and update PR bodies. Do not substitute old full-suite totals or isolated focused passes. Owner SPEC/tech/database/review files and running dogfood data remain protected. Historical sections below intentionally preserve old failures and unintegrated handoff evidence; their status does not override this paragraph.
+
+Hosted CI is terminal: PR3/4/7/8 pass all checks. PR9 Linux has 1,090 passes/3 failures/96 skips; PR10 has 1,263 passes/2 failures/123 skips. All native boards/repair, image/QEMU and remote checks pass; all 12 transfer scenarios pass. Search-fixture schema duplication, retired-reactions initialization and PR9's six-revert aggregate deadline have assigned follow-ups. Exact tested merge hashes and run links are in the [review ledger](stack-review-status.md).
+
+Local exact `3db1bc0` finished **1,253 passed, 12 failed, 123 skipped**, across **275 passed, 9 failed, 47 skipped files**, in **2,719.06s**, with actual Node 22.22.3 and two workers. It overlapped confirmed 30m01s machine sleep. Extraordinary sleep-correlated durations are not uninterrupted execution; other failures still require their own assertion evidence and awake verification. No blanket sleep diagnosis or final pass is claimed.
 
 ## Accepted database checkpoint before the latest review wave
 
