@@ -62,6 +62,8 @@ const pinnedClient = (connection: RemoteConnection, writing: boolean) =>
 		const permit = yield* Semaphore.make(1);
 		const invalid = yield* Ref.make(false);
 		const safe = safeConnection(pinned);
+		// Mutation writes must stay inside sql.withTransaction: only failed transaction-control
+		// statements latch this session invalid; a failing bare statement does not.
 		const selected: Connection = {
 			...safe,
 			executeUnprepared: (sql, ...args) =>

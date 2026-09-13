@@ -79,6 +79,32 @@ Reads and writes using the remote client share its pinned session and run serial
 
 An advisory lock coordinates clients that follow this protocol. It does **not** prove every process or session using those credentials is dead, inspect prepared transactions, or fence a failed-over server. Arbitrary clients can bypass it. Multiple chirp containers, split-brain recovery and prepared-work cleanup are unsupported. Resolve those cases through the database operator; do not delete identity or recovery records to make startup pass.
 
+The kernel's epoch fence remains: each mutation transaction checks `kernel_writer.epoch` before writing. A stale chirp writer is refused and its transaction rolls back. The removed keeper is not that fence.
+
+Crash detection can be slower. After a host loses power, an orphaned session can retain its lock until the engine detects the dead connection. Depending on TCP keepalive settings, this can take hours; startup refuses with `remote_writer_busy` meanwhile. To recover sooner, first ensure the previous chirp instance is stopped, then have the database operator identify and terminate the lock-holding session. Do not kill an active instance to bypass admission.
+
+For PostgreSQL, inspect the writing database's advisory lock and verify the returned session against the stopped instance:
+
+```sql
+SELECT a.pid, a.usename, a.application_name, a.client_addr, a.backend_start, a.state
+FROM pg_stat_activity a JOIN pg_locks l ON l.pid = a.pid
+WHERE a.datname = 'chirp_app' AND l.locktype = 'advisory'
+  AND l.classid = 1128813138 AND l.objid = 1 AND l.objsubid = 2 AND l.granted;
+SELECT pg_terminate_backend(<verified_pid>);
+```
+
+For MySQL, resolve the named lock to a connection, inspect that ID in the process list, and terminate that connection:
+
+```sql
+SELECT IS_USED_LOCK(CONCAT('chirp:', SHA2('chirpapp', 224))) AS connection_id;
+SHOW FULL PROCESSLIST;
+KILL CONNECTION <verified_connection_id>;
+```
+
+See PostgreSQL's [session termination documentation](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-SIGNAL) and MySQL's [lock inspection](https://dev.mysql.com/doc/refman/8.4/en/locking-functions.html) and [connection termination](https://dev.mysql.com/doc/refman/8.4/en/kill.html) documentation.
+
+Use the boot database name instead when boot's own session is blocked. These are operator actions requiring the provider's session-inspection/termination privileges; chirp does not receive those privileges or run these commands.
+
 The rehearsal response reports `schema_checked`, `schema_check_only: true` and `report_unavailable: true`. This check no longer catches data-dependent migration failures before touching live data. PostgreSQL transactions and the existing MySQL DDL intent checks still apply, but they do not restore a prior database after a completed migration. Take a provider snapshot before risky changes and accept the downtime needed for repair.
 
 Identity proves the board, not snapshot freshness. An out-of-band provider restore does not rewind boot's sequence allocator or emit a `db.restored` event. Restoring only the app database can leave historical boot events describing data that the snapshot no longer contains. Restoring both stores may roll back credentials and event history too. The operator must choose a consistent recovery point; chirp does not coordinate provider snapshots or promise atomic recovery across them.
