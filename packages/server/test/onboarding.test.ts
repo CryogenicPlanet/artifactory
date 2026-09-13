@@ -77,6 +77,9 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	const text = await anonymous.text();
 	expect(text).toContain("Live instructions.");
 	expect(text).toContain("GET /api/standup");
+	// The prose instructs agents to lock, stage and reload; the table must list those routes too.
+	for (const route of ["POST /api/lock", "GET / PUT /api/fs/{path}", "POST /api/reload", "GET /_boot/events"])
+		expect(text).toContain(route);
 	expect(text).toContain(`Version ${version}`);
 	expect(text).not.toContain("You are");
 	expect(text).not.toContain("spoofed");

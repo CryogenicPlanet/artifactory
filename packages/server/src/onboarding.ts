@@ -3,6 +3,7 @@ import { Crypto, Effect, Layer, Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { failure, identity } from "./conversation-request.ts";
+import { liveDiscovery } from "./discovery.ts";
 import { Pages } from "./ext/core/pages.ts";
 import { escapeHtml } from "./page-markdown.ts";
 
@@ -44,11 +45,18 @@ export const description = HttpApiGroup.make("onboarding").add(
 	),
 );
 
-export const orientation = (markdownOnly: boolean, endpoints: OpenAPISpec["paths"]) =>
+export const orientation = (markdownOnly: boolean, spec: OpenAPISpec) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const pages = yield* Pages;
 		const source = yield* pages.read("init.md");
+		// The prose above the table tells agents to call /api/lock, /api/fs and /api/reload, which boot
+		// serves. Describe the same assembled surface /api does, and fall back to the app's own routes
+		// rather than refusing orientation when boot cannot be reached.
+		const endpoints = yield* liveDiscovery(spec).pipe(
+			Effect.map((merged) => merged.paths),
+			Effect.catchCause(() => Effect.succeed(spec.paths)),
+		);
 		const routeTable = Object.entries(endpoints)
 			.sort(([a], [b]) => a.localeCompare(b))
 			.map(([path, operations]) => {
@@ -118,8 +126,8 @@ export const quickstart = (markdownOnly: boolean) =>
 
 export const routes = (spec: OpenAPISpec) =>
 	Layer.mergeAll(
-		HttpRouter.add("GET", "/init", orientation(false, spec.paths)),
-		HttpRouter.add("GET", "/init.md", orientation(true, spec.paths)),
+		HttpRouter.add("GET", "/init", orientation(false, spec)),
+		HttpRouter.add("GET", "/init.md", orientation(true, spec)),
 		HttpRouter.add("GET", "/quickstart", quickstart(false)),
 		HttpRouter.add("GET", "/quickstart.md", quickstart(true)),
 	);
