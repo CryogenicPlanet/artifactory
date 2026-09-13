@@ -1,13 +1,13 @@
 import { remoteMigrate, indexShape, RemoteMigrationError } from "@comms/storage/remote-migrations";
 import { Effect } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
-import { remoteBootEvent } from "./remote-boot-event-schema.ts";
-import { remoteBootAuth } from "./remote-boot-auth-schema.ts";
-import { remoteBootRuntime } from "./remote-boot-runtime-schema.ts";
-import { remoteBootSource } from "./remote-boot-source-schema.ts";
+import { eventTables } from "./boot-event-tables.ts";
+import { authTables } from "./boot-auth-tables.ts";
+import { runtimeTables } from "./boot-runtime-tables.ts";
+import { sourceTables } from "./boot-source-tables.ts";
 
 /** These histories have never existed remotely: introduce final table shapes, retaining every logical ID. */
-export const initializeRemoteBootSchema = (sql: SqlClient, engine: "pg" | "mysql") =>
+export const initializeBootTables = (sql: SqlClient, engine: "pg" | "mysql") =>
 	Effect.gen(function* () {
 		// convert_to is STABLE. The generated hash uses immutable escape decoding of UTF-8 text bytes.
 		if (engine === "pg") {
@@ -17,10 +17,10 @@ export const initializeRemoteBootSchema = (sql: SqlClient, engine: "pg" | "mysql
 		}
 
 		const tables = [
-			...remoteBootAuth(sql, engine),
-			...remoteBootEvent(sql, engine),
-			...remoteBootRuntime(sql, engine),
-			...remoteBootSource(sql, engine),
+			...authTables(sql, engine),
+			...eventTables(sql, engine),
+			...runtimeTables(sql, engine),
+			...sourceTables(sql, engine),
 		];
 		const index = (step: number, table: string, name: string, columns: readonly string[], unique = false) => ({
 			step,

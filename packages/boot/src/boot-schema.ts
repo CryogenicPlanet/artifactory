@@ -1,4 +1,4 @@
-import { initializeRemoteBootSchema } from "./remote-boot-schema.ts";
+import { initializeBootTables } from "./boot-tables.ts";
 import { verifyBootSchemaShape } from "./boot-schema-shape.ts";
 import { inspectMigrations, migrate } from "@comms/storage/migrations";
 import { RecoveryRejected } from "./recovery-intents.ts";
@@ -35,7 +35,7 @@ export class BootIdentityUpgradePending extends Schema.TaggedError<BootIdentityU
 export const initializeBootSchema = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const remote = sql.onDialectOrElse({ pg: () => "pg" as const, mysql: () => "mysql" as const, orElse: () => null });
-	if (remote !== null) return yield* initializeRemoteBootSchema(sql, remote);
+	if (remote !== null) return yield* initializeBootTables(sql, remote);
 	const steps = [
 		{
 			id: 1,
