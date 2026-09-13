@@ -23,3 +23,13 @@ This observes session absence on one continuously observed authoritative server.
 Each pool owns its PostgreSQL integer codec; BIGINT values must fit JavaScript safe integers. MySQL keeps unsafe BIGINT results lossless until the guarded connection rejects them. Text and JSON strings are not treated as numbers. Query errors retain only unique-conflict, deadlock and serialization categories; driver causes, messages and constraint names are discarded.
 
 SQLite boot and core migration ledgers record complete named prefixes independently of editable and extension migration receipts. The validated, contiguous named ledger is authoritative. The shared migrator writes its derived `user_version` mirror in the same transaction as adoption, schema changes and receipts, and repairs a lagging mirror without replaying recorded steps. A mirror ahead of the ledger, corrupt IDs or names, and newer histories refuse startup with distinct bounded diagnostics. Initial adoption uses the mirror only when no ledger exists.
+
+## Credential boundaries deferred to remote runtime
+
+This SQLite-only layer does not secure remote credentials at these later process boundaries:
+
+- Launcher to child: `APP_DATABASE` is plaintext in the child environment and is read with `Config.String`.
+- Server to SQL read worker: `BootChannel` exposes a filename, rebuilt as a store selection and JSON-encoded into the worker’s stdin. A remote URL must remain protected through that transport.
+- Supervisor to privileged keeper: the environment map is JSON-encoded in `COMMS_CHILD_CONFIG`. Decode failures can reach keeper stderr and the retained generation stderr tail; the existing hexadecimal redactor does not scrub connection URLs.
+
+Remote runtime must address each boundary before accepting credential-bearing descriptors. Parser errors naming variables without values do not establish transport or stderr redaction.

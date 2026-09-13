@@ -20,7 +20,7 @@ export class StoreError extends Schema.TaggedError<StoreError>()("StoreError", {
 		"store_descriptor_mismatch",
 		"store_engine_mismatch",
 	]),
-	variable: Schema.optionalKey(Schema.Literals(["APP_STORE", "APP_DATABASE"])),
+	variable: Schema.optionalKey(Schema.Literals(["APP_STORE", "APP_DATABASE", "APP_STORE or APP_DATABASE"])),
 }) {
 	override get message() {
 		return this.variable ? `${this.variable}: ${this.code}` : this.code;
@@ -120,7 +120,8 @@ export const render = (store: Store) =>
 /** Old images provide only APP_DATABASE; current images provide both. Validate either selection. */
 export const childStore = (raw: string | undefined, legacy?: string) =>
 	Effect.gen(function* () {
-		const variable = raw === undefined && legacy !== undefined ? "APP_DATABASE" : "APP_STORE";
+		const variable =
+			raw === undefined ? (legacy === undefined ? "APP_STORE or APP_DATABASE" : "APP_DATABASE") : "APP_STORE";
 		const selected =
 			raw === undefined
 				? legacy === undefined
