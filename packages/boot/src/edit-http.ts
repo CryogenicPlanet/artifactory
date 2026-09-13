@@ -119,7 +119,7 @@ export const editRoute = (
 					if (repairLock) yield* humanSession(auth, request);
 					return HttpServerResponse.jsonUnsafe(
 						{ lock, ...(recovery ? { lock_committed: true, recovery } : {}) },
-						{ headers: { "cache-control": "no-store" } },
+						{ status: recovery?.status === "failed" ? 503 : 200, headers: { "cache-control": "no-store" } },
 					);
 				});
 			if (route === "/_boot/reset") {
