@@ -23,7 +23,7 @@ it.for(["restoring", "working", "accepted", "mid-source", "before-activation"] a
 		const source = await readFile(filename, "utf8");
 		const needle =
 			boundary === "restoring"
-				? "const restored = yield* backup.restoreInto(target);"
+				? "yield* backup.restoreInto(target);"
 				: boundary === "working"
 					? 'yield* candidate.process.health.pipe(Effect.timeout("5 seconds"));'
 					: boundary === "accepted"

@@ -80,7 +80,10 @@ it("keeper rejects absent, malformed and conflicting selections before any owner
 	for (const [env, message] of [
 		[{}, "APP_STORE or APP_DATABASE: store_descriptor_invalid"],
 		[{ APP_DATABASE: "relative-secret.db" }, "APP_DATABASE: store_descriptor_invalid"],
-		[{ APP_STORE: "mysql://private-secret@host/db" }, "Invalid remote app configuration"],
+		[
+			{ APP_STORE: "mysql://private-secret@host/db", APP_DATABASE: "/data/store/comms.db" },
+			"Invalid remote app configuration",
+		],
 		[
 			{ APP_STORE: "file:/data/store/comms.db", APP_DATABASE: "/data/private-secret.db" },
 			"APP_STORE: store_descriptor_mismatch",
