@@ -1,12 +1,13 @@
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Cause, Console, Deferred, Effect, Fiber, Layer, Ref, Schema, Semaphore } from "effect";
+import { Cause, Console, Deferred, Effect, Fiber, FileSystem, Layer, Redacted, Ref, Schema, Semaphore } from "effect";
 import { TestClock } from "effect/testing";
 import { Reactivity } from "effect/unstable/reactivity";
 import { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "../../src/kernel/boot-channel.ts";
 import { makeReadSnapshot } from "../../src/kernel/read-snapshot.ts";
+import { directClientLayer } from "@comms/storage/remote-client";
 import { testStore } from "./test-store.ts";
 import { Lifecycle, assertWriterHealthy, layer as lifecycleLayer } from "../../src/kernel/lifecycle.ts";
 
@@ -160,9 +161,42 @@ const program = Effect.gen(function* () {
 					),
 					true,
 				);
-			// SQLite keeps the failed transaction; remote drivers discard its lease before reuse.
-			assert.deepEqual(yield* sql`SELECT * FROM changes`, engine === "sqlite" ? [{ value: "must roll back" }] : []);
-			if (engine === "sqlite") yield* sql`ROLLBACK`;
+			if (engine === "sqlite") {
+				assert.deepEqual(yield* sql`SELECT * FROM changes`, [{ value: "must roll back" }]);
+				yield* sql`ROLLBACK`;
+			} else {
+				// This fixture deliberately sends malformed control text; only an independent session
+				// can inspect committed visibility without trusting that writer's transaction state.
+				const configPath = process.env.COMMS_READ_CLEANUP_CONFIG;
+				assert(configPath);
+				const config = yield* (yield* FileSystem.FileSystem).readFileString(configPath).pipe(
+					Effect.flatMap(
+						Schema.decodeEffect(
+							Schema.fromJsonString(
+								Schema.Struct({
+									engine: Schema.Literals(["pg", "mysql"]),
+									host: Schema.String,
+									port: Schema.Int,
+									database: Schema.String,
+									username: Schema.String,
+									password: Schema.String,
+								}),
+							),
+						),
+					),
+				);
+				assert.equal(config.database, "comms_read_cleanup");
+				const rows = yield* Effect.gen(function* () {
+					const observer = yield* SqlClient.SqlClient;
+					return yield* observer`SELECT * FROM changes`;
+				}).pipe(
+					Effect.provide(
+						directClientLayer({ connection: { ...config, password: Redacted.make(config.password), tls: false } }),
+					),
+					Effect.scoped,
+				);
+				assert.deepEqual(rows, []);
+			}
 		} else {
 			assert.equal(next._tag, "Success");
 			assert.deepEqual(yield* sql`SELECT * FROM changes`, [{ value: "next writer" }]);
