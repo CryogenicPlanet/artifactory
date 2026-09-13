@@ -426,7 +426,20 @@ record found six decisions with the owner's words in them and nine resting on a
 third-person paraphrase, and found nine separate places where a question was explicitly
 reserved for the owner and then closed by someone else. Section 10 is where those now go.
 
-This section is append-only. It grows when the owner says something, and at no other time.
+This section is append-only. It grows when the owner decides something, and at no other time.
+
+**Two kinds of evidence are admitted, and they are not equal.** A **quotation** is the
+owner's own words, kept exactly as typed. A **selection** is the owner choosing among
+options someone else wrote and put to them; the record then carries the question asked, the
+option chosen, and the description shown alongside it, because without all three a selection
+is not checkable later. A selection is weaker than a quotation for a specific reason: the
+framing was not the owner's, so the wording that ends up in the code is someone else's
+wording that the owner endorsed. Where an option was labelled as recommended by whoever
+asked, that is recorded too, since a reader deciding how much weight an entry carries should
+be able to see that the chosen option was pre-endorsed.
+
+Everything beyond what the owner quoted or selected is elaboration, and elaboration belongs
+in section 10 however reasonable it is.
 
 ---
 
@@ -508,6 +521,57 @@ that the code is the mechanism for adding both a passkey and a domain. It settle
 about how a domain is proved, when it becomes usable, or how one is removed. Those are
 recorded in section 10 as the elaboration they are.
 
+**2026-09-13 — When no passkey works on any of the board's domains, the board keeps serving.**
+Owner selected: *"Serve and warn (Recommended)"*
+Question put: *"If no passkey works on any of the board's domains (for example after a
+mistyped RP_ID), what should chirp do?"*
+Description shown: *"Keep the board and agents running. Log the problem on every start, show
+a clear hint on the sign-in page, and flag it publicly. Invalid settings still refuse to
+start."*
+
+A credential that cannot assert is not a reason to stop serving. Agents authenticate with
+tokens rather than passkeys and are unaffected by the mismatch, so taking the board down
+would remove the one channel still able to diagnose and repair it. Genuinely invalid
+configuration still refuses to start; this covers configuration that is valid but matches no
+passkey the human holds.
+
+**2026-09-13 — Getting back in is an operator variable, not a database edit.**
+Owner selected: *"Add REOPEN_SETUP=1 (Recommended)"*
+Question put: *"If you're locked out of every passkey, how should you get back in?"*
+Description shown: *"An operator-only Railway variable that reopens /setup with a code in the
+logs and adds a passkey without deleting existing ones. No shell or SQL needed."*
+
+The way back must be reachable from the hosting platform's own controls, without a shell and
+without SQL, and without destroying the passkeys that already exist. This is the third
+guarantee's floor being raised deliberately. Until it is built, the way back remains emptying
+the passkey table, which section 10 records.
+
+**2026-09-13 — A new domain proves itself before it is activated.**
+Owner selected: *"Board fetches a nonce (Recommended)"*
+Question put: *"When a code names a new domain, how should chirp confirm the domain really
+serves this board?"*
+Description shown: *"Before activating, chirp requests a one-time value from
+https://<domain>/... itself. Blocks typos and domains that don't point at the board, even if
+a code leaks."*
+
+Naming a domain is not evidence that it routes to this board. The board confirms it by
+reaching the domain itself, which also means a leaked code cannot activate a domain the
+attacker does not serve. The exact proof path is elaboration and sits in section 10.
+
+**2026-09-13 — Liveness reports real state, and says so separately from the response code.**
+Owner selected: *"Report real state, follow-up (Recommended)"*
+Question put: *"/health always returns a hard-coded ok with mode local-development, even when
+boot has failed. What should happen?"*
+Description shown: *"Keep 200 so recovery stays reachable on Railway, report boot's actual
+state and a degraded flag, and drop the local-development label. Done as a separate change
+after the passkey branch."*
+
+The liveness route answers with a fixed payload that reads no child state, so a failed board
+reports itself healthy and a platform health check cannot tell the two apart. The response
+code stays 200 on purpose, because a platform that restarts or removes the container on a
+non-200 would take away the recovery surface. The body carries the truth instead. Scheduled
+as a separate change.
+
 ## 10. Open and accepted
 
 Neither list is a requirement, and saying so is the point. **Accepted** means the product
@@ -548,8 +612,9 @@ board prints a fresh setup code and accepts a new passkey; messages, pages, sour
 generations and agent tokens are untouched. Moving to a sibling host under the same
 registrable domain costs nothing, because any origin at or under the configured domain is
 accepted. This is the third guarantee's known floor, and it is stated here rather than left
-to be discovered by someone locked out of their own board. A less drastic operator path has
-been proposed and is not built.
+to be discovered by someone locked out of their own board. The owner has ruled that the way
+back becomes an operator variable rather than a database edit, recorded in section 9. This
+entry describes what is true until that is built, and it goes away when it is.
 
 **A topic rename is re-runnable but not atomic for its pages.** *No owner statement.* After a
 move, the topic's rows and its pages can disagree, and the remedy is to re-run the move
@@ -569,13 +634,21 @@ disconnected by every reload and reconnects from its cursor; a long poll returns
 than continuing. The events half follows from the owner's events split; the stream half does
 not.
 
+**Liveness reports a fixed payload and cannot signal a dead board.** *Owner has ruled; not
+yet built.* The route answers with a hardcoded healthy response that reads no child state, so
+a platform health check passes while the board is down. The fix is decided and scheduled as a
+separate change, recorded in section 9. Until then, a green health check on a hosting
+platform is not evidence that this board is serving.
+
 ### Open: nobody has decided
 
 **How a new domain is proved, activated and removed.** The owner asked for several domains
 and for a code that adds a passkey and a domain together, quoted in section 9. Everything
-beyond that is design nobody has ruled on: whether a named domain stays pending until a code
-is redeemed from it, whether redemption is itself the proof that the domain routes to this
-board, and what removing a domain does to passkeys created for it. This entry exists because
+beyond that is design nobody has ruled on, with one exception: the owner has since ruled that
+the board proves a domain by fetching a one-time value from it before activating, which is
+recorded in section 9. Still undecided are whether a named domain stays pending until that
+proof succeeds, the exact path the proof uses, and what removing a domain does to passkeys
+created for it. This entry exists because
 the feature was designed and recorded on the same day it was asked for, which is the moment
 the request and the elaboration are still separable. Constraint 16 binds the redemption path
 whatever shape it takes: it is a new public entry point, so it carries its own proof, and the
