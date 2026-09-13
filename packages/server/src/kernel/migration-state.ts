@@ -14,11 +14,14 @@ const Objects = Schema.Array(
 );
 
 /** Caller holds the migration transaction. Product and extension-owned tables remain editable. */
-export const preserveMigrationState = <A, E, R>(sql: SqlClient.SqlClient, operation: Effect.Effect<A, E, R>) =>
+export const preserveMigrationState = <A, E, R>(
+	sql: SqlClient.SqlClient,
+	operation: Effect.Effect<A, E, R>,
+	tables: ReadonlyArray<string> = kernelSqlTables,
+) =>
 	Effect.gen(function* () {
 		if (!sql.onDialectOrElse({ sqlite: () => true, orElse: () => false }))
 			return yield* preserveRemoteMigrationState(sql, operation);
-		const tables = [...kernelSqlTables, "migrations"];
 		const inventory =
 			sql`SELECT type,name,tbl_name,sql FROM main.sqlite_schema WHERE lower(tbl_name) IN ${sql.in(tables)} ORDER BY type,name`.pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(Objects)),
