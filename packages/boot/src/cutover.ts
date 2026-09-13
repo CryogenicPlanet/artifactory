@@ -4,6 +4,7 @@ import { seedSource } from "./seed-source.ts";
 import { recoveryIntents } from "./recovery-intents.ts";
 import { Layer, Cause, Crypto, DateTime, Effect, FileSystem, Path, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { isSqlError } from "effect/unstable/sql/SqlError";
 import { GenerationPreparation } from "./generation-preparation.ts";
 import { artifactRetention, ArtifactRetentionRejected } from "./artifact-retention.ts";
 import { HeadroomPolicy, storageHeadroom, StorageRejected } from "./storage-headroom.ts";
@@ -22,6 +23,11 @@ import type { ActiveChild, Supervisor } from "./supervisor.ts";
 
 export class FreezeTimeout extends Schema.TaggedError<FreezeTimeout>()("FreezeTimeout", {
 	code: Schema.Literal("freeze_timeout"),
+}) {}
+
+export class CutoverCleanupPending extends Schema.TaggedError<CutoverCleanupPending>()("CutoverCleanupPending", {
+	code: Schema.Literal("accepted_cleanup_pending"),
+	cause: Schema.Unknown,
 }) {}
 
 const Record = Schema.Struct({
@@ -131,9 +137,25 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			)
 				return yield* new ChildError({ code: "cutover_recovery_required" });
 			// Only boot metadata changes: the accepted writer may already have acknowledged newer data.
-			yield* sql.withTransaction(
-				finish(cleanup.owner, true, cleanup.release).pipe(Effect.andThen(sql`DELETE FROM cutover WHERE singleton=1`)),
-			);
+			yield* sql
+				.withTransaction(
+					finish(cleanup.owner, true, cleanup.release).pipe(Effect.andThen(sql`DELETE FROM cutover WHERE singleton=1`)),
+				)
+				.pipe(
+					Effect.catchCause((cause) => {
+						if (Cause.hasInterruptsOnly(cause))
+							return Effect.failCause(Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason)));
+						const failure = Cause.findError(cause);
+						const error = failure._tag === "Success" ? failure.success : undefined;
+						// Only trusted categories reach diagnostics; SQL text/parameters stay private.
+						const category = isSqlError(error)
+							? `${error.reason._tag} retryable=${error.isRetryable}`
+							: "metadata_defect";
+						return Effect.logWarning(`Accepted cutover metadata cleanup failed: ${category}`).pipe(
+							Effect.andThen(Effect.fail(new CutoverCleanupPending({ code: "accepted_cleanup_pending", cause }))),
+						);
+					}),
+				);
 		}
 		yield* Ref.update(pendingCleanup, (current) => (current === cleanup ? null : current));
 	});
@@ -507,9 +529,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 
 	return {
 		retryCleanup: <E, R>(authorize: Effect.Effect<void, E, R>) =>
-			authorize.pipe(
-				Effect.andThen(supervisor.operationGate.withPermit(authorize.pipe(Effect.andThen(completeCleanup)))),
-			),
+			supervisor.operationGate.withPermit(authorize.pipe(Effect.andThen(completeCleanup))),
 		reload: (owner: Ownership, reloadOptions?: Parameters<typeof performReload>[1]) =>
 			supervisor.operationGate.withPermit(performReload(owner, reloadOptions)),
 		reset,

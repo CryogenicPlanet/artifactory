@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -9,7 +9,7 @@ import { seedSession, sessionFetch } from "./fixtures/session.ts";
 
 const execute = promisify(execFile);
 async function fixture(test: TestContext) {
-	const root = await mkdtemp(join(tmpdir(), "comms-legacy-refusal-"));
+	const root = await realpath(await mkdtemp(join(tmpdir(), "comms-legacy-refusal-")));
 	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
 	await mkdir(join(root, "pages/old"), { recursive: true });
 	await writeFile(join(root, "pages/old/page.md"), "preserved page");
@@ -45,6 +45,30 @@ it.for(["topic_moves", "topic_page_moves", "TOPIC_MOVES"])(
 	},
 );
 
+it("refuses pre-cut legacy schemas before migration and still upgrades clean pre-cut stores", async (test) => {
+	for (const legacy of [true, false]) {
+		const app = await fixture(test);
+		await app.sql("ALTER TABLE edit_lock DROP COLUMN reset_pin");
+		await app.sql("PRAGMA user_version=15");
+		if (legacy) await app.sql("CREATE TABLE topic_moves(evidence TEXT)");
+		const before = await readFile(join(app.root, "boot.db"));
+		if (legacy) {
+			await expect(app.inspect()).rejects.toMatchObject({
+				stdout: expect.stringContaining("topic_move_recovery_required"),
+			});
+			expect(await readFile(join(app.root, "boot.db"))).toEqual(before);
+			expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 15 }]);
+			expect(await app.sql("SELECT name FROM pragma_table_info('edit_lock') WHERE name='reset_pin'")).toEqual([]);
+		} else {
+			expect(await app.inspect()).toBe(false);
+			expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 16 }]);
+			expect(await app.sql("SELECT name FROM pragma_table_info('edit_lock') WHERE name='reset_pin'")).toEqual([
+				{ name: "reset_pin" },
+			]);
+		}
+	}
+});
+
 it("keeps authentication available while refusing legacy stores across restart, retaining old events and all recovery evidence", async (test) => {
 	const app = await fixture(test);
 	await app.sql("CREATE TABLE topic_moves(id TEXT,state TEXT)");
@@ -67,7 +91,8 @@ it("keeps authentication available while refusing legacy stores across restart, 
 	const cookie = (await seedSession(app.root)).cookie;
 	const authenticated = sessionFetch(cookie);
 	for (let restart = 0; restart < 2; restart++) {
-		const child = spawn("bun", [join(import.meta.dirname, "fixtures/launcher.ts")], {
+		await rm(join(app.root, "maintenance-observed"), { force: true });
+		const child = spawn("bun", [join(import.meta.dirname, "fixtures/legacy-refusal-launcher.ts")], {
 			env: { ...process.env, ENTRY: join(app.root, "missing-seed/server.ts"), DATA_DIR: app.root },
 			stdio: ["ignore", "pipe", "pipe"],
 		});
@@ -91,6 +116,8 @@ it("keeps authentication available while refusing legacy stores across restart, 
 				{ timeout: 5000 },
 			)
 			.not.toBe("");
+		// Before any request, only the scoped byte-cap loop measures boot database allocation.
+		await expect.poll(() => readFile(join(app.root, "maintenance-observed"), "utf8").catch(() => "")).toBe("measured");
 		await expect
 			.poll(async () => (await authenticated(`${url}/_boot/status`)).json(), { timeout: 5000 })
 			.toMatchObject({
