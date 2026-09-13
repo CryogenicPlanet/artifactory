@@ -1,7 +1,0 @@
-#!/bin/sh
-set -eu
-umask 077
-PATH=/usr/local/bin:/usr/bin:/bin
-COMMS_ISOLATED=true
-export PATH COMMS_ISOLATED COMMS_NATIVE_COPY_CONFIG
-exec /usr/local/bin/bun /opt/comms/packages/boot/dist/native-copy-keeper.js

@@ -52,15 +52,10 @@ import { databaseRestore } from "./database-restore.ts";
 import { supervise } from "./supervisor.ts";
 import { databaseConfiguration } from "./database-configuration.ts";
 import { remoteRuntime } from "./remote-runtime.ts";
-import { remoteNativeCopy } from "./remote-native-copy.ts";
 import { remoteDbOps } from "./remote-db-ops.ts";
 import { makeRemoteAppInitializer } from "./app-kernel-initialize.ts";
-import { StoreError } from "@comms/storage/store";
-import { failure as remoteFailure } from "@comms/storage/remote-session";
 
-export { failedRemoteRestoreBlocksStartup } from "./remote-restore-selection.ts";
 export { remoteRuntime } from "./remote-runtime.ts";
-export { launchRemoteRoot } from "./remote-root-launcher.ts";
 export { databaseConfiguration } from "./database-configuration.ts";
 
 type Handler = Effect.Effect<
@@ -156,29 +151,12 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 							bootStore: configuration.boot,
 							dataDirectory: options.dataDirectory,
 							withStore: runtime.withStore,
+							withWriter: runtime.withWriter,
 							initialize,
-							authorizeStoreAccess: (selected) =>
-								Effect.gen(function* () {
-									yield* supervisor.assertClosure.pipe(
-										Effect.mapError(() => remoteFailure("remote_local_closure_unproven")),
-									);
-									const active = yield* Ref.get(supervisor.current);
-									if (
-										active &&
-										(active.store._tag === "file" ||
-											active.store._tag !== selected._tag ||
-											active.store.database !== selected.database)
-									)
-										return yield* new StoreError({ code: "store_descriptor_mismatch" });
-								}),
 						});
 						const backups = yield* remoteDbOps({
 							store: recovery.store,
-							bootStore: configuration.boot,
-							dataDirectory: options.dataDirectory,
 							withStore: runtime.withStore,
-							withNative: yield* remoteNativeCopy(runtime),
-							assertAccountClosed: runtime.assertAccountClosed,
 						});
 						return Layer.mergeAll(Layer.succeed(AppRecovery, recovery), Layer.succeed(DbOps, backups));
 					}),

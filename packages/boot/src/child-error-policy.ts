@@ -36,6 +36,11 @@ export const childErrorPolicy = {
 	cutover_backup_invalid: recovery,
 	cutover_backup_missing: recovery,
 	cutover_recovery_required: recovery,
+	remote_cutover_requires_operator: {
+		status: 409,
+		retriable: false,
+		hint: "Inspect the failed remote migration. Repair forward or restore with your database provider; chirp cannot roll back remote data automatically.",
+	},
 	generation_store_incompatible: {
 		status: 409,
 		retriable: false,

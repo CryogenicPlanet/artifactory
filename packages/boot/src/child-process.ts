@@ -22,6 +22,7 @@ export class ChildError extends Schema.TaggedError<ChildError>()("ChildError", {
 		"cutover_backup_invalid",
 		"cutover_backup_missing",
 		"cutover_recovery_required",
+		"remote_cutover_requires_operator",
 		"generation_store_incompatible",
 		"health_failed",
 		"incompatible_schema",
@@ -44,7 +45,9 @@ export class ChildError extends Schema.TaggedError<ChildError>()("ChildError", {
 	stderr: Schema.optionalKey(Schema.String),
 }) {
 	get message() {
-		return `Child operation failed: ${this.code}`;
+		return this.code === "remote_cutover_requires_operator"
+			? "Remote candidate may have changed the database. Automatic data rollback is unavailable; inspect the failed migration and use your provider restore or a forward repair before restarting chirp."
+			: `Child operation failed: ${this.code}`;
 	}
 }
 export type Launch = typeof ChildConfiguration.Type;
@@ -72,8 +75,6 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch, 
 						stdin: "pipe",
 						stdout: "pipe",
 						stderr: "pipe",
-						// The pinned remote inspector must survive termination of boot's process group.
-						detached: options.remote !== undefined,
 						forceKillAfter: "5 seconds",
 					},
 				),
@@ -201,6 +202,8 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch, 
 					Effect.mapError(() => new ChildError({ code: "keeper_closure_unproven" })),
 				);
 				if (yield* handle.isRunning) return yield* new ChildError({ code: "keeper_closure_unproven" });
+				// Remote SQL exclusion is enforced when the next writing session acquires its lock.
+				if (options.env.APP_STORE !== undefined && options.env.APP_DATABASE === undefined) return;
 				const receipt = yield* fs
 					.readFileString(options.receipt)
 					.pipe(Effect.mapError(() => new ChildError({ code: "child_closure_unproven" })));

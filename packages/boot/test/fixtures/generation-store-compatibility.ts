@@ -131,6 +131,7 @@ const case4 = Effect.scoped(
 			recover: Effect.succeed(undefined),
 		});
 		const recovery = AppRecovery.of({
+			checkSchema: Effect.succeed(undefined),
 			store: Effect.succeed(f.pg),
 			filename: undefined,
 			dataDirectory: f.root,

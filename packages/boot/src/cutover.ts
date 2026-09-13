@@ -73,11 +73,8 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 	const restore = (record: typeof Record.Type) =>
 		Effect.gen(function* () {
 			yield* supervisor.assertClosure;
+			if (backup.engine !== "sqlite") return yield* new ChildError({ code: "remote_cutover_requires_operator" });
 			if (!record.backup) return yield* new ChildError({ code: "cutover_backup_missing" });
-			if (record.phase === "restored" && backup.engine !== "sqlite") {
-				yield* recovery.prepare(yield* freshEpoch);
-				return;
-			}
 			const rows = yield* sql`SELECT * FROM backups WHERE id=${record.backup}`.pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BackupRecord))),
 			);
@@ -182,7 +179,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			yield* Ref.set(ready, true);
 			return;
 		}
-		// Called only after keeper receipts prove every prior database owner closed.
+		// SQLite recovery follows keeper closure; remote unaccepted cutovers require operator review.
 		if (record.phase !== "accepted") yield* restore(record);
 		if (record.phase === "accepted") {
 			const holder = (yield* lock.inspect).value;
@@ -257,50 +254,56 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					if (recovery.filename !== undefined && !(yield* fs.exists(recovery.filename)))
 						yield* recovery.prepare(yield* freshEpoch);
 					const epoch = yield* freshEpoch;
-					const report = yield* Effect.acquireUseRelease(
-						backup.rehearsal({ _tag: "file", filename: path.resolve(materialized, "rehearsal.db") }, epoch),
-						(clone) =>
-							Effect.gen(function* () {
-								// Read after cloning: the boot allocator includes pruned events and outstanding reservations.
-								const sequence = (yield* events.state).next;
-								return yield* Effect.acquireUseRelease(
-									supervisor
-										.launch(generation, clone.store, "rehearsal", sequence, epoch)
-										.pipe(Effect.provideContext(context)),
-									(rehearsed) =>
-										rehearsed.process.health.pipe(
-											Effect.timeout("30 seconds"),
-											Effect.catchCause((cause) => {
-												const reason = cause.reasons[0];
-												if (
-													cause.reasons.length !== 1 ||
-													reason?._tag !== "Fail" ||
-													!Schema.is(ChildError)(reason.error)
-												)
-													return Effect.failCause(cause);
-												const error = reason.error;
-												return Effect.gen(function* () {
-													return yield* new ChildError({
-														code:
-															(request.undo?.generation !== undefined || request.trustedSource !== undefined) &&
-															Schema.is(ChildError)(error) &&
-															error.code === "health_failed"
-																? "incompatible_schema"
-																: error.code,
-														stderr: yield* Ref.get(rehearsed.process.stderr),
-													});
-												});
-											}),
-										),
-									(rehearsed) => stop(rehearsed).pipe(Effect.orDie),
-								);
-							}),
-						(clone) => supervisor.assertClosure.pipe(Effect.andThen(clone.dispose), Effect.orDie),
-					);
+					const report = yield* backup.engine !== "sqlite"
+						? recovery.checkSchema.pipe(Effect.as({ report_unavailable: true, schema_check_only: true } as const))
+						: Effect.acquireUseRelease(
+								backup.rehearsal({ _tag: "file", filename: path.resolve(materialized, "rehearsal.db") }, epoch),
+								(clone) =>
+									Effect.gen(function* () {
+										// Read after cloning: the boot allocator includes pruned events and outstanding reservations.
+										const sequence = (yield* events.state).next;
+										return yield* Effect.acquireUseRelease(
+											supervisor
+												.launch(generation, clone.store, "rehearsal", sequence, epoch)
+												.pipe(Effect.provideContext(context)),
+											(rehearsed) =>
+												rehearsed.process.health.pipe(
+													Effect.timeout("30 seconds"),
+													Effect.catchCause((cause) => {
+														const reason = cause.reasons[0];
+														if (
+															cause.reasons.length !== 1 ||
+															reason?._tag !== "Fail" ||
+															!Schema.is(ChildError)(reason.error)
+														)
+															return Effect.failCause(cause);
+														const error = reason.error;
+														return Effect.gen(function* () {
+															return yield* new ChildError({
+																code:
+																	(request.undo?.generation !== undefined || request.trustedSource !== undefined) &&
+																	Schema.is(ChildError)(error) &&
+																	error.code === "health_failed"
+																		? "incompatible_schema"
+																		: error.code,
+																stderr: yield* Ref.get(rehearsed.process.stderr),
+															});
+														});
+													}),
+												),
+											(rehearsed) => stop(rehearsed).pipe(Effect.orDie),
+										);
+									}),
+								(clone) => supervisor.assertClosure.pipe(Effect.andThen(clone.dispose), Effect.orDie),
+							);
 					yield* generations.rehearsed(generation.n, report);
 					if (request.check) {
 						yield* sources.discard(proposal);
-						return { generation: generation.n, status: "checked" };
+						return {
+							generation: generation.n,
+							status: backup.engine === "sqlite" ? "checked" : "schema_checked",
+							...(backup.engine === "sqlite" ? {} : { schema_check_only: true, report_unavailable: true }),
+						};
 					}
 					yield* sources.publish(proposal);
 					const launchCandidate = (epoch?: string) =>
@@ -311,7 +314,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							rollback.candidate = candidate;
 							return candidate;
 						});
-					// Remote accounts are shared by live attempts; retire their guardian before constructing the next one.
+					// Remote writers hold a session lock; retire the old writer before opening the next.
 					const waitingCandidate = backup.engine === "sqlite" ? yield* launchCandidate() : null;
 					yield* supervisor.freeze;
 					const frozenAt = (yield* DateTime.nowAsDate).getTime();
@@ -334,7 +337,13 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					const candidateEpoch = waitingCandidate?.attempt.epoch ?? (yield* freshEpoch);
 					yield* Effect.gen(function* () {
 						if (prior && !priorFrozen) yield* closePrior;
-						yield* recovery.prepare(prior?.attempt.epoch ?? (yield* freshEpoch));
+						yield* recovery.prepare(
+							backup.engine === "sqlite" ? (prior?.attempt.epoch ?? (yield* freshEpoch)) : candidateEpoch,
+						);
+						if (backup.engine !== "sqlite") {
+							yield* sql`INSERT INTO cutover(singleton,candidate,prior,backup,lock_id,family,phase,candidate_epoch) VALUES(1,${generation.n},${prior?.generation.n ?? null},NULL,${owner.id},${owner.family},'working',${candidateEpoch})`;
+							return;
+						}
 						const id = yield* crypto.randomUUIDv4;
 						const directory = path.join(options.dataDirectory, "backups");
 						yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 });
@@ -366,10 +375,10 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 							}),
 						);
 					});
-					// Edited module imports can open connections before go. Preserve the frozen store first.
+					// SQLite preserves a frozen copy; remote migration failures require operator repair.
 					const candidate = waitingCandidate ?? (yield* launchCandidate(candidateEpoch));
 					yield* Effect.gen(function* () {
-						yield* recovery.prepare(candidate.attempt.epoch);
+						if (backup.engine === "sqlite") yield* recovery.prepare(candidate.attempt.epoch);
 						yield* supervisor.recordAttempt(candidate, "starting");
 						yield* owners.opened(candidate.id);
 						yield* candidate.process.control("go");
@@ -460,6 +469,10 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 				if (persisted) {
 					yield* supervisor.withdraw;
 					yield* closePrior;
+					if (backup.engine !== "sqlite" && failedGeneration) {
+						yield* generations.failed(failedGeneration.n, error, stderr);
+						yield* refresh;
+					}
 					yield* restore(persisted);
 					// Restarted live jobs may publish immediately; recovery must never restore over them.
 					yield* sql`DELETE FROM cutover WHERE singleton=1`;

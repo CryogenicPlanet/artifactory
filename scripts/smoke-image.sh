@@ -6,10 +6,6 @@ image=${1:-chirp:local}
 docker run --rm --read-only --user 1000:1000 --entrypoint /bin/sh "$image" -ec '
     test "$(dpkg --print-architecture)" = amd64
     test -s /etc/ssl/certs/ca-certificates.crt
-    pg_dump --version | grep -F "(PostgreSQL) 17.11 "
-    pg_restore --version | grep -F "(PostgreSQL) 17.11 "
-    mysql --version | grep -F "8.4.11" | grep -F "MySQL Community"
-    mysqldump --version | grep -F "8.4.11" | grep -F "MySQL Community"
 '
 container=
 volume=

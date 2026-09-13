@@ -6,6 +6,7 @@ import { Lifecycle } from "./kernel/lifecycle.ts";
 /** Run in the application scope: boot must freeze writers while this request is pending. */
 export const backupSchedule = Effect.gen(function* () {
 	const boot = yield* BootChannel;
+	if (boot.store._tag !== "file") return;
 	const lifecycle = yield* Lifecycle;
 	return yield* runCron(parseCron("0 * * * *"), () =>
 		Ref.get(lifecycle.state).pipe(

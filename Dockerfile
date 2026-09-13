@@ -41,8 +41,6 @@ COPY --from=dependencies /opt/comms /opt/comms
 COPY --from=build /opt/comms/packages/boot/dist packages/boot/dist
 COPY --from=build /opt/comms/packages/server/dist packages/server/dist
 COPY --from=build /opt/comms/packages/server/pages packages/server/pages
-COPY scripts/install-database-clients.sh /tmp/install-database-clients.sh
-RUN sh /tmp/install-database-clients.sh && rm /tmp/install-database-clients.sh
 RUN apt-get update && apt-get install -y --no-install-recommends sudo util-linux tini \
     && rm -rf /var/lib/apt/lists/* \
     && usermod --login boot bun \
@@ -52,7 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo util-linux
     && usermod --append --groups comms boot \
     && mkdir /data
 COPY deployment /opt/comms/deployment
-RUN chmod 0755 /opt/comms/deployment/entrypoint /opt/comms/deployment/child-keeper /opt/comms/deployment/preparation-keeper /opt/comms/deployment/native-copy-keeper \
+RUN chmod 0755 /opt/comms/deployment/entrypoint /opt/comms/deployment/child-keeper /opt/comms/deployment/preparation-keeper \
     && cp /opt/comms/deployment/sudoers /etc/sudoers.d/comms \
     && chmod 0440 /etc/sudoers.d/comms \
     && visudo --check

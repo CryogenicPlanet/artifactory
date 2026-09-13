@@ -8,6 +8,7 @@ import {
 import { decodeRows } from "./decode-rows.ts";
 import { clientLayer } from "@comms/storage/client";
 import { asBoot, withDatabase, type FileStore, type RemoteStore, type StoreError } from "@comms/storage/store";
+import type { RemoteConnectionRejected } from "@comms/storage/remote-session";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { Context, Crypto, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -132,6 +133,7 @@ const make = (filename: string, dataDirectory?: string) =>
 		const events = yield* Events;
 		return {
 			reserveIdentity: identity.reserve,
+			checkSchema: Effect.void,
 			selectRestored: (_target: RemoteStore) => Effect.fail(new EventError({ code: "app_store_identity_invalid" })),
 			store: Effect.succeed(store),
 			identityStatus: identity.status.pipe(Effect.provideContext(context)),
@@ -148,14 +150,16 @@ const make = (filename: string, dataDirectory?: string) =>
 		};
 	});
 
-export type RemoteRecoveryError = EventError | SqlError | StoreError;
+export type RemoteRecoveryError = EventError | SqlError | StoreError | RemoteConnectionRejected;
 export interface RemoteRecoveryOptions {
 	readonly appStore: RemoteStore;
 	readonly bootStore: RemoteStore;
 	readonly dataDirectory: string;
-	/** Enforce the coordinator's drain/closure boundary for this specific store before opening its pool. */
-	readonly authorizeStoreAccess: (store: RemoteStore) => Effect.Effect<void, RemoteRecoveryError>;
-	/** Root owns registration, scoped pool closure and proof through its pinned inspector. */
+	/** Holds the app database advisory lock on the session executing these writes. */
+	readonly withWriter: <A, E>(
+		store: RemoteStore,
+		effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+	) => Effect.Effect<A, E | RemoteRecoveryError>;
 	readonly withStore: <A, E>(
 		store: RemoteStore,
 		effect: Effect.Effect<A, E, SqlClient.SqlClient>,
@@ -172,10 +176,9 @@ export const remoteRecovery = (options: RemoteRecoveryOptions) =>
 			Effect.gen(function* () {
 				const adoption = yield* remoteIdentity.reserve;
 				const store = yield* withDatabase(options.appStore, adoption.database);
-				yield* options.authorizeStoreAccess(store);
 				const bootView = yield* asBoot(store, options.bootStore);
 				const pending = yield* events.state;
-				const evidence = yield* options.withStore(
+				const evidence = yield* options.withWriter(
 					bootView,
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
@@ -196,7 +199,7 @@ export const remoteRecovery = (options: RemoteRecoveryOptions) =>
 						);
 					}),
 				);
-				// The guarded app scope has closed and proved its registered sessions gone before boot finalizes.
+				// The fence committed before the writing session released its advisory lock.
 				yield* remoteIdentity.complete(adoption);
 				if (evidence._tag === "Failure") return yield* evidence.failure;
 				if (evidence.success && pending.pending_attempt === rejectedAttempt)
@@ -206,7 +209,23 @@ export const remoteRecovery = (options: RemoteRecoveryOptions) =>
 					else yield* events.abort(pending.pending_id, pending.pending_attempt);
 				}
 			});
+		const checkSchema = Effect.gen(function* () {
+			const adoption = yield* remoteIdentity.reserve;
+			if (adoption.phase !== "ready") return yield* new EventError({ code: "app_store_identity_invalid" });
+			const store = yield* withDatabase(options.appStore, adoption.database);
+			yield* options.withStore(
+				store,
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* verifyRemoteAppIdentity(adoption);
+					yield* sql`SELECT singleton,epoch FROM kernel_writer LIMIT 0`;
+					yield* sql`SELECT id,from_seq,to_seq,count FROM mutation_batches LIMIT 0`;
+					yield* sql`SELECT seq,transaction_id,event,shipped_at FROM outbox LIMIT 0`;
+				}),
+			);
+		});
 		return {
+			checkSchema,
 			store: remoteIdentity.store,
 			reserveIdentity: remoteIdentity.reserve,
 			identityStatus: remoteIdentity.status,

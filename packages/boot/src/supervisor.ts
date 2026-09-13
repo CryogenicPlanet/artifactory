@@ -2,7 +2,7 @@ import type { RemoteRuntime } from "./remote-runtime.ts";
 import { Redacted } from "effect";
 import { recoveryIntents } from "./recovery-intents.ts";
 import { SqlClient } from "effect/unstable/sql";
-import { render, StoreError, type Store } from "@comms/storage/store";
+import { render, type Store } from "@comms/storage/store";
 import { logRedactor } from "./log-redaction.ts";
 import {
 	Cause,
@@ -169,19 +169,12 @@ export const supervise = Effect.fn("supervise")(function* (
 				: path.join(generation.snapshot_dir ?? "", "board");
 			const descriptor = yield* render(store);
 			const owner = yield* owners.reserve(generation.n);
-			const remoteConfiguration =
-				store._tag === "file"
-					? undefined
-					: remote
-						? yield* remote.reserveOwner(store, owner.id)
-						: yield* new StoreError({ code: "store_engine_unsupported" });
 			const process = yield* launchChild(
 				{
 					entry,
 					cwd: generation.snapshot_dir ?? "",
 					attempt: owner.id,
 					receipt: owner.receipt,
-					...(remoteConfiguration ? { remote: remoteConfiguration } : {}),
 					env: {
 						PORT: "0",
 						REHEARSAL_COPY_BUDGET: `${Duration.toMillis(copyBudget)} millis`,
@@ -189,7 +182,9 @@ export const supervise = Effect.fn("supervise")(function* (
 						WRITER_EPOCH: epoch,
 						GENERATION: String(generation.n),
 						APP_STORE: Redacted.value(descriptor),
-						...(store._tag === "file" ? { APP_DATABASE: store.filename } : {}),
+						...(store._tag === "file"
+							? { APP_DATABASE: store.filename }
+							: { DATABASE_TLS: String(remote?.tls ?? true) }),
 						PAGES_DIRECTORY: path.resolve(options.dataDirectory, "pages"),
 						BOARD_DIRECTORY: board,
 						STATE: mode,
