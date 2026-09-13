@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile, stat, rename } from "node:fs/promises";
 import { setTimeout } from "node:timers/promises";
 import { Schema } from "effect";
+import { sourcePut } from "../packages/boot/test/fixtures/source-put.ts";
 import { authenticator } from "../packages/boot/test/fixtures/authenticator.ts";
 
 const ceremony = Schema.Struct({ id: Schema.String, options: Schema.Struct({ challenge: Schema.String }) });
@@ -175,7 +176,43 @@ async function run() {
 			).json(),
 		);
 		assert.deepEqual(visible.items, [written]);
-		console.log(`Remote board ${phase}: authenticated persistence and idempotency passed`);
+		await ok(await request("/api/lock", {}, state.cookie), "Acquire failing candidate edit lock");
+		await ok(
+			await sourcePut(new URL("/api/fs/app/migrations/999999_expected_failure.ts?reload=0", url).href, {
+				headers: { cookie: state.cookie, origin, "content-type": "text/plain" },
+				body: 'import { Effect } from "effect";\nexport default Effect.die("private migration cause");\n',
+				signal: AbortSignal.timeout(180000),
+			}),
+			"Stage failing migration",
+		);
+		const refused = await request("/api/reload?release=1", {}, state.cookie);
+		assert.equal(refused.status, 409, "Failed remote migration requires operator repair");
+		Schema.decodeUnknownSync(
+			Schema.Struct({ error: Schema.Struct({ code: Schema.Literal("remote_cutover_requires_operator") }) }),
+		)(await refused.json());
+		assert.equal((await request("/api/messages", undefined, state.cookie)).status, 503);
+		const failed = Schema.decodeUnknownSync(
+			Schema.Struct({
+				items: Schema.Array(
+					Schema.Struct({
+						status: Schema.String,
+						error: Schema.NullOr(Schema.String),
+						stderr: Schema.NullOr(Schema.String),
+					}),
+				),
+			}),
+		)(
+			await (
+				await ok(await request("/_boot/generations", undefined, state.cookie), "Failed candidate diagnostics")
+			).json(),
+		).items.find((item) => item.status === "failed" && item.error?.includes("health_failed"));
+		assert.ok(failed, "Original candidate error must survive the operator refusal");
+		assert.match(failed.stderr ?? "", /^Kernel health failed: stage=initialize;/);
+		assert.ok(
+			![failed.error, failed.stderr].some((value) => value?.includes("private migration cause")),
+			"Migration causes remain private",
+		);
+		console.log(`Remote board ${phase}: persistence, fresh writes and failed migration refusal passed`);
 		return;
 	}
 	assert.ok(!existsSync(stateFile), "Completed probe state already exists; use check-restarted");
