@@ -18,12 +18,12 @@ export const verifyBootSchemaShape = (sql: SqlClient) =>
 		yield* sql`SELECT shape."session_id",shape."key_hash",shape."request_hash",shape."proof_hash",shape."family",shape."successor_access_id",shape."successor_refresh_id",shape."expires_at",shape."salt",shape."nonce",shape."ciphertext",shape."tag" FROM "mint_receipts" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."id",shape."public_key",shape."counter",shape."transports",shape."label",shape."created_at",shape."rp_id" FROM "passkeys" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."origin",shape."rp_id",shape."created_at" FROM "auth_origins" AS shape LIMIT 0`;
-		yield* sql`SELECT shape."id",shape."hash",shape."origin",shape."failures",shape."expires_at",shape."created_at" FROM "passkey_codes" AS shape LIMIT 0`;
+		yield* sql`SELECT shape."id",shape."hash",shape."origin",shape."failures",shape."locked_until",shape."expires_at",shape."created_at" FROM "passkey_codes" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."path" FROM "public_paths" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."family",shape."key_hash",shape."predecessor",shape."expires_at" FROM "refresh_idempotency" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."predecessor",shape."family",shape."successor_access_id",shape."successor_refresh_id",shape."expires_at",shape."salt",shape."nonce",shape."ciphertext",shape."tag" FROM "refresh_receipts" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."singleton",shape."next",shape."published_through",shape."pending_id",shape."pending_attempt",shape."pending_from",shape."pending_to" FROM "seq" AS shape LIMIT 0`;
-		yield* sql`SELECT shape."id",shape."hash",shape."created_at",shape."expires_at",shape."last_seen_at" FROM "sessions" AS shape LIMIT 0`;
+		yield* sql`SELECT shape."id",shape."hash",shape."created_at",shape."expires_at",shape."last_seen_at",shape."origin" FROM "sessions" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."key",shape."value" FROM "settings" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."id",shape."lock_id",shape."agent",shape."at",shape."state" FROM "source_batches" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."batch",shape."path",shape."before",shape."before_sha",shape."before_mode",shape."desired",shape."desired_sha",shape."desired_mode",shape."before_directory",shape."desired_directory" FROM "source_changes" AS shape LIMIT 0`;

@@ -36,6 +36,8 @@ import type { RemoveOrigin } from "./passkey-code-schema.ts";
 /** The top-level origin is the primary one; boot generates absolute URLs from it. */
 export interface AuthConfig extends RelyingParty {
 	readonly additionalOrigins?: ReadonlyArray<RelyingParty>;
+	/** Set when origins came from PUBLIC_ORIGINS, which names no RP ID for passkeys stored before RP IDs were recorded. */
+	readonly originList?: boolean;
 }
 
 export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
@@ -61,10 +63,12 @@ export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
 		"invalid_request",
 		"last_passkey",
 		"origin_has_passkeys",
+		"origin_last_passkey",
 		"origin_invalid",
 		"origin_not_found",
 		"origin_protected",
 		"passkey_code_invalid",
+		"passkey_code_locked",
 		"passkey_exists",
 		"passkey_not_found",
 		"refresh_invalid",
@@ -138,6 +142,16 @@ const makeAuth = (config: AuthConfig) =>
 		});
 		// Every boot invalidates setup ceremonies created under an earlier stdout code.
 		yield* sql`DELETE FROM auth_challenges WHERE ceremony = 'setup'`;
+		// A passkey without a recorded RP ID was created under the single-origin RP_ID. PUBLIC_ORIGINS names no such
+		// RP ID, so starting with it would strand that passkey on every domain. Refuse, and let the old config recover.
+		if (config.originList && (yield* sql`SELECT id FROM passkeys WHERE rp_id IS NULL LIMIT 1`).length) {
+			yield* Effect.sync(() =>
+				bootConsole.error(
+					"chirp: PUBLIC_ORIGINS refused: some passkeys predate recorded RP IDs. Start again with the previous RP_ID and PUBLIC_ORIGIN, sign in once with each passkey you keep and delete the rest, then switch to PUBLIC_ORIGINS.",
+				),
+			);
+			return yield* refuse("auth_configuration_invalid");
+		}
 		yield* setupState;
 
 		const allowed = allowedParties(sql, config);
@@ -169,15 +183,17 @@ const makeAuth = (config: AuthConfig) =>
 				return yield* refuse("challenge_invalid");
 			return challenge;
 		});
-		const newSession = Effect.gen(function* () {
-			const token = yield* random;
-			const id = yield* random;
-			const now = yield* Clock.currentTimeMillis;
-			const expiresAt = now + 30 * 24 * 60 * 60 * 1000;
-			const digest = yield* hash(token);
-			yield* sql`INSERT INTO sessions (id, hash, created_at, expires_at, last_seen_at) VALUES (${id}, ${digest}, ${now}, ${expiresAt}, ${now})`;
-			return { token, id, expiresAt };
-		});
+		/** Sessions record the origin they were issued on, so removing that origin can end them. */
+		const newSession = (origin: string) =>
+			Effect.gen(function* () {
+				const token = yield* random;
+				const id = yield* random;
+				const now = yield* Clock.currentTimeMillis;
+				const expiresAt = now + 30 * 24 * 60 * 60 * 1000;
+				const digest = yield* hash(token);
+				yield* sql`INSERT INTO sessions (id, hash, created_at, expires_at, last_seen_at, origin) VALUES (${id}, ${digest}, ${now}, ${expiresAt}, ${now}, ${origin})`;
+				return { token, id, expiresAt };
+			});
 		const startSetup = (party: RelyingParty) => (code: string) =>
 			mutex.withPermit(
 				Effect.gen(function* () {
@@ -299,7 +315,7 @@ const makeAuth = (config: AuthConfig) =>
 				sql.withTransaction(
 					lockBootWrite(sql).pipe(
 						Effect.andThen(verifyAssertion(id, response, "login", null, party)),
-						Effect.andThen(newSession),
+						Effect.andThen(newSession(party.expectedOrigin)),
 					),
 				),
 			);
@@ -322,6 +338,7 @@ const makeAuth = (config: AuthConfig) =>
 				),
 			);
 		const passkeys = yield* makePasskeyManagement(
+			config,
 			(action, binding, proof) => verifyAssertion(proof.id, proof.response, action, binding),
 			mutex,
 		);

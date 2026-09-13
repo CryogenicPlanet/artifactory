@@ -207,12 +207,14 @@ export const initializeBootSchema = Effect.gen(function* () {
 			id: 20,
 			name: "passkey_origins",
 			run: Effect.gen(function* () {
-				// Existing rows stay NULL here; Auth backfills them with the configured primary RP ID when it starts.
+				// Nothing is backfilled. A NULL rp_id stays NULL until a verified signature stamps it, and until then
+				// counts as the single-origin RP_ID's. A NULL session origin counts as the primary origin's.
 				yield* sql`ALTER TABLE passkeys ADD COLUMN rp_id TEXT`;
+				yield* sql`ALTER TABLE sessions ADD COLUMN origin TEXT`;
 				yield* sql`CREATE TABLE auth_origins (origin TEXT PRIMARY KEY, rp_id TEXT NOT NULL, created_at INTEGER NOT NULL)`;
 				yield* sql`CREATE TABLE passkey_codes (
 			id TEXT PRIMARY KEY, hash TEXT NOT NULL, origin TEXT, failures INTEGER NOT NULL,
-			expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+			locked_until INTEGER NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
 		)`;
 			}),
 		},

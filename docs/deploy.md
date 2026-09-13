@@ -278,10 +278,11 @@ address to a custom domain later, keep the variables as they are:
 3. Open `https://<domain>/auth/passkey-code` within ten minutes and enter the code. This
    creates a passkey for the domain, adds the domain to the board, and signs you in there.
 
-Both addresses keep working. Approval links still use the configured origin until you
-change the variables, for example to
-`PUBLIC_ORIGINS=https://<domain>,https://<service>.up.railway.app` with `RP_ID` and
-`PUBLIC_ORIGIN` removed.
+Both addresses keep working, and approval links keep using the configured origin. Switching
+to `PUBLIC_ORIGINS` is optional. Boot refuses to start with it while any passkey predates
+recorded RP IDs, because the list names no RP ID for such a passkey. Before switching, sign
+in once on the old address with each passkey you keep and delete the rest. If boot refuses,
+restore `RP_ID` and `PUBLIC_ORIGIN` and it starts again.
 
 ### Creating the databases
 

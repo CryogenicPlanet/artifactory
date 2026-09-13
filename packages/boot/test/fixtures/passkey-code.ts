@@ -3,7 +3,7 @@ import { layer as durableEventsLayer } from "../../src/events.ts";
 import assert from "node:assert/strict";
 import { BunServices } from "@effect/platform-bun";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
-import { Console, Context, Effect, Layer, Result } from "effect";
+import { Clock, Console, Context, Effect, Layer, Result } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Auth, layer as authLayer } from "../../src/auth.ts";
 import type { RelyingParty } from "../../src/auth-origins.ts";
@@ -19,6 +19,8 @@ if (!filename) throw new Error("Missing database");
 const primary: RelyingParty = { rpId: "comms.test", expectedOrigin: "https://comms.test" };
 const other: RelyingParty = { rpId: "other.test", expectedOrigin: "https://other.test" };
 const added: RelyingParty = { rpId: "new.test", expectedOrigin: "https://new.test" };
+// A primary origin whose RP ID is its parent domain, so a runtime origin on that parent shares the RP ID.
+const board: RelyingParty = { rpId: "comms.test", expectedOrigin: "https://board.comms.test" };
 
 const run = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -30,9 +32,9 @@ const run = Effect.gen(function* () {
 			for (const value of values) if (typeof value === "string") output.push(value);
 		},
 	};
-	const start = (configured: RelyingParty = primary) =>
+	const start = (configured: RelyingParty = primary, originList = false) =>
 		Layer.build(
-			authLayer({ ...configured, additionalOrigins: [other] }).pipe(
+			authLayer({ ...configured, additionalOrigins: [other], originList }).pipe(
 				Layer.provide(Layer.mergeAll(lockLayer, eventsLayer(Effect.void))),
 			),
 		).pipe(
@@ -51,7 +53,8 @@ const run = Effect.gen(function* () {
 				);
 			}),
 		);
-	let auth = yield* start();
+	const base = scenario === "shared-rp" ? board : primary;
+	let auth = yield* start(base);
 	const first = authenticator(),
 		second = authenticator();
 	const counters = new Map<string, number>();
@@ -63,14 +66,14 @@ const run = Effect.gen(function* () {
 	const setupCode = output.at(-1)?.split("code ")[1];
 	assert.ok(setupCode);
 	const setup = yield* auth.startSetup(setupCode);
-	yield* auth.finishSetup(setup.id, first.registration(setup.options.challenge));
+	yield* auth.finishSetup(setup.id, first.registration(setup.options.challenge, base.expectedOrigin, base.rpId));
 	const login = (device: ReturnType<typeof authenticator>, party: RelyingParty) =>
 		Effect.gen(function* () {
 			const challenge = yield* auth.at(party).startLogin;
 			return yield* auth.at(party).finishLogin(challenge.id, sign(device, challenge.options.challenge, party));
 		});
-	const session = yield* login(first, primary);
-	const codeProof = (params: { readonly origin?: string }, party = primary, device = first) =>
+	const session = yield* login(first, base);
+	const codeProof = (params: { readonly origin?: string }, party = base, device = first) =>
 		Effect.gen(function* () {
 			const challenge = yield* auth.at(party).startPasskeyCodeAssertion(params, session.id);
 			return { id: challenge.id, response: sign(device, challenge.options.challenge, party) };
@@ -159,11 +162,31 @@ const run = Effect.gen(function* () {
 		// A newer code invalidates the previous one.
 		const newer = yield* create();
 		yield* fails(auth.startPasskeyCodeRedemption(issued.code, primary.expectedOrigin), "passkey_code_invalid");
-		// Wrong guesses are limited: the third failure discards the code.
+		// Origins that are neither allowed nor bound are refused before the code is examined and spend nothing.
+		for (const origin of [undefined, "https://evil.test", "https://sub.comms.test"])
+			for (const _ of [1, 2, 3, 4, 5])
+				yield* fails(auth.startPasskeyCodeRedemption("0000000000000000", origin), "origin_invalid");
+		assert.deepEqual(yield* sql`SELECT failures, locked_until FROM passkey_codes`, [{ failures: 1, locked_until: 0 }]);
+		// The third wrong code locks redemption for a minute without deleting the code; even the right code waits.
 		yield* fails(auth.startPasskeyCodeRedemption("0000000000000000", primary.expectedOrigin), "passkey_code_invalid");
 		yield* fails(auth.startPasskeyCodeRedemption("0000000000000000", primary.expectedOrigin), "passkey_code_invalid");
-		yield* fails(auth.startPasskeyCodeRedemption(newer.code, primary.expectedOrigin), "passkey_code_invalid");
-		assert.equal((yield* sql`SELECT id FROM passkey_codes`).length, 0);
+		const lockedFor = (row: unknown) =>
+			Effect.map(Clock.currentTimeMillis, (now) =>
+				typeof row === "object" && row !== null && "locked_until" in row ? Number(row.locked_until) - now : -1,
+			);
+		const locked = yield* sql`SELECT failures, locked_until FROM passkey_codes`;
+		assert.equal(locked.length, 1);
+		const firstLock = yield* lockedFor(locked[0]);
+		assert.ok(firstLock > 55_000 && firstLock <= 60_000, String(firstLock));
+		yield* fails(auth.startPasskeyCodeRedemption(newer.code, primary.expectedOrigin), "passkey_code_locked");
+		// A further wrong code after the lockout doubles it.
+		yield* sql`UPDATE passkey_codes SET locked_until=0`;
+		yield* fails(auth.startPasskeyCodeRedemption("0000000000000000", primary.expectedOrigin), "passkey_code_invalid");
+		const doubled = yield* lockedFor((yield* sql`SELECT locked_until FROM passkey_codes`)[0]);
+		assert.ok(doubled > 115_000 && doubled <= 120_000, String(doubled));
+		// Once the lockout ends, the right code still works.
+		yield* sql`UPDATE passkey_codes SET locked_until=0`;
+		assert.ok((yield* auth.startPasskeyCodeRedemption(newer.code, primary.expectedOrigin)).id);
 		// Expiry.
 		const expiring = yield* create();
 		yield* sql`UPDATE passkey_codes SET expires_at=1`;
@@ -208,10 +231,10 @@ const run = Effect.gen(function* () {
 				["https://new.test", "code", "pending", false],
 			],
 		);
-		// Redeeming from another origin, even an allowed one, fails and consumes an attempt.
+		// Redeeming from another origin, even an allowed one, is refused without spending an attempt.
 		yield* fails(auth.startPasskeyCodeRedemption(issued.code, primary.expectedOrigin), "origin_invalid");
 		yield* fails(auth.startPasskeyCodeRedemption(issued.code, undefined), "origin_invalid");
-		assert.deepEqual(yield* sql`SELECT failures FROM passkey_codes`, [{ failures: 2 }]);
+		assert.deepEqual(yield* sql`SELECT failures FROM passkey_codes`, [{ failures: 0 }]);
 		// Redemption from the bound origin activates it and adds a passkey for its hostname in one transaction.
 		// A lowercase transcription of the code is accepted.
 		const redeemed = yield* redeem(issued.code.toLowerCase(), second, added);
@@ -223,6 +246,7 @@ const run = Effect.gen(function* () {
 		auth = yield* start();
 		assert.deepEqual(yield* auth.relyingParty(added.expectedOrigin), added);
 		yield* login(second, added);
+		assert.ok((yield* sql`SELECT id FROM sessions WHERE origin=${added.expectedOrigin}`).length >= 2);
 		// Removal: never a configured origin or the request's own origin, never while passkeys are bound to it.
 		const removeProof = (origin: string, party: RelyingParty, device: ReturnType<typeof authenticator>) =>
 			Effect.gen(function* () {
@@ -286,6 +310,10 @@ const run = Effect.gen(function* () {
 			{ removed: added.expectedOrigin },
 		);
 		yield* fails(auth.relyingParty(added.expectedOrigin), "origin_invalid");
+		// Sessions issued on the removed origin end with it; the primary origin's session does not.
+		yield* fails(auth.authenticateSession(redeemed.token), "session_invalid");
+		assert.equal((yield* sql`SELECT id FROM sessions WHERE origin=${added.expectedOrigin}`).length, 0);
+		assert.ok((yield* auth.authenticateSession(session.token)).id);
 	} else if (scenario === "zero-passkeys") {
 		const issued = yield* create();
 		yield* sql`DELETE FROM passkeys`;
@@ -296,6 +324,7 @@ const run = Effect.gen(function* () {
 		yield* sql`DROP TABLE auth_origins`;
 		yield* sql`DROP TABLE passkey_codes`;
 		yield* sql`ALTER TABLE passkeys DROP COLUMN rp_id`;
+		yield* sql`ALTER TABLE sessions DROP COLUMN origin`;
 		yield* sql`DELETE FROM boot_migrations WHERE migration_id=20`;
 		yield* sql`PRAGMA user_version=19`;
 		yield* initializeBootSchema;
@@ -317,6 +346,66 @@ const run = Effect.gen(function* () {
 		yield* login(first, primary);
 		assert.deepEqual(yield* sql`SELECT rp_id FROM passkeys`, [{ rp_id: "comms.test" }]);
 		yield* fails(login(first, other), "authentication_invalid");
+		// PUBLIC_ORIGINS names no RP ID for a passkey without one recorded, so boot refuses to start with it.
+		yield* sql`UPDATE passkeys SET rp_id=NULL`;
+		yield* fails(start(primary, true), "auth_configuration_invalid");
+		assert.deepEqual(yield* sql`SELECT rp_id FROM passkeys`, [{ rp_id: null }]);
+		// Reverting to the single-origin config starts, and a sign-in there records the RP ID.
+		auth = yield* start();
+		yield* login(first, primary);
+		// With every passkey recorded, PUBLIC_ORIGINS starts and the passkey still signs in.
+		auth = yield* start(primary, true);
+		yield* login(first, primary);
+	} else if (scenario === "shared-rp") {
+		// A runtime origin on the primary's parent domain shares its RP ID with the configured primary origin.
+		const issued = yield* create({ origin: primary.expectedOrigin });
+		const redeemed = yield* redeem(issued.code, second, primary);
+		assert.deepEqual(yield* sql`SELECT DISTINCT rp_id FROM passkeys`, [{ rp_id: "comms.test" }]);
+		// Its passkeys stay usable through the primary origin, so it is removable despite having passkeys.
+		const challenge = yield* auth.at(board).startOriginRemoveAssertion({ origin: primary.expectedOrigin }, session.id);
+		assert.deepEqual(
+			yield* auth
+				.at(board)
+				.removeOrigin(
+					{ origin: primary.expectedOrigin },
+					{ id: challenge.id, response: sign(first, challenge.options.challenge, board) },
+					session.id,
+				),
+			{ removed: primary.expectedOrigin },
+		);
+		yield* fails(auth.relyingParty(primary.expectedOrigin), "origin_invalid");
+		yield* fails(auth.authenticateSession(redeemed.token), "session_invalid");
+		yield* login(second, board);
+	} else if (scenario === "configured-passkeys") {
+		const issued = yield* create({ origin: added.expectedOrigin });
+		yield* redeem(issued.code, second, added);
+		// An unstamped passkey counts as the primary RP ID's.
+		yield* sql`UPDATE passkeys SET rp_id=NULL WHERE id=${first.id}`;
+		assert.deepEqual(
+			(yield* auth.listPasskeys(session.id)).items.map((key) => [key.id, key.can_delete]),
+			[
+				[first.id, false],
+				[second.id, true],
+			],
+		);
+		const deleteProof = (id: string, device: ReturnType<typeof authenticator>, party: RelyingParty) =>
+			Effect.gen(function* () {
+				const challenge = yield* auth.at(party).startPasskeyDeleteAssertion({ id }, session.id);
+				return { id: challenge.id, response: sign(device, challenge.options.challenge, party) };
+			});
+		// The primary's last passkey is kept while another domain still has one. The proof comes from the other
+		// domain's passkey, so the primary passkey stays unstamped for this check.
+		yield* fails(
+			auth.deletePasskey({ id: first.id }, yield* deleteProof(first.id, second, added), session.id),
+			"origin_last_passkey",
+		);
+		assert.deepEqual(yield* sql`SELECT rp_id FROM passkeys WHERE id=${first.id}`, [{ rp_id: null }]);
+		// A runtime domain's passkey stays deletable while the primary keeps one.
+		yield* auth.deletePasskey({ id: second.id }, yield* deleteProof(second.id, first, primary), session.id);
+		assert.deepEqual(
+			(yield* auth.listPasskeys(session.id)).items.map((key) => key.id),
+			[first.id],
+		);
 	} else throw new Error("Unknown scenario");
 });
 await Effect.runPromise(

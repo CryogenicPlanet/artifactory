@@ -125,6 +125,7 @@ describe("typed source tree publication", () => {
 			"DROP TABLE auth_origins",
 			"DROP TABLE passkey_codes",
 			"ALTER TABLE passkeys DROP COLUMN rp_id",
+			"ALTER TABLE sessions DROP COLUMN origin",
 			"DROP TABLE IF EXISTS boot_migrations",
 			"ALTER TABLE backups DROP COLUMN engine",
 			"PRAGMA user_version=12",

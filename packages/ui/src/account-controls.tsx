@@ -63,16 +63,16 @@ export function AccountControls() {
 							variant="outline"
 							size="sm"
 							type="button"
-							disabled={busy || !passkeys.can_delete}
+							disabled={busy || !passkey.can_delete}
 							onClick={() => run(deletePasskey(passkey.id), "Passkey removed.")}
 						>
 							Remove {passkey.label}
 						</Button>
 					</article>
 				))}
-				{passkeys && !passkeys.can_delete && (
+				{passkeys?.items.some((passkey) => !passkey.can_delete) && (
 					<p className="mt-1.5 text-[10px] leading-relaxed text-subtle">
-						Keep at least one passkey so you can sign in.
+						Keep at least one passkey for each configured address so you can sign in.
 					</p>
 				)}
 				<Card className="mt-4">

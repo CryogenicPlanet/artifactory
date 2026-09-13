@@ -13,6 +13,7 @@ const main = Effect.gen(function* () {
 		yield* sql`DROP TABLE auth_origins`;
 		yield* sql`DROP TABLE passkey_codes`;
 		yield* sql`ALTER TABLE passkeys DROP COLUMN rp_id`;
+		yield* sql`ALTER TABLE sessions DROP COLUMN origin`;
 		yield* sql`ALTER TABLE backups DROP COLUMN engine`;
 		yield* sql`DROP TABLE boot_migrations`;
 		yield* sql`PRAGMA user_version=17`;
@@ -58,6 +59,7 @@ const main = Effect.gen(function* () {
 	yield* sql`DROP TABLE auth_origins`;
 	yield* sql`DROP TABLE passkey_codes`;
 	yield* sql`ALTER TABLE passkeys DROP COLUMN rp_id`;
+	yield* sql`ALTER TABLE sessions DROP COLUMN origin`;
 	yield* sql`DROP TABLE IF EXISTS boot_migrations`;
 	yield* sql`ALTER TABLE backups DROP COLUMN engine`;
 	yield* sql`PRAGMA user_version=11`;

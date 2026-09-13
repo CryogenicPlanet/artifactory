@@ -14,15 +14,18 @@ import { Events } from "./events.ts";
 import { humanAgent } from "./human-agent.ts";
 import { canonicalPasskeyCode, type PasskeyCodeParams } from "./passkey-code-schema.ts";
 
-/** A code is shown once, so it lives briefly and allows as few wrong guesses as a setup code. */
+/** A code is shown once, so it lives briefly. Wrong guesses lock redemption rather than destroy the code,
+ * because redemption is public and a forged Origin header would otherwise let anyone burn it. */
 export const passkeyCodeLifetimeMs = 10 * 60_000;
 const passkeyCodeAttempts = 3;
+export const passkeyCodeLockoutMs = 60_000;
 
 const codeRow = Schema.Struct({
 	id: Schema.String,
 	hash: Schema.String,
 	origin: Schema.NullOr(Schema.String),
 	failures: Schema.Finite,
+	locked_until: Schema.Finite,
 	expires_at: Schema.Finite,
 });
 type CodeRow = typeof codeRow.Type;
@@ -36,7 +39,7 @@ const challengeRow = Schema.Struct({
 export const makePasskeyCodes = <E, R, S, SE, SR>(
 	config: AuthConfig,
 	verify: (binding: string, proof: AssertionProof) => Effect.Effect<void, E, R>,
-	newSession: Effect.Effect<S, SE, SR>,
+	newSession: (origin: string) => Effect.Effect<S, SE, SR>,
 	mutex: Semaphore.Semaphore,
 ) =>
 	Effect.gen(function* () {
@@ -61,7 +64,7 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 			});
 		const noPasskeys = Effect.map(sql`SELECT id FROM passkeys LIMIT 1`, (rows) => rows.length === 0);
 		const currentCode = Effect.gen(function* () {
-			const rows = yield* sql`SELECT id, hash, origin, failures, expires_at FROM passkey_codes`;
+			const rows = yield* sql`SELECT id, hash, origin, failures, locked_until, expires_at FROM passkey_codes`;
 			return (yield* Schema.decodeUnknownEffect(Schema.Array(codeRow))(rows))[0];
 		});
 		const discard = Effect.gen(function* () {
@@ -95,8 +98,8 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 						const expiresAt = now + passkeyCodeLifetimeMs;
 						// A newer code replaces the previous one and every ceremony started with it.
 						yield* discard;
-						yield* sql`INSERT INTO passkey_codes (id, hash, origin, failures, expires_at, created_at)
-				VALUES (${yield* random}, ${yield* hash(code)}, ${origin}, 0, ${expiresAt}, ${now})`;
+						yield* sql`INSERT INTO passkey_codes (id, hash, origin, failures, locked_until, expires_at, created_at)
+				VALUES (${yield* random}, ${yield* hash(code)}, ${origin}, 0, 0, ${expiresAt}, ${now})`;
 						yield* event("auth.passkey_code_created", "info", { origin, expires_at: expiresAt });
 						return { code, origin, expires_at: expiresAt };
 					}).pipe(captureRefusal(Schema.is(AuthError))),
@@ -132,23 +135,30 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 							if (code) yield* discard;
 							return yield* refuse("passkey_code_invalid");
 						}
-						const failed = (refusal: "passkey_code_invalid" | "origin_invalid") =>
-							Effect.gen(function* () {
-								const exhausted = code.failures + 1 >= passkeyCodeAttempts;
-								if (exhausted) yield* discard;
-								else yield* sql`UPDATE passkey_codes SET failures=${code.failures + 1} WHERE id=${code.id}`;
-								yield* event("auth.passkey_code_refused", "warn", {
-									reason: refusal,
-									origin: origin ?? null,
-									exhausted,
-								});
-								return yield* refuse(refusal);
-							});
+						// An origin that is neither allowed nor bound is refused before the code is examined and spends nothing.
+						// Origin is forgeable outside a browser, so it is not a reason to count anything either.
+						const party = yield* partyFor(code, origin);
+						if (!party) return yield* refuse("origin_invalid");
+						if (code.locked_until > now) return yield* refuse("passkey_code_locked");
 						// Comparing SHA-256 digests of a random code; the stored value is never the code itself.
 						// Codes are uppercase hex, so a lowercase transcription is the same code rather than a wasted attempt.
-						if ((yield* hash(input.trim().toUpperCase())) !== code.hash) return yield* failed("passkey_code_invalid");
-						const party = yield* partyFor(code, origin);
-						if (!party) return yield* failed("origin_invalid");
+						if ((yield* hash(input.trim().toUpperCase())) !== code.hash) {
+							const failures = code.failures + 1;
+							// From the third wrong code, lock for 60 seconds, doubling with each further wrong code.
+							// The code keeps its TTL, so a lockout delays its owner but never destroys it.
+							const lockedUntil =
+								failures >= passkeyCodeAttempts
+									? now + passkeyCodeLockoutMs * 2 ** Math.min(failures - passkeyCodeAttempts, 10)
+									: 0;
+							yield* sql`UPDATE passkey_codes SET failures=${failures}, locked_until=${lockedUntil} WHERE id=${code.id}`;
+							yield* event("auth.passkey_code_refused", "warn", {
+								reason: "passkey_code_invalid",
+								origin: party.expectedOrigin,
+								failures,
+								locked_until: lockedUntil === 0 ? null : lockedUntil,
+							});
+							return yield* refuse("passkey_code_invalid");
+						}
 						const existing = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: Schema.String })))(
 							yield* sql`SELECT id FROM passkeys WHERE COALESCE(rp_id, ${config.rpId})=${party.rpId}`,
 						);
@@ -225,7 +235,7 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 							rp_id: party.rpId,
 							activated,
 						});
-						return yield* newSession;
+						return yield* newSession(party.expectedOrigin);
 					}),
 				),
 			);

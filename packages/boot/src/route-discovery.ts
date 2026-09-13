@@ -185,7 +185,7 @@ const routes = [
 		"post",
 		["/_boot/auth/passkey-code/options"],
 		"public",
-		"Start code redemption with {code} and exact Origin: an allowed origin, or the origin the code is bound to. Refuses bearer credentials and boards with no passkey. A wrong code or origin consumes one of three attempts.",
+		"Start code redemption with {code} and exact Origin: an allowed origin, or the origin the code is bound to. Refuses bearer credentials and boards with no passkey. Other origins are refused without spending an attempt; from the third wrong code, redemption locks for 60 seconds, doubling per further wrong code, and the code survives until it expires.",
 	],
 	[
 		"post",
@@ -234,7 +234,7 @@ const routes = [
 		"delete",
 		["/_boot/auth/passkeys/{id}"],
 		"human",
-		`Delete a passkey with {}, exact Origin and a fresh passkey.delete ${headerLabel(assertionHeader)}. The last key cannot be deleted.`,
+		`Delete a passkey with {}, exact Origin and a fresh passkey.delete ${headerLabel(assertionHeader)}. The last key, and the last key for a configured origin's RP ID, cannot be deleted.`,
 	],
 	[
 		"post",
@@ -253,7 +253,7 @@ const routes = [
 		"delete",
 		["/_boot/auth/origins"],
 		"human",
-		`Remove a runtime origin with {origin}, exact Origin and a fresh origin.remove ${headerLabel(assertionHeader)}. Refuses configured origins, the request's own origin, and origins whose RP ID still has passkeys.`,
+		`Remove a runtime origin with {origin}, exact Origin and a fresh origin.remove ${headerLabel(assertionHeader)}. Refuses configured origins, the request's own origin, and origins whose RP ID still has passkeys unless another allowed origin serves that RP ID. Ends sessions issued on the removed origin.`,
 	],
 ] as const satisfies ReadonlyArray<readonly [string, readonly string[], Access, string]>;
 

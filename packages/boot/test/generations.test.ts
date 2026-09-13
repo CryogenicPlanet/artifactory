@@ -439,6 +439,7 @@ await helper.exited;
 		await sql(env.data, "DROP TABLE public_paths");
 		for (const table of ["auth_origins", "passkey_codes"]) await sql(env.data, `DROP TABLE ${table}`);
 		await sql(env.data, "ALTER TABLE passkeys DROP COLUMN rp_id");
+		await sql(env.data, "ALTER TABLE sessions DROP COLUMN origin");
 		await sql(env.data, "DROP TABLE IF EXISTS boot_migrations");
 		await sql(env.data, "PRAGMA user_version = 4");
 		const migrated = await launch(test, env);

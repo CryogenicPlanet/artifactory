@@ -6,7 +6,15 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
 
-for (const scenario of ["origins", "code", "bound-origin", "zero-passkeys", "backfill"]) {
+for (const scenario of [
+	"origins",
+	"code",
+	"bound-origin",
+	"zero-passkeys",
+	"backfill",
+	"shared-rp",
+	"configured-passkeys",
+]) {
 	test(`passkey code: ${scenario}`, async ({ onTestFinished }) => {
 		const directory = await mkdtemp(join(tmpdir(), "comms-passkey-code-"));
 		onTestFinished(() => rm(directory, { recursive: true, force: true }));

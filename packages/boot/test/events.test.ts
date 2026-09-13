@@ -147,6 +147,7 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 	await app.sql("DROP TABLE public_paths");
 	for (const table of ["auth_origins", "passkey_codes"]) await app.sql(`DROP TABLE ${table}`);
 	await app.sql("ALTER TABLE passkeys DROP COLUMN rp_id");
+	await app.sql("ALTER TABLE sessions DROP COLUMN origin");
 	await app.sql("DROP TABLE IF EXISTS boot_migrations");
 	await app.sql("PRAGMA user_version=5");
 	await app.sql("INSERT INTO settings VALUES('preserved','value')");
@@ -168,7 +169,7 @@ it("migrates v5 without disturbing durable source journal and auth state", async
 	expect(await app.sql("SELECT state FROM source_batches")).toEqual([{ state: "publishing" }]);
 	expect(await app.sql("SELECT hex(content) AS content,mode FROM staging")).toEqual([{ content: "6566", mode: 493 }]);
 	expect(await app.sql("SELECT * FROM sessions")).toEqual([
-		{ id: "session", hash: "hash", created_at: 1, expires_at: 9999999999999, last_seen_at: null },
+		{ id: "session", hash: "hash", created_at: 1, expires_at: 9999999999999, last_seen_at: null, origin: null },
 	]);
 }, 15000);
 
@@ -321,6 +322,7 @@ it("backfills legacy routing without altering pending state or original event by
 	await app.sql("ALTER TABLE backups DROP COLUMN legacy_store_id");
 	for (const table of ["auth_origins", "passkey_codes"]) await app.sql(`DROP TABLE ${table}`);
 	await app.sql("ALTER TABLE passkeys DROP COLUMN rp_id");
+	await app.sql("ALTER TABLE sessions DROP COLUMN origin");
 	await app.sql("DROP TABLE IF EXISTS boot_migrations");
 	await app.sql("ALTER TABLE backups DROP COLUMN engine");
 	await app.sql("PRAGMA user_version=12");
@@ -353,6 +355,7 @@ it("migrates indexed projections without changing routed topics, JSON bytes or p
 	await app.sql("ALTER TABLE backups DROP COLUMN legacy_store_id");
 	for (const table of ["auth_origins", "passkey_codes"]) await app.sql(`DROP TABLE ${table}`);
 	await app.sql("ALTER TABLE passkeys DROP COLUMN rp_id");
+	await app.sql("ALTER TABLE sessions DROP COLUMN origin");
 	await app.sql("DROP TABLE IF EXISTS boot_migrations");
 	await app.sql("ALTER TABLE backups DROP COLUMN engine");
 	await app.sql("PRAGMA user_version=13");

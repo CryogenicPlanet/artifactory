@@ -29,28 +29,62 @@ const passkeys = (sql: SqlClient, engine: "pg" | "mysql", step: number, columns:
 		[{ name: "passkeys_id_hash_unique", columns: ["id_hash"] }],
 	);
 
-/** Step 20 appends rp_id to the step-4 passkeys table. Reopen rechecks this final shape, not step 4's. */
-export const passkeyRpId = (sql: SqlClient, engine: "pg" | "mysql") => {
-	const final = passkeys(sql, engine, 20, [...passkeyColumns, column("rp_id", 255, true)]);
+const sessionColumns = [
+	column("id", 128, false),
+	column("hash", 64, false),
+	column("created_at", "integer", false),
+	column("expires_at", "integer", false),
+	column("last_seen_at", "integer", true),
+];
+const sessions = (sql: SqlClient, engine: "pg" | "mysql", step: number, columns: typeof sessionColumns) =>
+	bootTable(
+		sql,
+		engine,
+		step,
+		"sessions",
+		columns,
+		["id"],
+		['PRIMARY KEY ("id")', "PRIMARY KEY (`id`)"],
+		noConstraints,
+		[{ name: "sessions_hash_unique", columns: ["hash"] }],
+	);
+
+/** One nullable text column appended to a step-4 table, owned once it exists with the table's final shape. */
+const appendColumn = (
+	sql: SqlClient,
+	engine: "pg" | "mysql",
+	final: ReturnType<typeof bootTable>,
+	table: "passkeys" | "sessions",
+	name: "rp_id" | "origin",
+	length: number,
+) => {
 	const present =
 		engine === "pg"
-			? sql`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='passkeys' AND column_name='rp_id'`
-			: sql`SELECT COLUMN_NAME FROM information_schema.columns WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='passkeys' AND COLUMN_NAME='rp_id'`;
+			? sql`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=${table} AND column_name=${name}`
+			: sql`SELECT COLUMN_NAME FROM information_schema.columns WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=${table} AND COLUMN_NAME=${name}`;
 	return {
-		final,
-		operation: {
-			name: "passkeys_rp_id",
-			run: sql
-				.unsafe(
-					engine === "pg"
-						? 'ALTER TABLE "passkeys" ADD COLUMN "rp_id" text'
-						: "ALTER TABLE `passkeys` ADD COLUMN `rp_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin",
-				)
-				.pipe(Effect.asVoid),
-			postcondition: present.pipe(
-				Effect.flatMap((rows) => (rows.length ? final.postcondition : Effect.succeed(false))),
-			),
-		},
+		name: `${table}_${name}`,
+		run: sql
+			.unsafe(
+				engine === "pg"
+					? `ALTER TABLE "${table}" ADD COLUMN "${name}" text`
+					: `ALTER TABLE \`${table}\` ADD COLUMN \`${name}\` varchar(${length}) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`,
+			)
+			.pipe(Effect.asVoid),
+		postcondition: present.pipe(Effect.flatMap((rows) => (rows.length ? final.postcondition : Effect.succeed(false)))),
+	};
+};
+
+/** Step 20 appends passkeys.rp_id and sessions.origin. Reopen rechecks these final shapes, not step 4's. */
+export const appendedAuthColumns = (sql: SqlClient, engine: "pg" | "mysql") => {
+	const finalPasskeys = passkeys(sql, engine, 20, [...passkeyColumns, column("rp_id", 255, true)]);
+	const finalSessions = sessions(sql, engine, 20, [...sessionColumns, column("origin", 512, true)]);
+	return {
+		finals: [finalPasskeys, finalSessions],
+		operations: [
+			appendColumn(sql, engine, finalPasskeys, "passkeys", "rp_id", 255),
+			appendColumn(sql, engine, finalSessions, "sessions", "origin", 512),
+		],
 	};
 };
 
@@ -76,26 +110,7 @@ export const authTables = (sql: SqlClient, engine: "pg" | "mysql") => [
 		],
 		[],
 	),
-	bootTable(
-		sql,
-		engine,
-		4,
-		"sessions",
-		[
-			column("id", 128, false),
-			column("hash", 64, false),
-			column("created_at", "integer", false),
-			column("expires_at", "integer", false),
-			column("last_seen_at", "integer", true),
-		],
-		["id"],
-		['PRIMARY KEY ("id")', "PRIMARY KEY (`id`)"],
-		[
-			{ foreignKeys: [], checks: [] },
-			{ foreignKeys: [], checks: [] },
-		],
-		[{ name: "sessions_hash_unique", columns: ["hash"] }],
-	),
+	sessions(sql, engine, 4, sessionColumns),
 	bootTable(
 		sql,
 		engine,
@@ -260,6 +275,7 @@ export const authTables = (sql: SqlClient, engine: "pg" | "mysql") => [
 			column("hash", 64, false),
 			column("origin", 512, true),
 			column("failures", "integer", false),
+			column("locked_until", "integer", false),
 			column("expires_at", "integer", false),
 			column("created_at", "integer", false),
 		],

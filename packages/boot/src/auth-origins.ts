@@ -150,9 +150,19 @@ export const makeOriginManagement = <E, R>(
 							yield* sql`SELECT origin, rp_id FROM auth_origins WHERE origin=${params.origin}`,
 						))[0];
 						if (!row) return yield* refuse("origin_not_found");
-						if ((yield* sql`SELECT id FROM passkeys WHERE COALESCE(rp_id, ${config.rpId})=${row.rp_id} LIMIT 1`).length)
+						// Passkeys for this RP ID stay usable when another allowed origin serves the same RP ID.
+						const served = (yield* allowedParties(sql, config)).some(
+							(item) => item.expectedOrigin !== row.origin && item.rpId === row.rp_id,
+						);
+						if (
+							!served &&
+							(yield* sql`SELECT id FROM passkeys WHERE COALESCE(rp_id, ${config.rpId})=${row.rp_id} LIMIT 1`).length
+						)
 							return yield* refuse("origin_has_passkeys");
 						yield* sql`DELETE FROM auth_origins WHERE origin=${row.origin}`;
+						// Sessions issued on the removed origin end with it. A session with no recorded origin predates
+						// runtime origins and counts as the primary origin's, which is never removable here.
+						yield* sql`DELETE FROM sessions WHERE origin=${row.origin}`;
 						const now = yield* Clock.currentTimeMillis;
 						yield* events.writeBoot({
 							at: now,

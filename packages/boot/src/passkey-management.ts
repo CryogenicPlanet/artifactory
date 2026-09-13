@@ -3,8 +3,8 @@ import { committed, captureRefusal } from "./auth-primitives.ts";
 import { generateRegistrationOptions, verifyRegistrationResponse } from "@simplewebauthn/server";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { AuthError } from "./auth.ts";
-import type { RelyingParty } from "./auth-origins.ts";
+import { AuthError, type AuthConfig } from "./auth.ts";
+import { configuredParties, type RelyingParty } from "./auth-origins.ts";
 import type { AssertionProof } from "./enrollment.ts";
 import {
 	canonicalPasskeyAdd,
@@ -30,6 +30,7 @@ const challengeRow = Schema.Struct({
 
 /** Composes with Auth's single mutex and boot transaction; registration state survives restart. */
 export const makePasskeyManagement = <E, R>(
+	config: AuthConfig,
 	verify: (
 		action: "passkey.add" | "passkey.delete",
 		binding: string,
@@ -46,13 +47,27 @@ export const makePasskeyManagement = <E, R>(
 				const rows = yield* sql`SELECT id FROM sessions WHERE id=${sessionId} AND expires_at>${now}`;
 				if (!rows.length) return yield* new AuthError({ code: "session_invalid" });
 			});
+		// A configured origin's RP ID must keep a passkey: its origin always answers, and without one no
+		// login, code or setup gets the human back in. A NULL rp_id counts as the primary RP ID's.
+		const protectedRpIds = configuredParties(config).map((party) => party.rpId);
+		const effective = (key: { readonly rp_id: string | null }) => key.rp_id ?? config.rpId;
+		const deletable = (
+			keys: ReadonlyArray<{ readonly rp_id: string | null }>,
+			key: { readonly rp_id: string | null },
+		) =>
+			keys.length > 1 &&
+			(!protectedRpIds.includes(effective(key)) ||
+				keys.filter((other) => effective(other) === effective(key)).length > 1);
 		const listPasskeys = (sessionId: string) =>
 			mutex.withPermit(
 				Effect.gen(function* () {
 					yield* liveSession(sessionId);
 					const rows = yield* sql`SELECT id, label, created_at, rp_id FROM passkeys ORDER BY created_at, id`;
 					const items = yield* Schema.decodeUnknownEffect(Schema.Array(item))(rows);
-					return { items, can_delete: items.length > 1 };
+					return {
+						items: items.map((key) => ({ ...key, can_delete: deletable(items, key) })),
+						can_delete: items.length > 1,
+					};
 				}),
 			);
 		const startPasskeyRegistration = (label: string, sessionId: string, party: RelyingParty) =>
@@ -151,10 +166,13 @@ export const makePasskeyManagement = <E, R>(
 						if (!validPasskeyId(params.id)) return yield* new AuthError({ code: "invalid_request" });
 						yield* verify("passkey.delete", canonicalPasskeyDelete(params, sessionId), proof);
 						yield* liveSession(sessionId);
-						const credentials = yield* sql`SELECT id FROM passkeys`;
-						if (!credentials.some((row) => row.id === params.id))
-							return yield* new AuthError({ code: "passkey_not_found" });
+						const credentials = yield* Schema.decodeUnknownEffect(
+							Schema.Array(Schema.Struct({ id: Schema.String, rp_id: Schema.NullOr(Schema.String) })),
+						)(yield* sql`SELECT id, rp_id FROM passkeys`);
+						const target = credentials.find((row) => row.id === params.id);
+						if (!target) return yield* new AuthError({ code: "passkey_not_found" });
 						if (credentials.length <= 1) return yield* new AuthError({ code: "last_passkey" });
+						if (!deletable(credentials, target)) return yield* new AuthError({ code: "origin_last_passkey" });
 						yield* sql`DELETE FROM passkeys WHERE id=${params.id}`;
 						return { deleted: params.id };
 					}).pipe(captureRefusal(Schema.is(AuthError))),

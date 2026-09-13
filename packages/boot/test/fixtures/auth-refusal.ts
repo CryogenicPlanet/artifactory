@@ -40,6 +40,7 @@ const run = Effect.gen(function* () {
 		const fault = yield* extra.pipe(Effect.exit);
 		const cause = Exit.isFailure(fault) ? Cause.combine(Cause.fail(refusal), fault.cause) : Cause.fail(refusal);
 		const passkeys = yield* makePasskeyManagement(
+			{ rpId: "comms.test", expectedOrigin: "https://comms.test" },
 			() =>
 				Effect.gen(function* () {
 					yield* sql`DELETE FROM auth_challenges WHERE id='proof'`;

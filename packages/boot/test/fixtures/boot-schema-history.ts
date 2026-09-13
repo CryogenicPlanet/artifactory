@@ -58,8 +58,8 @@ const main = Effect.gen(function* () {
 				const current = (yield* catalog)
 					.filter((row) => !added.includes(String(row.tbl_name)))
 					.map((row) =>
-						row.name === "passkeys" && typeof row.sql === "string"
-							? { ...row, sql: row.sql.replace(/, rp_id TEXT\)$/, ")") }
+						(row.name === "passkeys" || row.name === "sessions") && typeof row.sql === "string"
+							? { ...row, sql: row.sql.replace(/, (rp_id|origin) TEXT\)$/, ")") }
 							: row,
 					);
 				assert.deepEqual(current, historical18, "Only step 20 and the ledger may change the historical v18 catalog");

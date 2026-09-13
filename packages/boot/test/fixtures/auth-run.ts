@@ -159,7 +159,7 @@ const run = Effect.gen(function* () {
 					Object.keys(rows[0] ?? {})
 						.sort()
 						.join(","),
-					"created_at,expires_at,hash,id,last_seen_at",
+					"created_at,expires_at,hash,id,last_seen_at,origin",
 				);
 				const again = yield* restart();
 				assert.equal((yield* again.authenticateSession(session.token)).id, session.id);

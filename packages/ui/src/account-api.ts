@@ -5,6 +5,8 @@ import { BoardError } from "./board-api.ts";
 
 const failure = Schema.Struct({ error: Schema.Struct({ code: Schema.String }) });
 const explanation = (code: string) => {
+	if (code === "origin_last_passkey")
+		return "Keep at least one passkey for each configured address. Add another there before removing this one.";
 	if (code === "last_passkey") return "Keep at least one passkey. Add another before removing this one.";
 	if (code === "session_invalid") return "Your session expired. Sign in again, then reload this page.";
 	if (code === "origin_has_passkeys") return "Remove the passkeys for this domain before removing the domain.";
@@ -69,6 +71,7 @@ const Passkeys = Schema.Struct({
 			label: Schema.String,
 			created_at: Schema.Int,
 			rp_id: Schema.NullOr(Schema.String),
+			can_delete: Schema.Boolean,
 		}),
 	),
 	can_delete: Schema.Boolean,

@@ -50,6 +50,7 @@ const main = Effect.gen(function* () {
 		yield* sql`DROP TABLE auth_origins`;
 		yield* sql`DROP TABLE passkey_codes`;
 		yield* sql`ALTER TABLE passkeys DROP COLUMN rp_id`;
+		yield* sql`ALTER TABLE sessions DROP COLUMN origin`;
 		if (mode === "legacy") yield* sql`DROP TABLE boot_migrations`;
 		else yield* sql`DELETE FROM boot_migrations WHERE migration_id>=19`;
 		yield* sql`PRAGMA user_version=18`;
@@ -68,7 +69,14 @@ const main = Effect.gen(function* () {
 				{ key: "retained", value: "not JSON: unchanged" },
 			]);
 			assert.deepEqual(yield* sql`SELECT * FROM sessions`, [
-				{ id: "session", hash: "credential", created_at: 123, expires_at: 9000000000000, last_seen_at: 456 },
+				{
+					id: "session",
+					hash: "credential",
+					created_at: 123,
+					expires_at: 9000000000000,
+					last_seen_at: 456,
+					origin: null,
+				},
 			]);
 		}
 		return yield* Console.log(JSON.stringify(yield* snapshot));

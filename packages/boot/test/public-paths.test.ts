@@ -192,6 +192,7 @@ it("adopts an older boot store with an empty grant projection without guessing f
 		"DROP TABLE auth_origins",
 		"DROP TABLE passkey_codes",
 		"ALTER TABLE passkeys DROP COLUMN rp_id",
+		"ALTER TABLE sessions DROP COLUMN origin",
 	])
 		await app.sql(statement);
 	await app.sql("DROP TABLE IF EXISTS boot_migrations");

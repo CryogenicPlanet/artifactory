@@ -92,14 +92,22 @@ const policy = {
 		status: 403,
 		hint: "Send this action from a configured or activated origin with its exact Origin header; a code bound to an origin redeems only there. Inspect /_boot/auth/origins.",
 	},
+	origin_last_passkey: {
+		status: 409,
+		hint: "Keep at least one passkey for each configured origin's RP ID. Add another passkey on that address before deleting this one.",
+	},
 	origin_not_found: { status: 404, hint: "Inspect /_boot/auth/origins and select an activated runtime origin." },
 	origin_protected: {
 		status: 409,
 		hint: "Configured origins and the origin this request came from cannot be removed. Remove it from another origin.",
 	},
+	passkey_code_locked: {
+		status: 429,
+		hint: "Too many wrong codes. Wait for the lockout to end, then enter the code again before it expires.",
+	},
 	passkey_code_invalid: {
 		status: 401,
-		hint: "Ask the signed-in human for a new add-passkey code; codes expire, are single-use and allow three wrong attempts.",
+		hint: "Ask the signed-in human for a new add-passkey code; codes expire and are single-use. Three wrong codes lock redemption briefly.",
 	},
 	passkey_exists: { status: 409, hint: "Use the registered passkey or choose a different authenticator." },
 	passkey_not_found: { status: 404, hint: "Inspect /_boot/auth/passkeys and select an existing passkey." },

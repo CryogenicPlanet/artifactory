@@ -46,6 +46,7 @@ export const startServer = (browserOrigin?: string) =>
 				rpId: ambiguous || !primary ? "" : primary.rpId,
 				expectedOrigin: primary?.expectedOrigin ?? "",
 				additionalOrigins,
+				originList: Option.isSome(origins),
 			},
 		}).pipe(
 			Effect.provide(

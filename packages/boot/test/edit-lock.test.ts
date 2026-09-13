@@ -330,6 +330,7 @@ describe("durable edit ownership and staging", () => {
 			"DROP TABLE auth_origins",
 			"DROP TABLE passkey_codes",
 			"ALTER TABLE passkeys DROP COLUMN rp_id",
+			"ALTER TABLE sessions DROP COLUMN origin",
 		])
 			await env.sql(statement);
 		await env.sql("DROP TABLE IF EXISTS boot_migrations");
