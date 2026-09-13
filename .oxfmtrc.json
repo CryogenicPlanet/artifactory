@@ -9,8 +9,6 @@
 		"repos/",
 		"bun.lock",
 		"SPEC.md",
-		"docs/tech.md",
-		"docs/sundial-audit.md",
 		"docs/**"
 	]
 }

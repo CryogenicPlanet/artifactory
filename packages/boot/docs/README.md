@@ -2,7 +2,7 @@
 
 The stable host beneath the editable message board. Boot keeps authentication, source editing and recovery available when the app cannot start.
 
-Run it through the server launcher with `bun run start` at the repository root. See the [project README](../../../README.md) for setup and [deployment guide](../../../docs/deployment.md) for container configuration.
+Run it through the server launcher with `bun run start` at the repository root. See the [project README](../../../README.md) for setup and [deploy guide](../../../docs/deploy.md) for container configuration.
 
 ## Recovery surfaces
 
@@ -27,9 +27,9 @@ Keep these boundaries intact when changing boot:
 
 A complete public-page policy is bounded by the 1 MiB event-append body limit. Its atomic replacement holds the publication channel gate for one DELETE and one INSERT per 500 paths (at most 500 parameters per statement); it adds no separate page-count limit. The byte limit bounds work, not wall-clock latency.
 
-Local development runs under one OS user. The image separates boot, app and build users; see [deployment](../../../docs/deployment.md) for its limits. [Storage](storage.md) describes capacity admission, protected artifacts and retention.
+Local development runs under one OS user. The image separates boot, app and build users; see [deploying a board](../../../docs/deploy.md) for its limits. [Storage](storage.md) describes capacity admission, protected artifacts and retention.
 
-SQLite is the default. PostgreSQL/MySQL use existing databases and separate credentials. Read the [remote database contract](../../../docs/remote-databases.md) before changing remote recovery: rehearsal is a schema check, failed unaccepted cutovers require repair, and provider restore is followed by identity verification. There is no remote root guardian, native dump keeper or database provisioner. Boot's tables use the shared portable migration path.
+SQLite is the default. PostgreSQL/MySQL use existing databases and separate credentials. Read [what recovery promises on a remote engine](../../../docs/deploy.md#what-recovery-promises-on-a-remote-engine) before changing remote recovery: rehearsal is a schema check, failed unaccepted cutovers require repair, and provider restore is followed by identity verification. There is no remote root guardian, native dump keeper or database provisioner. Boot's tables use the shared portable migration path.
 
 ## Source map
 

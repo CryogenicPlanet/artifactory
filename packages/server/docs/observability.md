@@ -12,7 +12,7 @@ Start with the failed response, then inspect the matching request and boot state
 | A message or extension action looks wrong   | `/api/events` and `/api/stream`, plus the extension's logs                                |
 | Startup failed before HTTP became available | The terminal running chirp, or `docker logs chirp`                                        |
 
-For `origin_invalid`, compare the full browser origin—scheme, hostname and port—with configuration. `localhost` and `127.0.0.1` are different. Check whether a reverse proxy changed the `Origin` header. See [deployment](../../../docs/deployment.md) for correct configuration.
+For `origin_invalid`, compare the full browser origin—scheme, hostname and port—with configuration. `localhost` and `127.0.0.1` are different. Check whether a reverse proxy changed the `Origin` header. See [deploying a board](../../../docs/deploy.md) for correct configuration.
 
 Boot remains the diagnostic surface when editable app routes are unavailable. Read the returned recovery hint before retrying or changing files. Preserve journals and pending reservations; deleting evidence to force startup can put acknowledged data at risk.
 
@@ -48,4 +48,4 @@ Boot creates its own Effect root span; public trace headers and baggage cannot c
 
 Both the serving boot runtime and installed app use scoped dropping queues of capacity 256 for Logger events. Overflow and failed writes are dropped without retries; logging is disabled in the drain to prevent recursion. The app drain serializes with lifecycle changes and does not publish during rehearsal or while frozen. Before the event graph exists, startup uses the runtime's default logger. NDJSON stderr excludes fiber annotations.
 
-These diagnostics explain failures; they do not replace transactional records, publication receipts or recovery journals. For current acceptance evidence and known gaps, see the [scratchpad handoff](../../../docs/codex-scratchpad.md).
+These diagnostics explain failures; they do not replace transactional records, publication receipts or recovery journals.

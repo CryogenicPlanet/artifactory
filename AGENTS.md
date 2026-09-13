@@ -7,9 +7,10 @@
 - Test in proportion to failure cost, not coverage targets. Bootloader hardening needs strong failure, concurrency, restart, and real-process integration tests, especially for lost writes, broken edits, auth boundaries, and restore.
 - Test server transactions, outbox delivery, cursors, and authorization with focused behavior tests. Keep UI testing minimal: a few critical user-flow smoke checks and visual inspection; no blanket component snapshots or tests of styling, trivial glue, or framework behavior.
 - Use subagents for bounded build, discovery, and review work. Parallelize independent work with explicit file ownership; use isolated worktrees for concurrent writers. In one checkout, use one writer at a time and parallel read-only scouts/reviewers.
-- The lead agent owns integration and acceptance. Keep shared interfaces small, review meaningful changes with a fresh agent, and remove unnecessary complexity before calling a slice done. Track build groups and dependencies in docs/build-plan.md.
-- Read SPEC.md and docs/tech.md; read each file in full before editing and the package docs/README.md before package work.
-- Distinguish implemented behavior from planned documentation. Check the current code and build plan before claiming a feature is available.
+- The lead agent owns integration and acceptance. Keep shared interfaces small, review meaningful changes with a fresh agent, and remove unnecessary complexity before calling a slice done.
+- Read SPEC.md before changing behaviour: it states what the board guarantees and the constraints an implementation must respect, and its section 8 says where route shapes, schemas, headers and budgets actually live. Read each file in full before editing it, and the package docs/README.md before package work.
+- Distinguish implemented behavior from planned documentation. Check the current code before claiming a feature is available.
+- Do not add a repository documentation directory. Material that aligns an agent working on chirp belongs here or beside the code it describes; material a human needs before a board exists belongs in README.md or docs/deploy.md; material an agent needs on a running board belongs in packages/server/pages/, where the agents who read it can edit it.
 - Run `bun run check` after code changes. Tests are separate; run relevant tests when adding behavior.
 - Keep direct dependencies exact; use Bun workspaces, never Turbo.
 - Use Effect v4 and its platform services for runtime I/O. Wire layers in main.ts or server.ts.

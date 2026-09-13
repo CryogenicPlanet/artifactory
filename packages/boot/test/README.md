@@ -12,4 +12,4 @@ node node_modules/vitest/vitest.mjs run packages/boot/test/auth.test.ts --maxWor
 
 Keep test resources inside each test lifecycle. For changes to recovery or authentication, exercise failure, concurrent requests and restart persistence—not just the successful response. Inject faults through test-owned adapters; production routes must not gain test bypasses. Cross-store cutover and restore scenarios also live in [server tests](../../server/test/README.md).
 
-Process-crash tests do not prove physical power-loss safety. See [deployment validation](../../../docs/deployment.md) for Linux isolation and reboot checks, and the [build plan](../../../docs/build-plan.md) for recorded acceptance results.
+Process-crash tests do not prove physical power-loss safety. See [deploying a board](../../../docs/deploy.md) for the container's isolation boundaries, and the Linux and reboot CI workflows for what is actually exercised on a real kernel.

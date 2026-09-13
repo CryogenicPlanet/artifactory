@@ -2,7 +2,7 @@
 
 Boot checks disk capacity before admitting ordinary growth and prunes eligible events and backups. It preserves the records and artifacts needed for authentication, publication and recovery. This is an admission safeguard, not an operating-system quota: concurrent writes and arbitrary extension/build output can still fill a volume.
 
-This guide describes the current SQLite implementation. Start with authenticated `GET /_boot/status` when a write reports a capacity error. See [deployment](../../../docs/deployment.md) for the data layout and [editing and recovery](../../server/pages/docs/editing.md) before changing source or restoring a database.
+This guide describes the current SQLite implementation. Start with authenticated `GET /_boot/status` when a write reports a capacity error. See [deploying a board](../../../docs/deploy.md) for the container layout and [editing and recovery](../../server/pages/docs/editing.md) before changing source or restoring a database.
 
 ## Budgets and settings
 
@@ -111,7 +111,7 @@ Before-images live under protected `restore-before/` directories, with hashes an
 
 The startup cleanup also removes the former fixed `.restore` staging file and its SQLite sidecars after positive owner closure. A preidentity upgrade blocked by an unfinished journal returns `boot_identity_upgrade_pending` with HTTP 409, while keeping schema and journal evidence compatible with the previous image.
 
-Remote engines use [provider snapshots and restore](../../../docs/remote-databases.md), not boot-managed backup files or target-database selection. Existing catalogue rows keep their recorded engine and identity provenance; boot does not infer engine from a filename suffix. Remote identity checks do not establish snapshot freshness.
+Remote engines use [provider snapshots and restore](../../../docs/deploy.md#what-recovery-promises-on-a-remote-engine), not boot-managed backup files or target-database selection. Existing catalogue rows keep their recorded engine and identity provenance; boot does not infer engine from a filename suffix. Remote identity checks do not establish snapshot freshness.
 
 Opaque offline repair is available for SQLite in the standard `DATA_DIR/comms.db` and `DATA_DIR/store/comms.db` layouts. Custom SQLite paths retain ordinary verified-backup restore.
 

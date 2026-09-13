@@ -2,7 +2,7 @@
 
 Shared database mechanisms for immutable boot and the standalone editable server: store descriptors, Effect SQL clients, dialect fragments, migration ledgers and remote connection ownership. This package imports neither boot nor application code and never enters browser source. Runtime staging copies it as an editable workspace alongside protocol.
 
-SQLite is the default. PostgreSQL and Oracle MySQL drivers are wired into the current runtime integration; complete board and image acceptance remains in progress. See [deployment](../../../docs/deployment.md) for configuration and [operator provisioning](../../boot/sql/README.md) for database roles. Passing client tests alone does not establish restart, restore or engine-transfer support.
+SQLite is the default; PostgreSQL and Oracle MySQL are supported deployment targets. See [deploying a board](../../../docs/deploy.md) for configuration and [operator provisioning](../../boot/sql/README.md) for database roles. Passing client tests alone does not establish restart or restore support.
 
 ## Stores and queries
 
@@ -19,10 +19,10 @@ A remote writing client reserves one physical connection for its lifetime and ho
 
 The pinned PostgreSQL/MySQL driver patches discard a lease whose scope exits with failure before returning it to the pool. This includes failed outer transaction COMMIT/ROLLBACK, so a queued borrower cannot inherit that uncertain session while application failure handling runs. Ordinary failed transactions may also lose their connection after successful rollback. The shared Effect transaction patch remembers failed transaction controls across nested calls: catching a failed savepoint boundary cannot make the outer transaction commit. Ordinary caught body failures remain valid when their savepoint rollback succeeds. The existing read/mutation gate remains in place.
 
-Advisory locks coordinate cooperating chirp writers. They do not prove arbitrary sessions, escaped processes or prepared work are gone, and do not establish failover fencing. There is no guardian, session registry or closure receipt for remote SQL. See the [remote operating contract](../../../docs/remote-databases.md).
+Advisory locks coordinate cooperating chirp writers. They do not prove arbitrary sessions, escaped processes or prepared work are gone, and do not establish failover fencing. There is no guardian, session registry or closure receipt for remote SQL. See [what recovery promises on a remote engine](../../../docs/deploy.md#what-recovery-promises-on-a-remote-engine).
 
 ## Validation
 
-Run `bun run check` and focused storage tests after changes. [Remote client acceptance](../../../scripts/remote-session-acceptance.sh) uses disposable pinned database containers; [real-board acceptance](../../../scripts/remote-board-acceptance.sh) exercises the image separately. Neither runs in the default SQLite suite. Check [current acceptance](../../../docs/build-plan.md) before treating a workflow or a prepared integration as verified behavior.
+Run `bun run check` and focused storage tests after changes. [Remote client acceptance](../../../scripts/remote-session-acceptance.sh) uses disposable pinned database containers; [real-board acceptance](../../../scripts/remote-board-acceptance.sh) exercises the image separately. Neither runs in the default SQLite suite.
 
 [Private CA acceptance](../../../scripts/remote-tls-acceptance.sh) runs the built image against disposable TLS servers. It checks encrypted queries with a trusted CA, then requires refusal with an unrelated CA or a mismatched hostname. This is a separate Linux image check; preparing the fixture or passing argument tests does not prove a successful TLS handshake.
