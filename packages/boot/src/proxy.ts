@@ -51,7 +51,7 @@ GET /_boot/settings  Human-only revisioned storage percentages and public paths.
 POST /_boot/settings  Change {revision,patch} with a fresh settings.change assertion; retain proof for exact retries.
 GET /health        Bootloader liveness (independent of the child).
 GET /_boot/recovery  Human source-recovery page, independent of the child.
-GET /_boot/status  Child state and bounded stderr tail.
+GET /_boot/status  Child state, bounded stderr tail and passkey/origin diagnostics.
 GET /_boot/generations  Persistent generation history (also /api/generations).
 GET /_boot/db/backups  Human-only backup catalog.
 POST /_boot/db/backup  Capture a consistent app backup (human or fs scope).
@@ -136,6 +136,22 @@ export const proxy = Effect.gen(function* () {
 				requestId,
 			});
 	const routed = Effect.gen(function* () {
+		// Recovery help carries a public yes/no on whether stored passkeys match an allowed origin; detail needs auth.
+		if (path === "/_boot" && request.method === "GET") {
+			const ok = yield* auth.passkeyOriginState.pipe(
+				Effect.map((state): boolean | null => state.ok),
+				Effect.orElseSucceed(() => null),
+			);
+			return HttpServerResponse.text(
+				`${help}${
+					ok === null
+						? ""
+						: ok
+							? "\npasskey_origins_ok: true\n"
+							: "\npasskey_origins_ok: false\nSome stored passkeys belong to no address this board serves. The operator can restore the previous origin variables or recover with REOPEN_SETUP=1; details are in the boot log and /_boot/status.\n"
+				}`,
+			);
+		}
 		const publicResponse = yield* publicRoute;
 		if (publicResponse) return publicResponse;
 		if (
@@ -273,6 +289,7 @@ export const proxy = Effect.gen(function* () {
 									}).pipe(Effect.orElseSucceed(() => null))
 								: null,
 							traffic: yield* child.traffic.state,
+							passkey_origins: yield* auth.passkeyOriginState.pipe(Effect.orElseSucceed(() => null)),
 							last_good: lastGood,
 						}),
 					);

@@ -18,7 +18,7 @@ export const verifyBootSchemaShape = (sql: SqlClient) =>
 		yield* sql`SELECT shape."session_id",shape."key_hash",shape."request_hash",shape."proof_hash",shape."family",shape."successor_access_id",shape."successor_refresh_id",shape."expires_at",shape."salt",shape."nonce",shape."ciphertext",shape."tag" FROM "mint_receipts" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."id",shape."public_key",shape."counter",shape."transports",shape."label",shape."created_at",shape."rp_id" FROM "passkeys" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."origin",shape."rp_id",shape."created_at" FROM "auth_origins" AS shape LIMIT 0`;
-		yield* sql`SELECT shape."id",shape."selector",shape."hash",shape."origin",shape."failures",shape."locked_until",shape."expires_at",shape."created_at" FROM "passkey_codes" AS shape LIMIT 0`;
+		yield* sql`SELECT shape."id",shape."selector",shape."hash",shape."origin",shape."failures",shape."locked_until",shape."proven",shape."proof_id",shape."proof_nonce",shape."proof_expires_at",shape."expires_at",shape."created_at" FROM "passkey_codes" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."path" FROM "public_paths" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."family",shape."key_hash",shape."predecessor",shape."expires_at" FROM "refresh_idempotency" AS shape LIMIT 0`;
 		yield* sql`SELECT shape."predecessor",shape."family",shape."successor_access_id",shape."successor_refresh_id",shape."expires_at",shape."salt",shape."nonce",shape."ciphertext",shape."tag" FROM "refresh_receipts" AS shape LIMIT 0`;

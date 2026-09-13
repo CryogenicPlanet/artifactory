@@ -18,7 +18,12 @@ const routes = [
 	],
 	["get", ["/health"], "public", "Bootloader liveness, independent of the app."],
 	["head", ["/health"], "public", "Bootloader liveness without a response body."],
-	["get", ["/_boot"], "public", "Plain-text boot recovery help."],
+	[
+		"get",
+		["/_boot"],
+		"public",
+		"Plain-text boot recovery help, ending with passkey_origins_ok: true or false. False means some stored passkeys belong to no address this board serves; detail is on /_boot/status.",
+	],
 	[
 		"get",
 		["/.well-known/agent.json"],
@@ -35,7 +40,7 @@ const routes = [
 		"get",
 		["/_boot/status"],
 		"fs",
-		"Child state, recovery diagnostics and traffic state. Human session or fs-scoped bearer.",
+		"Child state, recovery diagnostics, traffic state, and passkey_origins: whether stored passkeys belong to allowed origins, with the mismatch and recovery steps. Human session or fs-scoped bearer.",
 	],
 	[
 		"get",
@@ -147,7 +152,12 @@ const routes = [
 		"refresh-token",
 		"Rotate {refresh}. Optional Idempotency-Key. Retry the same predecessor during the fixed 60-second replay window after a lost response.",
 	],
-	["get", ["/setup"], "public", "First-passkey setup page; available only before setup completes."],
+	[
+		"get",
+		["/setup"],
+		"public",
+		"First-passkey setup page; available only before setup completes, or for one recovery passkey on the primary origin per boot process while the operator sets REOPEN_SETUP=1.",
+	],
 	["get", ["/auth/login"], "public", "Human passkey sign-in page."],
 	[
 		"post",
@@ -161,7 +171,12 @@ const routes = [
 		"public",
 		"Complete setup with {id,response} registration proof and exact Origin.",
 	],
-	["post", ["/_boot/auth/login/options"], "public", "Start passkey login with {} and exact Origin."],
+	[
+		"post",
+		["/_boot/auth/login/options"],
+		"public",
+		"Start passkey login with {} and exact Origin. Refused with passkey_origin_mismatch while no stored passkey belongs to an allowed origin.",
+	],
 	[
 		"post",
 		["/_boot/auth/login/verify"],
@@ -185,13 +200,19 @@ const routes = [
 		"post",
 		["/_boot/auth/passkey-code/options"],
 		"public",
-		"Start code redemption with {code}, formatted SELECTOR-SECRET (12 and 16 hex characters, case-insensitive), and exact Origin: an allowed origin, or the origin the code is bound to. Refuses bearer credentials and boards with no passkey. A malformed code, an unknown selector, or an origin that is neither allowed nor bound gets one identical passkey_code_invalid refusal and spends nothing; from the third wrong secret for the live selector, redemption locks for 60 seconds, doubling per further wrong secret, and the code survives until it expires.",
+		"Start code redemption with {code}, formatted SELECTOR-SECRET (12 and 16 hex characters, case-insensitive), and exact Origin: an allowed origin, or the origin the code is bound to. Refuses bearer credentials and boards with no passkey. A malformed code, an unknown selector, or an origin that is neither allowed nor bound gets one identical passkey_code_invalid refusal and spends nothing; from the third wrong secret for the live selector, redemption locks for 60 seconds, doubling per further wrong secret, and the code survives until it expires. A code bound to a domain not yet allowed first has the board GET a one-time proof from that domain (https, no redirects, 5 seconds); if the domain does not serve it, redemption is refused with origin_unproven and spends no attempt.",
 	],
 	[
 		"post",
 		["/_boot/auth/passkey-code/verify"],
 		"public",
-		"Finish redemption with {id,response} registration proof and the same exact Origin. Adds the passkey, activates a bound origin, consumes the code and issues a secure human session cookie.",
+		"Finish redemption with {id,response} registration proof and the same exact Origin. Adds the passkey, activates a bound origin whose proof succeeded, consumes the code and issues a secure human session cookie.",
+	],
+	[
+		"get",
+		["/_boot/auth/origin-proof/{id}"],
+		"public",
+		"Returns the one-time proof value the board is fetching through a newly named domain while that proof is live, and 404 otherwise. It confirms the domain routes to this board before redemption activates it.",
 	],
 	[
 		"get",

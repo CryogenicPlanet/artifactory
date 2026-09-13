@@ -15,6 +15,7 @@ import {
 	FileSystem,
 	Layer,
 	Logger,
+	Option,
 	Path,
 	Redacted,
 	Ref,
@@ -74,6 +75,12 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		path.resolve(options.dataDirectory, isolated ? "store/comms.db" : "comms.db"),
 	);
 	yield* validateAuthConfig(options.auth);
+	// REOPEN_SETUP is an operator recovery switch read only from boot's own environment. Child processes receive
+	// explicit environments, and no settings or agent-writable surface can set it.
+	const reopenSetup = Option.exists(
+		yield* Config.option(Config.String("REOPEN_SETUP")),
+		(value) => value === "1" || value === "true",
+	);
 	yield* fs.makeDirectory(options.dataDirectory, { recursive: true, mode: 0o700 });
 	const configuration =
 		configured._tag === "file"
@@ -162,7 +169,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 					}),
 				);
 	const graph = Layer.mergeAll(
-		authLayer(options.auth),
+		authLayer({ ...options.auth, reopenSetup }),
 		generationsLayer,
 		publicPagesLayer(options.dataDirectory),
 		preparationLayer(options).pipe(Layer.provide(preparationProcessLayer)),

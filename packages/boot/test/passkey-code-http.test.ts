@@ -1,11 +1,12 @@
 /* oxlint-disable effecttsgo/node-builtin-import */
 import { assertionHeader } from "@comms/protocol/headers";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { promisify } from "node:util";
 import { Schema } from "effect";
 import { expect, it } from "vitest";
 import { authenticator } from "./fixtures/authenticator.ts";
@@ -15,7 +16,6 @@ const issued = Schema.Struct({ code: Schema.String, origin: Schema.NullOr(Schema
 const failure = Schema.Struct({ error: Schema.Struct({ code: Schema.String }) });
 const primary = { origin: "https://comms.test", rpId: "comms.test" };
 const other = { origin: "https://other.test", rpId: "other.test" };
-const added = { origin: "https://new.test", rpId: "new.test" };
 
 it("accepts each configured origin, redeems a bound code only on its domain, and keeps agents and pending origins out", async ({
 	onTestFinished,
@@ -55,6 +55,8 @@ it("accepts each configured origin, redeems a bound code only on its domain, and
 			return url;
 		})
 		.not.toBe("");
+	// The new domain is this board reached as http://localhost, so the board fetches its own proof through it.
+	const added = { origin: `http://localhost:${new URL(url).port}`, rpId: "localhost" };
 	await expect.poll(async () => (await fetch(`${url}/setup`)).status).toBe(200);
 	const setupCode = /\/setup is open, code ([A-F0-9]+)/.exec(output)?.[1];
 	expect(setupCode).toBeTruthy();
@@ -195,6 +197,13 @@ it("accepts each configured origin, redeems a bound code only on its domain, and
 	expect(redeemed.status).toBe(200);
 	const addedCookie = redeemed.headers.get("set-cookie")?.split(";")[0] ?? "";
 	expect(addedCookie).toMatch(/^__Host-comms_session=/);
+	// The proof route is an exact public path; unknown ids and query strings reveal nothing.
+	for (const probe of ["x".repeat(43), "short", `${"x".repeat(43)}?probe=1`]) {
+		const response = await fetch(`${url}/_boot/auth/origin-proof/${probe}`);
+		expect(response.status).toBe(404);
+		expect(await response.text()).toBe("");
+	}
+	expect((await fetch(`${url}/_boot/auth/origin-proof/${"x".repeat(43)}/extra`)).status).not.toBe(200);
 	expect((await send("/_boot/auth/passkey-code/options", { code: code.code }, added.origin)).status).toBe(401);
 
 	// The activated origin now signs in with its own passkey and accepts human writes.
@@ -205,7 +214,7 @@ it("accepts each configured origin, redeems a bound code only on its domain, and
 	const origins = await fetch(`${url}/_boot/auth/origins`, { headers: human });
 	expect(origins.status).toBe(200);
 	expect(JSON.stringify(await origins.json())).toContain(
-		'"origin":"https://new.test","rp_id":"new.test","source":"runtime"',
+		`"origin":"${added.origin}","rp_id":"localhost","source":"runtime"`,
 	);
 
 	// Removal refuses the request's own origin, configured origins and origins with bound passkeys.
@@ -230,12 +239,32 @@ it("accepts each configured origin, redeems a bound code only on its domain, and
 		expect(await errorCode(removed)).toBe(expected);
 	}
 
+	// While stored passkeys match an allowed origin, the public help says so.
+	expect(await (await fetch(`${url}/_boot`)).text()).toContain("passkey_origins_ok: true");
+	// Strand every passkey. Boot keeps serving and says so on each surface, without listing RP IDs publicly.
+	await promisify(execFile)("bun", [
+		"-e",
+		`const { Database } = require("bun:sqlite"); new Database(${JSON.stringify(join(directory, "data", "boot.db"))}).run("UPDATE passkeys SET rp_id='elsewhere.test'");`,
+	]);
+	const help = await (await fetch(`${url}/_boot`)).text();
+	expect(help).toContain("passkey_origins_ok: false");
+	expect(help).not.toContain("elsewhere.test");
+	const stranded = await send("/_boot/auth/login/options", {}, primary.origin);
+	expect(stranded.status).toBe(409);
+	expect(await errorCode(stranded)).toBe("passkey_origin_mismatch");
+	const status = await fetch(`${url}/_boot/status`, { headers: human });
+	expect(status.status).toBe(200);
+	expect(JSON.stringify(await status.json())).toContain("elsewhere.test");
+	// Existing sessions keep working.
+	expect((await fetch(`${url}/_boot/auth/passkeys`, { headers: human })).status).toBe(200);
+
 	const manifest = JSON.stringify(await (await fetch(`${url}/.well-known/agent.json`)).json());
 	for (const path of [
 		"/_boot/auth/passkey-code",
 		"/_boot/auth/passkey-code/options",
 		"/auth/passkey-code",
 		"/_boot/auth/origins",
+		"/_boot/auth/origin-proof/{id}",
 	])
 		expect(manifest).toContain(`"${path}"`);
 }, 30_000);

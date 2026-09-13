@@ -83,6 +83,7 @@ export function serve(mode: string) {
 						hop: request.headers.get("x-hop"),
 						contentType: request.headers.get("content-type"),
 						inheritedSecret: process.env.BOOT_DATABASE_URL ?? null,
+						reopenSetup: process.env.REOPEN_SETUP ?? null,
 					},
 					{
 						headers: {

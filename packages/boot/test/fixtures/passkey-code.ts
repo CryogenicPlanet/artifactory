@@ -11,6 +11,7 @@ import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 import { layer as eventsLayer } from "../../src/events.ts";
 import { authenticator } from "./authenticator.ts";
+import { OriginProofError } from "../../src/origin-proof.ts";
 
 const lockLayer = rawEditLockLayer.pipe(Layer.provideMerge(durableEventsLayer(Effect.void)));
 const filename = process.argv[2],
@@ -26,15 +27,19 @@ const run = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	yield* initializeBootSchema;
 	const output: string[] = [];
+	const warnings: string[] = [];
 	const captured: Console.Console = {
 		...console,
 		log: (...values: readonly unknown[]) => {
 			for (const value of values) if (typeof value === "string") output.push(value);
 		},
+		error: (...values: readonly unknown[]) => {
+			for (const value of values) if (typeof value === "string") warnings.push(value);
+		},
 	};
-	const start = (configured: RelyingParty = primary, originList = false) =>
+	const start = (configured: RelyingParty = primary, originList = false, reopenSetup = false) =>
 		Layer.build(
-			authLayer({ ...configured, additionalOrigins: [other], originList }).pipe(
+			authLayer({ ...configured, additionalOrigins: [other], originList, reopenSetup }).pipe(
 				Layer.provide(Layer.mergeAll(lockLayer, eventsLayer(Effect.void))),
 			),
 		).pipe(
@@ -82,9 +87,18 @@ const run = Effect.gen(function* () {
 		Effect.gen(function* () {
 			return yield* auth.createPasskeyCode(params, yield* codeProof(params), session.id);
 		});
+	const proofUrls: string[] = [];
+	const proofIdOf = (url: string | undefined) => (url ?? "").slice((url ?? "").lastIndexOf("/") + 1);
+	/** Stands in for a domain that routes to this board: it answers the proof path with the board's own value. */
+	const serving = (url: string) =>
+		Effect.gen(function* () {
+			proofUrls.push(url);
+			const nonce = yield* auth.originProofNonce(proofIdOf(url));
+			return nonce ?? (yield* new OriginProofError({ reason: "status" }));
+		});
 	const redeem = (code: string, device: ReturnType<typeof authenticator>, party: RelyingParty) =>
 		Effect.gen(function* () {
-			const started = yield* auth.startPasskeyCodeRedemption(code, party.expectedOrigin);
+			const started = yield* auth.startPasskeyCodeRedemption(code, party.expectedOrigin, serving);
 			assert.equal(started.options.rp.id, party.rpId);
 			return yield* auth.finishPasskeyCodeRedemption(
 				started.id,
@@ -227,6 +241,8 @@ const run = Effect.gen(function* () {
 		// An unbound code redeems on any allowed origin, binds the passkey to that RP ID, signs in, and is single-use.
 		const usable = yield* create();
 		const redeemed = yield* redeem(usable.code, second, other);
+		// An unbound code needs no proof.
+		assert.deepEqual(proofUrls, []);
 		assert.ok((yield* auth.authenticateSession(redeemed.token)).id);
 		assert.deepEqual(yield* sql`SELECT rp_id FROM passkeys WHERE id=${second.id}`, [{ rp_id: "other.test" }]);
 		yield* fails(auth.startPasskeyCodeRedemption(usable.code, other.expectedOrigin), "passkey_code_invalid");
@@ -255,6 +271,40 @@ const run = Effect.gen(function* () {
 		yield* fails(auth.startPasskeyCodeRedemption(issued.code, primary.expectedOrigin), "passkey_code_invalid");
 		yield* fails(auth.startPasskeyCodeRedemption(issued.code, undefined), "passkey_code_invalid");
 		assert.deepEqual(yield* sql`SELECT failures FROM passkey_codes`, [{ failures: 0 }]);
+		// A pending domain must first serve the board's one-time proof. A forged Origin whose domain does not serve it
+		// is refused, spends no attempt and activates nothing, whether the answer mismatches, redirects or times out.
+		const attempted: string[] = [];
+		const record = (url: string) => Effect.sync(() => attempted.push(url));
+		for (const failing of [
+			(url: string) => record(url).pipe(Effect.andThen(Effect.succeed("not the proof"))),
+			(url: string) => record(url).pipe(Effect.andThen(Effect.fail(new OriginProofError({ reason: "redirect" })))),
+			(url: string) => record(url).pipe(Effect.andThen(Effect.fail(new OriginProofError({ reason: "timeout" })))),
+		])
+			yield* fails(auth.startPasskeyCodeRedemption(issued.code, added.expectedOrigin, failing), "origin_unproven");
+		yield* fails(auth.startPasskeyCodeRedemption(issued.code, added.expectedOrigin), "origin_unproven");
+		assert.equal(attempted.length, 3);
+		for (const url of attempted) {
+			assert.match(url, /^https:\/\/new\.test\/_boot\/auth\/origin-proof\/[A-Za-z0-9_-]{43}$/);
+			// Each proof was consumed by its attempt.
+			assert.equal(yield* auth.originProofNonce(proofIdOf(url)), null);
+		}
+		assert.equal(yield* auth.originProofNonce("x".repeat(43)), null);
+		assert.deepEqual(yield* sql`SELECT failures, proven FROM passkey_codes`, [{ failures: 0, proven: 0 }]);
+		yield* fails(auth.relyingParty(added.expectedOrigin), "origin_invalid");
+		// A matching proof marks the code proven and is single-use; verify still refuses a code that is not proven.
+		const proven = yield* auth.startPasskeyCodeRedemption(issued.code, added.expectedOrigin, serving);
+		assert.equal(proofUrls.length, 1);
+		assert.equal(yield* auth.originProofNonce(proofIdOf(proofUrls[0])), null);
+		yield* sql`UPDATE passkey_codes SET proven=0`;
+		yield* fails(
+			auth.finishPasskeyCodeRedemption(
+				proven.id,
+				second.registration(proven.options.challenge, added.expectedOrigin, added.rpId),
+				added.expectedOrigin,
+			),
+			"origin_unproven",
+		);
+		yield* sql`UPDATE passkey_codes SET proven=1`;
 		// Redemption from the bound origin activates it and adds a passkey for its hostname in one transaction.
 		// A lowercase transcription of the code is accepted.
 		const redeemed = yield* redeem(issued.code.toLowerCase(), second, added);
@@ -366,16 +416,17 @@ const run = Effect.gen(function* () {
 		yield* login(first, primary);
 		assert.deepEqual(yield* sql`SELECT rp_id FROM passkeys`, [{ rp_id: "comms.test" }]);
 		yield* fails(login(first, other), "authentication_invalid");
-		// PUBLIC_ORIGINS names no RP ID for a passkey without one recorded, so boot refuses to start with it.
+		// PUBLIC_ORIGINS names no RP ID for a passkey without one recorded: boot serves and warns, and the passkey is
+		// still tried under the primary origin's hostname.
 		yield* sql`UPDATE passkeys SET rp_id=NULL`;
-		yield* fails(start(primary, true), "auth_configuration_invalid");
-		assert.deepEqual(yield* sql`SELECT rp_id FROM passkeys`, [{ rp_id: null }]);
-		// Reverting to the single-origin config starts, and a sign-in there records the RP ID.
-		auth = yield* start();
-		yield* login(first, primary);
-		// With every passkey recorded, PUBLIC_ORIGINS starts and the passkey still signs in.
 		auth = yield* start(primary, true);
+		const unrecorded = yield* auth.passkeyOriginState;
+		assert.equal(unrecorded.ok, false);
+		assert.equal(unrecorded.stranded, false);
+		assert.ok(unrecorded.detail?.includes("predate recorded RP IDs"));
 		yield* login(first, primary);
+		// The sign-in recorded the RP ID, so the warning clears without a restart.
+		assert.equal((yield* auth.passkeyOriginState).ok, true);
 	} else if (scenario === "shared-rp") {
 		// A runtime origin on the primary's parent domain shares its RP ID with the configured primary origin.
 		const issued = yield* create({ origin: primary.expectedOrigin });
@@ -431,11 +482,20 @@ const run = Effect.gen(function* () {
 		assert.deepEqual(yield* sql`SELECT rp_id FROM passkeys`, [{ rp_id: "comms.test" }]);
 		// PUBLIC_ORIGINS=https://board.comms.test gives that origin RP ID board.comms.test, which no passkey uses.
 		const hostOnly: RelyingParty = { rpId: "board.comms.test", expectedOrigin: board.expectedOrigin };
-		yield* fails(start(hostOnly, true), "auth_configuration_invalid");
-		// The same mismatch is refused in single-origin mode.
-		yield* fails(start(hostOnly), "auth_configuration_invalid");
-		// Reverting starts normally and the passkey signs in.
+		// Boot serves anyway and warns: the log says why and how to recover, sign-in explains, sessions keep working.
+		for (const originList of [true, false]) {
+			auth = yield* start(hostOnly, originList);
+			const state = yield* auth.passkeyOriginState;
+			assert.equal(state.stranded, true);
+			assert.ok(state.detail?.includes("comms.test") && state.detail.includes("REOPEN_SETUP=1"));
+			assert.ok(warnings.some((line) => line.includes("passkey origins") && line.includes("DELETE FROM passkeys")));
+			yield* fails(auth.at(hostOnly).startLogin, "passkey_origin_mismatch");
+			yield* fails(auth.at(hostOnly).finishLogin("unused", sign(first, "unused", hostOnly)), "passkey_origin_mismatch");
+			assert.ok((yield* auth.authenticateSession(session.token)).id);
+		}
+		// Reverting clears the warning and the passkey signs in.
 		auth = yield* start(board);
+		assert.deepEqual(yield* auth.passkeyOriginState, { ok: true, stranded: false, detail: null });
 		yield* login(first, board);
 		// A list whose origins serve the stamped RP ID starts, and the passkey signs in there.
 		auth = yield* start(primary, true);
@@ -451,6 +511,12 @@ const run = Effect.gen(function* () {
 		auth = yield* start(moved);
 		// The human signs in there and mints a code that adds a passkey for the new configured domain.
 		const there = yield* login(second, added);
+		// The state is read fresh: losing that runtime origin strands every passkey at once, and restoring it recovers.
+		yield* sql`DELETE FROM auth_origins`;
+		assert.equal((yield* auth.passkeyOriginState).stranded, true);
+		yield* fails(auth.at(moved).startLogin, "passkey_origin_mismatch");
+		yield* sql`INSERT INTO auth_origins (origin, rp_id, created_at) VALUES (${added.expectedOrigin}, ${added.rpId}, 1)`;
+		assert.equal((yield* auth.passkeyOriginState).stranded, false);
 		const challenge = yield* auth.at(added).startPasskeyCodeAssertion({}, there.id);
 		const code = yield* auth.createPasskeyCode(
 			{},
@@ -460,9 +526,45 @@ const run = Effect.gen(function* () {
 		const third = authenticator();
 		yield* redeem(code.code, third, moved);
 		yield* login(third, moved);
-		// Without that runtime origin, the same configuration is refused.
+		// Without that runtime origin, a configuration serving none of the passkeys still starts, stranded and warning.
 		yield* sql`DELETE FROM auth_origins`;
-		yield* fails(start({ rpId: "gone.test", expectedOrigin: "https://gone.test" }), "auth_configuration_invalid");
+		const gone: RelyingParty = { rpId: "gone.test", expectedOrigin: "https://gone.test" };
+		auth = yield* start(gone);
+		assert.equal((yield* auth.passkeyOriginState).stranded, true);
+		yield* fails(auth.at(gone).startLogin, "passkey_origin_mismatch");
+	} else if (scenario === "reopen-setup") {
+		// Without the flag, /setup stays closed while passkeys exist.
+		assert.equal(yield* auth.setupOpen, false);
+		yield* fails(auth.startSetup("0000000000000000"), "setup_closed");
+		// With REOPEN_SETUP=1 boot warns, prints a fresh setup code, and opens /setup with passkeys present.
+		auth = yield* start(primary, false, true);
+		assert.ok(warnings.some((line) => line.includes("REOPEN_SETUP=1")));
+		assert.equal(yield* auth.setupOpen, true);
+		const recoveryCode = output.at(-1)?.split("code ")[1];
+		assert.ok(recoveryCode);
+		assert.notEqual(recoveryCode, setupCode);
+		// The recovery passkey is only for the primary origin.
+		yield* fails(auth.at(other).startSetup(recoveryCode), "origin_invalid");
+		const recovery = yield* auth.startSetup(recoveryCode);
+		const third = authenticator();
+		yield* auth.finishSetup(recovery.id, third.registration(recovery.options.challenge));
+		assert.deepEqual(yield* sql`SELECT rp_id, label FROM passkeys WHERE id=${third.id}`, [
+			{ rp_id: "comms.test", label: "Recovery passkey" },
+		]);
+		// Existing passkeys and sessions are kept, and both passkeys sign in on the primary.
+		assert.equal((yield* sql`SELECT id FROM passkeys`).length, 2);
+		assert.ok((yield* auth.authenticateSession(session.token)).id);
+		yield* login(third, primary);
+		yield* login(first, primary);
+		// One use per process: setup closes again while the flag is still set.
+		assert.equal(yield* auth.setupOpen, false);
+		yield* fails(auth.startSetup(recoveryCode), "setup_closed");
+		const reopened = yield* sql`SELECT event FROM events WHERE type='auth.setup_reopened'`;
+		assert.equal(reopened.length, 1);
+		assert.ok(!JSON.stringify(reopened).includes(recoveryCode));
+		// A restart without the flag keeps setup closed.
+		auth = yield* start();
+		assert.equal(yield* auth.setupOpen, false);
 	} else throw new Error("Unknown scenario");
 });
 await Effect.runPromise(

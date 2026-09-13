@@ -31,6 +31,8 @@ import { canonicalDecision, type EnrollmentDecision } from "./enrollment-schema.
 import { allowedParties, makeOriginManagement, passkeyOriginMismatch, type RelyingParty } from "./auth-origins.ts";
 import { makeActionAssertions, restartBinding } from "./action-assertions.ts";
 import { makePasskeyCodes } from "./passkey-code.ts";
+import { Events } from "./events.ts";
+import { humanAgent } from "./human-agent.ts";
 import type { RemoveOrigin } from "./passkey-code-schema.ts";
 
 /** The top-level origin is the primary one; boot generates absolute URLs from it. */
@@ -38,6 +40,8 @@ export interface AuthConfig extends RelyingParty {
 	readonly additionalOrigins?: ReadonlyArray<RelyingParty>;
 	/** Set when origins came from PUBLIC_ORIGINS, which names no RP ID for passkeys stored before RP IDs were recorded. */
 	readonly originList?: boolean;
+	/** Operator recovery switch read by boot from its own environment: one setup may add a passkey while passkeys exist. */
+	readonly reopenSetup?: boolean;
 }
 
 export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
@@ -67,10 +71,12 @@ export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
 		"origin_invalid",
 		"origin_not_found",
 		"origin_protected",
+		"origin_unproven",
 		"passkey_code_invalid",
 		"passkey_code_locked",
 		"passkey_exists",
 		"passkey_not_found",
+		"passkey_origin_mismatch",
 		"refresh_invalid",
 		"registration_failed",
 		"registration_invalid",
@@ -107,12 +113,17 @@ const same = (left: string, right: string) => {
 	return a.length === b.length && timingSafeEqual(a, b);
 };
 
+/** How an operator gets back in when stored passkeys and allowed origins disagree. */
+const passkeyRecoveryHint =
+	"PUBLIC_ORIGINS gives each origin its hostname as RP ID, so it only keeps passkeys whose RP ID equals one of those hostnames; otherwise keep RP_ID and PUBLIC_ORIGIN. Fix it by restoring the previous origin variables, or recover by setting REOPEN_SETUP=1 and opening /setup with the code in this log, or by emptying boot's passkey table (DELETE FROM passkeys).";
+
 /** Boot-owned passkeys and sessions. No app code or external credential issuer is involved. */
 const makeAuth = (config: AuthConfig) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const crypto = yield* Crypto.Crypto;
 		const bootConsole = yield* Console.Console;
+		const events = yield* Events;
 		const mutex = yield* Semaphore.make(1);
 		const setup = yield* Ref.make<{
 			readonly code: string;
@@ -120,6 +131,8 @@ const makeAuth = (config: AuthConfig) =>
 			readonly failures: number;
 		} | null>(null);
 		const { hash, random } = authSecrets(crypto);
+		// REOPEN_SETUP=1 lets one setup add a passkey while passkeys exist, once per boot process.
+		const reopenAvailable = yield* Ref.make(config.reopenSetup === true);
 		const noPasskeys = Effect.gen(function* () {
 			const rows = yield* sql`SELECT id FROM passkeys LIMIT 1`;
 			return rows.length === 0;
@@ -134,7 +147,7 @@ const makeAuth = (config: AuthConfig) =>
 			return { code, generation, failures: 0 };
 		});
 		const setupState = Effect.gen(function* () {
-			if (!(yield* noPasskeys)) {
+			if (!(yield* noPasskeys) && !(yield* Ref.get(reopenAvailable))) {
 				yield* Ref.set(setup, null);
 				return null;
 			}
@@ -142,28 +155,41 @@ const makeAuth = (config: AuthConfig) =>
 		});
 		// Every boot invalidates setup ceremonies created under an earlier stdout code.
 		yield* sql`DELETE FROM auth_challenges WHERE ceremony = 'setup'`;
-		// Startup guarantees that some allowed origin can still sign in: a configured origin, or a runtime origin
-		// activated by a code, whose passkeys can mint a code for any other domain.
-		const refuseConfiguration = (reason: string) =>
-			Effect.gen(function* () {
-				yield* Effect.sync(() => bootConsole.error(`chirp: auth configuration refused: ${reason}`));
-				return yield* refuse("auth_configuration_invalid");
-			});
-		const listHint =
-			"PUBLIC_ORIGINS gives each origin its hostname as RP ID, so it only keeps passkeys whose RP ID equals one of those hostnames; otherwise keep RP_ID and PUBLIC_ORIGIN. To start, restore the previous configuration, or, if no passkey can be recovered, empty boot's passkey table (DELETE FROM passkeys) and set up again at /setup.";
-		// PUBLIC_ORIGINS names no RP ID for a passkey stored before RP IDs were recorded.
-		if (config.originList && (yield* sql`SELECT id FROM passkeys WHERE rp_id IS NULL LIMIT 1`).length)
-			return yield* refuseConfiguration(
-				`some passkeys predate recorded RP IDs. Start with the previous RP_ID and PUBLIC_ORIGIN, sign in once with each passkey you keep and delete the rest. ${listHint}`,
+		/** Whether stored passkeys can still sign in through an allowed origin. Read fresh each time, because passkeys
+		 * and runtime origins change while boot runs. A mismatch warns; it never refuses startup. */
+		const passkeyOriginState = Effect.gen(function* () {
+			const rows = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ rp_id: Schema.String })))(
+				yield* sql`SELECT DISTINCT COALESCE(rp_id, ${config.rpId}) AS rp_id FROM passkeys`,
 			);
-		const passkeyRpIds = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ rp_id: Schema.String })))(
-			yield* sql`SELECT DISTINCT COALESCE(rp_id, ${config.rpId}) AS rp_id FROM passkeys`,
-		);
-		const mismatch = passkeyOriginMismatch(
-			passkeyRpIds.map((row) => row.rp_id),
-			yield* allowedParties(sql, config),
-		);
-		if (mismatch) return yield* refuseConfiguration(`${mismatch}. ${listHint}`);
+			const mismatch = passkeyOriginMismatch(
+				rows.map((row) => row.rp_id),
+				yield* allowedParties(sql, config),
+			);
+			const unrecorded =
+				config.originList === true && (yield* sql`SELECT id FROM passkeys WHERE rp_id IS NULL LIMIT 1`).length > 0;
+			const problems = [
+				...(mismatch === null ? [] : [mismatch]),
+				...(unrecorded
+					? [
+							"some passkeys predate recorded RP IDs, and PUBLIC_ORIGINS names no RP ID for them, so they are tried under the primary origin's hostname",
+						]
+					: []),
+			];
+			return {
+				ok: problems.length === 0,
+				stranded: mismatch !== null,
+				detail: problems.length === 0 ? null : `${problems.join("; ")}. ${passkeyRecoveryHint}`,
+			};
+		});
+		const startupState = yield* passkeyOriginState;
+		if (startupState.detail !== null)
+			yield* Effect.sync(() => bootConsole.error(`chirp: WARNING passkey origins: ${startupState.detail}`));
+		if (config.reopenSetup === true)
+			yield* Effect.sync(() =>
+				bootConsole.error(
+					"chirp: WARNING REOPEN_SETUP=1 is set: /setup accepts one new passkey for the primary origin in this process even though passkeys exist. Remove the variable once you have signed in.",
+				),
+			);
 		yield* setupState;
 
 		const allowed = allowedParties(sql, config);
@@ -211,6 +237,9 @@ const makeAuth = (config: AuthConfig) =>
 				Effect.gen(function* () {
 					const state = yield* setupState;
 					if (!state) return yield* refuse("setup_closed");
+					// A reopened setup only adds a passkey for the primary origin.
+					if (!(yield* noPasskeys) && party.expectedOrigin !== config.expectedOrigin)
+						return yield* refuse("origin_invalid");
 					if (!same(code, state.code)) {
 						if (state.failures + 1 >= 3) yield* rotateSetup;
 						else yield* Ref.set(setup, { ...state, failures: state.failures + 1 });
@@ -236,7 +265,9 @@ const makeAuth = (config: AuthConfig) =>
 				sql.withTransaction(
 					Effect.gen(function* () {
 						yield* lockBootWrite(sql);
-						if (!(yield* noPasskeys)) return yield* refuse("setup_closed");
+						const reopened = !(yield* noPasskeys);
+						if (reopened && !(yield* Ref.get(reopenAvailable))) return yield* refuse("setup_closed");
+						if (reopened && party.expectedOrigin !== config.expectedOrigin) return yield* refuse("origin_invalid");
 						const state = yield* Ref.get(setup);
 						const challenge = yield* takeChallenge(id, "setup");
 						if (!state || challenge.setup_generation !== state.generation) return yield* refuse("challenge_invalid");
@@ -260,11 +291,26 @@ const makeAuth = (config: AuthConfig) =>
 						);
 						const now = yield* Clock.currentTimeMillis;
 						yield* sql`INSERT INTO passkeys (id, public_key, counter, transports, label, created_at, rp_id)
-			VALUES (${credential.id}, ${publicKey}, ${credential.counter}, ${transports}, 'First passkey', ${now}, ${party.rpId})`;
+			VALUES (${credential.id}, ${publicKey}, ${credential.counter}, ${transports}, ${reopened ? "Recovery passkey" : "First passkey"}, ${now}, ${party.rpId})`;
 						yield* sql`DELETE FROM auth_challenges WHERE ceremony = 'setup'`;
 						// Clear before commit so interruption cannot retain the old setup code.
 						// A failed commit safely requires a fresh code on the next setup attempt.
 						yield* Ref.set(setup, null);
+						// Any completed setup uses up REOPEN_SETUP for this process.
+						yield* Ref.set(reopenAvailable, false);
+						if (reopened)
+							yield* events.writeBoot({
+								at: now,
+								type: "auth.setup_reopened",
+								level: "warn",
+								actor: humanAgent,
+								instance: null,
+								generation: 0,
+								request_id: null,
+								topic: null,
+								message_id: null,
+								payload: { origin: party.expectedOrigin, rp_id: party.rpId },
+							});
 						return { credentialId: credential.id };
 					}),
 				),
@@ -273,6 +319,7 @@ const makeAuth = (config: AuthConfig) =>
 			mutex.withPermit(
 				Effect.gen(function* () {
 					if (yield* noPasskeys) return yield* refuse("setup_required");
+					if ((yield* passkeyOriginState).stranded) return yield* refuse("passkey_origin_mismatch");
 					const options = yield* Effect.tryPromise({
 						try: () => generateAuthenticationOptions({ rpID: party.rpId, userVerification: "required" }),
 						catch: () => new AuthError({ code: "authentication_failed" }),
@@ -326,6 +373,11 @@ const makeAuth = (config: AuthConfig) =>
 			mutex.withPermit(
 				sql.withTransaction(
 					lockBootWrite(sql).pipe(
+						Effect.andThen(
+							Effect.flatMap(passkeyOriginState, (state) =>
+								state.stranded ? refuse("passkey_origin_mismatch") : Effect.void,
+							),
+						),
 						Effect.andThen(verifyAssertion(id, response, "login", null, party)),
 						Effect.andThen(newSession(party.expectedOrigin)),
 					),
@@ -476,6 +528,8 @@ const makeAuth = (config: AuthConfig) =>
 			...at({ rpId: config.rpId, expectedOrigin: config.expectedOrigin }),
 			at,
 			setupOpen: mutex.withPermit(Effect.map(setupState, (state) => state !== null)),
+			setupRequired: noPasskeys,
+			passkeyOriginState,
 			authenticateSession,
 			logout,
 		};

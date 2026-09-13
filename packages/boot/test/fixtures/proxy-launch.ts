@@ -9,7 +9,12 @@ import { expect, type TestContext } from "vitest";
 import { childDiagnostic, launcherOutput } from "./launcher-diagnostics.ts";
 import { seedSession, sessionFetch } from "./session.ts";
 
-export async function launch(test: TestContext, mode = "normal", actualServer = false) {
+export async function launch(
+	test: TestContext,
+	mode = "normal",
+	actualServer = false,
+	extraEnv: Readonly<Record<string, string>> = {},
+) {
 	const directory = await mkdtemp(join(tmpdir(), "comms-proxy-"));
 	test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
 	const seed = join(directory, "seed");
@@ -24,6 +29,7 @@ export async function launch(test: TestContext, mode = "normal", actualServer = 
 			DATA_DIR: join(directory, "data"),
 			DATABASE_URL: `file:${join(directory, "data", "comms.db")}`,
 			BOOT_DATABASE_URL: `file:${join(directory, "data", "boot.db")}`,
+			...extraEnv,
 		},
 		stdio: ["ignore", "pipe", "pipe"],
 	});

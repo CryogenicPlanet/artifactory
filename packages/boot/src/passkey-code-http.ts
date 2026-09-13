@@ -1,6 +1,7 @@
 import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { Effect, Schema } from "effect";
-import { HttpServerResponse } from "effect/unstable/http";
+import { HttpClient, HttpServerResponse } from "effect/unstable/http";
+import { fetchOriginProof } from "./origin-proof.ts";
 import { AuthError, type Auth } from "./auth.ts";
 import { assertionProof, authFailure, body, humanSession, pageHeaders, sessionResponse } from "./auth-http.ts";
 import { authPage } from "./auth-page.ts";
@@ -20,9 +21,27 @@ export const passkeyCodeRoute = (auth: Auth["Service"]) =>
 		const redeemVerify = method === "POST" && path === "/_boot/auth/passkey-code/verify";
 		const listOrigins = method === "GET" && path === "/_boot/auth/origins";
 		const removeOrigin = method === "DELETE" && path === "/_boot/auth/origins";
-		if (!page && !create && !revoke && !redeemOptions && !redeemVerify && !listOrigins && !removeOrigin) return null;
+		const proofId = method === "GET" ? /^\/_boot\/auth\/origin-proof\/([^/]+)$/.exec(path)?.[1] : undefined;
+		if (
+			!page &&
+			!create &&
+			!revoke &&
+			!redeemOptions &&
+			!redeemVerify &&
+			!listOrigins &&
+			!removeOrigin &&
+			proofId === undefined
+		)
+			return null;
 		return yield* authFailure(
 			Effect.gen(function* () {
+				// The board fetches this through a newly named domain. Unknown or expired proofs reveal nothing.
+				if (proofId !== undefined) {
+					const nonce = url.search ? null : yield* auth.originProofNonce(proofId);
+					return nonce === null
+						? HttpServerResponse.empty({ status: 404 })
+						: HttpServerResponse.text(nonce, { headers: { "x-content-type-options": "nosniff" } });
+				}
 				if (page) return HttpServerResponse.text(authPage("code"), { contentType: "text/html", headers: pageHeaders });
 				if (url.search) return yield* new AuthError({ code: "invalid_request" });
 				if (redeemOptions || redeemVerify) {
@@ -31,8 +50,11 @@ export const passkeyCodeRoute = (auth: Auth["Service"]) =>
 					// The service matches Origin exactly against allowed origins or the one origin the live code is bound to.
 					if (redeemOptions) {
 						const input = yield* body(Schema.Struct({ code: Schema.String }));
+						const client = yield* HttpClient.HttpClient;
 						return HttpServerResponse.jsonUnsafe(
-							yield* auth.startPasskeyCodeRedemption(input.code, request.headers.origin),
+							yield* auth.startPasskeyCodeRedemption(input.code, request.headers.origin, (target) =>
+								fetchOriginProof(target).pipe(Effect.provideService(HttpClient.HttpClient, client)),
+							),
 						);
 					}
 					const input = yield* body(Schema.Struct({ id: Schema.String, response: PasskeyRegistrationResponse }));

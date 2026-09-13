@@ -60,7 +60,7 @@ describe("real Bun boot proxy", () => {
 	});
 
 	it("forwards POST bytes/query and strips credentials, identity and hop headers", async (test) => {
-		const app = await launch(test);
+		const app = await launch(test, "normal", false, { REOPEN_SETUP: "1" });
 		await expect.poll(async () => (await app.state()).state).toBe("live");
 		const response = await rawRequest(
 			`${app.url}/echo?q=a%2Fb`,
@@ -101,6 +101,8 @@ describe("real Bun boot proxy", () => {
 			hop: null,
 			contentType: "text/plain",
 			inheritedSecret: null,
+			// Boot reads REOPEN_SETUP from its own environment only; the app never receives it.
+			reopenSetup: null,
 		});
 		const root = await app.fetch(app.url);
 		expect(root.headers.get("x-hop-response")).toBeNull();

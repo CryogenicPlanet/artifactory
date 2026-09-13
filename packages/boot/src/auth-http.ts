@@ -101,6 +101,14 @@ const policy = {
 		status: 409,
 		hint: "Configured origins and the origin this request came from cannot be removed. Remove it from another origin.",
 	},
+	origin_unproven: {
+		status: 403,
+		hint: "The board could not fetch its one-time proof from that domain. Point the domain at this board first, for example by adding it in Railway and creating the DNS record, then enter the code again.",
+	},
+	passkey_origin_mismatch: {
+		status: 409,
+		hint: "No stored passkey belongs to an address this board serves, so nobody can sign in. The operator can restore the previous RP_ID/PUBLIC_ORIGIN or PUBLIC_ORIGINS, set REOPEN_SETUP=1 and open /setup with the code from the boot log, or empty boot's passkey table (DELETE FROM passkeys).",
+	},
 	passkey_code_locked: {
 		status: 429,
 		hint: "Too many wrong codes. Wait for the lockout to end, then enter the code again before it expires.",
@@ -332,7 +340,7 @@ export const authRoute = (auth: Auth["Service"], requestId: string) =>
 			Effect.gen(function* () {
 				if (page) {
 					const setupOpen = yield* auth.setupOpen;
-					if (path === "/auth/login" && setupOpen) {
+					if (path === "/auth/login" && (yield* auth.setupRequired)) {
 						const next = url.searchParams.get("next");
 						return HttpServerResponse.empty({
 							status: 302,

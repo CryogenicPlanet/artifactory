@@ -16,6 +16,7 @@ for (const scenario of [
 	"configured-passkeys",
 	"stamped-config",
 	"runtime-served",
+	"reopen-setup",
 ]) {
 	test(`passkey code: ${scenario}`, async ({ onTestFinished }) => {
 		const directory = await mkdtemp(join(tmpdir(), "comms-passkey-code-"));

@@ -16,6 +16,7 @@ import type { AssertionProof } from "./enrollment.ts";
 import { Events } from "./events.ts";
 import { humanAgent } from "./human-agent.ts";
 import { canonicalPasskeyCode, type PasskeyCodeParams } from "./passkey-code-schema.ts";
+import { OriginProofError, originProofPath } from "./origin-proof.ts";
 
 /** A code is SELECTOR-SECRET and shown once, so it lives briefly. The selector names the live code and is not
  * secret; only the right selector with a wrong secret counts, and wrong secrets lock redemption rather than destroy
@@ -23,6 +24,8 @@ import { canonicalPasskeyCode, type PasskeyCodeParams } from "./passkey-code-sch
 export const passkeyCodeLifetimeMs = 10 * 60_000;
 const passkeyCodeAttempts = 3;
 export const passkeyCodeLockoutMs = 60_000;
+/** A named domain's proof lives only as long as one fetch. */
+const originProofLifetimeMs = 30_000;
 
 const codeRow = Schema.Struct({
 	id: Schema.String,
@@ -31,6 +34,10 @@ const codeRow = Schema.Struct({
 	origin: Schema.NullOr(Schema.String),
 	failures: Schema.Finite,
 	locked_until: Schema.Finite,
+	proven: Schema.Finite,
+	proof_id: Schema.NullOr(Schema.String),
+	proof_nonce: Schema.NullOr(Schema.String),
+	proof_expires_at: Schema.NullOr(Schema.Finite),
 	expires_at: Schema.Finite,
 });
 type CodeRow = typeof codeRow.Type;
@@ -69,13 +76,14 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 			});
 		const noPasskeys = Effect.map(sql`SELECT id FROM passkeys LIMIT 1`, (rows) => rows.length === 0);
 		const currentCode = Effect.gen(function* () {
-			const rows = yield* sql`SELECT id, selector, hash, origin, failures, locked_until, expires_at FROM passkey_codes`;
+			const rows =
+				yield* sql`SELECT id, selector, hash, origin, failures, locked_until, proven, proof_id, proof_nonce, proof_expires_at, expires_at FROM passkey_codes`;
 			return (yield* Schema.decodeUnknownEffect(Schema.Array(codeRow))(rows))[0];
 		});
 		const codeBySelector = (selector: string) =>
 			Effect.gen(function* () {
 				const rows =
-					yield* sql`SELECT id, selector, hash, origin, failures, locked_until, expires_at FROM passkey_codes WHERE selector=${selector}`;
+					yield* sql`SELECT id, selector, hash, origin, failures, locked_until, proven, proof_id, proof_nonce, proof_expires_at, expires_at FROM passkey_codes WHERE selector=${selector}`;
 				return (yield* Schema.decodeUnknownEffect(Schema.Array(codeRow))(rows))[0];
 			});
 		const discard = Effect.gen(function* () {
@@ -113,8 +121,8 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 						const expiresAt = now + passkeyCodeLifetimeMs;
 						// A newer code replaces the previous one and every ceremony started with it.
 						yield* discard;
-						yield* sql`INSERT INTO passkey_codes (id, selector, hash, origin, failures, locked_until, expires_at, created_at)
-				VALUES (${yield* random}, ${selector}, ${yield* hash(secret)}, ${origin}, 0, 0, ${expiresAt}, ${now})`;
+						yield* sql`INSERT INTO passkey_codes (id, selector, hash, origin, failures, locked_until, proven, expires_at, created_at)
+				VALUES (${yield* random}, ${selector}, ${yield* hash(secret)}, ${origin}, 0, 0, 0, ${expiresAt}, ${now})`;
 						yield* event("auth.passkey_code_created", "info", { origin, expires_at: expiresAt });
 						return { code, origin, expires_at: expiresAt };
 					}).pipe(captureRefusal(Schema.is(AuthError))),
@@ -137,7 +145,7 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 				),
 			);
 
-		const startPasskeyCodeRedemption = (input: string, origin: string | undefined) =>
+		const admitRedemption = (input: string, origin: string | undefined) =>
 			mutex.withPermit(
 				committed(
 					sql,
@@ -182,6 +190,17 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 							});
 							return yield* refuse("passkey_code_invalid");
 						}
+						// A domain named on the code and not yet allowed must first serve a one-time proof the board fetches.
+						// Only the code holder reaches this point, and a failed proof spends no attempt.
+						const pending =
+							code.origin !== null &&
+							!(yield* allowedParties(sql, config)).some((allowed) => allowed.expectedOrigin === party.expectedOrigin);
+						if (pending && code.proven !== 1) {
+							const proofId = yield* random;
+							const nonce = yield* random;
+							yield* sql`UPDATE passkey_codes SET proof_id=${proofId}, proof_nonce=${nonce}, proof_expires_at=${now + originProofLifetimeMs} WHERE id=${code.id}`;
+							return { _tag: "proof" as const, proofId, url: `${party.expectedOrigin}${originProofPath(proofId)}` };
+						}
 						const existing = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: Schema.String })))(
 							yield* sql`SELECT id FROM passkeys WHERE COALESCE(rp_id, ${config.rpId})=${party.rpId}`,
 						);
@@ -202,10 +221,74 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 						yield* sql`DELETE FROM auth_challenges WHERE expires_at <= ${now}`;
 						yield* sql`INSERT INTO auth_challenges (id, challenge, ceremony, setup_generation, expires_at)
 				VALUES (${id}, ${options.challenge}, 'passkey.redeem', ${code.id}, ${now + 120_000})`;
-						return { id, options };
+						return { _tag: "options" as const, id, options };
 					}).pipe(captureRefusal(Schema.is(AuthError))),
 				),
 			);
+
+		/** Consume the proof, and mark the code proven only if the fetched body is exactly its nonce. */
+		const proveOrigin = (proofId: string, body: string | null) =>
+			mutex.withPermit(
+				committed(
+					sql,
+					Effect.gen(function* () {
+						const now = yield* Clock.currentTimeMillis;
+						const code = (yield* Schema.decodeUnknownEffect(Schema.Array(codeRow))(
+							yield* sql`SELECT id, selector, hash, origin, failures, locked_until, proven, proof_id, proof_nonce, proof_expires_at, expires_at FROM passkey_codes WHERE proof_id=${proofId}`,
+						))[0];
+						if (!code) return yield* refuse("origin_unproven");
+						yield* sql`UPDATE passkey_codes SET proof_id=NULL, proof_nonce=NULL, proof_expires_at=NULL WHERE id=${code.id}`;
+						const expected = Buffer.from(code.proof_nonce ?? "");
+						const received = Buffer.from(body ?? "");
+						const matched =
+							code.proof_nonce !== null &&
+							body !== null &&
+							code.proof_expires_at !== null &&
+							code.proof_expires_at > now &&
+							expected.length === received.length &&
+							timingSafeEqual(expected, received);
+						if (!matched) {
+							yield* event("auth.origin_proof_failed", "warn", { origin: code.origin });
+							return yield* refuse("origin_unproven");
+						}
+						yield* sql`UPDATE passkey_codes SET proven=1 WHERE id=${code.id}`;
+					}).pipe(captureRefusal(Schema.is(AuthError))),
+				),
+			);
+		/** The value a newly named domain must serve back to the board, while its proof is live. */
+		const originProofNonce = (proofId: string) =>
+			Effect.gen(function* () {
+				const now = yield* Clock.currentTimeMillis;
+				const rows = yield* Schema.decodeUnknownEffect(
+					Schema.Array(
+						Schema.Struct({
+							proof_nonce: Schema.NullOr(Schema.String),
+							proof_expires_at: Schema.NullOr(Schema.Finite),
+						}),
+					),
+				)(yield* sql`SELECT proof_nonce, proof_expires_at FROM passkey_codes WHERE proof_id=${proofId}`);
+				const row = rows[0];
+				return row?.proof_nonce && row.proof_expires_at !== null && row.proof_expires_at > now ? row.proof_nonce : null;
+			});
+		/** Check the code. If its domain needs proving, fetch the proof with no lock held, then check again. */
+		const startPasskeyCodeRedemption = (
+			input: string,
+			origin: string | undefined,
+			fetchProof: (url: string) => Effect.Effect<string, unknown> = () =>
+				Effect.fail(new OriginProofError({ reason: "network" })),
+		) =>
+			Effect.gen(function* () {
+				const first = yield* admitRedemption(input, origin);
+				if (first._tag === "options") return { id: first.id, options: first.options };
+				const body = yield* fetchProof(first.url).pipe(
+					Effect.map((value): string | null => value),
+					Effect.orElseSucceed(() => null),
+				);
+				yield* proveOrigin(first.proofId, body);
+				const second = yield* admitRedemption(input, origin);
+				if (second._tag === "proof") return yield* refuse("origin_unproven");
+				return { id: second.id, options: second.options };
+			});
 
 		const finishPasskeyCodeRedemption = (id: string, response: RegistrationResponseJSON, origin: string | undefined) =>
 			mutex.withPermit(
@@ -222,6 +305,12 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 							return yield* refuse("challenge_invalid");
 						const party = yield* partyFor(code, origin);
 						if (!party) return yield* refuse("origin_invalid");
+						// Activating a domain requires the board to have fetched its proof from that domain.
+						if (
+							code.proven !== 1 &&
+							!(yield* allowedParties(sql, config)).some((allowed) => allowed.expectedOrigin === party.expectedOrigin)
+						)
+							return yield* refuse("origin_unproven");
 						const verified = yield* Effect.tryPromise({
 							try: () =>
 								verifyRegistrationResponse({
@@ -246,7 +335,7 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 						const label = `Added with a code on ${party.rpId}`.slice(0, 128);
 						yield* sql`INSERT INTO passkeys (id, public_key, counter, transports, label, created_at, rp_id)
 				VALUES (${credential.id}, ${publicKey}, ${credential.counter}, ${transports}, ${label}, ${now}, ${party.rpId})`;
-						// Reaching the board from the bound origin is the proof that the domain routes here.
+						// The fetched proof showed that the domain routes to this board.
 						const activated = !(yield* allowedParties(sql, config)).some(
 							(allowed) => allowed.expectedOrigin === party.expectedOrigin,
 						);
@@ -268,5 +357,6 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 			revokePasskeyCode,
 			startPasskeyCodeRedemption,
 			finishPasskeyCodeRedemption,
+			originProofNonce,
 		};
 	});

@@ -52,10 +52,11 @@ Setting `PUBLIC_ORIGINS` together with either single-origin variable is refused.
 each hostname is an RP ID, `PUBLIC_ORIGINS` only keeps existing passkeys whose RP ID equals
 one of those hostnames. Otherwise keep `RP_ID` and `PUBLIC_ORIGIN`: a board with
 `RP_ID=example.com` and `PUBLIC_ORIGIN=https://chirp.example.com` stays on the single-origin
-variables. Boot refuses to start when no passkey's RP ID is served by a configured origin
-or a domain added with a code,
-or in `PUBLIC_ORIGINS` mode while any passkey predates recorded RP IDs, and restoring the
-previous variables starts it again.
+variables. When no passkey's RP ID is served by a configured origin or a domain added with a
+code, or in `PUBLIC_ORIGINS` mode while any passkey predates recorded RP IDs, boot still
+serves but warns: its log says so on every start, sign-in explains the mismatch when no
+passkey can sign in, `/_boot` shows `passkey_origins_ok: false`, and `/_boot/status` has the
+detail. Restoring the previous variables fixes it.
 
 ```sh
 --env PUBLIC_ORIGINS=https://chirp.example.com,https://chirp-old.example.net
@@ -65,8 +66,9 @@ A passkey only works on the RP ID it was created for. A signed-in human can add 
 another address without touching the configuration: generate a one-time code on the
 account page, optionally naming a new domain, and redeem it at `/auth/passkey-code` on
 that address. Redeeming a code bound to a domain adds the domain to the board's allowed
-origins. The domain must already reach the board through your host and DNS, or the code
-cannot be redeemed there.
+origins. Before activating it, the board fetches a one-time value from the new domain to
+confirm it points here, so the domain must already reach the board through your host and
+DNS.
 
 ## Updating
 
@@ -89,9 +91,10 @@ table to recover from a lockout is a different thing and is covered below.
 A passkey only works for the domain it was created for. That is WebAuthn, not a chirp
 choice, and it has one consequence worth knowing before it happens to you: if you change
 `RP_ID` to a different registrable domain, every passkey you already hold stops asserting.
-Boot refuses to start in that state rather than serve a board nobody can sign in to, and its
-log says why; restoring `RP_ID` starts it again. While you can still sign in, a one-time code
-moves you to a new domain without losing anything, as described under [Railway](#railway).
+Boot keeps serving and says so: its log warns on every start, sign-in answers with
+`passkey_origin_mismatch`, and `/_boot` shows `passkey_origins_ok: false`. Restoring `RP_ID`
+fixes it. While you can still sign in, a one-time code moves you to a new domain without
+losing anything, as described under [Railway](#railway).
 
 Try the non-destructive option first. The board accepts any origin at or under `RP_ID`, so
 if you are moving to a sibling host under the same registrable domain, keep `RP_ID` as it is
@@ -99,7 +102,15 @@ and point `PUBLIC_ORIGIN` at the new host. Your existing passkeys keep working. 
 moving from one subdomain to another and is not a workaround; it is how the check is written.
 
 If you are genuinely moving to a different registrable domain, or you have lost every
-passkey, the way back is to empty the passkey table in boot's database:
+passkey, reopen setup. On a managed host such as Railway, set `REOPEN_SETUP=1` on the service
+and redeploy. Boot warns in its log on every start while the variable is set and prints a
+setup code there. Open `/setup` on the configured origin, enter the code and create a
+passkey. Setup accepts one passkey per start and keeps your existing passkeys, sessions and
+domains. Then remove the variable. Only the operator can set it: the app and agents never
+see boot's environment.
+
+If you have a shell or a SQL client instead, the fallback is to empty the passkey table in
+boot's database:
 
 ```sql
 DELETE FROM passkeys;
@@ -280,16 +291,17 @@ address to a custom domain later, keep the variables as they are:
    the DNS record Railway shows. Wait until `https://<domain>/health` answers.
 2. Sign in on the Railway address, open the account page, and generate an add-passkey code
    with `https://<domain>` as the new domain.
-3. Open `https://<domain>/auth/passkey-code` within ten minutes and enter the code. This
-   creates a passkey for the domain, adds the domain to the board, and signs you in there.
+3. Open `https://<domain>/auth/passkey-code` within ten minutes and enter the code. The
+   board first fetches a one-time value from `https://<domain>` to confirm the domain points
+   here, then creates a passkey for the domain, adds the domain to the board, and signs you
+   in there.
 
 Both addresses keep working, and approval links keep using the configured origin. Switching
 to `PUBLIC_ORIGINS` is optional. It gives each listed origin its hostname as RP ID, so it
 only keeps passkeys created for one of those hostnames, such as passkeys created on the
-Railway address or through a code. Boot refuses to start with it while any passkey predates
-recorded RP IDs: before switching, sign in once on the old address with each passkey you
-keep and delete the rest. If boot refuses, restore `RP_ID` and `PUBLIC_ORIGIN` and it
-starts again.
+Railway address or through a code. Boot warns while any passkey predates recorded RP IDs,
+so before switching, sign in once on the old address with each passkey you keep and delete
+the rest. If the warning appears, restore `RP_ID` and `PUBLIC_ORIGIN`.
 
 ### Creating the databases
 
