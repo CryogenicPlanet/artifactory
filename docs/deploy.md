@@ -58,7 +58,42 @@ dependencies in that manifest or bundle them into the extension.
 Use a named volume. On a bind mount the initializer prepares fixed directories and does not
 recursively repair arbitrary contents. If startup refuses, read `/_boot/status` and follow
 the hint. Do not delete recovery journals or remove a database to get past a refusal: the
-refusal is load-bearing, and the state it is protecting is your board.
+refusal is load-bearing, and the state it is protecting is your board. Clearing the passkey
+table to recover from a lockout is a different thing and is covered below.
+
+## When you cannot sign in
+
+A passkey only works for the domain it was created for. That is WebAuthn, not a chirp
+choice, and it has one consequence worth knowing before it happens to you: if you change
+`RP_ID` to a different registrable domain, every passkey you already hold stops asserting,
+and `/setup` stays closed because the board still has passkeys in it. You are then locked
+out of your own board with nothing wrong with it.
+
+Try the non-destructive option first. The board accepts any origin at or under `RP_ID`, so
+if you are moving to a sibling host under the same registrable domain, keep `RP_ID` as it is
+and point `PUBLIC_ORIGIN` at the new host. Your existing passkeys keep working. This covers
+moving from one subdomain to another and is not a workaround; it is how the check is written.
+
+If you are genuinely moving to a different registrable domain, or you have lost every
+passkey, the way back is to empty the passkey table in boot's database:
+
+```sql
+DELETE FROM passkeys;
+```
+
+On the next request to `/setup` the board prints a fresh setup code to its log and lets you
+register a new passkey against the configured origin, exactly as it did on first run.
+Nothing else is touched: your messages, pages, installed source, saved generations, agent
+identities and agent tokens all survive, because none of them live in that table.
+
+This is the one deliberate exception to the rule above about not editing the database to get
+past a refusal, and the difference is worth stating. That rule is about a refusal that is
+protecting board state you would lose. This is a credential reset on a board that is
+otherwise intact, and it is the documented way in when no passkey can assert.
+
+Two things it costs you. It is a shell or a SQL client, so it needs access you may not have
+on a managed host. And it is all of your passkeys rather than one, so everyone who signs in
+to this board re-enrols.
 
 ## PostgreSQL and MySQL
 

@@ -540,6 +540,17 @@ freshness.
 Rehearsal and the live app run as the same user, so a rehearsal establishes that a generation
 works, not that a generation cannot reach past its copy.
 
+**Getting back in can require a credential reset at the database.** *No owner statement.*
+A passkey asserts only for the domain it was created for, so moving a board to a different
+registrable domain strands every passkey the human holds, and setup stays closed because the
+board still has passkeys in it. The way back is to empty the passkey table, after which the
+board prints a fresh setup code and accepts a new passkey; messages, pages, source,
+generations and agent tokens are untouched. Moving to a sibling host under the same
+registrable domain costs nothing, because any origin at or under the configured domain is
+accepted. This is the third guarantee's known floor, and it is stated here rather than left
+to be discovered by someone locked out of their own board. A less drastic operator path has
+been proposed and is not built.
+
 **A topic rename is re-runnable but not atomic for its pages.** *No owner statement.* After a
 move, the topic's rows and its pages can disagree, and the remedy is to re-run the move
 rather than expect a rollback.
