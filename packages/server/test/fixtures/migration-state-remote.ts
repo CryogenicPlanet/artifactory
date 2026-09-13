@@ -6,6 +6,7 @@ import { SqlClient } from "effect/unstable/sql";
 import { remoteClientLayer } from "@comms/storage/remote-client";
 import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
 import { remoteAppKernelSchema } from "../../../boot/src/app-kernel-schema.ts";
+import { protectionOwnershipOperation } from "../../src/kernel/protection-schema.ts";
 import { initializeRemoteKernelSchema } from "../../src/kernel/schema.ts";
 import { assertNoPendingMigration } from "../../src/kernel/migration-intent.ts";
 import { makeExtensionMigrate } from "../../src/kernel/extension-migrations.ts";
@@ -67,6 +68,7 @@ await Effect.runPromise(
 				yield* sql`INSERT INTO store_identity VALUES(1,'retained',1,NULL)`;
 				phase = "initialize";
 				yield* initializeRemoteKernelSchema(sql, "current");
+				yield* protectionOwnershipOperation(sql).run;
 				yield* sql`CREATE TABLE core_migrations(migration_id INTEGER PRIMARY KEY,name VARCHAR(255))`;
 				yield* sql`INSERT INTO core_migrations VALUES(1,'original')`;
 				yield* sql`CREATE TABLE idempotency(id INTEGER PRIMARY KEY,value TEXT)`;
@@ -124,14 +126,13 @@ await Effect.runPromise(
 				const run = yield* makeExtensionMigrate(sql, "current", "example");
 				// Ensure every DELETE actually changes data, including the migration ledgers/registry.
 				if (settings.engine === "mysql" && index > 0) {
-					yield* sql`INSERT INTO protected_sql_tables VALUES('owned')`;
+					yield* sql`INSERT INTO protected_sql_tables(name) VALUES('owned')`;
 					yield* sql`INSERT INTO extension_migrations VALUES('example','seed','checksum')`;
 					yield* sql`INSERT INTO migrations(migration_id,name) VALUES(1,'seed')`;
 				}
 				assert.equal((yield* run(`bad-${index}`, statement).pipe(Effect.exit))._tag, "Failure");
 				assert.equal((yield* sql`SELECT * FROM extension_migrations WHERE name=${`bad-${index}`}`).length, 0);
-				if (settings.engine === "mysql")
-					assert.equal((yield* assertNoPendingMigration(sql).pipe(Effect.exit))._tag, "Failure");
+				if (settings.engine === "mysql") yield* assertNoPendingMigration(sql);
 				else assert.equal((yield* sql`SELECT * FROM outbox`).length, 1200);
 			}
 			if (settings.engine === "pg") {
@@ -186,6 +187,9 @@ await Effect.runPromise(
 					(yield* destroy("drop-intent", "DROP TABLE kernel_migration_intent").pipe(Effect.exit))._tag,
 					"Failure",
 				);
+				yield* assertNoPendingMigration(sql);
+				// Explicit missing-evidence fault injection; the migration itself was refused before DDL.
+				yield* sql`DROP TABLE kernel_migration_intent`;
 				assert.equal((yield* initializeRemoteKernelSchema(sql, "current").pipe(Effect.exit))._tag, "Failure");
 			}
 			console.log(`MIGRATION_GUARD_PASSED ${settings.engine}`);

@@ -1,5 +1,6 @@
 import { tableShape, type ColumnShape } from "@comms/storage/remote-migrations";
 import { on } from "@comms/storage/dialect";
+import { protectionColumns } from "./protection-schema.ts";
 import { Effect } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 import { assertNoPendingMigration } from "./migration-intent.ts";
@@ -59,9 +60,17 @@ export const initializeRemoteKernelSchema = (sql: SqlClient.SqlClient, epoch: st
 					},
 				]) {
 					yield* sql.withTransaction(writerGate(sql, epoch));
-					const shape = tableShape(sql, table.name, table.columns, table.primary, { checks: [], foreignKeys: [] }).pipe(
-						Effect.mapError(() => new KernelError({ code: "migration_recovery_required" })),
-					);
+					const upgradedProtection =
+						table.name === "protected_sql_tables" &&
+						(yield* sql`SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='protected_sql_tables'`)
+							.length > 1;
+					const shape = tableShape(
+						sql,
+						table.name,
+						upgradedProtection ? protectionColumns(true) : table.columns,
+						table.primary,
+						{ checks: [], foreignKeys: [] },
+					).pipe(Effect.mapError(() => new KernelError({ code: "migration_recovery_required" })));
 					if (!(yield* shape)) {
 						yield* table.create;
 						if (!(yield* shape)) return yield* new KernelError({ code: "migration_recovery_required" });

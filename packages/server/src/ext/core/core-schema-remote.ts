@@ -1,4 +1,5 @@
 import { reindexMentions, mentionsCurrent } from "./message-mentions.ts";
+import { protectionOwnershipOperation } from "../../kernel/protection-schema.ts";
 import { assertCoreIdentifierCollations } from "./core-identifier-schema.ts";
 import { on } from "@comms/storage/dialect";
 import { indexShape, remoteMigrate, tableShape, type RemoteStep } from "@comms/storage/remote-migrations";
@@ -310,6 +311,7 @@ export const remoteCoreSteps = (
 				{ name: "reindex_mentions", kind: "data", run: reindexMentions(sql), postcondition: mentionsCurrent(sql) },
 			],
 		},
+		{ id: 14, name: "protection_ownership", operations: [protectionOwnershipOperation(sql)] },
 	];
 };
 

@@ -28,6 +28,18 @@ Boot creates MySQL's migration-intent table under its independent initialization
 
 This checks reserved table definitions and rows through the supplied client when control returns; it does not track arbitrary function-body dependencies. Module-import side effects, separate connections, deliberate transaction escape, or deleting uncertainty evidence and crashing are outside the check. MySQL recovery still depends on boot's pre-flip backup and cutover journal; this is not a sandbox for arbitrary migration code.
 
+## Retire table protection
+
+A new trusted app migration may explicitly release application registrations, including legacy rows whose original owner is unknown:
+
+```ts
+import { Effect } from "effect";
+export const unprotect = ["retired_extension_table"] as const;
+export default Effect.void;
+```
+
+The loader validates simple table names and releases them only after the migration body succeeds. SQLite/PostgreSQL include release and receipt in the migration transaction; MySQL retains its durable intent until the batch succeeds. The declaration does not drop the table or change its data. Kernel bookkeeping cannot be released. Keep applied files unchanged: just like their bodies, declarations on applied IDs are not imported or rerun. Changing an applied declaration has no effect; add a new migration ID. Extension factories use their owner-only `api.migrate(..., {unprotect: "table"})` instead.
+
 ## Portability advisory
 
 Successful rehearsal records `migration.non_portable` in the `generation.rehearsed`

@@ -5,6 +5,7 @@ import { Deferred, Effect, Layer, Redacted, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
 import { remoteClientLayer } from "@comms/storage/remote-client";
 import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { protectionOwnershipOperation } from "../../src/kernel/protection-schema.ts";
 import { initializeRemoteKernelSchema } from "../../src/kernel/schema.ts";
 import { makeExtensionMigrate } from "../../src/kernel/extension-migrations.ts";
 import { assertNoPendingMigration } from "../../src/kernel/migration-intent.ts";
@@ -42,6 +43,7 @@ await Effect.runPromise(
 		yield* sql`CREATE TABLE kernel_writer(singleton INTEGER PRIMARY KEY,epoch VARCHAR(64) NOT NULL)`;
 		yield* sql`INSERT INTO kernel_writer VALUES(1,'bundled-probe')`;
 		yield* initializeRemoteKernelSchema(sql, "bundled-probe");
+		yield* protectionOwnershipOperation(sql).run;
 		const sequence = yield* Ref.make(3_000_000_000);
 		const unavailable = () => Effect.die("Unexpected extension capability");
 		const context: BackgroundContext = {

@@ -21,7 +21,7 @@ export const preserveMigrationState = <A, E, R>(
 ) =>
 	Effect.gen(function* () {
 		if (!sql.onDialectOrElse({ sqlite: () => true, orElse: () => false }))
-			return yield* preserveRemoteMigrationState(sql, operation);
+			return yield* preserveRemoteMigrationState(sql, operation, tables);
 		const inventory =
 			sql`SELECT type,name,tbl_name,sql FROM main.sqlite_schema WHERE lower(tbl_name) IN ${sql.in(tables)} ORDER BY type,name`.pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(Objects)),

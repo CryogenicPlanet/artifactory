@@ -10,20 +10,24 @@ const invalid = () => new KernelError({ code: "extension_migration_invalid" });
 
 /** Detect changes before PostgreSQL commit or MySQL intent clearance. MySQL DDL is not rolled back.
  * Migration modules remain trusted code: a separate connection or explicit commit can escape this check. */
-export const preserveRemoteMigrationState = <A, E, R>(sql: SqlClient.SqlClient, operation: Effect.Effect<A, E, R>) =>
+export const preserveRemoteMigrationState = <A, E, R>(
+	sql: SqlClient.SqlClient,
+	operation: Effect.Effect<A, E, R>,
+	protectedTables: ReadonlyArray<string> = kernelSqlTables,
+) =>
 	Effect.gen(function* () {
 		const pg = sql.onDialectOrElse({ pg: () => true, orElse: () => false });
 		const capture = Effect.gen(function* () {
 			if (pg) {
 				yield* sql`SET LOCAL search_path TO public, pg_temp`;
 				const shadows =
-					yield* sql`SELECT c.relname FROM pg_catalog.pg_class c WHERE c.relnamespace=pg_my_temp_schema() AND lower(c.relname) IN ${sql.in(kernelSqlTables)}`;
+					yield* sql`SELECT c.relname FROM pg_catalog.pg_class c WHERE c.relnamespace=pg_my_temp_schema() AND lower(c.relname) IN ${sql.in(protectedTables)}`;
 				if (shadows.length) return yield* invalid();
 			}
 			const tables = yield* (
 				pg
-					? sql`SELECT c.relname AS name FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND lower(c.relname) IN ${sql.in(kernelSqlTables)} ORDER BY c.relname`
-					: sql`SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND lower(TABLE_NAME) IN ${sql.in(kernelSqlTables)} ORDER BY TABLE_NAME`
+					? sql`SELECT c.relname AS name FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND lower(c.relname) IN ${sql.in(protectedTables)} ORDER BY c.relname`
+					: sql`SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND lower(TABLE_NAME) IN ${sql.in(protectedTables)} ORDER BY TABLE_NAME`
 			).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Names)));
 			const hash = createHash("sha256");
 			const add = (value: string) => {

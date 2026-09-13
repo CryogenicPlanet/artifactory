@@ -5,6 +5,7 @@ import { preserveMigrationState } from "./migration-state.ts";
 import type { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
 import { registerProtectedSqlTable } from "./protected-sql-tables.ts";
+import { extensionProtection } from "./protection-ownership.ts";
 import { writerGate } from "./database.ts";
 
 /** Loader-only migrations share the startup writer fence; they never publish candidate events. */
@@ -12,7 +13,7 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 	Effect.gen(function* () {
 		const crypto = yield* Crypto.Crypto;
 		const gate = yield* Semaphore.make(1);
-		return (name: string, statement: string, options?: { readonly protect?: boolean }) =>
+		return (name: string, statement: string, options?: { readonly protect?: boolean; readonly unprotect?: string }) =>
 			Effect.gen(function* () {
 				if (
 					!name ||
@@ -33,9 +34,17 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 					: undefined;
 				if (options?.protect && table === undefined)
 					return yield* new KernelError({ code: "extension_migration_invalid" });
-				const checksum = Buffer.from(yield* crypto.digest("SHA-256", new TextEncoder().encode(statement))).toString(
-					"hex",
-				);
+				const legacyChecksum = Buffer.from(
+					yield* crypto.digest("SHA-256", new TextEncoder().encode(statement)),
+				).toString("hex");
+				const checksum = Buffer.from(
+					yield* crypto.digest(
+						"SHA-256",
+						new TextEncoder().encode(
+							JSON.stringify([statement, options?.protect ?? false, options?.unprotect ?? null]),
+						),
+					),
+				).toString("hex");
 				const mysql = on(sql, { sqlite: () => false, pg: () => false, mysql: () => true });
 				const prior = sql.withTransaction(
 					Effect.gen(function* () {
@@ -54,7 +63,10 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ checksum: Schema.String })))),
 							);
 						if (previous.length > 0) {
-							if (previous[0]?.checksum !== checksum)
+							if (
+								previous[0]?.checksum !== checksum &&
+								!(options?.unprotect === undefined && previous[0]?.checksum === legacyChecksum)
+							)
 								return yield* new KernelError({ code: "extension_migration_conflict" });
 							return true;
 						}
@@ -70,28 +82,29 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 							})).length
 						)
 							return yield* new KernelError({ code: "extension_migration_invalid" });
+						yield* extensionProtection(sql, extension, statement, options?.unprotect);
 						return false;
 					}),
 				);
+				let finishProtection: Effect.Effect<void, Effect.Error<ReturnType<typeof extensionProtection>>> = Effect.void;
+				const operation = Effect.gen(function* () {
+					const protection = yield* extensionProtection(sql, extension, statement, options?.unprotect);
+					yield* preserveMigrationState(sql, sql.unsafe(statement), protection.tables);
+					finishProtection = protection.receipt;
+				});
 				const receipt = Effect.gen(function* () {
-					if (table !== undefined) yield* registerProtectedSqlTable(sql, table);
+					yield* finishProtection;
+					if (table !== undefined) yield* registerProtectedSqlTable(sql, table, { extension, migration: name });
 					yield* sql`INSERT INTO extension_migrations(extension,name,checksum) VALUES(${extension},${name},${checksum})`;
 				});
 				if (mysql) {
 					if (yield* prior) return;
-					return yield* mysqlMigration(
-						sql,
-						epoch,
-						extension,
-						name,
-						sql.withTransaction(preserveMigrationState(sql, sql.unsafe(statement))).pipe(Effect.asVoid),
-						receipt,
-					);
+					return yield* mysqlMigration(sql, epoch, extension, name, sql.withTransaction(operation), receipt);
 				}
 				yield* sql.withTransaction(
 					Effect.gen(function* () {
 						if (yield* prior) return;
-						yield* preserveMigrationState(sql, sql.unsafe(statement));
+						yield* operation;
 						yield* receipt;
 					}),
 				);

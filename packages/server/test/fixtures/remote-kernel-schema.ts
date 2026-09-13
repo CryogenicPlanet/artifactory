@@ -16,6 +16,7 @@ import type { RemoteStore } from "@comms/storage/store";
 import { remoteClientLayer } from "@comms/storage/remote-client";
 import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
 import { remoteAppKernelSchema } from "../../../boot/src/app-kernel-schema.ts";
+import { protectionOwnershipOperation } from "../../src/kernel/protection-schema.ts";
 import { initializeRemoteKernelSchema } from "../../src/kernel/schema.ts";
 import { writerGate } from "../../src/kernel/database.ts";
 import { assertNoPendingMigration } from "../../src/kernel/migration-intent.ts";
@@ -149,6 +150,7 @@ await Effect.runPromise(
 			}
 			phase = "initialize";
 			yield* initializeRemoteKernelSchema(sql, "current");
+			yield* protectionOwnershipOperation(sql).run;
 			yield* initializeRemoteKernelSchema(sql, "current");
 			assert.equal((yield* sql.withTransaction(writerGate(sql, "stale")).pipe(Effect.result))._tag, "Failure");
 			phase = "extension";
