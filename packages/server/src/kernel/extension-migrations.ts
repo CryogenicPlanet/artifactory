@@ -1,6 +1,7 @@
+import { extensionChecksums } from "./extension-checksum.ts";
 import { on } from "@comms/storage/dialect";
 import { assertNoPendingMigration, mysqlMigration } from "./migration-intent.ts";
-import { Crypto, Effect, Schema, Semaphore } from "effect";
+import { Effect, Schema, Semaphore } from "effect";
 import { preserveMigrationState } from "./migration-state.ts";
 import type { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
@@ -11,7 +12,6 @@ import { writerGate } from "./database.ts";
 /** Loader-only migrations share the startup writer fence; they never publish candidate events. */
 export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, extension: string) =>
 	Effect.gen(function* () {
-		const crypto = yield* Crypto.Crypto;
 		const gate = yield* Semaphore.make(1);
 		return (name: string, statement: string, options?: { readonly protect?: boolean; readonly unprotect?: string }) =>
 			Effect.gen(function* () {
@@ -34,17 +34,7 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 					: undefined;
 				if (options?.protect && table === undefined)
 					return yield* new KernelError({ code: "extension_migration_invalid" });
-				const legacyChecksum = Buffer.from(
-					yield* crypto.digest("SHA-256", new TextEncoder().encode(statement)),
-				).toString("hex");
-				const checksum = Buffer.from(
-					yield* crypto.digest(
-						"SHA-256",
-						new TextEncoder().encode(
-							JSON.stringify([statement, options?.protect ?? false, options?.unprotect ?? null]),
-						),
-					),
-				).toString("hex");
+				const { checksum, legacyChecksum } = yield* extensionChecksums(statement, options);
 				const mysql = on(sql, { sqlite: () => false, pg: () => false, mysql: () => true });
 				const prior = sql.withTransaction(
 					Effect.gen(function* () {
