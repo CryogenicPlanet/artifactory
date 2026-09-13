@@ -34,7 +34,7 @@ it.for(["app-accepted", "page-journal"] as const)(
 		if (boundary === "page-journal") {
 			const indexPath = join(fixture.root, "packages/boot/src/index.ts");
 			const index = await readFile(indexPath, "utf8");
-			const admission = 'if ((yield* Ref.get(phase))._tag !== "Ready" || (yield* recoveryIntents(sql)).count > 0)';
+			const admission = "if ((yield* recoveryIntents(sql)).count > 0)";
 			expect(index.split(admission)).toHaveLength(2);
 			const refused = join(fixture.root, "undo-refused");
 			await writeFile(
