@@ -213,7 +213,7 @@ export const initializeBootSchema = Effect.gen(function* () {
 				yield* sql`ALTER TABLE sessions ADD COLUMN origin TEXT`;
 				yield* sql`CREATE TABLE auth_origins (origin TEXT PRIMARY KEY, rp_id TEXT NOT NULL, created_at INTEGER NOT NULL)`;
 				yield* sql`CREATE TABLE passkey_codes (
-			id TEXT PRIMARY KEY, hash TEXT NOT NULL, origin TEXT, failures INTEGER NOT NULL,
+			id TEXT PRIMARY KEY, selector TEXT NOT NULL, hash TEXT NOT NULL, origin TEXT, failures INTEGER NOT NULL,
 			locked_until INTEGER NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
 		)`;
 			}),

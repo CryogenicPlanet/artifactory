@@ -46,12 +46,15 @@ validation to make passkey setup pass, because origin validation is what makes t
 mean anything.
 
 To serve one board from several addresses, set `PUBLIC_ORIGINS` instead of `RP_ID` and
-`PUBLIC_ORIGIN`: a comma-separated list of exact origins, primary first. Each origin's
-passkeys are bound to its own hostname, and boot builds absolute links such as approval
-URLs from the first. Setting `PUBLIC_ORIGINS` together with either single-origin variable
-is refused. If an existing board's `RP_ID` is not its origin's hostname, for example
-`RP_ID=example.com` with `PUBLIC_ORIGIN=https://chirp.example.com`, keep the single-origin
-variables: switching would bind the primary origin to a different RP ID than its passkeys.
+`PUBLIC_ORIGIN`: a comma-separated list of exact origins, primary first. Each origin's RP
+ID is its own hostname, and boot builds absolute links such as approval URLs from the first.
+Setting `PUBLIC_ORIGINS` together with either single-origin variable is refused. Because
+each hostname is an RP ID, `PUBLIC_ORIGINS` only keeps existing passkeys whose RP ID equals
+one of those hostnames. Otherwise keep `RP_ID` and `PUBLIC_ORIGIN`: a board with
+`RP_ID=example.com` and `PUBLIC_ORIGIN=https://chirp.example.com` stays on the single-origin
+variables. Boot refuses to start when no passkey's RP ID is served by a configured origin,
+or in `PUBLIC_ORIGINS` mode while any passkey predates recorded RP IDs, and restoring the
+previous variables starts it again.
 
 ```sh
 --env PUBLIC_ORIGINS=https://chirp.example.com,https://chirp-old.example.net
@@ -84,9 +87,10 @@ table to recover from a lockout is a different thing and is covered below.
 
 A passkey only works for the domain it was created for. That is WebAuthn, not a chirp
 choice, and it has one consequence worth knowing before it happens to you: if you change
-`RP_ID` to a different registrable domain, every passkey you already hold stops asserting,
-and `/setup` stays closed because the board still has passkeys in it. You are then locked
-out of your own board with nothing wrong with it.
+`RP_ID` to a different registrable domain, every passkey you already hold stops asserting.
+Boot refuses to start in that state rather than serve a board nobody can sign in to, and its
+log says why; restoring `RP_ID` starts it again. While you can still sign in, a one-time code
+moves you to a new domain without losing anything, as described under [Railway](#railway).
 
 Try the non-destructive option first. The board accepts any origin at or under `RP_ID`, so
 if you are moving to a sibling host under the same registrable domain, keep `RP_ID` as it is
@@ -279,10 +283,12 @@ address to a custom domain later, keep the variables as they are:
    creates a passkey for the domain, adds the domain to the board, and signs you in there.
 
 Both addresses keep working, and approval links keep using the configured origin. Switching
-to `PUBLIC_ORIGINS` is optional. Boot refuses to start with it while any passkey predates
-recorded RP IDs, because the list names no RP ID for such a passkey. Before switching, sign
-in once on the old address with each passkey you keep and delete the rest. If boot refuses,
-restore `RP_ID` and `PUBLIC_ORIGIN` and it starts again.
+to `PUBLIC_ORIGINS` is optional. It gives each listed origin its hostname as RP ID, so it
+only keeps passkeys created for one of those hostnames, such as passkeys created on the
+Railway address or through a code. Boot refuses to start with it while any passkey predates
+recorded RP IDs: before switching, sign in once on the old address with each passkey you
+keep and delete the rest. If boot refuses, restore `RP_ID` and `PUBLIC_ORIGIN` and it
+starts again.
 
 ### Creating the databases
 

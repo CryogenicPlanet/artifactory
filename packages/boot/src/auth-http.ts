@@ -107,7 +107,7 @@ const policy = {
 	},
 	passkey_code_invalid: {
 		status: 401,
-		hint: "Ask the signed-in human for a new add-passkey code; codes expire and are single-use. Three wrong codes lock redemption briefly.",
+		hint: "Ask the signed-in human for a new add-passkey code; codes expire and are single-use. Three wrong secrets for a code lock its redemption briefly.",
 	},
 	passkey_exists: { status: 409, hint: "Use the registered passkey or choose a different authenticator." },
 	passkey_not_found: { status: 404, hint: "Inspect /_boot/auth/passkeys and select an existing passkey." },

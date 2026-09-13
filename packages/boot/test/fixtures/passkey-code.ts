@@ -53,7 +53,7 @@ const run = Effect.gen(function* () {
 				);
 			}),
 		);
-	const base = scenario === "shared-rp" ? board : primary;
+	const base = scenario === "shared-rp" || scenario === "stamped-config" ? board : primary;
 	let auth = yield* start(base);
 	const first = authenticator(),
 		second = authenticator();
@@ -150,26 +150,37 @@ const run = Effect.gen(function* () {
 			yield* fails(auth.createPasskeyCode({ origin }, yield* codeProof({ origin }), session.id), "invalid_request");
 		const replayed = yield* codeProof({});
 		const issued = yield* auth.createPasskeyCode({}, replayed, session.id);
-		assert.match(issued.code, /^[A-F0-9]{16}$/);
+		assert.match(issued.code, /^[A-F0-9]{6}-[A-F0-9]{16}$/);
 		assert.equal(issued.origin, null);
 		yield* fails(auth.createPasskeyCode({}, replayed, session.id), "challenge_invalid");
 		// Only a digest is stored, and no event or log carries the code.
 		const stored = yield* sql`SELECT hash FROM passkey_codes`;
 		assert.equal(stored.length, 1);
-		assert.notEqual(stored[0]?.hash, issued.code);
+		assert.ok(!JSON.stringify(yield* sql`SELECT * FROM passkey_codes`).includes(issued.code.slice(7)));
 		assert.ok(!JSON.stringify(yield* sql`SELECT * FROM events`).includes(issued.code));
 		assert.ok(!output.some((line) => line.includes(issued.code)));
 		// A newer code invalidates the previous one.
 		const newer = yield* create();
 		yield* fails(auth.startPasskeyCodeRedemption(issued.code, primary.expectedOrigin), "passkey_code_invalid");
-		// Origins that are neither allowed nor bound are refused before the code is examined and spend nothing.
+		const flip = (character: string) => (character === "0" ? "1" : "0");
+		const wrongSelector = (code: string) => `${flip(code.charAt(0))}${code.slice(1)}`;
+		const wrongSecret = (code: string) => `${code.slice(0, 7)}${flip(code.charAt(7))}${code.slice(8)}`;
+		// An unknown selector or a malformed code is refused without counting, even from an allowed origin.
+		for (const input of [wrongSelector(newer.code), "0000000000000000", `${newer.code}0`])
+			for (const _ of [1, 2, 3, 4, 5])
+				yield* fails(auth.startPasskeyCodeRedemption(input, primary.expectedOrigin), "passkey_code_invalid");
+		// With the live selector, origins that are neither allowed nor bound are refused first and spend nothing.
 		for (const origin of [undefined, "https://evil.test", "https://sub.comms.test"])
 			for (const _ of [1, 2, 3, 4, 5])
-				yield* fails(auth.startPasskeyCodeRedemption("0000000000000000", origin), "origin_invalid");
-		assert.deepEqual(yield* sql`SELECT failures, locked_until FROM passkey_codes`, [{ failures: 1, locked_until: 0 }]);
-		// The third wrong code locks redemption for a minute without deleting the code; even the right code waits.
-		yield* fails(auth.startPasskeyCodeRedemption("0000000000000000", primary.expectedOrigin), "passkey_code_invalid");
-		yield* fails(auth.startPasskeyCodeRedemption("0000000000000000", primary.expectedOrigin), "passkey_code_invalid");
+				yield* fails(auth.startPasskeyCodeRedemption(wrongSecret(newer.code), origin), "origin_invalid");
+		assert.deepEqual(yield* sql`SELECT failures, locked_until FROM passkey_codes`, [{ failures: 0, locked_until: 0 }]);
+		// The live selector with a wrong secret counts. The third locks redemption for a minute without deleting the
+		// code, and even the right code waits.
+		for (const _ of [1, 2, 3])
+			yield* fails(
+				auth.startPasskeyCodeRedemption(wrongSecret(newer.code), primary.expectedOrigin),
+				"passkey_code_invalid",
+			);
 		const lockedFor = (row: unknown) =>
 			Effect.map(Clock.currentTimeMillis, (now) =>
 				typeof row === "object" && row !== null && "locked_until" in row ? Number(row.locked_until) - now : -1,
@@ -179,14 +190,23 @@ const run = Effect.gen(function* () {
 		const firstLock = yield* lockedFor(locked[0]);
 		assert.ok(firstLock > 55_000 && firstLock <= 60_000, String(firstLock));
 		yield* fails(auth.startPasskeyCodeRedemption(newer.code, primary.expectedOrigin), "passkey_code_locked");
-		// A further wrong code after the lockout doubles it.
+		// An unknown selector still spends nothing during the lockout.
+		yield* fails(
+			auth.startPasskeyCodeRedemption(wrongSelector(newer.code), primary.expectedOrigin),
+			"passkey_code_invalid",
+		);
+		assert.deepEqual(yield* sql`SELECT failures FROM passkey_codes`, [{ failures: 3 }]);
+		// A further wrong secret after the lockout doubles it.
 		yield* sql`UPDATE passkey_codes SET locked_until=0`;
-		yield* fails(auth.startPasskeyCodeRedemption("0000000000000000", primary.expectedOrigin), "passkey_code_invalid");
+		yield* fails(
+			auth.startPasskeyCodeRedemption(wrongSecret(newer.code), primary.expectedOrigin),
+			"passkey_code_invalid",
+		);
 		const doubled = yield* lockedFor((yield* sql`SELECT locked_until FROM passkey_codes`)[0]);
 		assert.ok(doubled > 115_000 && doubled <= 120_000, String(doubled));
-		// Once the lockout ends, the right code still works.
+		// Once the lockout ends, the right full code still works, in lowercase too.
 		yield* sql`UPDATE passkey_codes SET locked_until=0`;
-		assert.ok((yield* auth.startPasskeyCodeRedemption(newer.code, primary.expectedOrigin)).id);
+		assert.ok((yield* auth.startPasskeyCodeRedemption(newer.code.toLowerCase(), primary.expectedOrigin)).id);
 		// Expiry.
 		const expiring = yield* create();
 		yield* sql`UPDATE passkey_codes SET expires_at=1`;
@@ -406,6 +426,21 @@ const run = Effect.gen(function* () {
 			(yield* auth.listPasskeys(session.id)).items.map((key) => key.id),
 			[first.id],
 		);
+	} else if (scenario === "stamped-config") {
+		// RP_ID=comms.test with PUBLIC_ORIGIN=https://board.comms.test, and the sign-in above stamped comms.test.
+		assert.deepEqual(yield* sql`SELECT rp_id FROM passkeys`, [{ rp_id: "comms.test" }]);
+		// PUBLIC_ORIGINS=https://board.comms.test gives that origin RP ID board.comms.test, which no passkey uses.
+		const hostOnly: RelyingParty = { rpId: "board.comms.test", expectedOrigin: board.expectedOrigin };
+		yield* fails(start(hostOnly, true), "auth_configuration_invalid");
+		// The same mismatch is refused in single-origin mode, and a runtime origin serving comms.test does not count.
+		yield* sql`INSERT INTO auth_origins (origin, rp_id, created_at) VALUES ('https://comms.test', 'comms.test', 1)`;
+		yield* fails(start(hostOnly), "auth_configuration_invalid");
+		// Reverting starts normally and the passkey signs in.
+		auth = yield* start(board);
+		yield* login(first, board);
+		// A list whose origins serve the stamped RP ID starts, and the passkey signs in there.
+		auth = yield* start(primary, true);
+		yield* login(first, primary);
 	} else throw new Error("Unknown scenario");
 });
 await Effect.runPromise(

@@ -1,4 +1,7 @@
 import { lockBootWrite } from "./boot-write-lock.ts";
+// Effect Crypto has no constant-time comparison primitive.
+// oxlint-disable-next-line effecttsgo/node-builtin-import
+import { timingSafeEqual } from "node:crypto";
 import { authSecrets, captureRefusal, committed, refuse } from "./auth-primitives.ts";
 import {
 	generateRegistrationOptions,
@@ -14,14 +17,16 @@ import { Events } from "./events.ts";
 import { humanAgent } from "./human-agent.ts";
 import { canonicalPasskeyCode, type PasskeyCodeParams } from "./passkey-code-schema.ts";
 
-/** A code is shown once, so it lives briefly. Wrong guesses lock redemption rather than destroy the code,
- * because redemption is public and a forged Origin header would otherwise let anyone burn it. */
+/** A code is SELECTOR-SECRET and shown once, so it lives briefly. The selector names the live code and is not
+ * secret; only the right selector with a wrong secret counts, and wrong secrets lock redemption rather than destroy
+ * the code, because redemption is public and its Origin header is forgeable. */
 export const passkeyCodeLifetimeMs = 10 * 60_000;
 const passkeyCodeAttempts = 3;
 export const passkeyCodeLockoutMs = 60_000;
 
 const codeRow = Schema.Struct({
 	id: Schema.String,
+	selector: Schema.String,
 	hash: Schema.String,
 	origin: Schema.NullOr(Schema.String),
 	failures: Schema.Finite,
@@ -64,9 +69,15 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 			});
 		const noPasskeys = Effect.map(sql`SELECT id FROM passkeys LIMIT 1`, (rows) => rows.length === 0);
 		const currentCode = Effect.gen(function* () {
-			const rows = yield* sql`SELECT id, hash, origin, failures, locked_until, expires_at FROM passkey_codes`;
+			const rows = yield* sql`SELECT id, selector, hash, origin, failures, locked_until, expires_at FROM passkey_codes`;
 			return (yield* Schema.decodeUnknownEffect(Schema.Array(codeRow))(rows))[0];
 		});
+		const codeBySelector = (selector: string) =>
+			Effect.gen(function* () {
+				const rows =
+					yield* sql`SELECT id, selector, hash, origin, failures, locked_until, expires_at FROM passkey_codes WHERE selector=${selector}`;
+				return (yield* Schema.decodeUnknownEffect(Schema.Array(codeRow))(rows))[0];
+			});
 		const discard = Effect.gen(function* () {
 			yield* sql`DELETE FROM passkey_codes`;
 			yield* sql`DELETE FROM auth_challenges WHERE ceremony='passkey.redeem'`;
@@ -91,15 +102,19 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 						const now = yield* Clock.currentTimeMillis;
 						if (!(yield* sql`SELECT id FROM sessions WHERE id=${sessionId} AND expires_at>${now}`).length)
 							return yield* refuse("session_invalid");
-						const code = Buffer.from(yield* crypto.randomBytes(8))
+						const selector = Buffer.from(yield* crypto.randomBytes(3))
 							.toString("hex")
 							.toUpperCase();
+						const secret = Buffer.from(yield* crypto.randomBytes(8))
+							.toString("hex")
+							.toUpperCase();
+						const code = `${selector}-${secret}`;
 						const origin = params.origin ?? null;
 						const expiresAt = now + passkeyCodeLifetimeMs;
 						// A newer code replaces the previous one and every ceremony started with it.
 						yield* discard;
-						yield* sql`INSERT INTO passkey_codes (id, hash, origin, failures, locked_until, expires_at, created_at)
-				VALUES (${yield* random}, ${yield* hash(code)}, ${origin}, 0, 0, ${expiresAt}, ${now})`;
+						yield* sql`INSERT INTO passkey_codes (id, selector, hash, origin, failures, locked_until, expires_at, created_at)
+				VALUES (${yield* random}, ${selector}, ${yield* hash(secret)}, ${origin}, 0, 0, ${expiresAt}, ${now})`;
 						yield* event("auth.passkey_code_created", "info", { origin, expires_at: expiresAt });
 						return { code, origin, expires_at: expiresAt };
 					}).pipe(captureRefusal(Schema.is(AuthError))),
@@ -130,21 +145,28 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 						// Adding a first passkey remains /setup's job.
 						if (yield* noPasskeys) return yield* refuse("setup_required");
 						const now = yield* Clock.currentTimeMillis;
-						const code = yield* currentCode;
-						if (!code || code.expires_at <= now) {
-							if (code) yield* discard;
+						// An unknown selector or a malformed code is refused without counting or touching any code.
+						const parts = /^([0-9A-F]{6})-([0-9A-F]{16})$/.exec(input.trim().toUpperCase());
+						const selector = parts?.[1];
+						const secret = parts?.[2];
+						if (!selector || !secret) return yield* refuse("passkey_code_invalid");
+						const code = yield* codeBySelector(selector);
+						if (!code) return yield* refuse("passkey_code_invalid");
+						if (code.expires_at <= now) {
+							yield* discard;
 							return yield* refuse("passkey_code_invalid");
 						}
-						// An origin that is neither allowed nor bound is refused before the code is examined and spends nothing.
-						// Origin is forgeable outside a browser, so it is not a reason to count anything either.
+						// An origin that is neither allowed nor bound is refused before the secret is examined and spends nothing.
 						const party = yield* partyFor(code, origin);
 						if (!party) return yield* refuse("origin_invalid");
 						if (code.locked_until > now) return yield* refuse("passkey_code_locked");
-						// Comparing SHA-256 digests of a random code; the stored value is never the code itself.
-						// Codes are uppercase hex, so a lowercase transcription is the same code rather than a wasted attempt.
-						if ((yield* hash(input.trim().toUpperCase())) !== code.hash) {
+						// Only the right selector with a wrong secret counts. The stored value is a hash of the secret,
+						// compared in constant time.
+						const digest = Buffer.from(yield* hash(secret));
+						const stored = Buffer.from(code.hash);
+						if (digest.length !== stored.length || !timingSafeEqual(digest, stored)) {
 							const failures = code.failures + 1;
-							// From the third wrong code, lock for 60 seconds, doubling with each further wrong code.
+							// From the third wrong secret, lock for 60 seconds, doubling with each further wrong secret.
 							// The code keeps its TTL, so a lockout delays its owner but never destroys it.
 							const lockedUntil =
 								failures >= passkeyCodeAttempts

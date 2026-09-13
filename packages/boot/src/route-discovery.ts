@@ -185,7 +185,7 @@ const routes = [
 		"post",
 		["/_boot/auth/passkey-code/options"],
 		"public",
-		"Start code redemption with {code} and exact Origin: an allowed origin, or the origin the code is bound to. Refuses bearer credentials and boards with no passkey. Other origins are refused without spending an attempt; from the third wrong code, redemption locks for 60 seconds, doubling per further wrong code, and the code survives until it expires.",
+		"Start code redemption with {code}, formatted SELECTOR-SECRET (6 and 16 hex characters, case-insensitive), and exact Origin: an allowed origin, or the origin the code is bound to. Refuses bearer credentials and boards with no passkey. An unknown selector or another origin spends nothing; from the third wrong secret for the live selector, redemption locks for 60 seconds, doubling per further wrong secret, and the code survives until it expires.",
 	],
 	[
 		"post",

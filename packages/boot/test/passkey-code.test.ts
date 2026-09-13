@@ -14,6 +14,7 @@ for (const scenario of [
 	"backfill",
 	"shared-rp",
 	"configured-passkeys",
+	"stamped-config",
 ]) {
 	test(`passkey code: ${scenario}`, async ({ onTestFinished }) => {
 		const directory = await mkdtemp(join(tmpdir(), "comms-passkey-code-"));
