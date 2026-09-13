@@ -158,6 +158,12 @@ const routes = [
 		"public",
 		"First-passkey setup page; available only before setup completes, or for one recovery passkey on the primary origin per boot process while the operator sets REOPEN_SETUP=1.",
 	],
+	[
+		"get",
+		["/onboarding"],
+		"public",
+		"First-visit setup guide. Public only while no passkey exists; once configured, a verified human session is required to show the agent invite prompt. Browser requests without that session redirect to passkey sign-in. Available independently of the editable app.",
+	],
 	["get", ["/auth/login"], "public", "Human passkey sign-in page."],
 	[
 		"post",

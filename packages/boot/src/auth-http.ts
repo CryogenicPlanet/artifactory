@@ -12,6 +12,7 @@ import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
 import { configuredParties, validRelyingParty } from "./auth-origins.ts";
 import { PasskeyRegistrationResponse } from "./passkey-management-schema.ts";
 import { authClient, authPage } from "./auth-page.ts";
+import { onboardingPage } from "./onboarding-page.ts";
 
 export const sessionCookie = "__Host-comms_session";
 
@@ -324,7 +325,7 @@ export const authRoute = (auth: Auth["Service"], requestId: string) =>
 				contentType: "text/javascript",
 				headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
 			});
-		const page = request.method === "GET" && (path === "/setup" || path === "/auth/login");
+		const page = request.method === "GET" && (path === "/setup" || path === "/auth/login" || path === "/onboarding");
 		const post =
 			request.method === "POST" &&
 			[
@@ -345,10 +346,15 @@ export const authRoute = (auth: Auth["Service"], requestId: string) =>
 						return HttpServerResponse.empty({
 							status: 302,
 							headers: {
-								location: `/setup${next === null ? "" : `?next=${encodeURIComponent(next)}`}`,
+								location: `/onboarding${next === null ? "" : `?next=${encodeURIComponent(next)}`}`,
 								"cache-control": "no-store",
 							},
 						});
+					}
+					if (path === "/onboarding") {
+						const ready = !(yield* auth.setupRequired);
+						if (ready) yield* humanSession(auth, request);
+						return HttpServerResponse.text(onboardingPage(ready), { contentType: "text/html", headers: pageHeaders });
 					}
 					if (path === "/setup" && !setupOpen)
 						return HttpServerResponse.empty({ status: 404, headers: { "cache-control": "no-store" } });

@@ -23,6 +23,7 @@ export const validPublicPath = (path: string) =>
 		"/auth",
 		"/approve",
 		"/setup",
+		"/onboarding",
 		"/p",
 		"/api/fs",
 		"/api/lock",

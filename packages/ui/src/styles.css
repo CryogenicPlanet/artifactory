@@ -44,36 +44,34 @@
 	--font-sans: "ABC Diatype", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	--font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-	/* Composio light surface: warm-neutral grays, never pure black. */
-	--color-background: #f6f6f6;
-	--color-foreground: #0f0f0f;
-	--color-card: #ffffff;
-	--color-card-foreground: #0f0f0f;
-	--color-muted: #f0f0f0;
-	--color-muted-foreground: oklch(0.556 0 0);
-	--color-subtle: oklch(0.65 0 0);
-	/* Deep product blue for actions; sky blue for brand accents. */
-	--color-primary: oklch(0.387 0.264 264.1);
-	--color-primary-hover: oklch(0.34 0.24 264.1);
-	--color-primary-foreground: #ffffff;
-	--color-accent: #51a2ff;
-	--color-accent-hover: #3590f5;
-	--color-accent-surface: oklch(0.95 0.025 250);
-	--color-accent-foreground: #1f7ee8;
-	--color-border: oklch(0.922 0 0);
-	--color-input: oklch(0.9 0 0);
-	/* Focus rings stay neutral — never a brand color. */
-	--color-ring: oklch(0.708 0 0);
-	--color-placeholder: oklch(0.75 0 0);
-	--color-warning: oklch(0.666 0.16 75);
-	--color-warning-surface: oklch(0.97 0.02 85);
-	--color-warning-border: oklch(0.9 0.05 85);
-	--color-warning-heading: oklch(0.55 0.14 75);
-	--color-destructive: oklch(0.577 0.215 27.3);
-	--color-destructive-surface: oklch(0.96 0.02 27.3);
-	--color-tag: oklch(0.546 0.16 155.8);
-	--color-tag-surface: oklch(0.96 0.02 155.8);
-	--color-tag-border: oklch(0.91 0.03 155.8);
+	/* Shared with the public page: charcoal surfaces, mint actions, quiet lilac accents. */
+	--color-background: #161b1d;
+	--color-foreground: #ece9e1;
+	--color-card: #1c2224;
+	--color-card-foreground: #ece9e1;
+	--color-muted: #252d30;
+	--color-muted-foreground: #a6b2b0;
+	--color-subtle: #95a3a0;
+	--color-primary: #b8d7c3;
+	--color-primary-hover: #d0e9da;
+	--color-primary-foreground: #172520;
+	--color-accent: #b9b0df;
+	--color-accent-hover: #cec7ea;
+	--color-accent-surface: #302e3c;
+	--color-accent-foreground: #d1cbea;
+	--color-border: #343c3e;
+	--color-input: #53615e;
+	--color-ring: #b8d7c3;
+	--color-placeholder: #8e9b98;
+	--color-warning: #e6c082;
+	--color-warning-surface: #342e24;
+	--color-warning-border: #67583e;
+	--color-warning-heading: #e6c082;
+	--color-destructive: #f1a28f;
+	--color-destructive-surface: #382825;
+	--color-tag: #b8d7c3;
+	--color-tag-surface: #26352e;
+	--color-tag-border: #455e4e;
 
 	--radius-sm: 2px;
 	--radius-md: 4px;
@@ -86,7 +84,7 @@
 
 @layer base {
 	:root {
-		color-scheme: light;
+		color-scheme: dark;
 		font-synthesis: none;
 		/* Reserve the scrollbar lane so page height changes never shift the layout. */
 		scrollbar-gutter: stable;
@@ -115,7 +113,7 @@
 		color: var(--color-placeholder);
 	}
 	::selection {
-		background: rgb(81 162 255 / 0.25);
+		background: rgb(184 215 195 / 0.25);
 	}
 	@media (prefers-reduced-motion: reduce) {
 		*,

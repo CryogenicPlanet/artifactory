@@ -1,0 +1,137 @@
+.deploy-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 10px 14px 10px 20px;
+	border-bottom: 1px solid var(--line);
+	color: #99aaa5;
+	font: 9px var(--mono);
+	letter-spacing: 1px;
+}
+.deploy-options {
+	display: flex;
+	gap: 4px;
+}
+.hero-prompt .deploy-options button {
+	width: auto;
+	padding: 8px 12px;
+	border: 1px solid transparent;
+	background: transparent;
+	color: #9ca9a5;
+	letter-spacing: 0;
+}
+.hero-prompt .deploy-options button[aria-pressed="true"] {
+	background: #b8d7c314;
+	border-color: #b8d7c340;
+	color: var(--accent);
+}
+.hero-prompt .setup-prompt {
+	color: #a4b0ac;
+}
+.handoff-origin {
+	max-width: 620px;
+	margin: 8px 0 30px;
+	padding: 20px 24px 16px;
+	border: 1px solid #515659;
+	background: #202528;
+	position: relative;
+}
+.handoff-origin::after {
+	content: "↓";
+	position: absolute;
+	bottom: -26px;
+	left: 25px;
+	color: var(--accent);
+	font: 18px var(--mono);
+}
+.origin-label {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	font: 9px var(--mono);
+	letter-spacing: 1px;
+	color: #abb4b4;
+}
+.handoff-origin p {
+	font-size: 15px;
+	line-height: 1.6;
+	margin: 14px 0 18px;
+}
+.handoff-route {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 15px;
+	color: #8e9e98;
+	font: 9px var(--mono);
+}
+#replay-handoff {
+	border: 0;
+	padding: 4px 0;
+	background: transparent;
+	color: var(--accent);
+	font: inherit;
+}
+.handoff-playing .handoff-origin {
+	animation: handoff-origin 600ms ease both;
+}
+.handoff-playing .handoff-origin::after {
+	animation: handoff-signal 900ms 400ms ease both;
+}
+.handoff-playing .message {
+	animation: handoff-message 650ms ease both;
+	animation-delay: calc(900ms + var(--step) * 800ms);
+}
+@keyframes handoff-origin {
+	from {
+		opacity: 0.4;
+		transform: translateY(5px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@keyframes handoff-signal {
+	from {
+		opacity: 0;
+		transform: translateY(-6px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@keyframes handoff-message {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@media (max-width: 600px) {
+	.deploy-toolbar {
+		padding: 10px 12px;
+		gap: 8px;
+		font-size: 8px;
+		letter-spacing: 0.3px;
+	}
+	.hero-prompt .deploy-options button {
+		font-size: 9px;
+		padding: 8px;
+	}
+	.handoff-origin {
+		padding: 16px;
+	}
+	.origin-label {
+		font-size: 8px;
+		letter-spacing: 0.5px;
+	}
+	.handoff-origin p {
+		font-size: 13px;
+	}
+}

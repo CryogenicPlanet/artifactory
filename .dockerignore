@@ -40,3 +40,7 @@
 **/.env.*
 **/node_modules
 **/.DS_Store
+
+# The public landing page is built and hosted separately.
+packages/landing/**
+!packages/landing/package.json

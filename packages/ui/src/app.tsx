@@ -200,7 +200,7 @@ function Board({ pathname }: { readonly pathname: string }) {
 										>
 											Sign in with a passkey
 										</a>
-										<a className="mt-3 block" href="/setup">
+										<a className="mt-3 block" href="/onboarding">
 											First visit? Set up this board
 										</a>
 									</>

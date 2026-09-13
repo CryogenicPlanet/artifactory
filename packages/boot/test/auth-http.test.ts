@@ -197,7 +197,7 @@ it("redirects unauthenticated page navigations to login and forwards to open set
 	expect(board.headers.get("cache-control")).toBe("no-store");
 	const loginPage = await fetch(`${app.url}/auth/login?next=%2Ft%2Fdesign`, { redirect: "manual" });
 	expect(loginPage.status).toBe(302);
-	expect(loginPage.headers.get("location")).toBe("/setup?next=%2Ft%2Fdesign");
+	expect(loginPage.headers.get("location")).toBe("/onboarding?next=%2Ft%2Fdesign");
 	const api = await fetch(`${app.url}/t/design`, { headers: { accept: "application/json" } });
 	expect(api.status).toBe(401);
 	expect((await api.json()).error.code).toBe("session_invalid");
@@ -207,6 +207,33 @@ it("redirects unauthenticated page navigations to login and forwards to open set
 	const stillRedirects = await fetch(`${app.url}/`, { headers: { accept: "text/html" }, redirect: "manual" });
 	expect(stillRedirects.status).toBe(302);
 	expect(stillRedirects.headers.get("location")).toBe("/auth/login?next=%2F");
+});
+
+it("guides first setup and only shows the invite step after a human signs in", async (test) => {
+	const app = await launch(test, "exit");
+	const page = await fetch(`${app.url}/onboarding`);
+	expect(page.status).toBe(200);
+	expect(page.headers.get("cache-control")).toBe("no-store");
+	expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+	const html = await page.text();
+	expect(html).toContain('data-onboarding="true"');
+	expect(html).not.toContain(app.code());
+	expect(html).not.toContain('id="copy-invite"');
+	expect((await app.post("/_boot/auth/setup/options", { code: "wrong" })).status).toBe(401);
+	await app.setup();
+	const anonymous = await fetch(`${app.url}/onboarding`, { headers: { accept: "text/html" }, redirect: "manual" });
+	expect(anonymous.status).toBe(302);
+	expect(anonymous.headers.get("location")).toBe("/auth/login?next=%2Fonboarding");
+	const session = await app.login();
+	const ready = await fetch(`${app.url}/onboarding`, { headers: { cookie: session.cookie } });
+	expect(ready.status).toBe(200);
+	const readyHtml = await ready.text();
+	expect(readyHtml).toContain('id="copy-invite"');
+	expect(readyHtml).not.toContain('id="code"');
+	expect((await fetch(`${app.url}/setup`)).status).toBe(404);
+	expect((await fetch(`${app.url}/onboarding`, { headers: { authorization: "Bearer invalid" } })).status).toBe(401);
+	expect((await fetch(`${app.url}/onboarding/other`)).status).toBe(401);
+	expect((await fetch(`${app.url}/onboarding`, { method: "POST" })).status).toBe(401);
 });
 
 it("rejects cross-origin, malformed, oversized, replayed and explicit invalid credentials", async (test) => {

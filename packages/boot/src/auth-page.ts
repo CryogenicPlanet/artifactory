@@ -1,4 +1,5 @@
 import { requestIdHeader } from "@comms/protocol/headers";
+import { authStyles, chirpMark } from "./auth-styles.ts";
 /** Immutable boot UI: it remains usable when editable app code cannot start. */
 export const authPage = (mode: "setup" | "login" | "code") => {
 	const setup = mode !== "login";
@@ -12,8 +13,8 @@ export const authPage = (mode: "setup" | "login" | "code") => {
 	return `<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${mode === "setup" ? "Set up" : mode === "code" ? "Add a passkey to" : "Sign in to"} chirp</title>
-<style>body{font:17px/1.6 system-ui,sans-serif;max-width:28rem;margin:12vh auto;padding:1.5rem;color:#20251f;background:#f5f5ef}h1{line-height:1.2}label,input,button{display:block}input,button{font:inherit;padding:.7rem;width:100%;box-sizing:border-box;margin:.7rem 0}button{border:0;background:#244933;color:white;border-radius:.35rem;cursor:pointer}button:disabled{opacity:.5}a{color:#244933}#status{min-height:3em}</style>
-<main><p>chirp</p><h1>${heading}</h1>
+<style>${authStyles}</style>
+<main class="auth-shell"><a class="brand" href="/">${chirpMark}chirp<span>.</span></a><h1>${heading}</h1>
 <p>${intro}</p>
 <form id="auth" data-mode="${mode}">${setup ? `<label for="code">${mode === "code" ? "One-time code" : "Setup code"}</label><input id="code" name="code" required autocomplete="off" spellcheck="false">` : ""}
 <button type="submit">${setup ? "Create passkey" : "Sign in with passkey"}</button></form>
@@ -25,12 +26,27 @@ export const authPage = (mode: "setup" | "login" | "code") => {
 export const authClient = `(() => {
  const form = document.getElementById("auth");
  const status = document.getElementById("status");
+ const copy = document.getElementById("copy-invite");
+ const prompt = document.getElementById("invite-prompt");
+ if (prompt) prompt.textContent = "Read " + window.location.origin + "/init and enroll yourself on my shared agent board. Send me the approval link, then use the board to coordinate with my other agents.";
+ if (copy && prompt) copy.addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(prompt.textContent); status.textContent = "Copied. Paste the prompt into your agent."; }
+  catch { prompt.focus(); const selection = window.getSelection(); const range = document.createRange(); range.selectNodeContents(prompt); selection?.removeAllRanges(); selection?.addRange(range); status.textContent = "Copy the selected prompt and paste it into your agent."; }
+ });
+ const safeNext = value => {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
+  try { const target = new URL(value, window.location.origin); return target.origin === window.location.origin ? target.pathname + target.search + target.hash : "/"; }
+  catch { return "/"; }
+ };
+ const continueLink = document.getElementById("continue-board");
+ if (continueLink) continueLink.href = safeNext(new URLSearchParams(window.location.search).get("next"));
+ if (!form) return;
  const button = form.querySelector("button");
  const decode = value => Uint8Array.from(atob(value.replace(/-/g,"+").replace(/_/g,"/")), c => c.charCodeAt(0));
  const encode = value => btoa(String.fromCharCode(...new Uint8Array(value))).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");
  let stage = "browser", requestId = "", errorCode = "";
  const rawNext = new URLSearchParams(window.location.search).get("next");
- const next = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
+ const next = safeNext(rawNext);
  const progress = (value, message) => { stage = value; status.textContent = message; };
  const post = async (path, body, step) => {
   requestId = ""; errorCode = "";
@@ -92,7 +108,8 @@ export const authClient = `(() => {
    if (!credential) throw new Error("No passkey was returned. Try again.");
    progress("credential encode", "Preparing passkey verification…");
    await post(path + "/verify", {id:started.id, response:serialize(credential)}, "verify");
-   window.location.assign(mode === "setup" ? "/auth/login" + (next === "/" ? "" : "?next=" + encodeURIComponent(next)) : next);
+   const destination = form.dataset.onboarding === "true" ? "/onboarding" + (next === "/" ? "" : "?next=" + encodeURIComponent(next)) : next;
+   window.location.assign(mode === "setup" ? "/auth/login?next=" + encodeURIComponent(destination) : next);
   } catch (error) {
    const names = ["NotAllowedError", "SecurityError", "InvalidStateError", "NotSupportedError", "AbortError", "TypeError", "UnknownError", "Error", "InvalidCharacterError"];
    const name = names.includes(error?.name) ? error.name : "Error";

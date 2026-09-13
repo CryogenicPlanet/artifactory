@@ -10,7 +10,7 @@ From the repository root:
 bun run dev
 ```
 
-Open `http://localhost:5173/setup` on a fresh installation, or `/auth/login` to sign in. The launcher starts boot and proxies API/auth requests from Vite. Use `localhost` consistently: passkeys and browser mutations depend on the exact configured origin. `UI_PORT` changes the Vite port; `PUBLIC_ORIGIN` overrides the browser origin.
+Open `http://localhost:5173/` on a fresh installation; it redirects to `/onboarding` for the setup code, passkey, and agent invite prompt. Use `/auth/login` to sign in later. The launcher starts boot and proxies API/auth requests from Vite. Use `localhost` consistently: passkeys and browser mutations depend on the exact configured origin. `UI_PORT` changes the Vite port; `PUBLIC_ORIGIN` overrides the browser origin.
 
 For ordinary use, follow the [project README](../../../README.md) and run `bun run start`. Runtime generations build and serve their own UI assets; existing data directories retain their installed source. Agents can customize the live UI using the [editing workflow](../../server/pages/docs/editing.md).
 

@@ -6,6 +6,7 @@ Run it through the server launcher with `bun run start` at the repository root. 
 
 ## Recovery surfaces
 
+- `/onboarding`: first-passkey setup and the agent invitation prompt.
 - `/setup` and `/auth/login`: passkey registration and sign-in.
 - `/_boot`: recovery help, independent of the app.
 - `/_boot/status` and `/_boot/generations`: authenticated runtime and generation diagnostics.
