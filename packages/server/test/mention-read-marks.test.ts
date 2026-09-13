@@ -21,6 +21,7 @@ it("recognizes punctuation-terminated mentions without shortening another valid 
 		["over to @codex-", "@codex"],
 		["over to @codex_", "@codex"],
 		["over to @codex.other", "@codex.other"],
+		["instance @codex/mac here", "@codex/mac"],
 	])
 		expect(mentionsIn(body ?? "")).toEqual([target]);
 	for (const body of [
@@ -38,8 +39,13 @@ it("recognizes punctuation-terminated mentions without shortening another valid 
 		"@codex.otherX",
 		"@codex.otheré",
 		"@codex-jobX",
+		// A handle with more path after it is the common shape: raw file URLs and profile links.
+		"https://raw.githubusercontent.com/@codex/repo/main/README.md",
+		"rahul@codex.com",
 	])
 		expect(mentionsIn(body)).toEqual([]);
+	// An agent and one of its instances stay distinct targets in the same body.
+	expect(mentionsIn("@codex and @codex/mac")).toEqual(["@codex", "@codex/mac"]);
 });
 
 it("marks only the requested subtree in OR results and never globally marks a mentions-only view", async (test) => {
@@ -179,3 +185,36 @@ it("leaves root read marks untouched when an extension calls markRead", async (t
 	expect((await fetch(app.url + "/api/root-read", { headers: { cookie } })).status).toBe(200);
 	expect(await fixture.sql("SELECT * FROM reads")).toEqual([]);
 });
+it("leaves the read mark alone on a latest-N read and still advances it on a forward read", async (test) => {
+	const fixture = await conversation(test),
+		app = await fixture.launch();
+	await app.setup();
+	const cookie = await app.login(),
+		author = await app.login();
+	await app.ready(cookie);
+	const post = async (body: string) => {
+		const response = await app.post("/api/messages", { topic: "latest", body }, author);
+		expect(response.status).toBe(200);
+		return (await response.json()) as { readonly seq: number };
+	};
+	const get = async (query: string) => {
+		const response = await fetch(`${app.url}/api/messages?${query}`, { headers: { cookie } });
+		expect(response.status, await response.clone().text()).toBe(200);
+		return (await response.json()) as { readonly items: ReadonlyArray<{ readonly seq: number }> };
+	};
+	const marks = () => fixture.sql("SELECT topic,seq FROM reads");
+	const first = await post("first");
+	await post("second");
+	const third = await post("third");
+	// One message returned, three unread: marking through it would clear two nobody saw.
+	expect((await get("topic=latest&newest=1&limit=1")).items.map((item) => item.seq)).toEqual([third.seq]);
+	expect(await marks()).toEqual([]);
+	expect((await get(`topic=latest&since=0&limit=1`)).items.map((item) => item.seq)).toEqual([first.seq]);
+	expect(await marks()).toEqual([{ topic: "latest", seq: first.seq }]);
+	// A later newest read must not drag the mark forward over the messages it skipped.
+	expect((await get("topic=latest&newest=1&limit=1")).items.map((item) => item.seq)).toEqual([third.seq]);
+	expect(await marks()).toEqual([{ topic: "latest", seq: first.seq }]);
+	const topic = await fetch(`${app.url}/api/topics/latest?mark=0`, { headers: { cookie } });
+	expect(topic.status).toBe(200);
+	expect((await topic.json()).unread).toBe(2);
+}, 30000);

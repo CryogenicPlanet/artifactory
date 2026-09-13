@@ -128,7 +128,7 @@ const makeAuth = (config: AuthConfig) =>
 			const generation = yield* random;
 			yield* sql`DELETE FROM auth_challenges WHERE ceremony = 'setup'`;
 			yield* Ref.set(setup, { code, generation, failures: 0 });
-			yield* Effect.sync(() => bootConsole.log(`comms: /setup is open, code ${code}`));
+			yield* Effect.sync(() => bootConsole.log(`chirp: /setup is open, code ${code}`));
 			return { code, generation, failures: 0 };
 		});
 		const setupState = Effect.gen(function* () {
@@ -184,7 +184,7 @@ const makeAuth = (config: AuthConfig) =>
 					const options = yield* Effect.tryPromise({
 						try: () =>
 							generateRegistrationOptions({
-								rpName: "comms",
+								rpName: "chirp",
 								rpID: config.rpId,
 								userName: "human",
 								userID: new TextEncoder().encode("comms-human"),

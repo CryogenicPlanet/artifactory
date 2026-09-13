@@ -1,3 +1,4 @@
+import { refusalSchema } from "./fixtures/openapi-refusal.ts";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -103,8 +104,10 @@ export default api => {
 	expect(openapi.paths["/api/files/{bucket}/{*}"].post.parameters).toEqual(
 		expect.arrayContaining([expect.objectContaining({ name: "bucket" }), expect.objectContaining({ name: "*" })]),
 	);
-	expect(JSON.stringify(openapi.paths["/api/route-demo/{name}"].get.responses[500])).toContain("extension_disabled");
-	expect(JSON.stringify(openapi.paths["/api/topics/{*}"].get.responses[500])).toContain("extension_disabled");
+	expect(refusalSchema(openapi, openapi.paths["/api/route-demo/{name}"].get.responses[500])).toContain(
+		"extension_disabled",
+	);
+	expect(refusalSchema(openapi, openapi.paths["/api/topics/{*}"].get.responses[500])).toContain("extension_disabled");
 	const enrollment = await (await app.post("/auth/enroll", { name: "reader", kind: "agent", host: "test" })).json();
 	const params = { id: enrollment.id, decision: "approve" as const, scopes: ["read"], long_lived: false };
 	const proof = await app.assertion(params);

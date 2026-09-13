@@ -25,9 +25,11 @@ export const revertSource = (key: string) =>
 	Effect.gen(function* () {
 		const lock = yield* getEditLock;
 		if (lock === null)
+			// 423 means someone else holds it; 503 means it was taken but recovery still needs repair,
+			// which carries lock_committed. Either way, re-read and proceed if the lock is ours now.
 			yield* accountPost("/_boot/lock", {}).pipe(
 				Effect.catchTag("BoardError", (error) =>
-					error.status === 423
+					error.status === 423 || error.status === 503
 						? getEditLock.pipe(Effect.flatMap((current) => (current ? Effect.void : Effect.fail(error))))
 						: Effect.fail(error),
 				),

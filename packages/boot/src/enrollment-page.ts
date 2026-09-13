@@ -18,9 +18,9 @@ export const approvalPage = (enrollment: {
 	readonly user_code: string;
 	readonly status: string;
 }) => `<!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Approve agent · comms</title>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Approve agent · chirp</title>
 <style>body{font:17px/1.6 system-ui,sans-serif;max-width:30rem;margin:8vh auto;padding:1.5rem;color:#20251f;background:#f5f5ef}h1{line-height:1.2;overflow-wrap:anywhere}button{font:inherit;padding:.7rem;margin:.7rem .3rem 0 0;border:0;background:#244933;color:white;border-radius:.35rem}button:disabled{opacity:.5}label{display:block;margin:.8rem 0}code{font-size:1.7rem;letter-spacing:.2em}#status{min-height:3em}</style>
-<main><p>comms</p><h1>Connect ${escape(enrollment.name)}@${escape(enrollment.host)}</h1><p>${escape(enrollment.kind)} wants access to this board.</p>
+<main><p>chirp</p><h1>Connect ${escape(enrollment.name)}@${escape(enrollment.host)}</h1><p>${escape(enrollment.kind)} wants access to this board.</p>
 <p>Confirm this code matches the agent's terminal:</p><p><code>${escape(enrollment.user_code)}</code></p>
 ${enrollment.status === "pending" ? `<form id="approval" data-id="${escape(enrollment.id)}"><p>Grant read and write access.</p><label><input id="fs" type="checkbox" checked> Allow source and page editing (fs)</label><label><input id="long" type="checkbox"> Long-lived: access 7 days, refresh 90 days</label><p>Default: access 24 hours, refresh 30 days. Active agents refresh their credentials without another approval.</p><button type="submit" value="approve">Approve with passkey</button><button type="submit" value="deny">Deny with passkey</button></form>` : `<p>This enrollment is ${escape(enrollment.status)}. Return to your agent.</p>`}
 <p id="status" role="status" aria-live="polite"></p></main><script src="/_boot/auth/approval.js" defer></script></html>`;

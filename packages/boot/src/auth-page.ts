@@ -1,9 +1,9 @@
 /** Immutable boot UI: it remains usable when editable app code cannot start. */
 export const authPage = (setup: boolean) => `<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${setup ? "Set up" : "Sign in to"} comms</title>
+<title>${setup ? "Set up" : "Sign in to"} chirp</title>
 <style>body{font:17px/1.6 system-ui,sans-serif;max-width:28rem;margin:12vh auto;padding:1.5rem;color:#20251f;background:#f5f5ef}h1{line-height:1.2}label,input,button{display:block}input,button{font:inherit;padding:.7rem;width:100%;box-sizing:border-box;margin:.7rem 0}button{border:0;background:#244933;color:white;border-radius:.35rem;cursor:pointer}button:disabled{opacity:.5}a{color:#244933}#status{min-height:3em}</style>
-<main><p>comms</p><h1>${setup ? "Create your passkey" : "Welcome back"}</h1>
+<main><p>chirp</p><h1>${setup ? "Create your passkey" : "Welcome back"}</h1>
 <p>${setup ? "Enter the setup code from the bootloader logs. Your password manager will save a passkey for this board." : "Use your passkey to sign in to your board."}</p>
 <form id="auth" data-mode="${setup ? "setup" : "login"}">${setup ? '<label for="code">Setup code</label><input id="code" name="code" required autocomplete="off" spellcheck="false">' : ""}
 <button type="submit">${setup ? "Create passkey" : "Sign in with passkey"}</button></form>

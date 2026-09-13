@@ -66,7 +66,7 @@ docker run --name comms-transfer-check --network comms-network \
   --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SETPCAP \
   --volume comms:/data \
   --mount type=bind,src=/etc/comms-transfer/check.json,dst=/run/transfer.json,readonly \
-  comms:local store-transfer --config /run/transfer.json
+  chirp:local store-transfer --config /run/transfer.json
 ```
 
 A successful command exits zero and returns JSON containing the transfer ID, `status: "checked"`, public source/target locations and a manifest hash. It never prints credential URLs. For another check, use fresh scratch stores and a new ID/container name. You can restart the unchanged source after a completed check; stop it again before transfer. Neither a stopped container nor a passing check replaces the CLI's closure verification.
@@ -84,7 +84,7 @@ docker run --name comms-transfer-run --network comms-network \
   --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SETPCAP \
   --volume comms:/data \
   --mount type=bind,src=/etc/comms-transfer/transfer.json,dst=/run/transfer.json,readonly \
-  comms:local store-transfer --config /run/transfer.json
+  chirp:local store-transfer --config /run/transfer.json
 ```
 
 The workflow retains safety backups, proves source writer closure, initializes the target from the selected frozen source, validates every selected table before copying, and independently verifies copied values and sequence state. Native safety-artifact restore has separate PostgreSQL/MySQL verification; that does not substitute for complete transfer acceptance.

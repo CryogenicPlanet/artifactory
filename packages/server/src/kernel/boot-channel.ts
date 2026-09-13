@@ -1,10 +1,15 @@
 import { childStore, parseDescriptor, StoreError } from "@comms/storage/store";
 import { EventRecord, EventPage } from "@comms/protocol/events";
 import { KernelErrorCode } from "@comms/protocol/error-code";
+import { ErrorDetail } from "@comms/protocol/errors";
 import { Config, Context, Deferred, Duration, Effect, Layer, Redacted, Ref, Schema, Semaphore } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
-export class KernelError extends Schema.TaggedError<KernelError>()("KernelError", { code: KernelErrorCode }) {}
+export class KernelError extends Schema.TaggedError<KernelError>()("KernelError", {
+	code: KernelErrorCode,
+	// Optional, so a refusal that has nothing more specific to say stays a bare code.
+	detail: Schema.optionalKey(ErrorDetail),
+}) {}
 export interface EventQuery {
 	readonly since?: number;
 	readonly wait?: number;

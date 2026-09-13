@@ -1,4 +1,4 @@
-# comms review: Effect idiom + over-abstraction
+# chirp review: Effect idiom + over-abstraction
 
 Read at `b9d6f28`, branch `codex/build-comms-core`. Measured sizes:
 
@@ -11,7 +11,7 @@ Read at `b9d6f28`, branch `codex/build-comms-core`. Measured sizes:
 
 Largest files: `server/src/kernel/ext.ts` 442, `boot/src/auth.ts` 356, `boot/src/edit-lock.ts` 351, `boot/src/proxy.ts` 345, `server/src/kernel/messages.ts` 333. Nothing exceeds tech.md's 400-line rule except `ext.ts`.
 
-**One premise in the brief needs correcting before the scores make sense.** The vendored Effect at `repos/effect/packages/effect/src` has no `ServiceMap.ts`; the module is `Context.ts`, and `Context.Service<Self, Shape>()("Id")` is the documented v4 class-service idiom — it appears verbatim in the doc example at `repos/effect/packages/effect/src/Context.ts:186-190`. So comms' 23 `Context.Service` declarations are not legacy; they are correct. I scored against the real rc.113 surface.
+**One premise in the brief needs correcting before the scores make sense.** The vendored Effect at `repos/effect/packages/effect/src` has no `ServiceMap.ts`; the module is `Context.ts`, and `Context.Service<Self, Shape>()("Id")` is the documented v4 class-service idiom — it appears verbatim in the doc example at `repos/effect/packages/effect/src/Context.ts:186-190`. So chirp's 23 `Context.Service` declarations are not legacy; they are correct. I scored against the real rc.113 surface.
 
 ---
 
@@ -159,7 +159,7 @@ Bonus, same file: `const optionsSource = options;` at `cutover.ts:296` is declar
 
 pi's `coding-agent/src` is 70052 lines in 258 files; `interactive-mode.ts` alone is 6620 and `agent-session.ts` 3552. Its style: 6 function hops from `main()` to calling a user's extension factory, every hop doing real work; plain verb names (`loadExtensions`, `emitToolCall`, `createContext`); `undefined` as "no change" instead of a wrapper; one very wide interface (`ExtensionAPI`, 62 declarations in one file at `core/extensions/types.ts:1252-1506`) rather than many narrow ones; errors thrown near the fault and returned as values at subsystem boundaries; and across all 258 files, `Receipt` 0, `Envelope` 0, `Descriptor` 5 (four of which are `Object.getOwnPropertyDescriptors`), `Transition` 3 (one private field). Its entire tool-wrapping layer is 92 lines in two files. Its only `*-types.ts` split is `modes/rpc/rpc-types.ts`, which exists because it is a cross-process wire contract.
 
-Two things pi does that comms correctly does *not* copy: 6620-line files, and one 1797-line types file.
+Two things pi does that chirp correctly does *not* copy: 6620-line files, and one 1797-line types file.
 
 ### Request path traces
 
@@ -247,11 +247,11 @@ None of these is worth a refactor on its own; they are listed for completeness.
 
 For an agent editing under time pressure, the two codebases fail in opposite directions. pi's risk is **volume**: to change one thing in `interactive-mode.ts` you must hold 6620 lines in your head, and its own `AGENTS.md` tells you to read files in full. But the path from a CLI flag to the work is six named hops, every identifier is a plain verb on a domain noun, values are passed bare, and `undefined` means "no change". An agent who finds the right file can usually finish the edit in that file.
 
-comms is the inverse: no file is long, the directories are flat, and each file is genuinely about one thing — that part of tech.md landed. The cost is that the *semantics* are distributed. To change how a message write is rejected you must reason about `KernelError` (untyped string code), `failure()`'s nested-ternary status map, the `acquireUseRelease` mutation gate in `server.ts`, the lifecycle state machine, and the `published_through` fence — five files, none of which names the others. The vocabulary compounds this: `admit` means three different things, so an agent that greps for it gets three unrelated subsystems. And because `handleRaw` is universal, the declared HttpApi Schemas look authoritative and are not, which is the most dangerous kind of wrong: an agent that adds a field to `MessagePatch` will reasonably assume validation follows, and it will not.
+chirp is the inverse: no file is long, the directories are flat, and each file is genuinely about one thing — that part of tech.md landed. The cost is that the *semantics* are distributed. To change how a message write is rejected you must reason about `KernelError` (untyped string code), `failure()`'s nested-ternary status map, the `acquireUseRelease` mutation gate in `server.ts`, the lifecycle state machine, and the `published_through` fence — five files, none of which names the others. The vocabulary compounds this: `admit` means three different things, so an agent that greps for it gets three unrelated subsystems. And because `handleRaw` is universal, the declared HttpApi Schemas look authoritative and are not, which is the most dangerous kind of wrong: an agent that adds a field to `MessagePatch` will reasonably assume validation follows, and it will not.
 
-Where comms is clearly better than pi: resource lifetimes are provably correct (`child-keeper.ts`), there is no module-level mutable state anywhere, and the durability invariants carry comments that cite *why* rather than narrating *what* — `edit-lock.ts:131`, `events.ts:92`, `supervisor.ts:49`, `cutover.ts:246`. Those comments are the single thing most likely to stop an agent from breaking a spec guarantee, and pi has no equivalent.
+Where chirp is clearly better than pi: resource lifetimes are provably correct (`child-keeper.ts`), there is no module-level mutable state anywhere, and the durability invariants carry comments that cite *why* rather than narrating *what* — `edit-lock.ts:131`, `events.ts:92`, `supervisor.ts:49`, `cutover.ts:246`. Those comments are the single thing most likely to stop an agent from breaking a spec guarantee, and pi has no equivalent.
 
-The honest summary: comms is not broadly over-abstracted. Its kernel is well factored, most modules have 2-4 importers, and the ceremonial-sounding names mostly do label real invariants. Its problem is **under-typed plumbing at the boundaries**, plus one architectural knot — `auth.ts` as a 5-cycle hub whose constructor-closure injection spawned five `*-schema.ts` files that do not even break the cycles they exist for.
+The honest summary: chirp is not broadly over-abstracted. Its kernel is well factored, most modules have 2-4 importers, and the ceremonial-sounding names mostly do label real invariants. Its problem is **under-typed plumbing at the boundaries**, plus one architectural knot — `auth.ts` as a 5-cycle hub whose constructor-closure injection spawned five `*-schema.ts` files that do not even break the cycles they exist for.
 
 ## Five simplifications, ranked by lines-saved to risk
 

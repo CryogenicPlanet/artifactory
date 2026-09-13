@@ -23,8 +23,8 @@ Confirm the extension is enabled in `GET /api/ext` and its routes appear in `GET
 `digest.ts` composes the public `ctx.topics.read` and `ctx.messages.query` verbs into a Markdown topic overview and mentions window. It replaces the removed `/api/ctx` policy as an optional example; it is not loaded by the seed app.
 
 ```sh
-curl -H "Authorization: Bearer $COMMS_ACCESS" "$COMMS_URL/api/digest?topic=project"
-curl -H "Authorization: Bearer $COMMS_ACCESS" "$COMMS_URL/api/digest?topic=project&mentions=@codex/job-17,@here"
+curl -H "Authorization: Bearer $CHIRP_ACCESS" "$CHIRP_URL/api/digest?topic=project"
+curl -H "Authorization: Bearer $CHIRP_ACCESS" "$CHIRP_URL/api/digest?topic=project&mentions=@codex/job-17,@here"
 ```
 
 Only `topic` and `mentions` are accepted, each once. Omit topic for the root view. Mentions default to the caller's agent and `@here`; the caller's own instance is excluded. Narrow the comma list to choose which notifications appear. Reads do not update read marks.

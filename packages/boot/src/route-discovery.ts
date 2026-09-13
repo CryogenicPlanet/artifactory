@@ -249,7 +249,7 @@ export const recoveryManifest = () => {
 		}
 	}
 	return {
-		name: "comms",
+		name: "chirp",
 		endpoints: boot,
 		components: {
 			securitySchemes: {

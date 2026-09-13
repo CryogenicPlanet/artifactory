@@ -351,8 +351,11 @@ export const editRoute = (
 				try: () => decodeURIComponent(route.slice("/_boot/fs/".length)),
 				catch: () => new SourceRejected({ code: "invalid_path", path: route }),
 			});
+			// A page refusal names pages; the docs work to keep the two apart and the text must not undo it.
+			const subject = name.startsWith("pages/") ? "page" : "source";
 			if (request.method === "GET") {
-				if (url.searchParams.has("baseVersion")) return errorResponse("unsupported_query", 400);
+				if (url.searchParams.has("baseVersion"))
+					return errorResponse("unsupported_query", 400, undefined, undefined, subject);
 				if (url.searchParams.has("history"))
 					return HttpServerResponse.jsonUnsafe({ items: yield* editing.source.history(name) });
 				const directory = name.endsWith("/") ? name.slice(0, -1) : name;
@@ -360,19 +363,24 @@ export const editRoute = (
 				const items = yield* editing.source.browse(directory, reader);
 				if (items !== null)
 					return HttpServerResponse.jsonUnsafe({ items }, { headers: { "cache-control": "no-store" } });
-				if (name.endsWith("/") || name === "app" || name === "pages") return errorResponse("file_not_found", 404);
+				if (name.endsWith("/") || name === "app" || name === "pages")
+					return errorResponse("file_not_found", 404, undefined, undefined, subject);
 				const image = yield* editing.source.read(name, reader);
-				if (image.content === null) return errorResponse("file_not_found", 404);
+				if (image.content === null) return errorResponse("file_not_found", 404, undefined, undefined, subject);
 				return HttpServerResponse.uint8Array(image.content, {
 					headers: {
-						"content-type": "application/octet-stream",
+						"content-type":
+							subject === "page" && name.toLowerCase().endsWith(".md")
+								? "text/markdown; charset=utf-8"
+								: "application/octet-stream",
 						"x-chirp-base-version": image.sha ?? "",
 						etag: `"${image.sha}"`,
 						"cache-control": "no-store",
 					},
 				});
 			}
-			if (request.method !== "PUT" && request.method !== "DELETE") return errorResponse("method_invalid", 405);
+			if (request.method !== "PUT" && request.method !== "DELETE")
+				return errorResponse("method_invalid", 405, undefined, undefined, subject);
 			const match = request.headers["if-match"];
 			const absent = request.headers["if-none-match"];
 			const tokens = url.searchParams.getAll("baseVersion");
@@ -383,16 +391,16 @@ export const editRoute = (
 				tokens.length > 1 ||
 				(token !== undefined && (match !== undefined || absent !== undefined || !/^(?:[a-f0-9]{64}|null)$/.test(token)))
 			)
-				return errorResponse("precondition_invalid", 400);
+				return errorResponse("precondition_invalid", 400, undefined, undefined, subject);
 			const baseVersion =
 				token === "null"
 					? null
 					: (token ?? (match !== undefined ? match.slice(1, -1) : absent === "*" ? null : undefined));
-			if (request.method === "PUT" && baseVersion === undefined) return errorResponse("precondition_required", 400);
-			if (name.startsWith("pages/")) {
-				if (request.method !== "PUT" && request.method !== "DELETE") return errorResponse("method_invalid", 405);
+			if (request.method === "PUT" && baseVersion === undefined)
+				return errorResponse("precondition_required", 400, undefined, undefined, subject);
+			if (subject === "page") {
 				if ([...url.searchParams.keys()].some((key) => key !== "baseVersion"))
-					return errorResponse("unsupported_query", 400);
+					return errorResponse("unsupported_query", 400, undefined, undefined, subject);
 				const content = request.method === "PUT" ? yield* readBytes(request, name) : null;
 				return yield* authoritative(
 					editing.withPagePublication(
