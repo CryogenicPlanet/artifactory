@@ -110,3 +110,7 @@ A signed-in human can restore a matching-board backup while the selected app sto
 Before-images live under protected `restore-before/` directories, with hashes and selection metadata committed alongside the restore journal. A failed candidate restores the original bytes or absence and keeps the app unavailable; it never authorizes the foreign store to run. Restart replays an interrupted selection or rollback. Recorded before-images remain retained; startup reclaims only validated artifacts that were never recorded, after owner closure. Expand storage if these retained copies consume capacity. Do not bypass identity checks or discard a pending reservation to enable restore.
 
 The startup cleanup also removes the former fixed `.restore` staging file and its SQLite sidecars after positive owner closure. A preidentity upgrade blocked by an unfinished journal returns `boot_identity_upgrade_pending` with HTTP 409, while keeping schema and journal evidence compatible with the previous image.
+
+## Power-loss recovery platform
+
+Automatic recovery of interrupted database ownership after machine power loss requires Linux with readable `/proc/sys/kernel/random/boot_id` at both recording and recovery. Other local platforms support normal keeper-receipted process restarts. Without a receipt or verifiable kernel change, startup refuses to reopen the store. Use the Linux image when unattended power-loss recovery is required; never clear the ownership journal or invent a closed receipt to bypass this refusal.
