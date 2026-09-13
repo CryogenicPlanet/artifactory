@@ -114,6 +114,7 @@ The startup cleanup also removes the former fixed `.restore` staging file and it
 New backup filenames use `.db` for SQLite, `.dump` for PostgreSQL and `.sql` for MySQL. Previously catalogued remote `.db` artifacts remain restorable and eligible for pruning under the same engine, provenance and canonical-path checks; startup never renames them or infers their engine from a suffix. Remote identity diagnostics report selected and recorded database names, while the durable selected database remains authoritative after restore.
 
 Opaque offline repair is available for SQLite in the standard `DATA_DIR/comms.db` and `DATA_DIR/store/comms.db` layouts. Custom SQLite paths retain ordinary verified-backup restore; PostgreSQL and MySQL retain their native restore and database-selection protocol.
+
 ## Power-loss recovery platform
 
 Automatic recovery of interrupted database ownership after machine power loss requires Linux with readable `/proc/sys/kernel/random/boot_id` at both recording and recovery. Other local platforms support normal keeper-receipted process restarts. Without a receipt or verifiable kernel change, startup refuses to reopen the store. Use the Linux image when unattended power-loss recovery is required; never clear the ownership journal or invent a closed receipt to bypass this refusal.

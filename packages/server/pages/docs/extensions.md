@@ -140,7 +140,7 @@ To retire protection, add a new migration to its owning extension:
 ```ts
 export default (api: Api) =>
 	Effect.gen(function* () {
-		yield* api.migrate("release_notes", "SELECT 1", { unprotect: "example_notes" });
+		yield* api.migrate("release_notes", "UPDATE example_notes SET body=body", { unprotect: "example_notes" });
 	});
 ```
 

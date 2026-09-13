@@ -9,6 +9,7 @@ import { seedSession } from "./fixtures/session.ts";
 
 it.for(["default", "custom"])(
 	"boots a real app with a relative data directory and %s store path",
+	{ timeout: 30000 },
 	async (selection, test) => {
 		const root = await mkdtemp(join(tmpdir(), "comms-relative-data-"));
 		test.onTestFinished(() => rm(root, { recursive: true, force: true }));
@@ -58,5 +59,4 @@ it.for(["default", "custom"])(
 		expect(await reload.json()).toMatchObject({ status: "live" });
 		expect((await fetch(`${url}/api/me`, { headers: { cookie } })).status).toBe(200);
 	},
-	30000,
 );
