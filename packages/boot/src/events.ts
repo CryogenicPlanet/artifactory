@@ -327,6 +327,7 @@ const make = Effect.fn("Events")(function* (
 			readonly level?: string;
 			readonly requestActor?: string;
 			readonly omitRequestEvents?: boolean;
+			readonly omitSequenceEvents?: boolean;
 			readonly excludeMessageInstance?: string;
 		}) =>
 			Effect.gen(function* () {
@@ -336,6 +337,7 @@ const make = Effect.fn("Events")(function* (
 				if (since === fence) return { items: [], cursor: fence, timed_out: false, drained: false };
 				const filters: Array<Statement.Fragment> = [sql`seq>${since}`, sql`seq<=${fence}`];
 				if (input.omitRequestEvents) filters.push(sql`type<>'http.request'`);
+				if (input.omitSequenceEvents) filters.push(sql`type<>'seq.reserved'`);
 				if (input.topic !== undefined) filters.push(sql`(topic=${input.topic} OR topic GLOB ${`${input.topic}/*`})`);
 				if (input.requestActor !== undefined) filters.push(sql`(type<>'http.request' OR actor=${input.requestActor})`);
 				if (input.excludeMessageInstance !== undefined)

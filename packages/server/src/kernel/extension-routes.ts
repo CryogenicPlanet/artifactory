@@ -14,7 +14,16 @@ export const reserved = (path: string) => {
 			"/approve",
 			"/setup",
 		].some((prefix) => route === prefix || route.startsWith(prefix + "/")) ||
-		["/health", "/api", "/api/ext", "/init", "/init.md", "/.well-known/agent.json"].includes(route)
+		[
+			"/health",
+			"/api",
+			"/api/ext",
+			"/init",
+			"/init.md",
+			"/quickstart",
+			"/quickstart.md",
+			"/.well-known/agent.json",
+		].includes(route)
 	);
 };
 export const requestPath = (url: string) => {

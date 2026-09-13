@@ -219,7 +219,7 @@ function Board({ pathname }: { readonly pathname: string }) {
 										path={path}
 										meta={topic.meta}
 										archived={topic.archived_at !== null}
-										parentArchived={topic.archived_by !== null && topic.archived_by !== path}
+										parentArchived={topic.archived_root !== null && topic.archived_root !== path}
 										onSaved={(saved) => {
 											update(
 												(previous) =>
@@ -229,7 +229,7 @@ function Board({ pathname }: { readonly pathname: string }) {
 															...previous.topic,
 															meta: saved.meta,
 															archived_at: saved.archived_at,
-															archived_by: saved.archived_at !== null ? path : null,
+															archived_root: saved.archived_at !== null ? path : null,
 														},
 													},
 											);
@@ -237,10 +237,10 @@ function Board({ pathname }: { readonly pathname: string }) {
 										}}
 									/>
 								)}
-								{topic.archived_by !== null && (
+								{topic.archived_root !== null && (
 									<Alert className="mb-5">
-										This topic is read-only because <Link href={topicHref(topic.archived_by)}>{topic.archived_by}</Link>{" "}
-										is archived.
+										This topic is read-only because{" "}
+										<Link href={topicHref(topic.archived_root)}>{topic.archived_root}</Link> is archived.
 									</Alert>
 								)}
 								{topic.index !== null && (
@@ -336,7 +336,7 @@ function Board({ pathname }: { readonly pathname: string }) {
 								)}
 							</>
 						)}
-						{topic && topic.archived_by === null && (
+						{topic && topic.archived_root === null && (
 							<Composer path={path} onSent={onSent} sessionExpired={authRequired} />
 						)}
 					</>

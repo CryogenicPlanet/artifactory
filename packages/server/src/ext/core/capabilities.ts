@@ -8,7 +8,7 @@ import { Crypto, Deferred, Effect, Option, Ref, type Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { BootChannel, KernelError } from "../../kernel/boot-channel.ts";
 import { type MessageInput } from "@comms/protocol/messages";
-import { makeMessages, validTopic } from "./messages.ts";
+import { makeMessages, topicPathDetail, validTopic } from "./messages.ts";
 import type { Identity } from "../../kernel/identity.ts";
 import { HealthProbe } from "../../kernel/health-probe.ts";
 import { Lifecycle, RequestMutation } from "../../kernel/lifecycle.ts";
@@ -108,8 +108,16 @@ export const extensionCapabilities = Effect.gen(function* () {
 								if (path === "") return;
 								const state = yield* Ref.get(lifecycle.state);
 								if (state !== "live" && state !== "accepted") return;
-								if (!validTopic(path) || !Number.isSafeInteger(seq) || seq < 0)
-									return yield* new KernelError({ code: "input_invalid" });
+								if (!validTopic(path))
+									return yield* new KernelError({ code: "input_invalid", detail: topicPathDetail("path") });
+								if (!Number.isSafeInteger(seq) || seq < 0)
+									return yield* new KernelError({
+										code: "input_invalid",
+										detail: {
+											field: "seq",
+											hint: "seq must be a nonnegative integer no higher than the publication fence.",
+										},
+									});
 								if (seq > (yield* publication.fence).published_through)
 									return yield* new KernelError({ code: "cursor_ahead" });
 								yield* markRead(sql, publication.mutate, caller, { topic: path, seq });
