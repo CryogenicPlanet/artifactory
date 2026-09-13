@@ -41,6 +41,8 @@ export const streamHandlers = (api: typeof Api, extension: ExtensionApi) =>
 					const pages = Stream.unfold(first, (page) =>
 						Effect.gen(function* () {
 							const next = yield* ctx.events.query({ ...input, since: page.cursor, wait: 60 });
+							// A failed remote wait can return an unchanged empty page immediately.
+							if (next.items.length === 0 && next.cursor === page.cursor) yield* Effect.sleep("1 second");
 							return [next.items, next] as const;
 						}),
 					).pipe(Stream.flatMap((items) => Stream.fromIterable(items)));

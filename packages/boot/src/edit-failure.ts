@@ -8,7 +8,7 @@ import { isSqlError } from "effect/unstable/sql/SqlError";
 import { isHttpClientError } from "effect/unstable/http/HttpClientError";
 import { ChildError } from "./child-process.ts";
 import { AuthError } from "./auth.ts";
-import { FreezeTimeout } from "./cutover.ts";
+import { CutoverCleanupPending, FreezeTimeout } from "./cutover.ts";
 import { EditRejected } from "./edit-lock.ts";
 import { ArtifactRetentionRejected } from "./artifact-retention.ts";
 import { StorageRejected } from "./storage-headroom.ts";
@@ -68,7 +68,15 @@ const policy = {
 	lock_required: lockRequired,
 	locked: lockRequired,
 	stale_lock: lockRequired,
-	cutover_in_flight: lockRequired,
+	cutover_in_flight: {
+		...lockRequired,
+		hint: "Inspect /_boot/status. After an accepted reload, repair the reported cleanup failure and POST /_boot/lock with current authentication to retry metadata cleanup. Keep the lock and recovery journals intact.",
+	},
+	accepted_cleanup_pending: {
+		status: 503,
+		retriable: false,
+		hint: "The generation is accepted; its lock cleanup failed. Repair the boot metadata failure, then POST /_boot/lock with current authentication to retry cleanup. Do not repeat the reload or restore the database; accepted writes are preserved.",
+	},
 	not_pinned: lockRequired,
 	staging_not_empty: {
 		status: 423,
@@ -142,7 +150,8 @@ const policy = {
 		| SourceRejected["code"]
 		| StorageRejected["code"]
 		| ArtifactRetentionRejected["code"]
-		| FreezeTimeout["code"],
+		| FreezeTimeout["code"]
+		| CutoverCleanupPending["code"],
 		{ readonly status: number; readonly retriable: boolean; readonly hint: string }
 	> &
 		Record<string, { readonly status: number; readonly retriable: boolean; readonly hint: string }>
@@ -180,6 +189,7 @@ export const editFailure = (cause: Cause.Cause<unknown>) => {
 					Schema.is(StorageRejected)(reason.error) ||
 					Schema.is(ArtifactRetentionRejected)(reason.error) ||
 					Schema.is(FreezeTimeout)(reason.error) ||
+					Schema.is(CutoverCleanupPending)(reason.error) ||
 					Schema.is(EditRejected)(reason.error) ||
 					Schema.is(SourceRejected)(reason.error) ||
 					Schema.is(AuthError)(reason.error) ||
@@ -209,6 +219,7 @@ export const editFailure = (cause: Cause.Cause<unknown>) => {
 		Schema.is(StorageRejected)(error) ||
 		Schema.is(ArtifactRetentionRejected)(error) ||
 		Schema.is(FreezeTimeout)(error) ||
+		Schema.is(CutoverCleanupPending)(error) ||
 		Schema.is(SourceRejected)(error) ||
 		Schema.is(ChildError)(error)
 	)

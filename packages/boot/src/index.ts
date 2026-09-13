@@ -123,10 +123,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			yield* volume.refresh;
 			yield* volume.run.pipe(Effect.forkScoped);
 			const storage = yield* makeEventStorage(volume.sample);
-			// Historical retirement needs retained event evidence. Keep auth available without pruning it.
-			if (!(yield* hasLegacyTopicMoves(yield* SqlClient.SqlClient))) {
-				yield* storage.run.pipe(Effect.forkScoped);
-			}
+			// Authentication and request diagnostics still append while application recovery is refused.
+			yield* storage.run.pipe(Effect.forkScoped);
 			return eventsLayer(
 				volume.sample.pipe(
 					Effect.flatMap((sample) => headroom.reserve(sample)),
@@ -196,7 +194,6 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	yield* Effect.gen(function* () {
 		const coordinator = yield* cutover(options, supervisor);
 		const reverts = yield* sourceReverts;
-		yield* reverts.retain.pipe(Effect.forkScoped);
 		const restore = yield* databaseRestore(supervisor);
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* Events;
