@@ -27,8 +27,9 @@ export const restoreBeforeImage = (dataDirectory: string, filename: string) =>
 		const crypto = yield* Crypto.Crypto;
 		const sql = yield* SqlClient.SqlClient;
 		const root = yield* fs.realPath(dataDirectory);
-		const parent = yield* fs.realPath(path.dirname(filename));
-		const selected = path.join(parent, path.basename(filename));
+		// Layout recovery may create the isolated store directory after this graph is constructed.
+		const selected = path.join(root, path.relative(path.resolve(dataDirectory), path.resolve(filename)));
+		const parent = path.dirname(selected);
 		const directory = path.join(root, "restore-before");
 		if (selected !== path.join(root, "comms.db") && selected !== path.join(root, "store", "comms.db"))
 			return yield* invalid();
@@ -94,7 +95,7 @@ export const restoreBeforeImage = (dataDirectory: string, filename: string) =>
 		const prepare = (storeId: string) =>
 			Effect.uninterruptible(
 				Effect.gen(function* () {
-					if (!uuid.test(storeId)) return yield* invalid();
+					if (!uuid.test(storeId) || !(yield* regular(parent, "Directory"))) return yield* invalid();
 					const present: (typeof Suffix.Type)[] = [];
 					for (const suffix of suffixes) if (yield* regular(`${selected}${suffix}`, "File")) present.push(suffix);
 					if (present.length > 0 && present[0] !== "") return yield* invalid();
@@ -121,6 +122,7 @@ export const restoreBeforeImage = (dataDirectory: string, filename: string) =>
 		const rollback = (proofId: string, storeId: string) =>
 			Effect.uninterruptible(
 				Effect.gen(function* () {
+					if (!(yield* regular(parent, "Directory"))) return yield* invalid();
 					const manifest = yield* read(proofId);
 					if (!manifest || manifest.storeId !== storeId) return yield* invalid();
 					const artifact = path.join(directory, manifest.artifact);
