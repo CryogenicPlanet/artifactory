@@ -90,6 +90,22 @@ export const addPasskey = (label: string) =>
 			Effect.flatMap(Schema.decodeUnknownEffect(Registration)),
 			Effect.catchTag("SchemaError", () => unreadable),
 		);
+		const response = yield* registerPasskey(started);
+		const proof = yield* confirmAccountAction("passkey.add", { registration: started.id, label, response });
+		yield* accountPost("/_boot/auth/passkeys/verify", { id: started.id, label, response }, proof);
+	});
+export const deletePasskey = (id: string) =>
+	Effect.gen(function* () {
+		const proof = yield* confirmAccountAction("passkey.delete", { id });
+		yield* accountRequest(
+			HttpClientRequest.delete(
+				new URL(`/_boot/auth/passkeys/${encodeURIComponent(id)}`, window.location.origin).href,
+			).pipe(HttpClientRequest.bodyJsonUnsafe({}), HttpClientRequest.setHeader(assertionHeader, proof)),
+		);
+	});
+
+const registerPasskey = (started: typeof Registration.Type) =>
+	Effect.gen(function* () {
 		const credential = yield* Effect.tryPromise({
 			try: () =>
 				navigator.credentials.create({
@@ -116,7 +132,7 @@ export const addPasskey = (label: string) =>
 		const extensions = yield* Schema.decodeUnknownEffect(Schema.JsonObject)(
 			credential.getClientExtensionResults(),
 		).pipe(Effect.catchTag("SchemaError", () => unreadable));
-		const response = {
+		return {
 			id: credential.id,
 			rawId: encode(credential.rawId),
 			type: "public-key",
@@ -127,15 +143,15 @@ export const addPasskey = (label: string) =>
 				transports: credential.response.getTransports(),
 			},
 		};
-		const proof = yield* confirmAccountAction("passkey.add", { registration: started.id, label, response });
-		yield* accountPost("/_boot/auth/passkeys/verify", { id: started.id, label, response }, proof);
 	});
-export const deletePasskey = (id: string) =>
+
+/** First registration proves possession but does not create a login session. */
+export const setupPasskey = (code: string) =>
 	Effect.gen(function* () {
-		const proof = yield* confirmAccountAction("passkey.delete", { id });
-		yield* accountRequest(
-			HttpClientRequest.delete(
-				new URL(`/_boot/auth/passkeys/${encodeURIComponent(id)}`, window.location.origin).href,
-			).pipe(HttpClientRequest.bodyJsonUnsafe({}), HttpClientRequest.setHeader(assertionHeader, proof)),
+		const started = yield* accountPost("/_boot/auth/setup/options", { code: code.trim() }).pipe(
+			Effect.flatMap(Schema.decodeUnknownEffect(Registration)),
+			Effect.catchTag("SchemaError", () => unreadable),
 		);
+		const response = yield* registerPasskey(started);
+		yield* accountPost("/_boot/auth/setup/verify", { id: started.id, response });
 	});

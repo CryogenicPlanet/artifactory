@@ -1,7 +1,8 @@
+import { Onboarding, useFirstVisit } from "./onboarding.tsx";
 import { BoardLayout, NavLink } from "./board-layout.tsx";
 import { useVisible } from "./use-visible.ts";
 import { Atom } from "effect/unstable/reactivity";
-import { useBoardClient } from "./board-client.tsx";
+import { BoardClientProvider, useBoardClient } from "./board-client.tsx";
 import { Effect } from "effect";
 import { useEffect, useMemo, useState } from "react";
 import { topicHref, validTopic, type BoardMessage } from "./board-api.ts";
@@ -41,14 +42,20 @@ const currentPath = (pathname: string) => {
 export function App() {
 	const location = useLocation();
 	useScrollOnNavigate();
+	useFirstVisit(location.pathname);
 	const agent = profileFromPath(location.pathname);
 	/* No keyed remount here: the layout and loaded data stay put, only the routed view swaps. */
-	return location.pathname === "/ext" ? (
-		<Extensions />
-	) : agent !== null ? (
-		<Profile agent={agent} />
-	) : (
-		<Board pathname={location.pathname} />
+	if (location.pathname === "/onboarding") return <Onboarding />;
+	return (
+		<BoardClientProvider>
+			{location.pathname === "/ext" ? (
+				<Extensions />
+			) : agent !== null ? (
+				<Profile agent={agent} />
+			) : (
+				<Board pathname={location.pathname} />
+			)}
+		</BoardClientProvider>
 	);
 }
 

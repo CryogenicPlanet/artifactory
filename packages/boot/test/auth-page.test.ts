@@ -93,8 +93,8 @@ it.each([
 	}
 });
 
-it("returns to the requested page after sign-in and keeps onboarding behind sign-in", async () => {
-	const run = async (search: string, onboarding = false) => {
+it("returns to a safe requested page after sign-in or standalone setup", async () => {
+	const run = async (search: string, setup = false) => {
 		const status = { textContent: "" },
 			button = { disabled: false };
 		let submit: (() => Promise<void>) | undefined;
@@ -121,7 +121,7 @@ it("returns to the requested page after sign-in and keeps onboarding behind sign
 							: id !== "auth"
 								? null
 								: {
-										dataset: { mode: onboarding ? "setup" : "login", onboarding: String(onboarding) },
+										dataset: { mode: setup ? "setup" : "login" },
 										querySelector: () => button,
 										addEventListener: (
 											_name: string,
@@ -163,57 +163,6 @@ it("returns to the requested page after sign-in and keeps onboarding behind sign
 	expect(await run("?next=//evil.example")).toBe("/");
 	expect(await run("")).toBe("/");
 	expect(await run("?next=/\\evil.example")).toBe("/");
-	expect(await run("?next=/t/design", true)).toBe("/auth/login?next=%2Fonboarding%3Fnext%3D%252Ft%252Fdesign");
-	expect(await run("", true)).toBe("/auth/login?next=%2Fonboarding");
-});
-
-it.each([false, true])("copies the invite or selects it when clipboard access fails (%s)", async (denied) => {
-	const status = { textContent: "" };
-	const prompt = { textContent: "", focus: () => {} };
-	let copy: (() => Promise<void>) | undefined;
-	let copied = "";
-	let selected = false;
-	runInNewContext(authClient, {
-		document: {
-			getElementById: (id: string) =>
-				id === "status"
-					? status
-					: id === "invite-prompt"
-						? prompt
-						: id === "copy-invite"
-							? {
-									addEventListener: (_event: string, handler: () => Promise<void>) => {
-										copy = handler;
-									},
-								}
-							: null,
-			createRange: () => ({
-				selectNodeContents: () => {
-					selected = true;
-				},
-			}),
-		},
-		window: {
-			location: { origin: "https://my-board.test" },
-			getSelection: () => ({ removeAllRanges: () => {}, addRange: () => {} }),
-		},
-		navigator: {
-			clipboard: {
-				writeText: async (value: string) => {
-					if (denied) throw new Error("denied");
-					copied = value;
-				},
-			},
-		},
-	});
-	if (!copy) throw new Error("Missing copy handler");
-	await copy();
-	expect(prompt.textContent).toContain("https://my-board.test/init");
-	if (denied) {
-		expect(selected).toBe(true);
-		expect(status.textContent).toContain("selected prompt");
-	} else {
-		expect(copied).toBe(prompt.textContent);
-		expect(status.textContent).toContain("Copied");
-	}
+	expect(await run("?next=/t/design", true)).toBe("/auth/login?next=%2Ft%2Fdesign");
+	expect(await run("", true)).toBe("/auth/login?next=%2F");
 });

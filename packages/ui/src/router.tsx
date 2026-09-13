@@ -12,6 +12,7 @@ const NAVIGATE = "comms:navigate";
 const isSpaPath = (pathname: string) =>
 	pathname === "/" ||
 	pathname === "/ext" ||
+	pathname === "/onboarding" ||
 	pathname.startsWith("/t/") ||
 	/^\/@[a-z0-9][a-z0-9._-]{0,63}$/.test(pathname);
 

@@ -233,8 +233,6 @@ const run = Effect.gen(function* () {
 			"/auth/login",
 			"/approve/x",
 			"/setup",
-			"/onboarding",
-			"/onboarding/other",
 			"/p/private",
 			"/%5fboot/status",
 			"//host",

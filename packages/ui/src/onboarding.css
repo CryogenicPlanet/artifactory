@@ -1,0 +1,133 @@
+.onboarding {
+	max-width: 66rem;
+	margin: 0 auto;
+	padding: 3rem 2rem 5rem;
+	font:
+		16px/1.65 system-ui,
+		sans-serif;
+}
+.onboarding-brand {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.6rem;
+	font-size: 1.6rem;
+	font-weight: 650;
+	letter-spacing: -0.06em;
+	text-decoration: none;
+	color: #eeeee7;
+}
+.onboarding-brand svg {
+	color: #e69b83;
+}
+.onboarding-brand span {
+	color: #b8d7c3;
+	margin-left: -0.55rem;
+}
+.onboarding h1 {
+	font:
+		normal clamp(2.7rem, 6vw, 4.5rem)/1.1 Georgia,
+		serif;
+	letter-spacing: -0.04em;
+	margin: 2.8rem 0 1.1rem;
+}
+.onboarding h1 em {
+	color: #b8d7c3;
+	font-weight: normal;
+}
+.onboarding h2 {
+	font-size: 1.15rem;
+	font-weight: 550;
+	line-height: 1.4;
+	margin-bottom: 0.6rem;
+}
+.onboarding p {
+	color: #a8b4b4;
+	margin-bottom: 1rem;
+}
+.onboarding-intro {
+	max-width: 35rem;
+	font-size: 1.1rem;
+	margin-bottom: 3rem !important;
+}
+.onboarding-steps {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	border-top: 1px solid #354140;
+}
+.onboarding-steps li {
+	display: grid;
+	grid-template-columns: 3rem 1fr;
+	gap: 1rem;
+	padding: 2rem 0;
+	border-bottom: 1px solid #354140;
+}
+.onboarding-steps li > span {
+	font: 13px/2 monospace;
+	color: #c9bfdf;
+}
+.onboarding-steps li > div {
+	max-width: 38rem;
+}
+.onboarding-pending {
+	opacity: 0.55;
+}
+.onboarding label {
+	display: block;
+	font-size: 0.85rem;
+	color: #bcc8c6;
+}
+.onboarding input {
+	width: 100%;
+	margin: 0.5rem 0 1rem;
+	padding: 0.75rem 1rem;
+	border: 1px solid #52625e;
+	border-radius: 4px;
+	background: #1e2728;
+	color: #eeeee7;
+	letter-spacing: 0.12em;
+}
+.onboarding a {
+	color: #b8d7c3;
+}
+.onboarding pre {
+	font:
+		13px/1.7 ui-monospace,
+		monospace;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	padding: 1rem;
+	border: 1px solid #354140;
+	background: #1c2425;
+	color: #cbd4cf;
+	margin-bottom: 1rem;
+}
+.onboarding-actions {
+	display: flex;
+	align-items: center;
+	gap: 1.5rem;
+	flex-wrap: wrap;
+	margin-top: 1.4rem;
+}
+.onboarding-footnote {
+	font-size: 0.85rem;
+	margin-top: 1.8rem;
+}
+.onboarding-status {
+	min-height: 1.6em;
+	color: #c9bfdf !important;
+	margin-top: 1rem;
+}
+@media (max-width: 600px) {
+	.onboarding {
+		padding: 1.5rem 1.2rem 3rem;
+	}
+	.onboarding-steps li {
+		grid-template-columns: 1.7rem 1fr;
+		gap: 0.6rem;
+		padding: 1.6rem 0;
+	}
+	.onboarding h1 {
+		margin-top: 2rem;
+	}
+}

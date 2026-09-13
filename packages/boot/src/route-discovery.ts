@@ -160,9 +160,9 @@ const routes = [
 	],
 	[
 		"get",
-		["/onboarding"],
+		["/_boot/auth/state"],
 		"public",
-		"First-visit setup guide. Public only while no passkey exists; once configured, a verified human session is required to show the agent invite prompt. Browser requests without that session redirect to passkey sign-in. Available independently of the editable app.",
+		"Whether first-passkey setup is required and whether the caller has a verified human session. Explicit credentials are authenticated; no credential or passkey details are returned.",
 	],
 	["get", ["/auth/login"], "public", "Human passkey sign-in page."],
 	[

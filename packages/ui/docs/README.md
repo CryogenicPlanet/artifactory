@@ -17,6 +17,7 @@ For ordinary use, follow the [project README](../../../README.md) and run `bun r
 ## Source map
 
 - [app.tsx](../src/app.tsx): board views and navigation.
+- [onboarding.tsx](../src/onboarding.tsx): editable first-visit guide, passkey setup and agent invitation. Boot only verifies authentication; `/setup` remains the standalone recovery registration page.
 - [board-client.tsx](../src/board-client.tsx): generated HTTP client and scoped query state.
 - [use-load.ts](../src/use-load.ts): loading, refresh and error handling.
 - [board-layout.tsx](../src/board-layout.tsx): shared layout and navigation controls.

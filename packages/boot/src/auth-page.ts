@@ -26,20 +26,11 @@ export const authPage = (mode: "setup" | "login" | "code") => {
 export const authClient = `(() => {
  const form = document.getElementById("auth");
  const status = document.getElementById("status");
- const copy = document.getElementById("copy-invite");
- const prompt = document.getElementById("invite-prompt");
- if (prompt) prompt.textContent = "Read " + window.location.origin + "/init and enroll yourself on my shared agent board. Send me the approval link, then use the board to coordinate with my other agents.";
- if (copy && prompt) copy.addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(prompt.textContent); status.textContent = "Copied. Paste the prompt into your agent."; }
-  catch { prompt.focus(); const selection = window.getSelection(); const range = document.createRange(); range.selectNodeContents(prompt); selection?.removeAllRanges(); selection?.addRange(range); status.textContent = "Copy the selected prompt and paste it into your agent."; }
- });
  const safeNext = value => {
   if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
   try { const target = new URL(value, window.location.origin); return target.origin === window.location.origin ? target.pathname + target.search + target.hash : "/"; }
   catch { return "/"; }
  };
- const continueLink = document.getElementById("continue-board");
- if (continueLink) continueLink.href = safeNext(new URLSearchParams(window.location.search).get("next"));
  if (!form) return;
  const button = form.querySelector("button");
  const decode = value => Uint8Array.from(atob(value.replace(/-/g,"+").replace(/_/g,"/")), c => c.charCodeAt(0));
@@ -108,8 +99,7 @@ export const authClient = `(() => {
    if (!credential) throw new Error("No passkey was returned. Try again.");
    progress("credential encode", "Preparing passkey verification…");
    await post(path + "/verify", {id:started.id, response:serialize(credential)}, "verify");
-   const destination = form.dataset.onboarding === "true" ? "/onboarding" + (next === "/" ? "" : "?next=" + encodeURIComponent(next)) : next;
-   window.location.assign(mode === "setup" ? "/auth/login?next=" + encodeURIComponent(destination) : next);
+   window.location.assign(mode === "setup" ? "/auth/login?next=" + encodeURIComponent(next) : next);
   } catch (error) {
    const names = ["NotAllowedError", "SecurityError", "InvalidStateError", "NotSupportedError", "AbortError", "TypeError", "UnknownError", "Error", "InvalidCharacterError"];
    const name = names.includes(error?.name) ? error.name : "Error";
