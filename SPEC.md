@@ -43,16 +43,22 @@ check, a restart, and a crash. The three moments that would otherwise lose it ar
 three the implementation is built around. This does not cover a deliberate delete through
 the API, which is an honored write.
 
-**A generation that has not proved itself never serves.** A change that fails its proof
-leaves the previous version serving and reports why, on every engine. What counts as proof
-differs by engine, and the difference is a real gap rather than a detail. On SQLite the
-proof is the whole thing: the board clones the live data, launches the real candidate
-against the clone, and makes it answer real calls. On PostgreSQL and MySQL there is no
-clone, so the candidate is checked against the existing schema and identity and its
-migrations first run against the live database. The board reports this itself, as
-`schema_check_only`, rather than implying a check it did not perform. Section 10 carries
-it as an open item, because it is the one place where choosing an engine quietly changes
-what the product promises.
+**A generation that has not proved itself never serves.** On every engine, a generation is
+never made live until the real assembled product has started against the store it will
+serve and answered a health check, and acceptance is recorded only after that. A change
+that fails leaves the previous version serving and reports why.
+
+What differs by engine is whether that proof happens before anything irreversible touches
+your data, and the difference is a real gap rather than a detail. On SQLite it does: the
+candidate first runs against a disposable clone, and a frozen copy is held across the flip,
+so a failure rolls back to the data as it stood. On PostgreSQL and MySQL nothing runs the
+candidate beforehand. The board verifies the board's identity and the shape of three
+kernel tables, reading no rows and executing no migration, and the candidate's own
+migrations then run against the live database once the previous generation is retired. A
+failure past that point is operator repair with no automatic rollback. The board reports
+this as a schema-only check rather than as a pass, which is the honest half. Section 10
+carries the rest, because this is the one place where choosing an engine changes what the
+product guarantees.
 
 **A human can always get back in.** Whatever an agent has done to the app, the edit route,
 the revert route and the recovery page still answer, still authenticate, and still work.
@@ -196,10 +202,10 @@ finishes before traffic moves. A control deadline is not a drain.
 **2. A generation that has not proved itself never serves.** Proof is the real assembled
 product answering real calls against a copy of the real data, with the probe's effects
 rolled back. A liveness ping proves a process started, which is not the same thing and has
-never been what breaks. A missing or overridden route must fail the proof. Where an engine
-cannot give a cheap copy of the live data, the board reports which weaker check it ran
-rather than reporting a pass. Claiming a check that was not performed is worse than
-performing none, and section 10 records where this currently happens.
+never been what breaks. A missing or overridden route must fail the proof. Where an engine cannot give a cheap
+copy of the live data, that proof moves after the point of no return, and the board reports
+which weaker check it ran beforehand rather than reporting a pass. Claiming a check that was
+not performed is worse than performing none, and section 10 records where this happens.
 
 **3. A timeout is not evidence that a write rolled back.** When a process dies
 mid-transaction, the tempting inference is that an operation which has not answered by now
@@ -500,14 +506,15 @@ claim than a decision.
 
 ### Accepted: the product promises less than you would assume
 
-**Proof of a generation is weaker on PostgreSQL and MySQL.** *No owner statement.* On SQLite
-a candidate proves itself against a clone of the live data. On the other two there is no
-clone: the candidate is checked against the existing schema and identity, and its migrations
-first run against the live database, after the previous generation is retired. A failed
-cutover there needs operator repair and has no automatic data rollback. The board reports
-this as a schema-only check rather than as a pass, which is the honest half. This is the one
-place where choosing an engine changes what the product guarantees, and it contradicts
-constraint 2 as written.
+**On PostgreSQL and MySQL, a generation is proved only after the point of no return.**
+*No owner statement.* Every engine starts the real candidate and takes a health check before
+traffic moves. Only SQLite does that against a disposable clone with a frozen copy held
+across the flip, so only SQLite can roll back to the data as it stood. On the other two the
+pre-flip check verifies board identity and the shape of three kernel tables and nothing
+else, and the candidate's migrations run against the live database after the previous
+generation retires. A failure past that point is operator repair. The owner named all three
+engines as deployment targets, so this gap sits underneath a requirement rather than beside
+one.
 
 **On a remote engine, an out-of-band restore is invisible to the board.** *No owner
 statement.* A provider restore does not rewind the sequence allocator and emits no restored
