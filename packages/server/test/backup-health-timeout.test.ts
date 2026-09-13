@@ -1,9 +1,9 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, type TestContext } from "vitest";
 import { resetFixture } from "./fixtures/source-reset.ts";
 
-it("releases unavailable admission after a backup restart misses health and proves closure", async (test) => {
+async function checkRecovery(test: TestContext, realTimeouts: 1 | 2) {
 	const fixture = await resetFixture(test);
 	const filename = join(fixture.boot, "src/child-process.ts");
 	const source = 'import { FileSystem as FaultFileSystem } from "effect";\n' + (await readFile(filename, "utf8"));
@@ -30,11 +30,16 @@ it("releases unavailable admission after a backup restart misses health and prov
 				`${health}
 		const fs = yield* FaultFileSystem.FileSystem;
 		if (yield* fs.exists(options.env.APP_DATABASE + ".stall-health")) {
-			// Only the targeted restart needs the real timeout; later attempts test the bounded recovery cap.
-			if (yield* fs.exists(options.env.APP_DATABASE + ".health-waiting"))
+			const marker = options.env.APP_DATABASE + ".health-waiting";
+			const attempt = (yield* fs.exists(marker)) ? 2 : 1;
+			if (attempt > ${realTimeouts} || (yield* fs.exists(marker + ".second")))
 				return yield* new ChildError({ code: "health_failed" });
-			yield* fs.writeFileString(options.env.APP_DATABASE + ".health-waiting", "waiting");
-			return yield* Effect.never;
+			yield* fs.writeFileString(marker, "waiting");
+			if (attempt === 2) yield* fs.writeFileString(marker + ".second", "waiting");
+			const started = performance.now();
+			return yield* Effect.never.pipe(Effect.ensuring(
+				Effect.suspend(() => fs.writeFileString(marker + ".elapsed-" + attempt, String(performance.now() - started)))
+			));
 		}`,
 			),
 	);
@@ -46,6 +51,7 @@ it("releases unavailable admission after a backup restart misses health and prov
 		(await app.post("/api/messages", { topic: "retained", body: "acknowledged before backup" }, cookie)).status,
 	).toBe(200);
 	await writeFile(join(fixture.root, "comms.db.stall-health"), "stall replacement only");
+	const recoveryStarted = performance.now();
 	const backup = app.post("/_boot/db/backup", {}, cookie);
 	await expect
 		.poll(async () => readFile(join(fixture.root, "comms.db.health-waiting"), "utf8").catch(() => ""), {
@@ -86,4 +92,29 @@ it("releases unavailable admission after a backup restart misses health and prov
 	expect(await fixture.sql("SELECT body FROM messages WHERE topic='retained' ORDER BY seq")).toEqual([
 		{ body: "acknowledged before backup" },
 	]);
-}, 30000);
+	if (realTimeouts === 2) {
+		const elapsed = await Promise.all(
+			[1, 2].map(async (attempt) =>
+				Number(await readFile(join(fixture.root, `comms.db.health-waiting.elapsed-${attempt}`), "utf8")),
+			),
+		);
+		for (const duration of elapsed) expect(duration).toBeGreaterThanOrEqual(4900);
+		const recoveryMs = performance.now() - recoveryStarted;
+		expect(recoveryMs).toBeGreaterThanOrEqual(9800);
+		console.info(
+			JSON.stringify({ real_health_timeouts: realTimeouts, health_wait_ms: elapsed, recovery_ms: recoveryMs }),
+		);
+	}
+}
+
+it(
+	"releases unavailable admission after a backup restart misses health and proves closure",
+	(test) => checkRecovery(test, 1),
+	30000,
+);
+
+it(
+	"measures two consecutive real health deadlines before bounded recovery exhaustion",
+	(test) => checkRecovery(test, 2),
+	45000,
+);
