@@ -2,10 +2,10 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
 import { errorSchemas } from "./errors.ts";
 import { RequestValidation } from "./request-validation.ts";
-import { queryInteger } from "./query-number.ts";
+import { QueryDepth } from "./query-number.ts";
 import { TopicResult } from "./topics.ts";
 export const TopicQuery = Schema.Struct({
-	depth: Schema.optionalKey(queryInteger(1, 200)),
+	depth: Schema.optionalKey(QueryDepth),
 	archived: Schema.optionalKey(Schema.Literals(["0", "1"])),
 	mark: Schema.optionalKey(Schema.Literals(["0", "1"])),
 }).annotate({ parseOptions: { onExcessProperty: "error" } });

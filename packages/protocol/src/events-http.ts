@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
 import { errorSchemas } from "./errors.ts";
 import { EventPage } from "./events.ts";
-import { QueryCursor, QueryLimit, queryInteger } from "./query-number.ts";
+import { QueryCursor, QueryLimit, QueryWait } from "./query-number.ts";
 import { RequestValidation } from "./request-validation.ts";
 
 export const eventsGroup = HttpApiGroup.make("events")
@@ -13,7 +13,7 @@ export const eventsGroup = HttpApiGroup.make("events")
 			query: Schema.Struct({
 				since: Schema.optionalKey(QueryCursor),
 				limit: Schema.optionalKey(QueryLimit),
-				wait: Schema.optionalKey(queryInteger(0, 60)),
+				wait: Schema.optionalKey(QueryWait),
 				topic: Schema.optionalKey(Schema.String),
 				types: Schema.optionalKey(Schema.String),
 				agent: Schema.optionalKey(Schema.String),

@@ -1,4 +1,5 @@
 import { RequestValidation } from "@comms/protocol/request-validation";
+import { queryBoundHint } from "@comms/protocol/query-number";
 import { Effect, Layer, Schema, Stream } from "effect";
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { refusal } from "./conversation-request.ts";
@@ -45,7 +46,8 @@ export const layer = (maximum: number) =>
 					onExcessProperty: "error",
 				})(query).pipe(
 					Effect.mapError(
-						(error) => new KernelError({ code: "query_invalid", ...requestDetail("query", error.issue) }),
+						(error) =>
+							new KernelError({ code: "query_invalid", ...requestDetail("query", error.issue, queryBoundHint) }),
 					),
 				);
 				if (request.method === "GET" || request.method === "HEAD" || endpoint.payload.size === 0) return yield* handler;

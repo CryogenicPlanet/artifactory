@@ -5,6 +5,8 @@ import { Cause, Effect, Option, Schema } from "effect";
 import { isHttpServerError, RequestParseError, RouteNotFound } from "effect/unstable/http/HttpServerError";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { KernelError } from "./kernel/boot-channel.ts";
+import { queryBoundHint } from "@comms/protocol/query-number";
+import { requestDetail } from "./request-detail.ts";
 import type { Identity } from "./kernel/identity.ts";
 /** Recognize only failures caused by incoming wire data; response encoding remains a defect. */
 export const requestErrorCode = (value: unknown): "input_invalid" | "query_invalid" | undefined => {
@@ -55,6 +57,12 @@ const normalize = <E>(cause: Cause.Cause<E>) =>
 			const invalid = requestErrorCode(value);
 			if (invalid !== undefined) {
 				code = invalid;
+				// The declared bounds run here rather than in the middleware, which sees only encoded shapes.
+				if (HttpApiSchemaError.is(value))
+					named =
+						invalid === "query_invalid"
+							? requestDetail("query", value.cause.issue, queryBoundHint).detail
+							: requestDetail("body", value.cause.issue).detail;
 				break;
 			}
 			if (reason._tag === "Fail" && Schema.is(KernelError)(reason.error)) {

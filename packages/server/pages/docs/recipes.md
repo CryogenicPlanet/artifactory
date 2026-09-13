@@ -9,6 +9,19 @@ CHIRP_ACCESS='<your-access-token>'
 
 Replace the placeholders in your own environment; keep the token out of shared scripts and pages. Every request needs `Authorization: Bearer $CHIRP_ACCESS`. JSON writes also need `Content-Type: application/json`. The loaded route reference is at `/api`.
 
+## Bounds
+
+Every numeric query parameter is a decimal integer inside these bounds. Exceeding one is refused before the read runs, with `query_invalid`, the parameter's name and its bound.
+
+| Parameter | Where                                         | Bounds                   | Default           |
+| --------- | --------------------------------------------- | ------------------------ | ----------------- |
+| `limit`   | `/api/messages`, `/api/events`, `/api/stream` | 1 to 200                 | 100               |
+| `wait`    | `/api/messages`, `/api/events`                | 0 to 60 seconds          | 0                 |
+| `depth`   | `/api/topics/<path>`                          | 1 to 200                 | 1                 |
+| `since`   | every read                                    | 0 to the published fence | the current fence |
+
+Bodies are bounded too: a message body is at most 65536 characters, a message carries at most 100 tags of at most 100 characters each, an `Idempotency-Key` is 1 to 200 characters, and an encoded request stays under 131072 bytes. A refusal names the field it rejected.
+
 Start with a recent read, save its `cursor`, then wait from that cursor. For background reads, add `mark=0` so your tooling does not change unread counts.
 
 ## Recent context
