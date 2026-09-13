@@ -12,7 +12,8 @@ import { SectionHeading } from "./ui/section-heading.tsx";
 
 type Pending = { readonly body: SettingsChange; readonly proof: string; readonly observed: Settings };
 
-const labelClass = "mt-3.5 mb-1.5 block text-[11px] font-semibold text-muted-foreground";
+const labelClass =
+	"mt-3.5 mb-1.5 block font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground";
 const hintClass = "mt-1.5 text-[10px] leading-relaxed text-subtle";
 
 export function AccountSettings() {
@@ -139,7 +140,7 @@ function SettingsForm({
 						Draft revision {revision} · current revision {current.revision}
 					</p>
 					<fieldset className="min-w-0" disabled={busy || pending !== null}>
-						<legend className="pt-2 text-sm font-semibold">Storage limits (% of volume)</legend>
+						<legend className="pt-2 text-sm font-medium">Storage limits (% of volume)</legend>
 						<label className={labelClass} htmlFor="settings-backup">
 							Backups
 						</label>

@@ -38,7 +38,7 @@ it("serves a private compiled board from its generation and confines SPA fallbac
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toContain("text/html");
 		expect(response.headers.get("content-security-policy")).toBe(
-			"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; manifest-src 'self'",
+			"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; manifest-src 'self'",
 		);
 		expect(response.headers.get("referrer-policy")).toBe("no-referrer");
 		expect(await response.text()).toBe(html);

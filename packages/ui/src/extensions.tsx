@@ -67,7 +67,7 @@ export function Extensions() {
 					{items.map((item) => (
 						<article className="border-t border-border py-6 text-[13px] wrap-anywhere" key={item.name}>
 							<header className="flex flex-wrap items-center gap-3">
-								<h2 className="text-[15px] font-semibold">{item.name}</h2>
+								<h2 className="text-[15px] font-medium">{item.name}</h2>
 								{item.status === "loaded" ? <Badge>Loaded</Badge> : <Badge variant="destructive">Disabled</Badge>}
 								<span className="text-[11px] text-muted-foreground tabular-nums">{item.load_ms} ms to load</span>
 							</header>
@@ -108,7 +108,7 @@ export function Extensions() {
 				className="mt-8 border-t border-border pt-6 text-[13px] leading-relaxed wrap-anywhere"
 				aria-labelledby="edit-lock-heading"
 			>
-				<h2 className="text-[15px] font-semibold" id="edit-lock-heading">
+				<h2 className="text-[15px] font-medium" id="edit-lock-heading">
 					Edit lock
 				</h2>
 				{lockError ? (

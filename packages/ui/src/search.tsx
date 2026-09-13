@@ -11,7 +11,8 @@ import { SectionHeading } from "./ui/section-heading.tsx";
 
 type MessageFilters = { readonly q: string; readonly topic: string; readonly tag: string; readonly agent: string };
 
-const labelClass = "block text-[11px] font-semibold text-muted-foreground [&>input]:mt-1.5 [&>input]:font-normal";
+const labelClass =
+	"block font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground [&>input]:mt-1.5 [&>input]:font-sans [&>input]:font-normal [&>input]:normal-case [&>input]:tracking-normal";
 
 export function Search({ path, onActive }: { readonly path: string; readonly onActive: (active: boolean) => void }) {
 	const client = useBoardClient();
@@ -86,7 +87,7 @@ export function Search({ path, onActive }: { readonly path: string; readonly onA
 	return (
 		<section className="mb-7" aria-label="Message search">
 			<details className="group rounded-lg border border-border bg-card px-4 py-3">
-				<summary className="flex cursor-pointer list-none items-center gap-2 text-[13px] font-semibold text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+				<summary className="flex cursor-pointer list-none items-center gap-2 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
 					<SearchIcon className="size-3.5" />
 					Search messages
 					<ChevronRight className="ml-auto size-3.5 transition-transform group-open:rotate-90" />

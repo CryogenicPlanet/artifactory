@@ -18,7 +18,8 @@ type MintInput = {
 };
 type PendingMint = { readonly input: MintInput; readonly key: string; readonly proof: string };
 
-const labelClass = "mt-3.5 mb-1.5 block text-[11px] font-semibold text-muted-foreground";
+const labelClass =
+	"mt-3.5 mb-1.5 block font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground";
 const checkClass =
 	"mt-3 flex items-center gap-2 text-xs font-medium text-muted-foreground [&_input]:size-3.5 [&_input]:accent-primary";
 const hintClass = "mt-1.5 text-[10px] leading-relaxed text-subtle";
@@ -131,7 +132,7 @@ export function AccountTokens() {
 							mint();
 						}}
 					>
-						<h3 className="text-sm font-semibold">Create agent tokens</h3>
+						<h3 className="text-sm font-medium">Create agent tokens</h3>
 						<p className={hintClass}>
 							Read access is included. Confirm the identity and permissions with your passkey.
 						</p>
@@ -187,7 +188,7 @@ export function AccountTokens() {
 						)}
 						{pair && (
 							<div className="mt-5">
-								<h3 className="text-sm font-semibold">Save this token pair</h3>
+								<h3 className="text-sm font-medium">Save this token pair</h3>
 								<p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
 									These secrets are shown only here. Closing this view removes them from the page; they cannot be
 									retrieved from the token list.

@@ -282,6 +282,22 @@ Full detail in `second-pass-5d96c1d.md`. Checks and 712 tests pass in a clean wo
 
 **Comment.** `pages-http.ts` gets the item 6 treatment (nested ternaries and a bodiless 503 remain). Enrollment enforces the lowercase host it documents (`enrollment.ts:78`, and the same class in `token-mint-schema.ts`). The README still documents six deleted routes. Drop the `reactions` and `agents` creates from the fresh-store rungs. `webhook_subscriptions` is created twice, by the app migration ladder and by `api.migrate`, with divergent DDL; delete the ladder file. The subscriptions error union declares two codes at two statuses, and `SubscriptionError` carries a `status` field nothing reads. `topics-http.ts` re-parses the raw URL instead of using its declared `:path` param and classifies a bad path as `query_invalid` on read and `input_invalid` on write. `sql-write.ts` should take its protected-table set from a registry extensions fill (`api.migrate(..., {protect:true})`) rather than hard-coding a core table. `extension-api.ts` should not type the kernel contract in terms of `ext/core`'s services. Event reads should not take the child channel gate. Every proxied request publishes an `http.request` event that wakes every idle long-poll; keep diagnostics off the publication sequence or let `changed` ignore diagnostic-only moves. `ctx.read` needs a bound. Board HTML needs the CSP `/p/**` has. Anonymous public-page reads answer a non-retriable 401 during recovery; answer a retriable 503. `extensions.md`'s worked example queries a table that does not exist and `standup.ts` imports a core internal. The subscriptions example bypasses `api.effects` for its deliveries and runs an empty durable transaction per delivery as a liveness check.
 
+## Database stack, round two (2026-09-12)
+
+Item 23's track, reviewed PR by PR at the heads below. Full report: `stack-review-round2.md`. PR #1 merged to master as `dd733fe`, the stack was recomposed on top of it, and it grew to five: #7 and #8 had never been reviewed before this round.
+
+| PR | Head | Verdict | Findings | Comment |
+| --- | --- | --- | --- | --- |
+| #2 store descriptors | `1ef641e` | mergeable with changes | 13 | 5644305395 |
+| #3 store identity | `f4f1dca` | needs changes | 11, one blocker | 5644334307 |
+| #4 DbOps and backup provenance | `7d47607` | needs changes | 15, two major | 5644329084 |
+| #7 migration histories | `aaf6396` | needs changes | 11, two major | 5644472625 |
+| #8 portable SQL, Postgres and MySQL | `686e07c` | needs changes | 16, four major | 5644467131 |
+
+Each PR got two Opus finders on orthogonal dimensions, each re-read by an Opus skeptic, plus a claims agent that installed, checked, built and tested in that PR's own worktree. 66 confirmed, 2 refuted.
+
+**The owner-facing question this round raises.** The track's goal is that swapping the engine on deployment just works. At the stack tip that is further away than the PR bodies suggest, for one concrete reason: no remote engine is exercised by the default suite, and the dialect SQL is never executed against Postgres or MySQL anywhere. `dialect.test.ts` runs only its SQLite branch and string-matches the other two, and the real-server CI fixture touches the connection lease and the integer guard but none of the twelve rewritten query modules. Three defects already sit in that blind spot: the published-image CTE has no Postgres form that parses, the MySQL read-mark upsert references a column MySQL cannot resolve, and boot's public-path cascade silently matches nothing on MySQL. All three are invisible to every check in the repo. The cheap fix is to run the dialect tests inside the existing remote-session CI legs, where live Postgres and MySQL already exist.
+
 ## Decisions after the ownership audit (a834e3f, 2026-09-11)
 
 Codex's `docs/boot-ownership-audit.md` narrowed four things the review had recorded the other way, and the owner gave Codex direction directly on the first. Recorded here so the ledger, the spec and the code agree. Check: `docs/pr-1/ownership-check-a834e3f.md`.
@@ -401,6 +417,102 @@ Report: `fourth-pass-efa6de5.md`. Four Opus finders, four skeptics, one claims a
 ### 50. Smaller items from the fourth pass
 
 **Comment.** A failed accepted-cutover metadata cleanup leaves the lock pinned and every hint steers the agent away from the request that clears it; retry it from the reload route or surface it in `/_boot/status`. `stream-http.ts:41` lost its empty-page guard, so a boot read failure becomes a zero-delay loop; sleep or end the stream on an empty unchanged page. `public-paths.ts:39` runs one `INSERT` per path inside the append transaction under the channel gate, bounded only by the 1 MiB body; batch it. `init.md:37` and boot's `GET /_boot` help still teach a tokenless `PUT`, which is now `400 precondition_required`. The lock-repair response shape (`lock_committed`, `recovery`) is undocumented and answers 200 on a failed recovery. `retryCleanup` runs its authorize effect twice. `examples/extensions/README.md:5` names a file that does not exist and the surviving digest example's import does not resolve when copied into `app/ext/`. `kernel/README.md:7` still forbids the probe design item 42 introduced. The recovery ladder has no total budget (5 s × 3 attempts × generations). Codex's three ledgers still describe 35 and 36 as unimplemented.
+
+## Live-board onboarding review (2026-09-11, decided 2026-09-13)
+
+Source: `live-board-review-2026-09-11.md`. A newly enrolled agent fetched `/init` with no prior knowledge, enrolled, and exercised every live route with `read`, `write` and `fs`. Thirteen findings, ordered by what they cost the next agent. The mechanics held up: the error envelope, conditional writes, idempotency, refresh rotation, topic semantics, SSE resumption and `/.well-known/agent.json` all worked first try. The damage is concentrated in the first ten minutes, and four findings are defects in the onboarding path itself.
+
+### 51. The on-ramp tells the truth (findings 3, 6, 11, 12)
+
+**Decided 2026-09-13.** None of the four pages `/init` links is usable before enrolling: `recipes.md` opens with "use these recipes after enrolling", `editing.md` needs `fs` scope, `extensions.md` is about editing a running board, `stream.md` uses the human's cookie. So do not publish them. Instead `/init` states that its links need a token, and a new post-auth `/quickstart` links onward to them. Also: `/init`'s agent-home example must lead with the combined form `mentions=@name,@name/label,@here`, because `mentions=@claude` does not match `@claude/mac` and an agent copying the current example silently never receives anything addressed to its instance. `/init`'s Live routes block is assembled from the app spec only, so it omits `/api/lock`, `/api/fs/*` and `/api/reload`, the very routes the prose above it tells you to call: include the boot aliases or label the block as extension routes. And the bounds belong in `recipes.md` as a short table (`limit` caps at 200, `wait` at 60) rather than only inside the `/api` document. **Measured 2026-09-13, and it changes the fix:** `/api` is 214,680 bytes of which 204,674, or 95.3%, is `responses`, because a 48-member error union is inlined into all eleven operations instead of referenced once. Hoisting that union behind a `$ref` is the real fix for the document's size, and it is worth doing on its own merits; the bounds table and a hint that names the offending parameter are still worth having, but they are not why `/api` is large. Note also that `recipes.md` is already correct on the mention and mark points below: the stale surface throughout this item is `init.md`, at lines 33 and 70.
+
+### 52. Mentions, fifth time: the URL false positive and the backtick drop (finding 2)
+
+Confirmed live from the board, and it is the same defect as item 44. A slash is not excluded by the leading lookbehind, so any link ending `/@name` pages that agent, and Mastodon handles, GitHub raw URLs and profile links all have that shape. A backtick is Unicode category Sk rather than P, so it fails the trailing test and an inline-code mention is dropped, which is the one place an author deliberately writes a name without meaning to page anyone. Treat a preceding `/` as part of a URL and accept a backtick the way `**` and `_` already are. Implement this inside item 44 rather than separately, and close item 44's other half at the same time: `ext/core/capabilities.ts:110` still admits an empty path, so an extension calling `markRead("")` writes the root row that zeroes every unread count for that instance.
+
+### 53. Boot bookkeeping in the app feed (finding 4)
+
+41% of events on an idle board are `seq.reserved`, carrying `actor: "boot"`, `generation: 0` and transaction and attempt hashes. Nothing an app consumer can act on, and every agent following the documented listen recipe pays tokens for them. Item 32 put `/api/events` on the app side and left boot serving its own lifecycle feed, so these should not be in the app feed at all. Filter them the way `http.request` is already filtered.
+
+### 54. The published OpenAPI declares no authentication (finding 5)
+
+Every operation in `GET /api` carries `"security": []`, including `POST /api/sql` and `POST /api/messages`, while both reject an unauthenticated call at runtime. A client generated from that document ships with no auth and fails on first contact. The boot manifest gets this right: `/.well-known/agent.json` declares its schemes, per-route `security` and an `x-comms-scopes` extension. Carry the same declarations on the app document.
+
+### 55. Errors name the field (finding 7)
+
+**Decided 2026-09-13: keep one code, name the field.** A bad topic path, an empty body, an unknown field and two mutually exclusive shapes in one `PUT` all return `input_invalid` with an identical hint and no field name, so each one costs a guess and a retry. Add the offending field, and the bound where there is one, to the error body, and make the hint specific ("Topic paths are lowercase", "Body cannot be empty"). Additive: the `Schema.Literals` code union from item 6 does not change.
+
+### 56. `archived_by` is not an actor (finding 8)
+
+It holds the ancestor whose archival propagated down, and the name reads as an identity sitting beside `agent` and `instance` fields that really are identities. Rename to `archived_root`. There are no deployments, so the rename is free. Alongside it, archiving a parent does empty the subtopic list on a plain read (`topics.ts:30`). **Corrected 2026-09-13:** the review asks for `archived=1` in the `topic_archived` hint, but that is a write error and the read route's own description already says archived children require `archived=1`, so the discoverability gap is smaller than stated. Leave the hint alone.
+
+### 57. Self-echo is inconsistent across the three listen surfaces (finding 9)
+
+**Narrower than the review states, corrected 2026-09-13.** Two of the three surfaces agree: `message-wait` and `events-http.ts:29` both set `excludeMessageInstance` while waiting. Only `/api/stream` echoes the caller's own writes, and none of the three documents the rule. So this is one line in the stream route plus a sentence in the recipes, not a three-way reconciliation. An agent that starts on long-poll and switches to SSE for latency still inherits a feedback loop on its own writes, which is the cost that matters.
+
+### 58. Webhooks stay unsigned (finding 10)
+
+**Decided 2026-09-13: no signing, document the limitation.** Deliveries carry `x-comms-delivery-id` as an idempotency key and no signature, and any `write`-scoped agent can point a subscription anywhere including at another service on localhost. The stated trust boundary is mistakes rather than adversaries, so this is a misconfiguration risk and stays one. Record it plainly in the subscriptions guide rather than adding a secret and an HMAC.
+
+### 59. Page writes report a source error (finding 13)
+
+Publishing a page without a precondition returns `precondition_required` with the message "Source edit refused", and a stale one returns `stale_base` with the same. The docs work to keep pages and source apart, since pages publish immediately and need no lock and no reload, and the error text undoes that. Give the page path its own message. Alongside it, raw page reads come back as `application/octet-stream` for `.md`.
+
+### 60. Unread marking on a latest-N read (finding 1)
+
+**Decided 2026-09-13, smallest fix.** The documented first read is `newest=1`, which returns the top slice and skips everything earlier, while the mark advances to the highest sequence returned: observed, seven unread became zero from a read that returned one message. **Corrected 2026-09-13:** `recipes.md` already tells background reads to add `mark=0`; the live trap is `init.md:33`, which shows `topic=project&recursive=1&newest=1&limit=50` with no `mark=0`. The code fix below still stands, because `/init` is the page every agent reads first. The unread badge is human-UI only (`packages/ui/src/app.tsx:126` and `:273`), so this is low stakes and does not warrant a redesign. A `newest=1` read marks nothing; every other read is unchanged. Noted for later: if the badge is not worth keeping, removing the unread concept entirely also removes this, the root-mark case in item 44 and the over-marking class, which is a real simplification rather than a fix.
+
+## Found while merging the stack (2026-09-13)
+
+Two things surfaced by the pre-merge pass that are now on master, recorded so they are not lost in the merge noise. Neither blocked a merge.
+
+### 61. Source-revert receipts grow without bound
+
+`23db345` ("Retain source revert outcomes without calendar expiry", merged in #2) removes the whole prune and retain loop from `packages/boot/src/source-revert.ts`, and `index.ts` now calls only `reverts.recover`. The intent is right and favours durability: an idempotency receipt should not expire by age while a replay can still arrive. The consequence is that `source-revert-result:` rows in `settings` accumulate one per revert request forever, and `source-revert.ts:98` reads all of them with `SELECT key,value FROM settings WHERE key LIKE 'source-revert-result:%'` on every recovery. Human-initiated, so growth is slow, but the scan is on the recovery path. Bound it by count or keyspace rather than by calendar, which is the same conclusion item 35 reached for events.
+
+### 62. The board UI aborts a revert on the new 503
+
+`3ab1962` made the lock route answer 503 while carrying `lock_committed: true` in the body, which is correct and which boot's own recovery page already tolerates: it catches the error, re-reads the lock and proceeds. The browser client does not. `packages/ui/src/recovery-api.ts:28-34` catches `BoardError` only when `status === 423`, so the 503 falls through and aborts the revert. Leave the board open, let recovery fail so the surface becomes non-writable, click undo: the lock commits server-side, the user sees a failure, and the second click succeeds because the lock is now found and the POST is skipped. One wasted click and self-healing, so it is minor, but the fix is adding 503 beside 423 in that `catchTag`.
+
+### 63. The descendant portability bug did not leave, it was inlined (now a PR #8 blocker)
+
+**Corrected 2026-09-13.** My PR #4 and PR #8 reviews both said `packages/storage/src/descendant.ts` still existed and was still imported by `boot/src/public-paths.ts`, carrying a SQLite-only `||` concatenation that on MySQL is a logical OR and therefore matches nothing. PR #4's `5d14a34` was titled as addressing it. What it actually did was delete the storage module, its package export, its test and its fixture, and inline the identical SQLite-only SQL at both call sites. A grep for `isDescendant` across `packages/` now returns nothing, and `public-paths.ts` carries the unportable form in three places: `:53` and `:60` build `substr(path,1,length(x)+1)=x||'/'`, and `:59` builds a replacement path with `${to}||substr(...)`.
+
+So the defect is unchanged and is now duplicated rather than shared. The consequence is the same and still silent: the moment boot runs on MySQL, a topic deletion or a topic move leaves every descendant public path published, because the predicate evaluates to 0 or 1 and matches no row. Postgres is unaffected, which is what makes it easy to miss.
+
+Codex's own follow-up assigns the dialect-aware helper to PR #8 and says the portability coverage must be retained when that layer is composed. That is the right home, so this is tracked as a **PR #8 blocker**, not a PR #4 one, and #4 merged with it outstanding on that basis.
+
+### 64. Size reduction pass, after the database stack merges (decided 2026-09-13)
+
+**Decided by the owner.** Once #9, #10 and #12 are in, do a deep audit of bloat and a substantial size reduction. Recording the measurements that prompted it so the audit starts from facts rather than impressions.
+
+Master at `1156548`, production source only, tests excluded: boot 13,536 lines in 101 files, server 7,315 in 92, ui 3,340 in 39, protocol 761 in 20, storage 810 in 9. Total about 25,800 across 261 files, with 40,544 further lines of tests. PRs #9 and #10 add roughly 19,000 more production lines, which would put the tree past 45,000 and boot alone near 24,000.
+
+The sharpest single fact: SPEC §7.1 line 401 budgets the immutable core at "about 6,000 to 7,000 lines, of which roughly 2,300 are durability machinery, with five runtime dependencies; a real bootloader's scope and nothing else". Boot is 13,536, about double, and `boot-audit.md` already found 7,250 achievable and named the cuts. Boot has grown through every review round rather than shrinking.
+
+Four causes worth carrying into the audit, because they suggest where to look.
+
+**Duplicate answers to one question.** Much of the machinery exists to establish *is the previous owner really dead*, and there are now several parallel mechanisms for it: keeper receipts, the kernel boot-id check, process-group closure proof, the owner inventory, the copy keeper's own receipt, the writer epoch CAS, the publication fence, intent journals and the adoption record. Each was justified on its own; nobody has asked whether three of them could answer for all.
+
+**Review-driven accretion, substantially my fault.** Sixty-six findings across the stack, and almost every one was closed by adding a mechanism rather than removing a case. Asking for typed errors produced a code-to-status-to-hint record in every module; asking for a way back in produced a five-condition repair admission; asking for closure proof produced a keeper plus a receipt plus a fallback. A reviewer who only says "this case is unhandled" produces a codebase where every case has its own handler.
+
+**File-per-concept.** #10 alone adds `transfer-sentinel.ts`, `transfer-target.ts`, `transfer-file-digest.ts`, `transfer-app-authority.ts`, `transfer-dump-authority.ts` and sixteen more.
+
+**The dominant line item is the optional one.** Engine portability is roughly 20,000 lines once #9 and #10 land, for a board that runs on SQLite, on one machine, for one human and their agents. The product itself is not big: eleven core operations, thirty-five boot routes, and the whole board in 11,400 lines. That part is about the right size.
+
+**Sequencing note, raised once and not pressed.** The largest line item is the part still unmerged, and deleting unmerged code is free while deleting merged code is a migration with a schema ladder attached. The owner's call is to merge first and cut after; this records that the cheaper moment was before.
+
+### 65. Four decisions after the bloat audit (2026-09-13)
+
+**1. Postgres and MySQL are a real requirement. PR #9 merges.** The audit's largest cut, 3,598 lines, is therefore off the table, and `docs/database.md` and the interoperability draft stay because they describe something we are building. Everything downstream of "is a second engine required" resolves the same way: the remote client stack stays, the CI matrix stays, the dialect layer stays.
+
+**2. The boot line budget is not the measure; ownership is.** The owner's words: "idc about a specific line budget but i really care if the bootloader is doing more than it should be like if we are applying max scrutiny to does this need to be in the bootloader". So SPEC §7.1's "about 6,000 to 7,000 lines" stops being a target and the six-jobs rule becomes the only test, applied at maximum scrutiny file by file: not *is this small* but *does this have to be in the immutable image at all, given that a line in boot is a line an agent cannot repair*. The audit measured boot against a number and found only 262 defensible lines; it never asked the ownership question with real severity, and its own verdict table hands out "J4" to 5,275 lines without interrogating whether each belongs there. That audit is the next piece of work, and it replaces the line-count framing entirely.
+
+**3. The review corpus is not bloat and will be deleted when it is spent.** `docs/pr-1/` is 8,757 lines and does not count against the codebase. It goes once its live decisions are folded into the spec, which decision 4 subsumes.
+
+**4. The spec itself gets audited and largely rewritten, at a higher level.** The owner's words: "i think we need to audit the spec more deeply and probably delete a lot and probably move to a higher level product spec than such a detailed spec where the intent is lost in the semantics". This is the response to the audit's sharpest finding, the document loop with no owner in it: a reviewer writes a finding, it becomes a spec sentence, the sentence becomes an implementation, and the next reviewer reads the spec rather than the ledger and defends the code because "the spec promises it". A spec that states intent cannot be mined for requirements nobody wanted, because intent is checkable against what the owner actually said. A spec that specifies mechanism can, and was: the 4,771-line transfer tool came from one such sentence, and the ledger contains the refusal to delete it in plain text.
+
+Two factual checks still outstanding against the running board, each gating a small cut: whether `/data/comms.db` exists at the pre-migration path (45 lines of legacy adoption), and what `SELECT count(*) FROM outbox WHERE shipped_at IS NOT NULL` returns (22 lines of dead column and a second drain loop).
 
 ## Moot after the deletions
 

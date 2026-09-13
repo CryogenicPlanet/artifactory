@@ -28,7 +28,7 @@ it("serves private Markdown with raw links, highlighting, conditional diagrams a
 	const response = await get("/p/guide/");
 	expect(response.status).toBe(200);
 	expect(response.headers.get("content-security-policy")).toBe(
-		"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+		"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 	);
 	expect(response.headers.get("referrer-policy")).toBe("no-referrer");
 	expect(response.headers.get("x-content-type-options")).toBe("nosniff");
