@@ -6,6 +6,7 @@ import { Reactivity } from "effect/unstable/reactivity";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
 import { remoteClientLayer } from "@comms/storage/remote-client";
 import { RemoteInspector, remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { cursorPublicationSemantics } from "./cursor-publication-semantics.ts";
 import { dialectSemantics } from "./dialect-semantics.ts";
 import { on } from "@comms/storage/dialect";
 import { readIsolationSemantics } from "./read-isolation-semantics.ts";
@@ -97,6 +98,8 @@ async function main() {
 					mysql: () => sql`ALTER TABLE messages MODIFY tags TEXT, MODIFY meta TEXT`,
 				});
 				yield* publishedImageSemantics(sql);
+				phase = "production cursor writes, unread counts and publication guards";
+				yield* cursorPublicationSemantics(sql, mutate);
 			}).pipe(Effect.provide(Layer.merge(Reactivity.layer, BunServices.layer)), Effect.scoped),
 		);
 		process.stdout.write("REMOTE_DIALECT_VERIFIED\n");

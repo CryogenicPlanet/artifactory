@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
 it.skipIf(!process.env.COMMS_REMOTE_DIALECT_CONFIG)(
-	"executes native dialect fragments and production topic move cursor collisions",
+	"executes native dialect fragments, topic moves, read marks, unread counts and SQL publication guards",
 	async () => {
 		const result = await promisify(execFile)(
 			"bun",

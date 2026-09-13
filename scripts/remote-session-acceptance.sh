@@ -94,6 +94,10 @@ import json,pathlib,sys
 for p in [pathlib.Path(sys.argv[1]),pathlib.Path(sys.argv[1]).with_name('dialect.json')]:
  d=json.loads(p.read_text()); d['port']=int(sys.argv[2]); p.write_text(json.dumps(d))
 PY
+if [ "$engine" = pg ]; then
+  COMMS_PG_JSON_TEST_CONFIG="$private/client.json" \
+    node node_modules/vitest/vitest.mjs run packages/storage/test/remote-json.test.ts --maxWorkers=1 --reporter=verbose
+fi
 if [ "$attributes" != 32 ]; then
   COMMS_REMOTE_DIALECT_CONFIG="$private/dialect.json" \
     node node_modules/vitest/vitest.mjs run packages/server/test/kernel/remote-dialect-semantics.test.ts --maxWorkers=1 --reporter=verbose
