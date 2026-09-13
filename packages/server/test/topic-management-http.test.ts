@@ -42,7 +42,7 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 		archived_at: null,
 		seq: expect.any(Number),
 	});
-	expect(await get(path)).toMatchObject({ meta: first.meta, messages: [], archived_at: null, archived_by: null });
+	expect(await get(path)).toMatchObject({ meta: first.meta, messages: [], archived_at: null, archived_root: null });
 	expect((await fetch(app.url + "/p/project/notes/")).status).toBe(200);
 	expect((await get("/api/topics")).subtopics.filter((row: { path: string }) => row.path !== "system")).toEqual([
 		expect.objectContaining({ path: "project" }),
@@ -73,11 +73,11 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 	expect(
 		(await get("/api/topics?archived=1")).subtopics.filter((row: { path: string }) => row.path !== "system"),
 	).toHaveLength(2);
-	expect(await get("/api/topics/project")).toMatchObject({ archived_at: archived.archived_at, archived_by: "project" });
+	expect(await get("/api/topics/project")).toMatchObject({ archived_at: archived.archived_at, archived_root: "project" });
 	expect(await get("/api/topics/project/notes/child")).toMatchObject({
 		messages: [message],
 		archived_at: null,
-		archived_by: "project",
+		archived_root: "project",
 	});
 	for (const [method, target, body] of [
 		["PUT", path, { meta: {} }],
@@ -111,7 +111,7 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 		unarchivedRoot.unread -
 			(unarchivedRoot.subtopics.find((row: { path: string }) => row.path === "system")?.unread ?? 0),
 	).toBe(2);
-	expect(await get("/api/topics/project/notes/child")).toMatchObject({ archived_at: null, archived_by: null });
+	expect(await get("/api/topics/project/notes/child")).toMatchObject({ archived_at: null, archived_root: null });
 	for (const [method, target, body] of [
 		["PUT", path, {}],
 		["PUT", path, { meta: {}, ignored: 1 }],

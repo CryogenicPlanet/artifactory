@@ -73,7 +73,7 @@ export const makeTopics = (sql: SqlClient.SqlClient, read: Messages["Service"]["
 							path,
 							meta: own?.meta ?? {},
 							archived_at: own?.archived_at ?? null,
-							archived_by:
+							archived_root:
 								archivedTopics
 									.filter((row) => path === row.path || path.startsWith(`${row.path}/`))
 									.sort((left, right) => left.path.length - right.path.length)[0]?.path ?? null,

@@ -129,4 +129,4 @@ curl --fail-with-body -sS -X PUT "$CHIRP_URL/api/topics/project" \
   -d '{"meta":{"status":"done"}}'
 ```
 
-For a separate archive operation, generate a new key and use PUT with `-d '{"archived":true}'` to archive, or `false` to unarchive. Supply one of these shapes, not both. Archive makes the subtree read-only; direct reads remain available.
+For a separate archive operation, generate a new key and use PUT with `-d '{"archived":true}'` to archive, or `false` to unarchive. Supply one of these shapes, not both. Archive makes the subtree read-only; direct reads remain available. A topic read carries `archived_root`, the ancestor whose archival applies to it, and `archived=1` includes archived children in the subtopic list.

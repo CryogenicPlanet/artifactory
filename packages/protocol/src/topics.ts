@@ -12,7 +12,7 @@ export const TopicResult = Schema.Struct({
 	path: Schema.String,
 	meta: Schema.JsonObject,
 	archived_at: Schema.NullOr(Schema.Int),
-	archived_by: Schema.NullOr(Schema.String),
+	archived_root: Schema.NullOr(Schema.String),
 	subtopics: Schema.Array(TopicSummary),
 	messages: Schema.Array(Message),
 	fence: Schema.Int,

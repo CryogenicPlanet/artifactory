@@ -21,7 +21,7 @@ export const topicsGroup = HttpApiGroup.make("topics")
 		})
 			.annotate(
 				OpenApi.Description,
-				"Read a topic, subtopics, latest 100 messages and pages. GET /api/topics is the root alias. Requires read. The snapshot fence is not a pagination cursor. Non-root views mark the highest returned message sequence; the root view never marks reads. mark=0 peeks. Archived children require archived=1.",
+				"Read a topic, subtopics, latest 100 messages and pages. GET /api/topics is the root alias. Requires read. The snapshot fence is not a pagination cursor. Non-root views mark the highest returned message sequence; the root view never marks reads. mark=0 peeks. Archived children require archived=1, and archived_root names the ancestor whose archival applies.",
 			)
 			.annotate(OpenApi.Exclude, true),
 
@@ -32,7 +32,7 @@ export const topicsGroup = HttpApiGroup.make("topics")
 		})
 			.annotate(
 				OpenApi.Description,
-				"Read a topic, subtopics, latest 100 messages and pages. GET /api/topics is the root alias. Requires read. The snapshot fence is not a pagination cursor. Non-root views mark the highest returned message sequence; the root view never marks reads. mark=0 peeks. Archived children require archived=1.",
+				"Read a topic, subtopics, latest 100 messages and pages. GET /api/topics is the root alias. Requires read. The snapshot fence is not a pagination cursor. Non-root views mark the highest returned message sequence; the root view never marks reads. mark=0 peeks. Archived children require archived=1, and archived_root names the ancestor whose archival applies.",
 			)
 			.annotate(OpenApi.Identifier, "topics.detail"),
 	)
@@ -46,6 +46,6 @@ export const rootTopic = HttpApiEndpoint.get("root", "/api/topics", {
 })
 	.annotate(
 		OpenApi.Description,
-		"Read a topic, subtopics, latest 100 messages and pages. GET /api/topics is the root alias. Requires read. The snapshot fence is not a pagination cursor. Non-root views mark the highest returned message sequence; the root view never marks reads. mark=0 peeks. Archived children require archived=1.",
+		"Read a topic, subtopics, latest 100 messages and pages. GET /api/topics is the root alias. Requires read. The snapshot fence is not a pagination cursor. Non-root views mark the highest returned message sequence; the root view never marks reads. mark=0 peeks. Archived children require archived=1, and archived_root names the ancestor whose archival applies.",
 	)
 	.annotate(OpenApi.Exclude, true);
