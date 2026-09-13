@@ -75,6 +75,8 @@ Percent-encode credentials and database names. URL query parameters and fragment
 | Backup | The provider takes and retains snapshots. Boot does not run dump tools or produce remote backup files. Existing catalogue records retain engine and board provenance; they are not proof of a usable provider snapshot. |
 | Restore | Stop chirp, restore through the provider, then restart. Boot verifies board identity before serving and refuses a foreign store. It does not load artifacts or switch to a newly provisioned database. |
 
+Reads and writes using the remote client share its pinned session and run serially. A long read transaction delays writes until it releases that session; the client no longer provides concurrent reads through a connection pool.
+
 An advisory lock coordinates clients that follow this protocol. It does **not** prove every process or session using those credentials is dead, inspect prepared transactions, or fence a failed-over server. Arbitrary clients can bypass it. Multiple chirp containers, split-brain recovery and prepared-work cleanup are unsupported. Resolve those cases through the database operator; do not delete identity or recovery records to make startup pass.
 
 The rehearsal response reports `schema_checked`, `schema_check_only: true` and `report_unavailable: true`. This check no longer catches data-dependent migration failures before touching live data. PostgreSQL transactions and the existing MySQL DDL intent checks still apply, but they do not restore a prior database after a completed migration. Take a provider snapshot before risky changes and accept the downtime needed for repair.
