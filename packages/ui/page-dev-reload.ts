@@ -1,9 +1,9 @@
+import { pageRevisionHeader } from "@comms/protocol/headers";
 import { BunCrypto } from "@effect/platform-bun";
 import { Crypto, Effect, Stream } from "effect";
 import type { Plugin, ProxyOptions } from "vite";
 
 const scriptPath = "/__comms/page-reload.js";
-const revisionHeader = "x-comms-page-revision";
 // Served only by Vite's development middleware. The expected revision belongs to
 // this document, not a shared cache, so an edit between load and first poll is seen.
 const script = `(() => {
@@ -32,7 +32,7 @@ const script = `(() => {
       const response = await fetch(page, {
         credentials: "same-origin", cache: "no-store", redirect: "error",
         signal: AbortSignal.timeout(10000),
-        headers: { "${revisionHeader}": "1" }
+        headers: { "${pageRevisionHeader}": "1" }
       });
       if (stopped || current !== generation) return;
       if (response.status === 401 || response.status === 403 || response.status === 404) {
@@ -40,7 +40,7 @@ const script = `(() => {
         location.reload();
         return;
       }
-      const next = response.ok && response.headers.get("${revisionHeader}") === "1"
+      const next = response.ok && response.headers.get("${pageRevisionHeader}") === "1"
         ? await response.text() : revision;
       if (stopped || current !== generation) return;
       if (next !== revision) {
@@ -82,7 +82,7 @@ const pageDevProxy = (target: string): ProxyOptions => ({
 			outgoing.setHeader("accept-encoding", "identity");
 			outgoing.removeHeader("if-none-match");
 			outgoing.removeHeader("if-modified-since");
-			outgoing.removeHeader(revisionHeader);
+			outgoing.removeHeader(pageRevisionHeader);
 		});
 		proxy.on("proxyRes", (incoming, request, response) => {
 			const headers = { ...incoming.headers };
@@ -109,7 +109,7 @@ const pageDevProxy = (target: string): ProxyOptions => ({
 				const body = Buffer.concat(chunks);
 				const crypto = yield* Crypto.Crypto;
 				const revision = Buffer.from(yield* crypto.digest("SHA-256", body)).toString("hex");
-				const polling = request.headers[revisionHeader] === "1";
+				const polling = request.headers[pageRevisionHeader] === "1";
 				const result = polling
 					? revision
 					: Buffer.concat([body, Buffer.from(`\n<script src="${scriptPath}?revision=${revision}"></script>`)]);
@@ -119,7 +119,7 @@ const pageDevProxy = (target: string): ProxyOptions => ({
 				headers["cache-control"] = "no-store";
 				if (polling) {
 					headers["content-type"] = "text/plain; charset=utf-8";
-					headers[revisionHeader] = "1";
+					headers[pageRevisionHeader] = "1";
 				}
 				response.writeHead(200, headers);
 				response.end(result);

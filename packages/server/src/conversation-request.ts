@@ -1,3 +1,11 @@
+import {
+	agentHeader,
+	authKindHeader,
+	instanceHeader,
+	labelHeader,
+	requestIdHeader,
+	scopesHeader,
+} from "@comms/protocol/headers";
 import { policy, encodeError, ErrorEnvelope, type ErrorDetail } from "@comms/protocol/errors";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError";
@@ -20,19 +28,19 @@ export const identity = (scope: string) =>
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const h = request.headers;
 		if (
-			(h["x-comms-auth-kind"] !== "human" && h["x-comms-auth-kind"] !== "agent") ||
-			!h["x-comms-agent"] ||
-			!h["x-comms-instance"] ||
-			!h["x-comms-request-id"] ||
-			!h["x-comms-scopes"]?.split(",").includes(scope)
+			(h[authKindHeader] !== "human" && h[authKindHeader] !== "agent") ||
+			!h[agentHeader] ||
+			!h[instanceHeader] ||
+			!h[requestIdHeader] ||
+			!h[scopesHeader]?.split(",").includes(scope)
 		)
 			return yield* new KernelError({ code: "scope_required" });
 		return {
-			agent: h["x-comms-agent"],
-			instance: h["x-comms-instance"],
-			request: h["x-comms-request-id"],
-			label: h["x-comms-label"] ?? "",
-			kind: h["x-comms-auth-kind"],
+			agent: h[agentHeader],
+			instance: h[instanceHeader],
+			request: h[requestIdHeader],
+			label: h[labelHeader] ?? "",
+			kind: h[authKindHeader],
 		} satisfies Identity;
 	});
 const normalize = <E>(cause: Cause.Cause<E>) =>

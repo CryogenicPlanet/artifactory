@@ -1,3 +1,4 @@
+import { rehearsalReportHeader } from "@comms/protocol/headers";
 import { Effect, Schema, Stream } from "effect";
 import type { HttpClientResponse } from "effect/unstable/http";
 
@@ -31,7 +32,7 @@ export type RehearsalReport = typeof RehearsalReport.Type | { readonly report_un
 /** Historical snapshots did not report suppression. Never pretend their absent report was empty. */
 export const readRehearsalReport = (response: HttpClientResponse.HttpClientResponse) =>
 	Effect.gen(function* () {
-		const version = response.headers["x-comms-rehearsal-report"];
+		const version = response.headers[rehearsalReportHeader];
 		if (version === undefined || version === "") return { report_unavailable: true } as const;
 		if (version !== "1") return yield* Effect.fail(new Error("Unsupported rehearsal report version"));
 		let bytes = 0;

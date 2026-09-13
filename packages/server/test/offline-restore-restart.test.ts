@@ -1,3 +1,4 @@
+import { assertionHeader, headerLabel } from "@comms/protocol/headers";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { readFile, rm, writeFile } from "node:fs/promises";
@@ -93,7 +94,7 @@ console.log('HOT'); setInterval(()=>{},1000);`,
 					cookie,
 					origin: "https://comms.test",
 					"content-type": "application/json",
-					"X-Comms-Assertion": proof,
+					[headerLabel(assertionHeader)]: proof,
 				},
 				body: JSON.stringify({ backup: saved.id }),
 			});

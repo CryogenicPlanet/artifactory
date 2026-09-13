@@ -1,3 +1,4 @@
+import { assertionHeader, scopesHeader } from "@comms/protocol/headers";
 import { sourcePut } from "./fixtures/source-put.ts";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -93,7 +94,7 @@ it("denies unauthenticated and read-only moves without changing a topic named mo
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": proof },
+				headers: { origin: "https://comms.test", "content-type": "application/json", [assertionHeader]: proof },
 				body: JSON.stringify({ decision: params.decision, scopes: params.scopes, long_lived: params.long_lived }),
 			})
 		).status,
@@ -108,7 +109,7 @@ it("denies unauthenticated and read-only moves without changing a topic named mo
 				headers: {
 					authorization: `Bearer ${access}`,
 					"content-type": "application/json",
-					"x-comms-scopes": "read,write",
+					[scopesHeader]: "read,write",
 				},
 				body: JSON.stringify({ to: "elsewhere" }),
 			})

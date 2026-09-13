@@ -1,4 +1,5 @@
 // Test-only HTTP controls exercise the real writer gate on an orphan's open SQLite connection.
+import { kernelProtocolHeader, writerEpochHeader } from "@comms/protocol/headers";
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Config, Console, Effect, Layer, Ref, Schema } from "effect";
@@ -59,7 +60,7 @@ export const run = () =>
 					"GET",
 					"/health",
 					HttpServerResponse.text("ok", {
-						headers: { "x-comms-writer-epoch": boot.epoch, "x-comms-kernel-protocol": "2" },
+						headers: { [writerEpochHeader]: boot.epoch, [kernelProtocolHeader]: "2" },
 					}),
 				),
 				HttpRouter.add(
@@ -67,7 +68,7 @@ export const run = () =>
 					"/_kernel/ping",
 					HttpServerResponse.empty({
 						status: 200,
-						headers: { "x-comms-writer-epoch": boot.epoch, "x-comms-kernel-protocol": "2" },
+						headers: { [writerEpochHeader]: boot.epoch, [kernelProtocolHeader]: "2" },
 					}),
 				),
 				HttpRouter.add("POST", "/_kernel/control", initialize.pipe(Effect.as(HttpServerResponse.text("ok")))),

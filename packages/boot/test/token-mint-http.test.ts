@@ -1,3 +1,4 @@
+import { agentHeader, assertionHeader, authKindHeader } from "@comms/protocol/headers";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -141,7 +142,7 @@ it("binds token mint to a human session, exact Origin, fresh verified passkey, a
 		[{ origin: headers.origin, "content-type": "application/json" }, 401],
 		[{ cookie, "content-type": "application/json" }, 403],
 		[{ ...headers, origin: "https://evil.test" }, 403],
-		[{ ...headers, "x-comms-auth-kind": "human", "x-comms-agent": "rahul", cookie: "" }, 401],
+		[{ ...headers, [authKindHeader]: "human", [agentHeader]: "rahul", cookie: "" }, 401],
 	] satisfies ReadonlyArray<readonly [Readonly<Record<string, string>>, number]>) {
 		expect((await mint(app.url, supplied)).status).toBe(status);
 		expect(
@@ -156,17 +157,17 @@ it("binds token mint to a human session, exact Origin, fresh verified passkey, a
 	}
 	expect((await mint(app.url, headers)).status).toBe(401);
 	const otherAction = await env.proof(app, cookie, "token.revoke", { family: `f_${"a".repeat(43)}` });
-	expect((await mint(app.url, { ...headers, "x-comms-assertion": otherAction })).status).toBe(401);
+	expect((await mint(app.url, { ...headers, [assertionHeader]: otherAction })).status).toBe(401);
 	for (const [origin, rpId, uv] of [
 		["https://evil.test", "comms.test", true],
 		["https://comms.test", "evil.test", true],
 		["https://comms.test", "comms.test", false],
 	] as const) {
 		const bad = await env.proof(app, cookie, "token.mint", input, origin, rpId, uv);
-		expect((await mint(app.url, { ...headers, "x-comms-assertion": bad })).status).toBe(401);
+		expect((await mint(app.url, { ...headers, [assertionHeader]: bad })).status).toBe(401);
 	}
 	const signed = await env.proof(app, cookie, "token.mint", input);
-	const authorized = { ...headers, "x-comms-assertion": signed };
+	const authorized = { ...headers, [assertionHeader]: signed };
 	for (const label of ["你好", "job\n17", "job 17"]) {
 		const invalid = { ...input, label };
 		expect((await app.post("/_boot/auth/challenge", { action: "token.mint", params: invalid }, cookie)).status).toBe(
@@ -192,7 +193,7 @@ it("binds token mint to a human session, exact Origin, fresh verified passkey, a
 		{ ...headers, authorization: `Bearer ${pair.access}` },
 	]) {
 		expect(
-			(await mint(app.url, { ...supplied, "content-type": "application/json", "x-comms-assertion": signed })).status,
+			(await mint(app.url, { ...supplied, "content-type": "application/json", [assertionHeader]: signed })).status,
 		).toBe(401);
 		expect(
 			(
@@ -218,7 +219,7 @@ it("replays one exact signed mint concurrently and across restart, refreshes dir
 		const body = { ...input, agent: "7codex", long_lived },
 			key = `mint-${long_lived}`;
 		const signed = await env.proof(app, cookie, "token.mint", { ...body, idempotency_key: key });
-		const headers = { ...human(cookie), "idempotency-key": key, "x-comms-assertion": signed };
+		const headers = { ...human(cookie), "idempotency-key": key, [assertionHeader]: signed };
 		const responses = await Promise.all(Array.from({ length: 4 }, () => mint(app.url, headers, body)));
 		for (const response of responses) expect(response.status).toBe(200);
 		const pairs = await Promise.all(
@@ -232,7 +233,7 @@ it("replays one exact signed mint concurrently and across restart, refreshes dir
 		expect(pair.refresh_expires_at - pair.expires_at).toBe((long_lived ? 83 : 29) * 86400000);
 		expect((await mint(app.url, headers, { ...body, label: "changed" })).status).toBe(409);
 		const replacement = await env.proof(app, cookie, "token.mint", { ...body, idempotency_key: key });
-		expect((await mint(app.url, { ...headers, "x-comms-assertion": replacement }, body)).status).toBe(401);
+		expect((await mint(app.url, { ...headers, [assertionHeader]: replacement }, body)).status).toBe(401);
 		expect((await mint(app.url, { ...headers, "idempotency-key": `${key}-changed` }, body)).status).toBe(401);
 		await app.stop();
 		app = await env.start();
@@ -248,7 +249,7 @@ it("replays one exact signed mint concurrently and across restart, refreshes dir
 		const revokeProof = await env.proof(app, cookie, "token.revoke", { family: pair.family });
 		const revoked = await fetch(`${app.url}/_boot/tokens/${pair.family}/revoke`, {
 			method: "POST",
-			headers: { ...human(cookie), "x-comms-assertion": revokeProof },
+			headers: { ...human(cookie), [assertionHeader]: revokeProof },
 			body: "{}",
 		});
 		expect(revoked.status).toBe(200);
@@ -272,7 +273,7 @@ for (const mode of ["logout", "expiry"])
 		const body = JSON.stringify(input);
 		const pending = request(`${app.url}/_boot/tokens`, {
 			method: "POST",
-			headers: { ...human(cookie), "x-comms-assertion": proof, "content-length": String(Buffer.byteLength(body)) },
+			headers: { ...human(cookie), [assertionHeader]: proof, "content-length": String(Buffer.byteLength(body)) },
 		});
 		test.onTestFinished(() => {
 			pending.destroy();

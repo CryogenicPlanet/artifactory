@@ -1,3 +1,4 @@
+import { assertionHeader, headerLabel } from "@comms/protocol/headers";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -65,7 +66,12 @@ it.for(["selection", "lock-release"] as const)(
 		await writeFile(armed, "armed");
 		const response = await fetch(`${app.url}/_boot/db/restore`, {
 			method: "POST",
-			headers: { cookie, origin: "https://comms.test", "content-type": "application/json", "X-Comms-Assertion": proof },
+			headers: {
+				cookie,
+				origin: "https://comms.test",
+				"content-type": "application/json",
+				[headerLabel(assertionHeader)]: proof,
+			},
 			body: JSON.stringify({ backup: saved.id }),
 		});
 		expect({ status: response.status, body: await response.json() }).toMatchObject({

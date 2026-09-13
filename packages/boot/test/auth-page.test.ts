@@ -1,3 +1,4 @@
+import { requestIdHeader } from "@comms/protocol/headers";
 import { runInNewContext } from "node:vm";
 import { expect, it } from "vitest";
 import { authClient } from "../src/auth-page.ts";
@@ -74,7 +75,7 @@ it.each([
 			if (scenario === "redirect") return new Response(null, { status: 302 });
 			return Response.json(
 				{ id: "private-challenge", options: scenario === "decode" ? {} : { challenge: "YWJj", user: { id: "YWJj" } } },
-				{ headers: { "x-comms-request-id": requestId } },
+				{ headers: { [requestIdHeader]: requestId } },
 			);
 		},
 	});
@@ -144,7 +145,7 @@ it("returns to the requested page after sign-in and refuses external targets", a
 			fetch: async () =>
 				Response.json(
 					{ id: "challenge", options: { challenge: "YWJj" } },
-					{ headers: { "x-comms-request-id": "1234567890abcdef1234567890abcdef" } },
+					{ headers: { [requestIdHeader]: "1234567890abcdef1234567890abcdef" } },
 				),
 		});
 		if (!submit) throw new Error("Missing submit handler");

@@ -1,3 +1,4 @@
+import { scopesHeader } from "@comms/protocol/headers";
 import { encodeError, policy } from "@comms/protocol/errors";
 import { makeExtensionEffects, type ExtensionEffects } from "./extension-effects.ts";
 import { reserved, requestPath, pattern, templatePattern, validateRoute } from "./extension-routes.ts";
@@ -152,7 +153,7 @@ const make = (directory: string, capabilities: CapabilityFactory, onWork: Effect
 						const request = yield* HttpServerRequest.HttpServerRequest;
 						const writable =
 							!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
-							(request.headers["x-comms-scopes"] ?? "").split(",").includes("write");
+							(request.headers[scopesHeader] ?? "").split(",").includes("write");
 						return {
 							...who,
 							...data(name, who, writable),
@@ -515,13 +516,13 @@ const make = (directory: string, capabilities: CapabilityFactory, onWork: Effect
 									route.extension,
 									who,
 									!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
-										(request.headers["x-comms-scopes"] ?? "").split(",").includes("write"),
+										(request.headers[scopesHeader] ?? "").split(",").includes("write"),
 								),
 								...capabilities(
 									route.extension,
 									who,
 									!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
-										(request.headers["x-comms-scopes"] ?? "").split(",").includes("write"),
+										(request.headers[scopesHeader] ?? "").split(",").includes("write"),
 								),
 								db: sql,
 								publicationFence: publication.fence.pipe(Effect.provideService(Lifecycle, lifecycle)),

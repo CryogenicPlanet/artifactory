@@ -1,3 +1,4 @@
+import { agentHeader, authKindHeader, instanceHeader, requestIdHeader, scopesHeader } from "@comms/protocol/headers";
 import { extensionCapabilities } from "../../src/ext/core/capabilities.ts";
 import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { BunRuntime, BunServices, BunHttpPlatform } from "@effect/platform-bun";
@@ -45,11 +46,11 @@ const run = Effect.gen(function* () {
 				HttpServerRequest.fromWeb(
 					new Request("http://localhost/api/failure", {
 						headers: {
-							"x-comms-agent": "test",
-							"x-comms-instance": "instance",
-							"x-comms-request-id": "request",
-							"x-comms-auth-kind": "agent",
-							"x-comms-scopes": "read",
+							[agentHeader]: "test",
+							[instanceHeader]: "instance",
+							[requestIdHeader]: "request",
+							[authKindHeader]: "agent",
+							[scopesHeader]: "read",
 						},
 					}),
 				),

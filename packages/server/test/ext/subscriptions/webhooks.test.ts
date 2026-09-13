@@ -1,3 +1,4 @@
+import { agentHeader, assertionHeader, deliveryIdHeader, instanceHeader } from "@comms/protocol/headers";
 import { sourcePut } from "../../fixtures/source-put.ts";
 import { createServer } from "node:http";
 import { once } from "node:events";
@@ -22,7 +23,7 @@ async function receiver(test: TestContext) {
 		request.on("data", (chunk: Buffer) => chunks.push(chunk));
 		request.on("end", () => {
 			received.push({
-				delivery: request.headers["x-comms-delivery-id"]?.toString(),
+				delivery: request.headers[deliveryIdHeader]?.toString(),
 				body: Schema.decodeSync(Schema.fromJsonString(Envelope))(Buffer.concat(chunks).toString("utf8")),
 				headers: request.headers,
 			});
@@ -94,7 +95,7 @@ it("persists registration receipts and checkpoints, replays uncertain delivery a
 	await expect.poll(() => fixture.sql("SELECT cursor FROM webhook_subscriptions")).toEqual([{ cursor: message.seq }]);
 	expect(await (await app.post("/api/subscriptions", input, cookie, "same")).json()).toEqual(first);
 	for (const item of target.received)
-		for (const key of ["authorization", "cookie", "x-boot-secret", "x-comms-agent", "x-comms-instance"])
+		for (const key of ["authorization", "cookie", "x-boot-secret", agentHeader, instanceHeader])
 			expect(item.headers[key]).toBeUndefined();
 	target.setStatus(503);
 	await app.post("/api/messages", { topic: "delivery", body: "retry later" }, cookie);
@@ -134,7 +135,7 @@ async function enroll(
 		(
 			await fetch(app.url + `/_boot/enroll/${enrollment.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": proof },
+				headers: { origin: "https://comms.test", "content-type": "application/json", [assertionHeader]: proof },
 				body: JSON.stringify({ decision: "approve", scopes, long_lived: false }),
 			})
 		).status,

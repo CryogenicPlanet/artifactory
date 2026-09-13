@@ -1,3 +1,4 @@
+import { tokenExpiresHeader } from "@comms/protocol/headers";
 import { bootRoute, checkBootOrigin } from "./boot-route.ts";
 import { Effect, Schema } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
@@ -20,7 +21,7 @@ export const tokenRoute = (auth: Auth["Service"], config: AuthConfig) =>
 				if (refresh) {
 					const input = yield* body(Schema.Struct({ refresh: Schema.String }));
 					const pair = yield* auth.refreshTokens(input.refresh, request.headers["idempotency-key"]);
-					return HttpServerResponse.jsonUnsafe(pair, { headers: { "x-comms-token-expires": String(pair.expires_at) } });
+					return HttpServerResponse.jsonUnsafe(pair, { headers: { [tokenExpiresHeader]: String(pair.expires_at) } });
 				}
 				yield* checkBootOrigin("tokenRevoke", request, config);
 				const session = yield* humanSession(auth, request);
@@ -29,7 +30,7 @@ export const tokenRoute = (auth: Auth["Service"], config: AuthConfig) =>
 				return HttpServerResponse.jsonUnsafe(
 					yield* auth.revokeFamily({ family }, yield* assertionProof(request), session.id),
 					{
-						headers: { "x-comms-token-expires": String(session.expiresAt) },
+						headers: { [tokenExpiresHeader]: String(session.expiresAt) },
 					},
 				);
 			}).pipe(Effect.map(HttpServerResponse.setHeader("cache-control", "no-store"))),

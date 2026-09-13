@@ -1,3 +1,4 @@
+import { kernelProtocolHeader, writerEpochHeader } from "@comms/protocol/headers";
 import { Database } from "bun:sqlite";
 import { existsSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -26,8 +27,8 @@ function serve() {
 				}
 				return new Response("ok", {
 					headers: {
-						"x-comms-writer-epoch": process.env.WRITER_EPOCH ?? "",
-						"x-comms-kernel-protocol": "2",
+						[writerEpochHeader]: process.env.WRITER_EPOCH ?? "",
+						[kernelProtocolHeader]: "2",
 					},
 				});
 			}

@@ -1,3 +1,4 @@
+import { assertionHeader, headerLabel } from "@comms/protocol/headers";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -52,7 +53,7 @@ it.for(["restoring", "working", "restored", "legacy-restoring"] as const)(
 					cookie,
 					origin: "https://comms.test",
 					"content-type": "application/json",
-					"X-Comms-Assertion": proof,
+					[headerLabel(assertionHeader)]: proof,
 				},
 				body: JSON.stringify({ backup: saved.id }),
 			});

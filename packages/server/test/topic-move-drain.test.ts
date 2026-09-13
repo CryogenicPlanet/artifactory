@@ -1,3 +1,4 @@
+import { agentHeader, authKindHeader, instanceHeader, requestIdHeader, scopesHeader } from "@comms/protocol/headers";
 import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -52,11 +53,11 @@ export default function(api) {
 		});
 	const identity = {
 		...secret,
-		"x-comms-agent": "codex",
-		"x-comms-instance": "family",
-		"x-comms-auth-kind": "agent",
-		"x-comms-scopes": "read",
-		"x-comms-request-id": "held",
+		[agentHeader]: "codex",
+		[instanceHeader]: "family",
+		[authKindHeader]: "agent",
+		[scopesHeader]: "read",
+		[requestIdHeader]: "held",
 	};
 	const aborted = new AbortController();
 	const pending = fetch(`${url}/api/late-write`, { headers: identity, signal: aborted.signal }).catch(() => null);

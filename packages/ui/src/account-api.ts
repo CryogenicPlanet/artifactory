@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { Effect, Schema } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { BoardError } from "./board-api.ts";
@@ -53,7 +54,7 @@ export const accountPost = (path: string, body: unknown, proof?: string, key?: s
 		HttpClientRequest.post(new URL(path, window.location.origin).href).pipe(
 			HttpClientRequest.bodyJsonUnsafe(body),
 			HttpClientRequest.setHeaders({
-				...(proof ? { "x-comms-assertion": proof } : {}),
+				...(proof ? { [assertionHeader]: proof } : {}),
 				...(key ? { "Idempotency-Key": key } : {}),
 			}),
 		),

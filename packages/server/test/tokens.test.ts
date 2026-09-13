@@ -1,3 +1,4 @@
+import { assertionHeader } from "@comms/protocol/headers";
 import { request } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { Schema } from "effect";
@@ -16,7 +17,7 @@ const enroll = async (app: Awaited<ReturnType<Awaited<ReturnType<typeof conversa
 		(
 			await fetch(`${app.url}/_boot/enroll/${e.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": proof },
+				headers: { origin: "https://comms.test", "content-type": "application/json", [assertionHeader]: proof },
 				body: JSON.stringify({ decision: "approve", scopes: ["read"], long_lived: false }),
 			})
 		).status,
@@ -114,7 +115,7 @@ it("requires a live human session at revocation commit, binds its signed family,
 						origin: "https://comms.test",
 						"content-type": "application/json",
 						"content-length": "2",
-						"x-comms-assertion": proof,
+						[assertionHeader]: proof,
 					},
 				},
 				(res) => {
@@ -158,7 +159,7 @@ it("requires a live human session at revocation commit, binds its signed family,
 	const call = (family = pair.family, origin = "https://comms.test") =>
 		fetch(`${app.url}/_boot/tokens/${family}/revoke`, {
 			method: "POST",
-			headers: { cookie, origin, "content-type": "application/json", "x-comms-assertion": proof },
+			headers: { cookie, origin, "content-type": "application/json", [assertionHeader]: proof },
 			body: "{}",
 		});
 	expect((await call(undefined, "https://evil.test")).status).toBe(403);

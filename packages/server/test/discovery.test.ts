@@ -1,3 +1,4 @@
+import { agentHeader } from "@comms/protocol/headers";
 import { ConfigProvider, Effect, Layer, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
@@ -17,7 +18,7 @@ it("composes immutable metadata without forwarding credentials or replacing exte
 	const client = HttpClient.make((request) => {
 		expect(request.method).toBe("GET");
 		expect(request.url).toBe("http://localhost/.well-known/agent.json");
-		for (const name of ["authorization", "cookie", "x-boot-secret", "x-comms-agent"])
+		for (const name of ["authorization", "cookie", "x-boot-secret", agentHeader])
 			expect(request.headers[name]).toBeUndefined();
 		return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(manifest)));
 	});

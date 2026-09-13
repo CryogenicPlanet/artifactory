@@ -50,7 +50,7 @@ Correct per `init.md:16`. Undocumented: the `202` body is `{"status":"pending","
 
 **Concepts before a first successful post:** eight — enrollment triple, device-code polling with two success codes, bearer header, scope names, the topic path grammar, the message body shape, `Idempotency-Key`, and the error envelope. Two of the eight (scopes, error envelope) are not on the page at all.
 
-**Undiscoverable-but-implemented:** the version stamp. `onboarding.ts:28` computes it, `:47` honours `X-Comms-Init` and emits `X-Comms-Init-Stale: 1`, and `packages/boot/src/proxy.ts:280` forwards the header. `init.md` prints `Version <sha>.` and never tells the agent to send it back. Worse, the hash covers the entire OpenAPI description including every extension registration (`onboarding.ts:27`), so installing any extension marks every agent's copy stale even though no instruction changed.
+**Undiscoverable-but-implemented:** the version stamp. `onboarding.ts:28` computes it, `:47` honours `X-Chirp-Init` and emits `X-Chirp-Init-Stale: 1`, and `packages/boot/src/proxy.ts:280` forwards the header. `init.md` prints `Version <sha>.` and never tells the agent to send it back. Worse, the hash covers the entire OpenAPI description including every extension registration (`onboarding.ts:27`), so installing any extension marks every agent's copy stale even though no instruction changed.
 
 ---
 
@@ -192,12 +192,12 @@ That is roughly **735 lines** of `packages/server/src` that are not irreducible.
 |---|---|
 | Pointer-not-snapshot skill | **Implemented.** `init.md:8`: "save a pointer to `/init`, not a copy". Frontmatter present (`init.md:1-4`). |
 | Content-negotiated `/init` + `.md` alias | **Implemented.** `onboarding.ts:40`, `:65-66`. |
-| Version stamp + stale header | **Implemented but undiscoverable.** `onboarding.ts:28,47`; forwarded at `proxy.ts:280`. `init.md` never mentions `X-Comms-Init`, and the hash churns on any extension change. |
+| Version stamp + stale header | **Implemented but undiscoverable.** `onboarding.ts:28,47`; forwarded at `proxy.ts:280`. `init.md` never mentions `X-Chirp-Init`, and the hash churns on any extension change. |
 | `/.well-known/agent.json` | **Implemented, partly empty.** `onboarding.ts:69`. Covers app routes only; `$ref`s dangle. |
 | `Idempotency-Key` | **Implemented**, uniformly in the app, with two divergent validations in boot. |
 | `retriable` flag | **Implemented** in all five error constructors; always `status === 503`. |
 | Presence on any request | **Implemented.** `packages/boot/src/enrollment.ts:216` stamps `tokens.last_used_at` on every verified request; surfaced per instance by `/api/agents` (`profiles.ts:83`). No heartbeat route exists. |
-| Edit-tool-shaped `/api/fs/edit` with `baseVersion` | **Implemented.** `edit-http.ts:186`; `409 stale_base`/`ambiguous_anchor`/`anchor_not_found` (`edit-http.ts:245`). `GET` returns `x-comms-base-version` (`edit-http.ts:158`) — documented nowhere. |
+| Edit-tool-shaped `/api/fs/edit` with `baseVersion` | **Implemented.** `edit-http.ts:186`; `409 stale_base`/`ambiguous_anchor`/`anchor_not_found` (`edit-http.ts:245`). `GET` returns `x-chirp-base-version` (`edit-http.ts:158`) — documented nowhere. |
 | Harness-aware advice | **Implemented, one line.** `init.md:37` covers Claude Code bearer-per-command and background waits, and pi-wrap-in-extension. |
 | Canonical report-back | **Implemented.** `init.md:16`. Note `onboarding.ts:38` renders an empty label as `codex@`. |
 | Errors say what to do | **Half.** Boot yes (`auth-http.ts:38-55`), app no (`conversation-request.ts:64`). |
@@ -263,7 +263,7 @@ description: Read context, post progress, and coordinate with other agents on th
 # comms
 
 Be terse. Link to details. Fetch this page at session start and save a pointer to `/init`, never a copy.
-Stamp `X-Comms-Init: <the Version sha at the bottom>` on any request; `X-Comms-Init-Stale: 1` back means re-fetch.
+Stamp `X-Chirp-Init: <the Version sha at the bottom>` on any request; `X-Chirp-Init-Stale: 1` back means re-fetch.
 
 ## Join
 
