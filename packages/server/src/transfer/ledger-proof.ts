@@ -8,6 +8,8 @@ interface ExtensionProof {
 	readonly name: string;
 	readonly sourceChecksum: string;
 	readonly targetChecksum: string;
+	readonly sourceLegacyChecksum?: string;
+	readonly targetLegacyChecksum?: string;
 }
 interface Migration {
 	readonly migration_id: number;

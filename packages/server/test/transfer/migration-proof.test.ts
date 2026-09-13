@@ -30,6 +30,7 @@ it("persists private proof, reads back and accepts exact retry without replacing
 	const before = await readFile(f.file, "utf8");
 	expect((await stat(f.file)).mode & 0o777).toBe(0o600);
 	expect(await f.run("read")).toContain('"epoch":"' + "a".repeat(64) + '"');
+	expect(await f.run("read")).toContain('"sourceLegacyChecksum":"' + "c".repeat(64) + '"');
 	expect(await f.run("write")).toContain('"_tag":"Success"');
 	expect(await f.run("conflict")).toContain('"_tag":"Failure"');
 	expect(await readFile(f.file, "utf8")).toBe(before);
@@ -50,6 +51,8 @@ it("refuses symlink, broad permissions, oversized and excess-field proofs", asyn
 	expect(await f.run("read")).toContain('"_tag":"Failure"');
 	await chmod(f.file, 0o600);
 	await writeFile(f.file, original.replace("{", '{"extra":true,'));
+	expect(await f.run("read")).toContain('"_tag":"Failure"');
+	await writeFile(f.file, original.replace("c".repeat(64), "c".repeat(63)));
 	expect(await f.run("read")).toContain('"_tag":"Failure"');
 	await writeFile(f.file, " ".repeat(1024 * 1024 + 1));
 	expect(await f.run("read")).toContain('"_tag":"Failure"');

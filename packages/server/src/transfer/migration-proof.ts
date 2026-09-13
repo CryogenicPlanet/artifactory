@@ -8,6 +8,8 @@ const Proof = Schema.Struct({
 	name: Schema.String,
 	sourceChecksum: Schema.String,
 	targetChecksum: Schema.String,
+	sourceLegacyChecksum: Schema.optionalKey(Schema.String),
+	targetLegacyChecksum: Schema.optionalKey(Schema.String),
 });
 export const MigrationProof = Schema.Struct({
 	selection: TransferSelection,
@@ -69,7 +71,13 @@ const canonical = (input: MigrationProof) =>
 				return yield* invalid();
 		if (
 			value.result.extensions.some((row) => !hash(row.checksum)) ||
-			value.result.extensionProofs.some((row) => !hash(row.sourceChecksum) || !hash(row.targetChecksum))
+			value.result.extensionProofs.some(
+				(row) =>
+					!hash(row.sourceChecksum) ||
+					!hash(row.targetChecksum) ||
+					(row.sourceLegacyChecksum !== undefined && !hash(row.sourceLegacyChecksum)) ||
+					(row.targetLegacyChecksum !== undefined && !hash(row.targetLegacyChecksum)),
+			)
 		)
 			return yield* invalid();
 		const compare = (

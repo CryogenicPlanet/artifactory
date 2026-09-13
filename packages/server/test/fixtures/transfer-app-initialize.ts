@@ -32,7 +32,7 @@ const program = Effect.gen(function* () {
 	const stale = yield* initializeTransferApp(sql, "b".repeat(64), source).pipe(Effect.result);
 	assert.equal(stale._tag, "Failure");
 	const result = yield* initializeTransferApp(sql, epoch, source);
-	assert.equal(result.core.at(-1)?.migration_id, 12);
+	assert.equal(result.core.at(-1)?.migration_id, 14);
 	assert.ok(result.extensions.length > 0);
 	assert.deepEqual(
 		result.extensionProofs.map(({ extension, name, targetChecksum }) => ({
@@ -47,7 +47,13 @@ const program = Effect.gen(function* () {
 	assert.equal(
 		portable.extensionProofs.find((row) => row.name === "system_cursor")?.sourceChecksum,
 		createHash("sha256")
-			.update("CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq BIGINT NOT NULL)")
+			.update(
+				JSON.stringify([
+					"CREATE TABLE IF NOT EXISTS system_cursor (id INTEGER PRIMARY KEY, seq BIGINT NOT NULL)",
+					false,
+					null,
+				]),
+			)
 			.digest("hex"),
 	);
 	assert.deepEqual(yield* initializeTransferApp(sql, epoch, source), result);

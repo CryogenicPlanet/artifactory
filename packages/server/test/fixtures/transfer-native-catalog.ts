@@ -68,7 +68,7 @@ for (const [store, settings] of [
 					yield* sql`INSERT INTO kernel_writer(singleton,epoch) VALUES (1,'catalog')`;
 				yield* initializeRemoteKernelSchema(sql, "catalog");
 				yield* initializeRemoteCore(sql, "catalog");
-				assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 12);
+				assert.equal((yield* sql`SELECT migration_id FROM core_migrations`).length, 14);
 			}
 			stage = "inventory";
 			const inventory = yield* sql.withTransaction(

@@ -145,18 +145,23 @@ Effect.gen(function* () {
 });
 ```
 
-Each engine executes and hashes its exact SQL string. You can replace an existing dialect selection with this declaration only if every previously executed string remains byte-for-byte unchanged, including whitespace. This declaration is your promise that the branches represent the same logical migration; transfer still verifies schema and data. It is not automatic SQL translation.
+Each engine executes its exact SQL string and hashes it with the protection options. You can replace an existing dialect selection with this declaration only if every previously executed string remains byte-for-byte unchanged, including whitespace. This declaration is your promise that the branches represent the same logical migration; transfer still verifies schema and data. It is not automatic SQL translation.
 
-Offline transfer loads only the frozen target factory and records its migration declarations. Every source and target receipt must match the corresponding declared branch, with exactly the same extension/name set. A removed or disabled historical migration, changed source branch, missing receipt or inconsistent duplicate declaration refuses transfer. Plain strings remain supported when both engines use that same SQL. Ledger checksums are never rewritten or copied to make a mismatch pass.
+Offline transfer loads only the frozen target factory and records its migration declarations. Every source and target receipt must match the corresponding declared branch and protection options, with exactly the same extension/name set. A removed or disabled historical migration, changed source branch, missing receipt or inconsistent duplicate declaration refuses transfer. Plain strings remain supported when both engines use that same SQL. Legacy SQL-only receipts remain accepted for migrations without `unprotect`, without inferring protection ownership. Ledger checksums are never rewritten or copied to make a mismatch pass.
 
 `yield* api.migrate(name, sql, {protect: true})` also durably protects that table from `/api/sql` writes, including writes reached through existing triggers or cascades. Protected migrations accept `CREATE TABLE [IF NOT EXISTS] name (...)` with a simple unquoted identifier (letters, numbers and underscores, beginning with a letter or underscore, at most 128 characters). Protection and migration commit together. A protected migration must create a new table in that transaction; an existing table is refused even with `IF NOT EXISTS` or different letter casing. Replaying an already-applied migration remains a no-op and cannot add protection to an old unprotected table. Protection survives factory failure, source removal, reload and restart. New registrations record the owning extension and creating migration. Another extension's `api.migrate` cannot change those protected tables. Existing registrations have unknown ownership; replaying old checksum receipts never guesses an owner.
 
 To retire protection, add a new migration to its owning extension:
 
 ```ts
-yield *
-	api.migrate("release_notes", "UPDATE example_notes SET body=body", {
-		unprotect: "example_notes",
+import { Effect } from "effect";
+import type { Api } from "../kernel/extension-api.ts";
+
+export default (api: Api) =>
+	Effect.gen(function* () {
+		yield* api.migrate("release_notes", "UPDATE example_notes SET body=body", {
+			unprotect: "example_notes",
+		});
 	});
 ```
 
