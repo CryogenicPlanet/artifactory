@@ -260,3 +260,17 @@ it.for(["prepare", "rollback"])(
 		else expect(await readdir(outside)).toEqual([]);
 	},
 );
+it("constructs before isolated layout recovery and validates the canonical parent only when preparing", async (test) => {
+	const app = await fixture(test);
+	expect(await app.run("isolated-construct")).toContain('"constructed"');
+	expect(await app.run("isolated-prepare")).toContain('"Failure"');
+	await mkdir(join(app.root, "elsewhere"));
+	await writeFile(join(app.root, "elsewhere/comms.db"), "foreign unchanged");
+	await symlink(join(app.root, "elsewhere"), join(app.root, "store"));
+	expect(await app.run("isolated-construct")).toContain('"constructed"');
+	expect(await app.run("isolated-prepare")).toContain('"Failure"');
+	expect(await readFile(join(app.root, "elsewhere/comms.db"), "utf8")).toBe("foreign unchanged");
+	await rm(join(app.root, "store"));
+	await mkdir(join(app.root, "store"));
+	expect(await app.run("isolated-prepare")).toContain('"files":[]');
+});

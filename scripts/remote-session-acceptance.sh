@@ -153,6 +153,10 @@ if d['engine']=='pg':
   d['database']='comms_schema_unaccent'+suffix; (p.parent/('unaccent-'+name+'.json')).write_text(json.dumps(d))
 PY
 # The intentionally truncated session-attribute case refuses before SQL admission.
+if [ "$engine" = pg ]; then
+  COMMS_PG_JSON_TEST_CONFIG="$private/client.json" \
+    node node_modules/vitest/vitest.mjs run packages/storage/test/remote-json.test.ts --maxWorkers=1 --reporter=verbose
+fi
 if [ "$attributes" != 32 ]; then
   if [ "$engine" = pg ]; then
     COMMS_UNACCENT_FRESH_CONFIG="$private/unaccent-fresh.json" \

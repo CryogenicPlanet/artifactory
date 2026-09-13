@@ -258,7 +258,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 						yield* recovery.prepare(yield* freshEpoch);
 					const epoch = yield* freshEpoch;
 					const report = yield* Effect.acquireUseRelease(
-						backup.rehearsal({ _tag: "file", filename: path.join(materialized, "rehearsal.db") }, epoch),
+						backup.rehearsal({ _tag: "file", filename: path.resolve(materialized, "rehearsal.db") }, epoch),
 						(clone) =>
 							Effect.gen(function* () {
 								// Read after cloning: the boot allocator includes pruned events and outstanding reservations.

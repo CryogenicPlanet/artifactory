@@ -95,6 +95,12 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 		return yield* Effect.die("Invalid app snapshot");
 	if (!/^[a-f0-9]{64}$/.test(config.attempt) || config.receipt !== `/data/attempts/${config.attempt}.closed`)
 		return yield* Effect.die("Invalid app receipt");
+	const descriptor = config.env.APP_STORE;
+	const parsed = yield* (
+		descriptor === undefined ? childStore(undefined, config.env.APP_DATABASE) : parseDescriptor(descriptor)
+	).pipe(Effect.orDie);
+	const store =
+		parsed._tag === "file" ? yield* childStore(descriptor, config.env.APP_DATABASE).pipe(Effect.orDie) : parsed;
 	yield* regular(config.entry);
 	// Saved pre-generation dependency stores remain referenced by legacy snapshots.
 	if (yield* fs.exists("/data/prepared")) yield* ownTree("/data/prepared", 1000, 1003, true);
@@ -106,16 +112,12 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 	}
 	if (yield* fs.exists(`${config.cwd}.board`)) yield* ownTree(`${config.cwd}.board`, 1000, 1003, true);
 	if (yield* fs.exists("/data/pages")) yield* sharePages("/data/pages");
-	const descriptor = config.env.APP_STORE;
-	if (!descriptor) return yield* Effect.die("Missing app store descriptor");
-	const parsed = yield* parseDescriptor(descriptor).pipe(Effect.orDie);
-	if (parsed._tag !== "file") {
+	if (store._tag !== "file") {
 		if (!config.remote || config.remote.dataDirectory !== "/data" || config.env.APP_DATABASE !== undefined)
 			return yield* Effect.die("Invalid remote app configuration");
 		return { ...config, env: { ...config.env, TMPDIR: "/data/runtime", HOME: "/data/runtime" } };
 	}
 	if (config.remote) return yield* Effect.die("Invalid remote app configuration");
-	const store = yield* childStore(descriptor, config.env.APP_DATABASE).pipe(Effect.orDie);
 	const filename = store.filename;
 	if (config.env.STATE !== "rehearsal") {
 		if (filename !== "/data/store/comms.db") return yield* Effect.die("Invalid live database");

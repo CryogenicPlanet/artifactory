@@ -133,14 +133,14 @@ export default (api: Api) =>
 
 `yield* api.migrate(name, sql)` runs a named migration while the factory loads. SQLite and PostgreSQL commit the migration and checksum receipt together under the current writer epoch. MySQL DDL commits implicitly; durable intent requires recovery after an interrupted migration. Repeating the same name, SQL and protection options is a no-op; changing them under an applied name fails loading. Use another name for the next migration. It accepts one SQL statement at most 64 KiB, without semicolons, comments or NUL, including inside literals. This restriction avoids Bun silently executing only the first statement of a script. Use multiple named migrations or the app's TypeScript migrations for larger changes. A retained migration function cannot run after factory registration closes. Rehearsal migrations never emit live events.
 
-`yield* api.migrate(name, sql, {protect: true})` also durably protects that table from `/api/sql` writes, including writes reached through existing triggers or cascades. Protected migrations accept `CREATE TABLE [IF NOT EXISTS] name (...)` with a simple unquoted identifier (letters, numbers and underscores, beginning with a letter or underscore, at most 128 characters). Protection and migration commit together. A protected migration must create a new table in that transaction; an existing table is refused even with `IF NOT EXISTS` or different letter casing. Replaying an already-applied migration remains a no-op and cannot add protection to an old unprotected table. Protection survives factory failure, source removal, reload and restart. New registrations record the owning extension and creating migration. Another extension's `api.migrate` cannot change those protected tables. Existing registrations have unknown ownership; replaying old checksum receipts never guesses an owner.
+`yield* api.migrate(name, sql, {protect: true})` also durably protects that table from `/api/sql` writes, including writes reached through existing triggers or cascades. Protected migrations accept `CREATE TABLE [IF NOT EXISTS] name (...)` with a simple unquoted identifier (letters, numbers and underscores, beginning with a letter or underscore, at most 128 characters). SQLite and PostgreSQL commit protection and migration together. MySQL records durable intent before implicit-commit DDL and reconciles protection with the receipt during recovery. A protected migration must create a new table in that transaction; an existing table is refused even with `IF NOT EXISTS` or different letter casing. Replaying an already-applied migration remains a no-op and cannot add protection to an old unprotected table. Protection survives factory failure, source removal, reload and restart. New registrations record the owning extension and creating migration. Another extension's `api.migrate` cannot change those protected tables. Existing registrations have unknown ownership; replaying old checksum receipts never guesses an owner.
 
 To retire protection, add a new migration to its owning extension:
 
 ```ts
-yield *
-	api.migrate("release_notes", "UPDATE example_notes SET body=body", {
-		unprotect: "example_notes",
+export default (api: Api) =>
+	Effect.gen(function* () {
+		yield* api.migrate("release_notes", "SELECT 1", { unprotect: "example_notes" });
 	});
 ```
 

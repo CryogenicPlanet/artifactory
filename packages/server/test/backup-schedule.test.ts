@@ -89,43 +89,48 @@ it.effect("permits freeze during a pending request and interrupts it when the ap
 	}).pipe(Effect.provide(lifecycleLayer)),
 );
 
-it.effect("uses the authenticated channel and allows a backup response beyond the usual channel timeout", () =>
-	Effect.gen(function* () {
-		const entered = yield* Deferred.make<void>();
-		const client = HttpClient.make((request, url) =>
-			Effect.gen(function* () {
-				expect(url.pathname).toBe("/_boot/db/backup");
-				expect(request.method).toBe("POST");
-				expect(request.headers["x-boot-secret"]).toBe("secret");
-				yield* Deferred.succeed(entered, undefined);
-				yield* Effect.sleep("2 seconds");
-				return HttpClientResponse.fromWeb(request, Response.json({ id: "saved", bytes: 10 }));
-			}),
-		);
-		yield* Effect.gen(function* () {
-			const boot = yield* BootChannel;
-			const request = yield* boot.backup.pipe(Effect.forkScoped);
-			yield* Deferred.await(entered);
-			yield* TestClock.adjust("2 seconds");
-			expect(yield* Fiber.join(request)).toBeUndefined();
-		}).pipe(
-			Effect.provide(channelLayer.pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, client)))),
-			Effect.provide(
-				ConfigProvider.layer(
-					ConfigProvider.fromUnknown({
-						WRITER_EPOCH: "epoch",
-						APP_STORE: "file:/unused.db",
-						APP_DATABASE: "/unused.db",
-						GENERATION: "1",
-						STATE: "live",
-						BOOT_URL: "http://localhost",
-						BOOT_SECRET: "secret",
-					}),
+for (const [budget, responseDelay] of [
+	["30 seconds", "25 seconds"],
+	["90 seconds", "95 seconds"],
+] as const)
+	it.effect(`allows the configured ${budget} copy budget and response framing`, () =>
+		Effect.gen(function* () {
+			const entered = yield* Deferred.make<void>();
+			const client = HttpClient.make((request, url) =>
+				Effect.gen(function* () {
+					expect(url.pathname).toBe("/_boot/db/backup");
+					expect(request.method).toBe("POST");
+					expect(request.headers["x-boot-secret"]).toBe("secret");
+					yield* Deferred.succeed(entered, undefined);
+					yield* Effect.sleep(responseDelay);
+					return HttpClientResponse.fromWeb(request, Response.json({ id: "saved", bytes: 10 }));
+				}),
+			);
+			yield* Effect.gen(function* () {
+				const boot = yield* BootChannel;
+				const request = yield* boot.backup.pipe(Effect.forkScoped);
+				yield* Deferred.await(entered);
+				yield* TestClock.adjust(responseDelay);
+				expect(yield* Fiber.join(request)).toBeUndefined();
+			}).pipe(
+				Effect.provide(channelLayer.pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, client)))),
+				Effect.provide(
+					ConfigProvider.layer(
+						ConfigProvider.fromUnknown({
+							WRITER_EPOCH: "epoch",
+							REHEARSAL_COPY_BUDGET: budget,
+							APP_STORE: "file:/unused.db",
+							APP_DATABASE: "/unused.db",
+							GENERATION: "1",
+							STATE: "live",
+							BOOT_URL: "http://localhost",
+							BOOT_SECRET: "secret",
+						}),
+					),
 				),
-			),
-		);
-	}),
-);
+			);
+		}),
+	);
 
 it.effect("refuses backup in rehearsal without constructing a live channel", () =>
 	Effect.gen(function* () {
