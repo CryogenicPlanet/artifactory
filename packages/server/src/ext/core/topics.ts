@@ -1,4 +1,3 @@
-import { isDescendant } from "@comms/storage/descendant";
 import { TopicSummary } from "@comms/protocol/topics";
 import { Context, Effect, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -23,12 +22,12 @@ export const makeTopics = (sql: SqlClient.SqlClient, read: Messages["Service"]["
 
 						const rows =
 							yield* sql`WITH visible_topics AS (${publishedTopics(sql, ceiling)}), visible_messages AS (${publishedMessages(sql, ceiling)}) SELECT t.path,t.name,t.meta,t.archived_at,
-   COALESCE((SELECT MAX(m.seq) FROM visible_messages m WHERE m.seq<=${ceiling} AND (m.topic=t.path OR ${isDescendant(sql, sql`m.topic`, sql`t.path`)})),0) AS last_seq,
-   (SELECT COUNT(*) FROM visible_messages m WHERE m.deleted_at IS NULL AND m.seq<=${ceiling} AND (m.topic=t.path OR ${isDescendant(sql, sql`m.topic`, sql`t.path`)})
-    AND NOT EXISTS(SELECT 1 FROM visible_topics a WHERE a.archived_at IS NOT NULL AND (m.topic=a.path OR ${isDescendant(sql, sql`m.topic`, sql`a.path`)}))
-    AND m.seq>COALESCE((SELECT MAX(r.seq) FROM reads r WHERE r.instance=${identity.instance} AND (r.topic='' OR r.topic=m.topic OR ${isDescendant(sql, sql`m.topic`, sql`r.topic`)})),0)) AS unread
-   FROM visible_topics t WHERE NOT EXISTS(SELECT 1 FROM visible_topics a WHERE a.deleted_at IS NOT NULL AND (t.path=a.path OR ${isDescendant(sql, sql`t.path`, sql`a.path`)})) AND (${path}='' OR t.path=${path} OR ${isDescendant(sql, sql`t.path`, sql`${path}`)})
-   AND (${archived ? 1 : 0}=1 OR t.path=${path} OR NOT EXISTS(SELECT 1 FROM visible_topics a WHERE a.archived_at IS NOT NULL AND (t.path=a.path OR ${isDescendant(sql, sql`t.path`, sql`a.path`)})))
+   COALESCE((SELECT MAX(m.seq) FROM visible_messages m WHERE m.seq<=${ceiling} AND (m.topic=t.path OR substr(m.topic,1,length(t.path)+1)=t.path||'/')),0) AS last_seq,
+   (SELECT COUNT(*) FROM visible_messages m WHERE m.deleted_at IS NULL AND m.seq<=${ceiling} AND (m.topic=t.path OR substr(m.topic,1,length(t.path)+1)=t.path||'/')
+    AND NOT EXISTS(SELECT 1 FROM visible_topics a WHERE a.archived_at IS NOT NULL AND (m.topic=a.path OR substr(m.topic,1,length(a.path)+1)=a.path||'/'))
+    AND m.seq>COALESCE((SELECT MAX(r.seq) FROM reads r WHERE r.instance=${identity.instance} AND (r.topic='' OR r.topic=m.topic OR substr(m.topic,1,length(r.topic)+1)=r.topic||'/')),0)) AS unread
+   FROM visible_topics t WHERE NOT EXISTS(SELECT 1 FROM visible_topics a WHERE a.deleted_at IS NOT NULL AND (t.path=a.path OR substr(t.path,1,length(a.path)+1)=a.path||'/')) AND (${path}='' OR t.path=${path} OR substr(t.path,1,length(${path})+1)=${path}||'/')
+   AND (${archived ? 1 : 0}=1 OR t.path=${path} OR NOT EXISTS(SELECT 1 FROM visible_topics a WHERE a.archived_at IS NOT NULL AND (t.path=a.path OR substr(t.path,1,length(a.path)+1)=a.path||'/')))
    ORDER BY last_seq DESC,t.path`.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(StoredTopic))));
 						const deletedTopics =
 							yield* sql`WITH visible_topics AS (${publishedTopics(sql, ceiling)}) SELECT path FROM visible_topics WHERE deleted_at IS NOT NULL`.pipe(
@@ -66,7 +65,7 @@ export const makeTopics = (sql: SqlClient.SqlClient, read: Messages["Service"]["
 							(row) => row.path !== path && row.path.split("/").length <= segments + depth,
 						);
 						const recent =
-							yield* sql`WITH visible_topics AS (${publishedTopics(sql, ceiling)}), visible_messages AS (${publishedMessages(sql, ceiling)}) SELECT * FROM visible_messages WHERE deleted_at IS NULL AND (${path}='' OR topic=${path}) AND seq<=${ceiling} AND (${path}<>'' OR NOT EXISTS(SELECT 1 FROM visible_topics a WHERE a.archived_at IS NOT NULL AND (visible_messages.topic=a.path OR ${isDescendant(sql, sql`visible_messages.topic`, sql`a.path`)}))) ORDER BY seq DESC LIMIT 100`.pipe(
+							yield* sql`WITH visible_topics AS (${publishedTopics(sql, ceiling)}), visible_messages AS (${publishedMessages(sql, ceiling)}) SELECT * FROM visible_messages WHERE deleted_at IS NULL AND (${path}='' OR topic=${path}) AND seq<=${ceiling} AND (${path}<>'' OR NOT EXISTS(SELECT 1 FROM visible_topics a WHERE a.archived_at IS NOT NULL AND (visible_messages.topic=a.path OR substr(visible_messages.topic,1,length(a.path)+1)=a.path||'/'))) ORDER BY seq DESC LIMIT 100`.pipe(
 								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(StoredMessage))),
 							);
 						return {

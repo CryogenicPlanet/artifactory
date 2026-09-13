@@ -62,6 +62,7 @@ it("lists backup metadata with a human session and rejects every Authorization h
 	expect(response.headers.get("x-content-type-options")).toBe("nosniff");
 	expect(response.headers.get("x-comms-token-expires")).toMatch(/^\d+$/);
 	expect(await response.json()).toEqual({
+		expected_store_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
 		items: [
 			{
 				id: "new",
@@ -71,6 +72,7 @@ it("lists backup metadata with a human session and rejects every Authorization h
 				taken_at: 20,
 				published_through: 123,
 				generation: 7,
+				provenance: { kind: "not_recorded", store_id: null },
 			},
 			{
 				id: "legacy",
@@ -80,10 +82,29 @@ it("lists backup metadata with a human session and rejects every Authorization h
 				taken_at: 10,
 				published_through: null,
 				generation: null,
+				provenance: { kind: "not_recorded", store_id: null },
 			},
 		],
 		next: null,
 	});
+
+	const expected = "12345678-1234-4234-8234-123456789abc";
+	await fixture.sql(`UPDATE backups SET legacy_store_id='${expected}' WHERE id='legacy'`, "boot.db");
+	expect(await (await fetch(url, { headers: { cookie } })).json()).toMatchObject({
+		items: [
+			{ id: "new", provenance: { kind: "not_recorded", store_id: null } },
+			{ id: "legacy", provenance: { kind: "legacy_adoption", store_id: expected } },
+		],
+	});
+	await fixture.sql(
+		"UPDATE backups SET legacy_store_id='postgres://user:secret@host/private' WHERE id='legacy'",
+		"boot.db",
+	);
+	const malformed = await (await fetch(url, { headers: { cookie } })).json();
+	expect(malformed).toMatchObject({
+		items: [{ id: "new" }, { id: "legacy", provenance: { kind: "legacy_adoption", store_id: null } }],
+	});
+	expect(JSON.stringify(malformed)).not.toContain("secret");
 	for (const method of ["POST", "PUT", "PATCH", "DELETE"])
 		expect((await fetch(url, { method, headers: { cookie, origin: "https://comms.test" } })).status).toBe(501);
 }, 20000);
