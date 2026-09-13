@@ -13,6 +13,10 @@ const main = Effect.gen(function* () {
 		Config.withDefault(installedDependencies),
 	);
 	// Optional extra configured origin for multi-origin authentication tests.
+	const primaryOrigin = Option.getOrElse(
+		yield* Config.option(Config.String("PRIMARY_ORIGIN")),
+		() => "https://comms.test",
+	);
 	const additional = yield* Config.option(Config.String("ADDITIONAL_ORIGIN"));
 	return yield* boot({
 		dataDirectory,
@@ -20,12 +24,14 @@ const main = Effect.gen(function* () {
 		entryFile: path.basename(entry),
 		dependenciesDirectory,
 		auth: {
-			rpId: "comms.test",
-			expectedOrigin: "https://comms.test",
-			additionalOrigins: Option.toArray(additional).map((origin) => ({
-				rpId: new URL(origin).hostname,
-				expectedOrigin: origin,
-			})),
+			rpId: new URL(primaryOrigin).hostname,
+			expectedOrigin: primaryOrigin,
+			additionalOrigins: Option.toArray(additional)
+				.flatMap((value) => value.split(","))
+				.map((origin) => ({
+					rpId: new URL(origin).hostname,
+					expectedOrigin: origin,
+				})),
 		},
 	}).pipe(
 		Effect.provide(

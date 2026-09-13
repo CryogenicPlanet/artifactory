@@ -46,6 +46,22 @@ export const originRelyingParty = (origin: string): RelyingParty | null => {
 	return validRelyingParty(party) ? party : null;
 };
 
+const loopbackOrIpHost = (hostname: string) =>
+	hostname === "localhost" ||
+	hostname.endsWith(".localhost") ||
+	hostname.startsWith("[") ||
+	/^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(hostname);
+
+/** A domain named on a passkey code. Loopback names and IP literals are refused unless the board itself runs on
+ * localhost: on a real board they would make boot fetch itself or probe its private network. */
+export const codeTargetParty = (origin: string, primary: RelyingParty): RelyingParty | null => {
+	const party = originRelyingParty(origin);
+	if (!party) return null;
+	const primaryHost = new URL(primary.expectedOrigin).hostname;
+	const localBoard = primaryHost === "localhost" || primaryHost.endsWith(".localhost");
+	return !localBoard && loopbackOrIpHost(new URL(origin).hostname) ? null : party;
+};
+
 /** The primary origin comes first: boot uses it wherever it generates an absolute URL. */
 export const configuredParties = (config: AuthConfig): ReadonlyArray<RelyingParty> => [
 	{ rpId: config.rpId, expectedOrigin: config.expectedOrigin },

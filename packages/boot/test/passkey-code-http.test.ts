@@ -30,7 +30,9 @@ it("accepts each configured origin, redeems a bound code only on its domain, and
 			...process.env,
 			ENTRY: join(seed, "child.ts"),
 			DATA_DIR: join(directory, "data"),
-			ADDITIONAL_ORIGIN: other.origin,
+			// A localhost-family primary lets this board name http://localhost as a new domain for its end-to-end proof.
+			PRIMARY_ORIGIN: "https://dev.localhost",
+			ADDITIONAL_ORIGIN: `${primary.origin},${other.origin}`,
 		},
 		stdio: ["ignore", "pipe", "pipe"],
 	});

@@ -3,7 +3,7 @@ import { layer as durableEventsLayer } from "../../src/events.ts";
 import assert from "node:assert/strict";
 import { BunServices } from "@effect/platform-bun";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
-import { Clock, Console, Context, Effect, Layer, Result } from "effect";
+import { Clock, Console, Context, Deferred, Effect, Exit, Layer, Result } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Auth, layer as authLayer } from "../../src/auth.ts";
 import { passkeyOriginMismatch, type RelyingParty } from "../../src/auth-origins.ts";
@@ -161,6 +161,16 @@ const run = Effect.gen(function* () {
 			"challenge_invalid",
 		);
 		for (const origin of ["https://new.test/path", "ftp://new.test", "https://user@new.test", "not an origin"])
+			yield* fails(auth.createPasskeyCode({ origin }, yield* codeProof({ origin }), session.id), "invalid_request");
+		// A board served from a real domain refuses loopback names and IP literals as new domains.
+		for (const origin of [
+			"http://localhost:8080",
+			"https://localhost",
+			"https://dev.localhost",
+			"https://127.0.0.1",
+			"https://[::1]",
+			"https://10.0.0.5",
+		])
 			yield* fails(auth.createPasskeyCode({ origin }, yield* codeProof({ origin }), session.id), "invalid_request");
 		const replayed = yield* codeProof({});
 		const issued = yield* auth.createPasskeyCode({}, replayed, session.id);
@@ -449,6 +459,37 @@ const run = Effect.gen(function* () {
 		yield* login(second, board);
 	} else if (scenario === "configured-passkeys") {
 		const issued = yield* create({ origin: added.expectedOrigin });
+		// One proof fetch per code: a concurrent redemption is refused before fetching and spends no attempt.
+		const gate = yield* Deferred.make<void>();
+		const fetched: string[] = [];
+		const slow = (url: string) =>
+			Effect.gen(function* () {
+				fetched.push(url);
+				yield* Deferred.await(gate);
+				return (yield* auth.originProofNonce(proofIdOf(url))) ?? (yield* new OriginProofError({ reason: "status" }));
+			});
+		const [winner, concurrent] = yield* Effect.all(
+			[
+				auth.startPasskeyCodeRedemption(issued.code, added.expectedOrigin, slow).pipe(Effect.result),
+				Effect.gen(function* () {
+					while (fetched.length === 0) yield* Effect.sleep("5 millis");
+					const refused = yield* auth
+						.startPasskeyCodeRedemption(issued.code, added.expectedOrigin, slow)
+						.pipe(Effect.result);
+					yield* Deferred.succeed(gate, undefined);
+					return refused;
+				}),
+			],
+			{ concurrency: "unbounded" },
+		);
+		assert.ok(Result.isSuccess(winner));
+		assert.ok(Result.isFailure(concurrent));
+		const refusal: unknown = concurrent.failure;
+		assert.ok(
+			typeof refusal === "object" && refusal !== null && "code" in refusal && refusal.code === "origin_unproven",
+		);
+		assert.equal(fetched.length, 1);
+		assert.deepEqual(yield* sql`SELECT failures, proven FROM passkey_codes`, [{ failures: 0, proven: 1 }]);
 		yield* redeem(issued.code, second, added);
 		// An unstamped passkey counts as the primary RP ID's.
 		yield* sql`UPDATE passkeys SET rp_id=NULL WHERE id=${first.id}`;
@@ -545,8 +586,22 @@ const run = Effect.gen(function* () {
 		assert.notEqual(recoveryCode, setupCode);
 		// The recovery passkey is only for the primary origin.
 		yield* fails(auth.at(other).startSetup(recoveryCode), "origin_invalid");
-		const recovery = yield* auth.startSetup(recoveryCode);
 		const third = authenticator();
+		// A setup whose transaction fails leaves the switch armed, and its unconsumed setup code still works.
+		const failing = yield* auth.startSetup(recoveryCode);
+		yield* sql`CREATE TRIGGER refuse_recovery BEFORE INSERT ON passkeys BEGIN SELECT RAISE(ABORT, 'disk failure'); END`;
+		assert.ok(
+			Exit.isFailure(
+				yield* auth.finishSetup(failing.id, third.registration(failing.options.challenge)).pipe(Effect.exit),
+			),
+		);
+		yield* sql`DROP TRIGGER refuse_recovery`;
+		assert.equal((yield* sql`SELECT id FROM passkeys`).length, 1);
+		assert.equal(yield* auth.setupOpen, true);
+		const retryCode = output.at(-1)?.split("code ")[1];
+		assert.ok(retryCode);
+		assert.equal(retryCode, recoveryCode);
+		const recovery = yield* auth.startSetup(retryCode);
 		yield* auth.finishSetup(recovery.id, third.registration(recovery.options.challenge));
 		assert.deepEqual(yield* sql`SELECT rp_id, label FROM passkeys WHERE id=${third.id}`, [
 			{ rp_id: "comms.test", label: "Recovery passkey" },

@@ -11,7 +11,7 @@ import {
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AuthError, type AuthConfig } from "./auth.ts";
-import { allowedParties, originRelyingParty, type RelyingParty } from "./auth-origins.ts";
+import { allowedParties, codeTargetParty, originRelyingParty, type RelyingParty } from "./auth-origins.ts";
 import type { AssertionProof } from "./enrollment.ts";
 import { Events } from "./events.ts";
 import { humanAgent } from "./human-agent.ts";
@@ -104,7 +104,7 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 				committed(
 					sql,
 					Effect.gen(function* () {
-						if (params.origin !== undefined && !originRelyingParty(params.origin))
+						if (params.origin !== undefined && !codeTargetParty(params.origin, config))
 							return yield* refuse("invalid_request");
 						yield* verify(yield* canonicalPasskeyCode(params, sessionId), proof);
 						const now = yield* Clock.currentTimeMillis;
@@ -196,6 +196,9 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 							code.origin !== null &&
 							!(yield* allowedParties(sql, config)).some((allowed) => allowed.expectedOrigin === party.expectedOrigin);
 						if (pending && code.proven !== 1) {
+							// One proof fetch per code at a time: a concurrent redemption would start another fetch.
+							if (code.proof_id !== null && code.proof_expires_at !== null && code.proof_expires_at > now)
+								return yield* refuse("origin_unproven");
 							const proofId = yield* random;
 							const nonce = yield* random;
 							yield* sql`UPDATE passkey_codes SET proof_id=${proofId}, proof_nonce=${nonce}, proof_expires_at=${now + originProofLifetimeMs} WHERE id=${code.id}`;

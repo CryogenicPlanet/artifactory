@@ -68,7 +68,8 @@ account page, optionally naming a new domain, and redeem it at `/auth/passkey-co
 that address. Redeeming a code bound to a domain adds the domain to the board's allowed
 origins. Before activating it, the board fetches a one-time value from the new domain to
 confirm it points here, so the domain must already reach the board through your host and
-DNS.
+DNS. Loopback names such as `localhost` and IP addresses are refused as new domains unless
+the board itself runs on localhost.
 
 ## Updating
 
@@ -104,8 +105,9 @@ moving from one subdomain to another and is not a workaround; it is how the chec
 If you are genuinely moving to a different registrable domain, or you have lost every
 passkey, reopen setup. On a managed host such as Railway, set `REOPEN_SETUP=1` on the service
 and redeploy. Boot warns in its log on every start while the variable is set and prints a
-setup code there. Open `/setup` on the configured origin, enter the code and create a
-passkey. Setup accepts one passkey per start and keeps your existing passkeys, sessions and
+setup code there. Open `/setup` on the primary origin, which is `PUBLIC_ORIGIN` or the first
+entry in `PUBLIC_ORIGINS`, enter the code and create a passkey; other configured origins are
+refused. Setup accepts one passkey per start and keeps your existing passkeys, sessions and
 domains. Then remove the variable. Only the operator can set it: the app and agents never
 see boot's environment.
 

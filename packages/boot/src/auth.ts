@@ -262,58 +262,62 @@ const makeAuth = (config: AuthConfig) =>
 			);
 		const finishSetup = (party: RelyingParty) => (id: string, response: RegistrationResponseJSON) =>
 			mutex.withPermit(
-				sql.withTransaction(
-					Effect.gen(function* () {
-						yield* lockBootWrite(sql);
-						const reopened = !(yield* noPasskeys);
-						if (reopened && !(yield* Ref.get(reopenAvailable))) return yield* refuse("setup_closed");
-						if (reopened && party.expectedOrigin !== config.expectedOrigin) return yield* refuse("origin_invalid");
-						const state = yield* Ref.get(setup);
-						const challenge = yield* takeChallenge(id, "setup");
-						if (!state || challenge.setup_generation !== state.generation) return yield* refuse("challenge_invalid");
-						const verified = yield* Effect.tryPromise({
-							try: () =>
-								verifyRegistrationResponse({
-									response,
-									expectedChallenge: challenge.challenge,
-									expectedOrigin: party.expectedOrigin,
-									expectedRPID: party.rpId,
-									requireUserVerification: true,
-								}),
-							catch: () => new AuthError({ code: "registration_invalid" }),
-						});
-						if (!verified.verified) return yield* refuse("registration_invalid");
-						if (challenge.expires_at <= (yield* Clock.currentTimeMillis)) return yield* refuse("challenge_invalid");
-						const credential = verified.registrationInfo.credential;
-						const publicKey = Buffer.from(credential.publicKey).toString("base64url");
-						const transports = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(
-							credential.transports ?? [],
-						);
-						const now = yield* Clock.currentTimeMillis;
-						yield* sql`INSERT INTO passkeys (id, public_key, counter, transports, label, created_at, rp_id)
-			VALUES (${credential.id}, ${publicKey}, ${credential.counter}, ${transports}, ${reopened ? "Recovery passkey" : "First passkey"}, ${now}, ${party.rpId})`;
-						yield* sql`DELETE FROM auth_challenges WHERE ceremony = 'setup'`;
-						// Clear before commit so interruption cannot retain the old setup code.
-						// A failed commit safely requires a fresh code on the next setup attempt.
-						yield* Ref.set(setup, null);
-						// Any completed setup uses up REOPEN_SETUP for this process.
-						yield* Ref.set(reopenAvailable, false);
-						if (reopened)
-							yield* events.writeBoot({
-								at: now,
-								type: "auth.setup_reopened",
-								level: "warn",
-								actor: humanAgent,
-								instance: null,
-								generation: 0,
-								request_id: null,
-								topic: null,
-								message_id: null,
-								payload: { origin: party.expectedOrigin, rp_id: party.rpId },
+				sql
+					.withTransaction(
+						Effect.gen(function* () {
+							yield* lockBootWrite(sql);
+							const reopened = !(yield* noPasskeys);
+							if (reopened && !(yield* Ref.get(reopenAvailable))) return yield* refuse("setup_closed");
+							if (reopened && party.expectedOrigin !== config.expectedOrigin) return yield* refuse("origin_invalid");
+							const state = yield* Ref.get(setup);
+							const challenge = yield* takeChallenge(id, "setup");
+							if (!state || challenge.setup_generation !== state.generation) return yield* refuse("challenge_invalid");
+							const verified = yield* Effect.tryPromise({
+								try: () =>
+									verifyRegistrationResponse({
+										response,
+										expectedChallenge: challenge.challenge,
+										expectedOrigin: party.expectedOrigin,
+										expectedRPID: party.rpId,
+										requireUserVerification: true,
+									}),
+								catch: () => new AuthError({ code: "registration_invalid" }),
 							});
-						return { credentialId: credential.id };
-					}),
-				),
+							if (!verified.verified) return yield* refuse("registration_invalid");
+							if (challenge.expires_at <= (yield* Clock.currentTimeMillis)) return yield* refuse("challenge_invalid");
+							const credential = verified.registrationInfo.credential;
+							const publicKey = Buffer.from(credential.publicKey).toString("base64url");
+							const transports = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(
+								credential.transports ?? [],
+							);
+							const now = yield* Clock.currentTimeMillis;
+							yield* sql`INSERT INTO passkeys (id, public_key, counter, transports, label, created_at, rp_id)
+			VALUES (${credential.id}, ${publicKey}, ${credential.counter}, ${transports}, ${reopened ? "Recovery passkey" : "First passkey"}, ${now}, ${party.rpId})`;
+							yield* sql`DELETE FROM auth_challenges WHERE ceremony = 'setup'`;
+							// Clear before commit so interruption cannot retain the old setup code.
+							// A failed commit safely requires a fresh code on the next setup attempt.
+							yield* Ref.set(setup, null);
+							if (reopened)
+								yield* events.writeBoot({
+									at: now,
+									type: "auth.setup_reopened",
+									level: "warn",
+									actor: humanAgent,
+									instance: null,
+									generation: 0,
+									request_id: null,
+									topic: null,
+									message_id: null,
+									payload: { origin: party.expectedOrigin, rp_id: party.rpId },
+								});
+							return { credentialId: credential.id };
+						}),
+					)
+					.pipe(
+						// Only a committed setup uses up REOPEN_SETUP for this process; a failed one leaves it armed. The mutex
+						// keeps a concurrent setup waiting until this is set, so it then finds setup closed.
+						Effect.tap(() => Ref.set(reopenAvailable, false)),
+					),
 			);
 		const startLogin = (party: RelyingParty) =>
 			mutex.withPermit(

@@ -200,7 +200,7 @@ const routes = [
 		"post",
 		["/_boot/auth/passkey-code/options"],
 		"public",
-		"Start code redemption with {code}, formatted SELECTOR-SECRET (12 and 16 hex characters, case-insensitive), and exact Origin: an allowed origin, or the origin the code is bound to. Refuses bearer credentials and boards with no passkey. A malformed code, an unknown selector, or an origin that is neither allowed nor bound gets one identical passkey_code_invalid refusal and spends nothing; from the third wrong secret for the live selector, redemption locks for 60 seconds, doubling per further wrong secret, and the code survives until it expires. A code bound to a domain not yet allowed first has the board GET a one-time proof from that domain (https, no redirects, 5 seconds); if the domain does not serve it, redemption is refused with origin_unproven and spends no attempt.",
+		"Start code redemption with {code}, formatted SELECTOR-SECRET (12 and 16 hex characters, case-insensitive), and exact Origin: an allowed origin, or the origin the code is bound to. Refuses bearer credentials and boards with no passkey. A malformed code, an unknown selector, or an origin that is neither allowed nor bound gets one identical passkey_code_invalid refusal and spends nothing; from the third wrong secret for the live selector, redemption locks for 60 seconds, doubling per further wrong secret, and the code survives until it expires. A code bound to a domain not yet allowed first has the board GET a one-time proof from that domain (https, no redirects, 5 seconds); if the domain does not serve it, redemption is refused with origin_unproven and spends no attempt. One proof fetch runs per code at a time; a concurrent redemption gets origin_unproven.",
 	],
 	[
 		"post",
@@ -261,7 +261,7 @@ const routes = [
 		"post",
 		["/_boot/auth/passkey-code"],
 		"human",
-		`Create a one-time add-passkey code with {origin?}, exact Origin and a fresh passkey.code ${headerLabel(assertionHeader)} bound to that body. Returns {code,origin,expires_at} once; the code lasts 10 minutes and replaces any earlier code. An origin (https, or http://localhost; RP ID is its hostname) stays pending and grants nothing until the code is redeemed from it. The host must already route that domain to this board.`,
+		`Create a one-time add-passkey code with {origin?}, exact Origin and a fresh passkey.code ${headerLabel(assertionHeader)} bound to that body. Returns {code,origin,expires_at} once; the code lasts 10 minutes and replaces any earlier code. An origin (https; RP ID is its hostname; loopback names and IP addresses only when the board itself runs on localhost) stays pending and grants nothing until the code is redeemed from it. The host must already route that domain to this board.`,
 	],
 	["delete", ["/_boot/auth/passkey-code"], "human", "Revoke the live add-passkey code with {} and exact Origin."],
 	[
