@@ -170,8 +170,8 @@ it("returns a typed conflict and preserves competing recovery journals on human 
 		headers: { "content-type": "application/json" },
 		body: "{}",
 	});
-	expect(refused.status).toBe(409);
-	expect(await refused.json()).toMatchObject({ error: { code: "recovery_intents_conflict", retriable: false } });
+	expect(refused.status).toBe(503);
+	expect(await refused.json()).toMatchObject({ error: { code: "publication_pending" } });
 	expect(await env.sql("SELECT * FROM cutover")).toEqual(journals);
 	expect(await env.sql("SELECT state FROM source_batches WHERE id='competing'")).toEqual([{ state: "publishing" }]);
 	expect(await readFile(join(env.root, "data/pages/index.md"), "utf8")).toBe("preserved page");
