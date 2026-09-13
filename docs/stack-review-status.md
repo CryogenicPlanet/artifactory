@@ -1,8 +1,26 @@
 # Database stack review status
 
-Read this alongside the [build plan](build-plan.md). This is a triage checkpoint, not a claim that reviewers have resolved their comments. Earlier accepted checkpoints include #7 `ddf0c67`, #8 `1739ee7` and runtime #9 `a6db9c5`. Current evidence distinguishes exact local `4587a6c`, transfer CI tested merge `058c278` and runtime repair tested merge `03d899a`; all top acceptance checks and the subsequent keeper-fixture image rerun pass at their named tested merges. Earlier #2–4 named fixes remain checkpoint-scoped. No new reviews were found at this acceptance checkpoint. Earlier #2–4 statuses below remain scoped to their named fixes. Subsequent worker commits require integration and verification before changing a status here. No tests were run for this audit.
+Read this alongside the [build plan](build-plan.md). The current review wave is **not accepted yet**. Isolated fixes and lower-stack compositions below must still reach the combined runtime/transfer checkout and its acceptance checks. Historical green results remain valid only for their named commits.
 
-**Statuses:** **pending** needs a fix, decision, evidence or disclosure; **already fixed** has evidence in the named pushed layer; **runtime-only** has implementation in the separate runtime checkout but does not resolve the lower PR; **disagreement** identifies a review premise that needs clarification rather than silently changing behavior.
+**Statuses:** **pending** requires implementation or verification; **frozen** identifies a committed worker handoff; **composed below** identifies a lower-layer composition, not final stack acceptance; **already fixed** refers to the recorded accepted checkpoint. A supported disagreement is an explicit disposition, not reviewer approval.
+
+## Current review wave
+
+| Group | Committed work and remaining dependency |
+| --- | --- |
+| PR1 item 44 | Mention delimiters and extension root marking: frozen `d98628b`, base composition `debe90e`. |
+| PR1 item 45 | Refuse legacy state before upgrade and retain byte-budget maintenance: frozen `d023281`, base composition `70964d5`. |
+| PR1 item 46 | **Pending:** safe human revert admission and ownerless pages-publication repair. Preserve pending journal ownership and report committed operation separately from recovery failure. |
+| PR1 item 48 | **Pending:** target-aware protection and extension/migration lifecycle. Core rung 13, portable histories and transfer inventories require composition and acceptance; never renumber existing rungs. |
+| PR1 item 49 | Reserved-route dispatch alongside rollback-only KV probe: frozen `f40eaa0`, base composition `b6672b8`. |
+| PR1 item 50 | Base compositions: empty-page pacing/conditional PUT help `0f13c21`, batched public paths `5d087de`, accepted-cleanup diagnostics `1bcf41f`. Final audit still needs the named examples, repair response, recovery-ladder total-budget disposition and the reason for both cleanup authorization checks. |
+| Retention follow-through | Request diagnostics evict before lifecycle history `a1d2eaa`; no calendar expiry of source-revert outcomes `23db345`. |
+| Lower layers | Descriptor fixture `29d05a3`; identity composition `f3117fb`; DbOps composition `a5a981d`; portable caller composition `a9c510a`. These are separate from the accepted runtime checkpoint. |
+| Shared fixtures and lease accounting | Frozen `e60a424` consolidates scoped memory stores; `ea3cc83` measures guarded leases and documents read/freeze cost arithmetic. |
+
+[PR1 fourth review](https://github.com/CryogenicPlanet/artifactory/pull/1#issuecomment-5643136461) supplies items 44–50. Subsequent user direction accepts the ownership decisions behind 35/36/47: boot-only lifecycle/request diagnostics, no convenience calendar pruning or retired topic-move coordinator, and retained source versioning/safe revert. Unsupported legacy stores still need safe refusal and budget maintenance. Owner design files remain unchanged.
+
+Direct DDL, MySQL views/triggers and failed-clone retention are broader design disagreements, not substitutes for the concrete unresolved review items above. Full four-engine suite parity also exceeds the review's native dialect/default remote execution request. Keep broader build obligations separate from review closure.
 
 ## Review inventory
 
@@ -31,9 +49,9 @@ All rows refer to the [PR #2 review](https://github.com/CryogenicPlanet/artifact
 | Mutable authoritative store pointer | **Runtime-only implemented.** The service reads durable `app_store_database`/adoption state; restore pointer and phase update in the boot transaction before prepare/launch. No extra mutable wrapper is needed. |
 | PR body names stale validation head | **Disclosure complete in [PR #2](https://github.com/CryogenicPlanet/artifactory/pull/2).** Its body distinguishes descriptor checkpoint `d062269`, reviewed `1ef641e` with two later test-only commits, and current `576476f` validation. |
 | Heading fixture repair predates descriptor work | **Code and disclosure complete.** The PR #2 body identifies `d6509bf` as a stale base `/init` assertion repair, not descriptor behavior. |
-| Fixture consolidation, including `:memory:` | **Partly implemented in current runtime.** Shared engine-selected fixtures and a shared focused behavior group are integrated; this is not conversion or acceptance of the entire suite under every engine. Remaining consolidation/design reconciliation stays open. |
+| Fixture consolidation, including `:memory:` | **Frozen follow-up `e60a424`.** Scoped memory-store construction is consolidated alongside existing shared SQLite/PGlite/native groups. Physical SQLite fixtures remain physical tests; no full four-engine suite claim. |
 | Design list/path/error-code drift | **Package/code disclosure complete; broader API reconciliation remains open.** PR #2 names `packages/storage/src/store.ts` and `store_descriptor_mismatch`, and distinguishes deferred runtime methods. Owner design files remain unchanged. |
-| New lint warning and tab-sensitive legacy fixture synthesis | **Lint already fixed** in `576476f` with `filterOrFail`; tab-sensitive fixture maintenance remains pending. Retain a loud failure if instrumentation no longer applies; do not weaken the compatibility scenario. |
+| New lint warning and tab-sensitive legacy fixture synthesis | **Lint already fixed** in `576476f`; **frozen `29d05a3`** replaces tab-sensitive synthesis with a genuine pre-descriptor generation fixture. Combined acceptance remains pending. |
 | Keeper acceptance caveat | **Already available for PR #2 `576476f` as separate CI evidence.** Later stack heads need their own verification; ordinary unit tests alone do not execute the privileged image path. |
 
 ## PR #3: identity
@@ -46,13 +64,13 @@ All rows refer to the [PR #3 review](https://github.com/CryogenicPlanet/artifact
 | Identity refusal prevents journal recovery and disarms restore | **SQLite repair already implemented in lower #3 `c4e4bd2`.** Offline restore preserves exact before-images or original absence before installing a matching backup; journal recovery precedes a new identity reservation. Remote repair belongs to #9 and its separately recorded native/image acceptance. |
 | Abandoned `.restore-*` copies and early legacy stamps | **Already fixed** in #3: deterministic staging reclamation and completed-adoption-only, NULL-guarded legacy provenance. Legacy fixed-path residue was a distinct finding, fixed separately below. |
 | Legacy `<store>.restore` residue remains forever | **Already fixed** in `2ebc95e`: known legacy staging and sidecars reclaimed after positive closure. |
-| Foreign identity reported as missing; identity absent from diagnostics | **Runtime diagnostics fixed** in `50122ca`: authenticated diagnostics include safe observed/expected UUID and selection/adoption details. Modern backup catalogue UUID provenance is explicitly `not_recorded`; do not populate legacy provenance to simulate it. |
+| Foreign identity reported as missing; identity absent from diagnostics | **Composed below in `f3117fb`**, following runtime `50122ca`: safe observed/expected UUID and selection/adoption diagnostics. Modern backup provenance stays `not_recorded`; do not fabricate it through legacy fields. |
 | Pre-upgrade refusal unreachable through HTTP | **Already fixed** in `2ebc95e`: permanent `boot_identity_upgrade_pending` HTTP 409 preserves old schema/journals. |
 | Shape probe emits bare SQL errors and differs by adoption mode | **Already fixed** in `2ebc95e`: populated stores receive consistent shared-table shape probes with coded refusal. |
-| Existing populated app store adopted under fresh boot state | **Partly fixed** in `2ebc95e`: shared outbox/batch high-water evidence ahead of boot refuses adoption. This does not prove freshness or discover domain rows after shared evidence has been pruned. |
+| Existing populated app store adopted under fresh boot state | **Composed below:** `fcbb7a9`, included in `f3117fb`, refuses legacy app adoption without its initialized boot marker, including when shared evidence was pruned. It does not inspect product tables or promise same-UUID freshness detection. |
 | Editable migrations can destroy protected identity/recovery tables | **Integrated in runtime.** SQLite and portable protected migration-state checks now run at the named boundaries (`aae09da`, 25 focused cases). Trusted code must return for validation; explicit commits, independent connections and arbitrary executable dependencies remain outside this guard. Lower-layer editable-receipt protection is now composed in `c30178a`. |
 | Same UUID does not prove freshness of a self-copy | **Already disclosed** in `2ebc95e` storage documentation: identity proves the board, not recency; use explicit restore rather than replacing same-UUID files. |
-| Withdrawal status change omitted; failure reason remains empty | **Runtime fixed** in `50122ca`: stale live PID/port invalidation is retained and `route_withdrawn` supplies a bounded reason. |
+| Withdrawal status change omitted; failure reason remains empty | **Composed below in `f3117fb`**, following runtime `50122ca`: stale PID/port invalidation and bounded `route_withdrawn` reason. |
 | Historical Linux held-marker failures unexplained | **Disclosure complete in [PR #3](https://github.com/CryogenicPlanet/artifactory/pull/3); historical cause remains unknown.** The body explicitly separates later green checks from the unexplained held-marker failures. No retrospective diagnosis is claimed. |
 
 ## PR #4: backup operations
@@ -62,12 +80,12 @@ All rows refer to the [PR #4 review](https://github.com/CryogenicPlanet/artifact
 | Finding | Status and next action |
 | --- | --- |
 | Rung 18 skips the v17 pending-recovery upgrade guard | **Already fixed** in `612d4ac`: guard extends through v17 before migration, with focused schema acceptance. |
-| Step-2 API/copy budgets are absent or undisclosed | **Bounded SQLite copy implemented; remaining contract/acceptance work.** Keeper-owned copy lifetimes and deadlines are composed in `ef47bba`; corrected ownership fixtures pass eleven cases. Reconcile remaining deferred API names/result-descriptor promises with actual journal selection behavior; no inert wrapper or focused test establishes full runtime/image acceptance. |
+| Step-2 API/copy budgets are absent or undisclosed | **Composed below in `a5a981d`:** `730c9c8` returns the durable SQLite selection; `3d3bbac` maps the actual API and layer responsibilities. Existing `ef47bba` supplies bounded keeper-owned copies. New combined acceptance remains pending. |
 | Backup inserts and capture response omit engine | **Already fixed** in `612d4ac`: explicit service dialect/provenance on all inserts and capture response, included in focused acceptance. |
 | Rollback fabricates SQLite engine | **Already fixed** in `612d4ac`: forwards catalogued engine; foreign provenance remains refused. |
 | Foreign-engine rows consume an unprunable budget | **Already fixed** in `612d4ac`: foreign artifacts stay preserved and are excluded from this engine’s catalogue budget; physical headroom still counts their bytes. |
 | Artifact naming bypasses `backupPath` and lacks engine parameter | **Already fixed** in `612d4ac`: engine-aware `.db`/`.dump`/`.sql` naming is shared by writers, validators and retention. |
-| Descendant helper belongs in dialect tranche; one statement mixes forms | **Pending scope decision; runtime-only conversion.** Portability work exists separately, but that does not remove the helper from #4 or verify all callers. Complete literal-prefix semantics and non-ASCII behavior tests in its intended layer. |
+| Descendant helper belongs in dialect tranche; one statement mixes forms | **Composed below:** `5d14a34` removes the extraction from the SQLite backup tranche; `a9c510a` completes portable callers in the dialect layer with literal/non-ASCII coverage. |
 | Image/Linux/QEMU acceptance missing; production delta claim wrong | **Already fixed** at pushed `7d47607`, as acknowledged by the new review. Do not substitute the separate 848-test/8-skip run for this PR's own result. |
 | Old ledgers show +38 lines and failed historical CI | **Disclosure complete in [PR #4](https://github.com/CryogenicPlanet/artifactory/pull/4).** Its body labels the old line-count estimate and failed CI entries as superseded historical status, not current measurements or newly diagnosed causes. Preserve those historical entries. |
 | Schema rungs taken before unresolved base migrations | **Pending integration discipline.** Preserve IDs and validate complete histories/compatibility; a textual restack cannot establish migration correctness. |
@@ -98,20 +116,20 @@ All rows refer to the [PR #4 review](https://github.com/CryogenicPlanet/artifact
 | Main and KV snapshot helpers | **Integrated in lower and runtime** through `ac3fada`, with nested snapshot boundary fixtures. |
 | Remote dialect edge semantics unexecuted | **Coverage integrated** in `ac3fada`: literal/non-ASCII prefixes, JSON/null/arrays, published images, nested snapshots and production topic moves. Do not claim exhaustive topic/tag/mention coverage. |
 | MySQL `incoming_seq` alias | **Allegation not substantiated.** Native move/collision fixtures preserve higher cursors; `dc8e1f0` fixes reserved `reads` quoting, not the alleged alias defect. |
-| Public paths use SQLite descendants | **Runtime-only behavior fixed.** Lower remains open; obsolete helper/export cleanup is separate. |
-| Null-safe event exclusion | **Runtime-only fixed** with `distinctFrom`; lower remains open. |
-| GLOB/planner hints | **Runtime-only behavior fixed.** Unused helper cleanup is separate from the SQL correctness issue. |
-| Singleton mutation/edit admission locks | **Runtime-only fixed** at allocator/lock boundaries; lower remains open. |
-| Prefix rewrites use SQLite concatenation | **Runtime-only fixed** in events/public paths; lower remains open. |
-| KV/system upserts invalid on MySQL | **KV already fixed in lower #8 `1739ee7`; system caller is runtime-only.** `extension-data.ts` uses the MySQL `ON DUPLICATE KEY` branch, while lower `system.ts` retains `ON CONFLICT`. The runtime conversion does not change the lower system caller; no generic helper is required. |
+| Public paths use SQLite descendants | **Composed below in `a9c510a`:** portable public-path callers replace the obsolete SQLite path; runtime equivalent already existed. |
+| Null-safe event exclusion | **Composed below in `a9c510a`** with `distinctFrom`; runtime equivalent already existed. |
+| GLOB/planner hints | **Composed below in `a9c510a`:** portable prefix predicates and removal of SQLite planner hints. |
+| Singleton mutation/edit admission locks | **Composed below in `a9c510a`** at allocator/edit-lock admission boundaries. |
+| Prefix rewrites use SQLite concatenation | **Composed below in `a9c510a`** in events/public paths. |
+| KV/system upserts invalid on MySQL | **KV already fixed in lower `1739ee7`; system composed below in `a9c510a`.** Both choose supported MySQL upsert syntax; no generic wrapper is required. |
 | MySQL REPEATABLE READ not asserted | **Assertion and negative coverage implemented in lower #8 `1739ee7`.** Lease admission checks isolation; the native session fixture changes all four leases to READ COMMITTED and verifies six refusals with `remote_isolation_unsupported`, no body entry and unchanged registration. [Guarded native session CI](https://github.com/CryogenicPlanet/artifactory/actions/runs/34691252728) passes. |
 | URL redaction before persisted stderr | **Runtime-only fixed** at reviewed child/supervisor boundaries with scoped redaction and adversarial coverage. |
 | TLS/private CA configuration | **Runtime verified** at `1b883b6`: actual private-CA TLS acceptance passes, including correction of the observed MySQL hostname defect. Unsupported client-certificate/servername configuration remains separate. |
-| Lease/registration latency absent from budget | **Local baseline measured; broader operational acceptance remains open.** The [benchmark](../scripts/native-database-benchmark.md) records PostgreSQL/MySQL reload freezes of 828/895ms and native dump/load samples, including 100,000 synthetic rows. These do not isolate lease-registration cost, establish managed-server budgets or measure complete transfer downtime. Preserve ownership checks. |
+| Lease/registration latency absent from budget | **Frozen `ea3cc83`:** actual PostgreSQL/MySQL lease samples separate first-session persistence, reused-session acknowledgment and retained leases; documented request arithmetic accounts for read/freeze deadlines. Local overhead excludes guardian IPC, TLS and remote network. This addresses missing mechanism/cost accounting without claiming managed-server capacity or weakening ownership checks. |
 | Historical red CI omitted | **Disclosure improved; historical causes not all proved.** Keep exact failed checkpoints separate from newer passes. |
 | PostgreSQL 18.6 versus pinned 17.11 | **Corrected documentation/evidence scope.** Native and pinned-image runs are separately identified; neither proves the other version. |
 
-## Runtime and transfer checkpoint
+## Accepted runtime and transfer checkpoint before this review wave
 
 Exact transfer integration `4587a6c` passes the combined full suite with actual Node 22.22.3 and two workers: **1,237 passed and 123 skipped (1,360 tests)**, across **278 passed files and 47 skipped (325 files)**, in **695.07s**. Check, build and fresh composition review pass. Transfer head `a8e96c2` at tested merge `058c278` also passes Linux with 1,237 tests passed and 123 skipped, across 278 passed files and 47 skipped, plus image, QEMU, both native parity groups, both boards and all twelve transfer scenarios. All twelve repair cases per engine also pass at that merge; all reported checks are green. The final documentation/keeper-fixture composition may start new CI runs, which retain their own tested-checkout attribution.
 
@@ -137,4 +155,4 @@ Historical failures remain evidence: `709ae2c` local full suite had 1,019 passed
 
 ## Acceptance before closing findings
 
-Each fix needs an exact pushed commit, focused evidence appropriate to failure cost, and integration review. Runtime-only implementations do not close lower-stack comments. Recheck GitHub heads and any new reviews before posting a response; do not mark all review comments resolved from this checklist. Current runtime, real-board and image acceptance is recorded above; transfer and remaining per-finding obligations remain in the build plan.
+Each fix needs an exact pushed commit, focused evidence appropriate to failure cost, and integration review. A runtime implementation alone does not close a lower-stack obligation; use the composed lower hashes above and their actual acceptance. Recheck GitHub heads and any new reviews before posting a response; do not mark all review comments resolved from this checklist. Current runtime, real-board and image acceptance is recorded above; transfer and remaining per-finding obligations remain in the build plan.
