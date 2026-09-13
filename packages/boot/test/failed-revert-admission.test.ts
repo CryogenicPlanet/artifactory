@@ -156,7 +156,7 @@ it("admits lock repair beside a stranded page-only publication without consuming
 		headers: { "content-type": "application/json" },
 		body: "{}",
 	});
-	expect(result.status).toBe(200);
+	expect(result.status).toBe(503);
 	expect(await result.json()).toMatchObject({
 		lock_committed: true,
 		lock: { holder_family: restarted.session.id },
