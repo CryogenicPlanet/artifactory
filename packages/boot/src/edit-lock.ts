@@ -1,3 +1,4 @@
+import { lockBootWrite } from "./boot-write-lock.ts";
 import { Context, Crypto, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Events } from "./events.ts";
@@ -175,6 +176,7 @@ const make = Effect.gen(function* () {
 		sql
 			.withTransaction(
 				Effect.gen(function* () {
+					yield* lockBootWrite(sql);
 					let lock = yield* read;
 					const now = (yield* DateTime.nowAsDate).getTime();
 					const transitions: Transition[] = [];
@@ -386,6 +388,7 @@ const make = Effect.gen(function* () {
 			),
 		recover: sql.withTransaction(
 			Effect.gen(function* () {
+				yield* lockBootWrite(sql);
 				const lock = yield* read;
 				const transitions: Transition[] = [];
 				if (lock?.cutover_in_flight) {

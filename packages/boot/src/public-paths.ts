@@ -1,3 +1,4 @@
+import { isDescendant, replacePrefix } from "@comms/storage/dialect";
 import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { EventRecord } from "./events.ts";
@@ -54,5 +55,5 @@ export const projectPublicPath = (sql: SqlClient, event: typeof EventRecord.Type
 	});
 
 export const movePublicPaths = (sql: SqlClient, from: string, to: string) =>
-	sql`UPDATE public_paths SET path=${to}||substr(path,length(${from})+1)
-		WHERE path=${from} OR substr(path,1,length(${from})+1)=${from}||'/'`;
+	sql`UPDATE public_paths SET path=${replacePrefix(sql, sql`path`, from, to)}
+		WHERE path=${from} OR ${isDescendant(sql, sql`path`, sql`${from}`)}`;
