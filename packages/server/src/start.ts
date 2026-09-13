@@ -1,6 +1,6 @@
-import { boot, launchRemoteRoot, databaseConfiguration } from "@comms/boot";
+import { boot } from "@comms/boot";
 import { BunHttpServer } from "@effect/platform-bun";
-import { Config, Effect, FileSystem, Layer, Path } from "effect";
+import { Config, Effect, Layer, Path } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 
 /** Launches the editable app through boot.
@@ -12,26 +12,6 @@ export const startServer = (browserOrigin?: string) =>
 			new URL(import.meta.url.endsWith(".ts") ? "../dist/runtime-seed" : "./runtime-seed", import.meta.url),
 		);
 		const dataDirectory = yield* Config.String("DATA_DIR").pipe(Config.withDefault("./data"));
-		const absoluteData = path.resolve(dataDirectory);
-		const selected = yield* databaseConfiguration(
-			path.join(absoluteData, "boot.db"),
-			path.join(absoluteData, "comms.db"),
-		);
-		const parent = yield* Config.Redacted("COMMS_REMOTE_ROOT_CONFIG").pipe(Config.withDefault(undefined));
-		if (selected._tag === "remote" && parent === undefined) {
-			yield* (yield* FileSystem.FileSystem).makeDirectory(absoluteData, { recursive: true, mode: 0o700 });
-			const exitCode = yield* launchRemoteRoot(selected, {
-				dataDirectory: absoluteData,
-				entry: yield* path.fromFileUrl(
-					new URL(import.meta.url.endsWith(".ts") ? "./main.ts" : "./main.js", import.meta.url),
-				),
-				env: browserOrigin
-					? { PUBLIC_ORIGIN: yield* Config.String("PUBLIC_ORIGIN").pipe(Config.withDefault(browserOrigin)) }
-					: {},
-			});
-			if (exitCode !== 0) return yield* Effect.die("Remote boot worker failed");
-			return;
-		}
 		const fetchOptions: RequestInit & { decompress: boolean } = { redirect: "manual", decompress: false };
 		const port = yield* Config.Port("PORT").pipe(Config.withDefault(8080));
 		const hostname = yield* Config.String("HOST").pipe(Config.withDefault("127.0.0.1"));

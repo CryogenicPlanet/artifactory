@@ -105,12 +105,8 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 	).pipe(Effect.orDie);
 	const store =
 		parsed._tag === "file" ? yield* childStore(descriptor, config.env.APP_DATABASE).pipe(Effect.orDie) : parsed;
-	if (
-		store._tag !== "file" &&
-		(!config.remote || config.remote.dataDirectory !== "/data" || config.env.APP_DATABASE !== undefined)
-	)
+	if (store._tag !== "file" && config.env.APP_DATABASE !== undefined)
 		return yield* Effect.die("Invalid remote app configuration");
-	if (store._tag === "file" && config.remote) return yield* Effect.die("Invalid remote app configuration");
 	yield* regular(config.entry);
 	// Saved pre-generation dependency stores remain referenced by legacy snapshots.
 	if (yield* fs.exists("/data/prepared")) yield* ownTree("/data/prepared", 1000, 1003, true);

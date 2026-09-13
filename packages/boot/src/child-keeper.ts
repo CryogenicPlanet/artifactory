@@ -1,4 +1,3 @@
-import { remoteChildGuardian } from "./remote-child-guardian.ts";
 import { childIdentity, prepareApp } from "./linux-ownership.ts";
 import { ChildConfiguration } from "./keeper-configuration.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
@@ -34,7 +33,7 @@ const keeper = Effect.gen(function* () {
 			return yield* Effect.die("Invalid app receipt");
 		// Preflight failure proves no editable subprocess was attempted. A spawn error does not.
 		yield* Effect.addFinalizer(() =>
-			spawnAttempted || supplied.remote
+			spawnAttempted
 				? Effect.void
 				: Effect.gen(function* () {
 						if (supplied.env.STATE === "rehearsal")
@@ -43,26 +42,7 @@ const keeper = Effect.gen(function* () {
 					}).pipe(Effect.orDie),
 		);
 	}
-	const prepared = isolated ? yield* prepareApp(supplied) : supplied;
-	if (prepared.remote && (prepared.env.APP_DATABASE !== undefined || !prepared.env.APP_STORE))
-		return yield* Effect.die("Invalid remote app configuration");
-	const guardian = prepared.remote
-		? yield* remoteChildGuardian(prepared.remote, prepared.env.APP_STORE ?? "", prepared.attempt, isolated).pipe(
-				Effect.catchTag("RemoteAuthenticationRejected", () =>
-					// Guardian persisted the terminal rejection after closing its initial acquisition scope.
-					// No editable process or registration endpoint has been created on this branch.
-					Console.error("remote_authentication_rejected").pipe(
-						Effect.andThen(receipt),
-						Effect.andThen(Effect.die("remote_authentication_rejected")),
-					),
-				),
-			)
-		: undefined;
-	const config = guardian ? { ...prepared, env: { ...prepared.env, ...guardian.env } } : prepared;
-	if (guardian)
-		yield* Effect.addFinalizer(() =>
-			spawnAttempted ? Effect.void : guardian.close(Effect.void).pipe(Effect.andThen(receipt), Effect.orDie),
-		);
+	const config = isolated ? yield* prepareApp(supplied) : supplied;
 	const stdio = yield* Stdio.Stdio;
 	const scope = yield* Scope.make();
 	return yield* Effect.uninterruptibleMask((restore) =>
@@ -117,8 +97,8 @@ const keeper = Effect.gen(function* () {
 			});
 			yield* Effect.addFinalizer(() =>
 				Effect.gen(function* () {
-					yield* guardian ? guardian.close(localClosure) : localClosure;
-					if (isolated && !guardian && config.env.STATE === "rehearsal")
+					yield* localClosure;
+					if (isolated && config.env.STATE === "rehearsal")
 						yield* fs.remove(`/data/rehearsals/${config.attempt}`, { recursive: true }).pipe(Effect.orDie);
 					yield* receipt;
 				}).pipe(Effect.ensuring(Scope.close(scope, Exit.void)), Effect.orDie),
