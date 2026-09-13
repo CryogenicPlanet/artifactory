@@ -109,7 +109,6 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	yield* Effect.gen(function* () {
 		const coordinator = yield* cutover(options, supervisor);
 		const reverts = yield* sourceReverts;
-		yield* reverts.retain.pipe(Effect.forkScoped);
 		const restore = yield* databaseRestore(supervisor);
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* Events;
