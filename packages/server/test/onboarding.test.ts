@@ -79,6 +79,32 @@ it("serves editable public orientation with negotiated HTML, a source version an
 		expect(discovery.paths[path].get.security).toEqual([]);
 		expect(discovery.paths[path].get["x-comms-scopes"]).toEqual([]);
 	}
+	// The error union is declared on every operation; it is referenced once, never inlined again.
+	const refusals = Object.entries(
+		discovery.paths as Record<
+			string,
+			Record<
+				string,
+				{ readonly responses?: Record<string, { content?: Record<string, { schema?: Record<string, string> }> }> }
+			>
+		>,
+	).flatMap(([path, item]) =>
+		Object.entries(item).flatMap(([method, operation]) =>
+			Object.entries(operation.responses ?? {})
+				.filter(([status]) => Number(status) >= 400)
+				.map(
+					([status, response]) =>
+						[`${method} ${path} ${status}`, response.content?.["application/json"]?.schema] as const,
+				),
+		),
+	);
+	expect(refusals.length).toBeGreaterThan(50);
+	for (const [where, schema] of refusals) {
+		expect(Object.keys(schema ?? {}), where).toEqual(["$ref"]);
+		expect(discovery.components.schemas, where).toHaveProperty(
+			(schema?.$ref ?? "").slice("#/components/schemas/".length),
+		);
+	}
 	const schemes = Object.keys(discovery.components.securitySchemes);
 	for (const item of Object.values(discovery.paths))
 		for (const operation of Object.values(item as Record<string, { readonly security?: ReadonlyArray<object> }>))

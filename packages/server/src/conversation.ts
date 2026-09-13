@@ -1,3 +1,4 @@
+import { hoistErrorSchemas } from "./api-responses.ts";
 import { applySecurity, type RouteScope } from "./api-security.ts";
 import { liveDiscovery } from "./discovery.ts";
 import { extGroup } from "@comms/protocol/extensions";
@@ -37,6 +38,7 @@ export const routes = (extensions: Extensions["Service"]) => {
 			securitySchemes: { ...extensions.openapi.components.securitySchemes, ...system.components.securitySchemes },
 		},
 	};
+	hoistErrorSchemas(specification);
 	return Layer.mergeAll(
 		HttpApiBuilder.layer(SystemApi).pipe(
 			Layer.provide(
