@@ -50,6 +50,9 @@ it("releases unavailable admission after a backup restart misses health and prov
 			timeout: 10000,
 		})
 		.toBe("waiting");
+	expect(await (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json()).toMatchObject({
+		child: { state: "starting", error: "route_withdrawn" },
+	});
 	const queued = app.post("/api/messages", { topic: "retained", body: "must not enter failed child" }, cookie);
 	// Cleanup may close this socket if an earlier assertion fails; retain the rejection for the awaited branch.
 	void queued.catch(() => undefined);

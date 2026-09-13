@@ -1,6 +1,7 @@
 import { Clock, Crypto, Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { EventError } from "./events.ts";
+import { storeIdentityDiagnostic } from "./store-identity-diagnostics.ts";
 
 const Adoption = Schema.Struct({
 	store_id: Schema.String,
@@ -153,7 +154,11 @@ export const verifyAppIdentity = (adoption: Adoption, allowMissing: boolean) =>
 		if (rows.length === 0) return yield* new EventError({ code: "app_store_missing" });
 		if (rows.length !== 1 || !row || row.singleton !== 1 || row.initialized_at < 0 || row.transferred_to !== null)
 			return yield* invalid();
-		if (row.store_id !== adoption.store_id) return yield* new EventError({ code: "app_store_mismatch" });
+		if (row.store_id !== adoption.store_id)
+			return yield* new EventError({
+				code: "app_store_mismatch",
+				identity: storeIdentityDiagnostic(adoption.store_id, row.store_id),
+			});
 	});
 
 export const isAppStoreIdentityError = (

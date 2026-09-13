@@ -1,5 +1,6 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { expect, it } from "vitest";
 import { storageFixture } from "./fixtures/storage-maintenance.ts";
 
@@ -23,12 +24,17 @@ for (const scenario of [
 		await fixture.cycle();
 		const [saved] = await fixture.backups();
 		if (!saved) throw Error("Missing fixture backup");
+		const [identity] = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ value: Schema.String })))(
+			await fixture.sql("SELECT value FROM settings WHERE key='app_store_id'", "boot.db"),
+		);
+		if (!identity) throw new Error("Missing adopted store identity");
+		const foreignId = scenario === "foreign" ? "aabbccdd-1234-4567-89ab-0123456789ab" : "foreign-board";
 		await app.stop();
 		if (scenario === "missing") {
 			for (const suffix of ["", "-wal", "-shm", "-journal"])
 				await rm(join(fixture.root, `comms.db${suffix}`), { force: true });
 		} else {
-			await fixture.sql("UPDATE store_identity SET store_id='foreign-board'");
+			await fixture.sql(`UPDATE store_identity SET store_id='${foreignId}'`);
 		}
 		if (scenario === "foreign-target")
 			await fixture.sql("UPDATE store_identity SET store_id='other-board'", `backups/${saved.id}.db`);
@@ -53,6 +59,16 @@ for (const scenario of [
 		await expect
 			.poll(async () => (await fixture.status(resumed.url, cookie)).child.state, { timeout: 15000 })
 			.toBe("failed");
+		expect((await fetch(`${resumed.url}/_boot/status`)).status).toBe(401);
+		if (scenario !== "missing")
+			expect(await (await fetch(`${resumed.url}/_boot/status`, { headers: { cookie } })).json()).toMatchObject({
+				child: {
+					identity_error: {
+						expected_store_id: identity.value,
+						observed_store_id: scenario === "foreign" ? foreignId : null,
+					},
+				},
+			});
 		const proof = await resumed.signedAssertion("db.restore", { backup: saved.id }, cookie);
 		const request = () =>
 			fetch(`${resumed.url}/_boot/db/restore`, {
@@ -71,6 +87,12 @@ for (const scenario of [
 			expect(result).toMatchObject({ status: "restored", safety_backup: null });
 			expect(response.status).toBe(200);
 			await resumed.ready(cookie);
+			const healthy = Schema.decodeUnknownSync(
+				Schema.Struct({
+					child: Schema.Struct({ identity_error: Schema.optionalKey(Schema.NullOr(Schema.Unknown)) }),
+				}),
+			)(await (await fetch(`${resumed.url}/_boot/status`, { headers: { cookie } })).json());
+			expect(healthy.child.identity_error ?? null).toBeNull();
 			expect(await fixture.sql("SELECT body FROM messages WHERE topic='offline'")).toEqual([{ body: "retained" }]);
 			expect((await resumed.post("/api/messages", { topic: "offline", body: "after repair" }, cookie)).status).toBe(
 				200,
