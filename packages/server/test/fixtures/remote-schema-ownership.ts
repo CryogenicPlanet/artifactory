@@ -1,10 +1,9 @@
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
-import { Effect, Layer, Redacted, Result, Schema } from "effect";
+import { Effect, Redacted, Result, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { Statement } from "effect/unstable/sql/Statement";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import { remoteAppKernelSchema } from "../../../boot/src/app-kernel-schema.ts";
 import { initializeRemoteCore } from "../../src/ext/core/core-schema-remote.ts";
 import { initializeRemoteKernelSchema } from "../../src/kernel/schema.ts";
@@ -29,14 +28,12 @@ assert.equal(app.database, boot.database);
 assert.equal(app.host, boot.host);
 assert.equal(app.port, boot.port);
 assert.notEqual(app.username, boot.username, "Separate boot and app credentials are required");
-const client = (settings: typeof Settings.Type, attempt: string) => {
-	const options = { connection: { ...settings, password: Redacted.make(settings.password), tls: false }, attempt };
-	return remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-		Layer.provide(remoteInspectorLayer(options)),
-	);
+const client = (settings: typeof Settings.Type) => {
+	const options = { connection: { ...settings, password: Redacted.make(settings.password), tls: false } };
+	return advisoryClientLayer(options);
 };
-const bootLayer = client(boot, "b2".repeat(32));
-const appLayer = client(app, "a2".repeat(32));
+const bootLayer = client(boot);
+const appLayer = client(app);
 const identity = "4e08c35d-4b6c-4efa-81fc-93b19dd40c73";
 const epoch = "ownership-probe";
 

@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { guardianClientLayer } from "@comms/storage/remote-client";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect, FileSystem, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -34,10 +34,8 @@ const main = Effect.gen(function* () {
 						password: Redacted.make(settings.password),
 					};
 					// This SQL-layout fixture has no external owner; use production codecs/leases.
-					return guardianClientLayer({
+					return advisoryClientLayer({
 						connection: { ...config, engine, tls: false },
-						attempt: "a".repeat(64),
-						register: () => Effect.void,
 					});
 				});
 	yield* Effect.gen(function* () {

@@ -1,11 +1,11 @@
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { guardianClientLayer } from "@comms/storage/remote-client";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Console, Effect, FileSystem, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Events, eventsSchema, layer as eventsLayer } from "../../src/events.ts";
-import { remoteBootEvent } from "../../src/remote-boot-event-schema.ts";
+import { eventTables } from "../../src/boot-event-tables.ts";
 
 const Settings = Schema.Struct({
 	host: Schema.String,
@@ -34,10 +34,8 @@ const main = Effect.gen(function* () {
 						password: Redacted.make(settings.password),
 					};
 					// This SQL-layout fixture has no external owner; use production codecs/leases.
-					return guardianClientLayer({
+					return advisoryClientLayer({
 						connection: { ...config, engine, tls: false },
-						attempt: "a".repeat(64),
-						register: () => Effect.void,
 					});
 				});
 	yield* Effect.gen(function* () {
@@ -48,7 +46,7 @@ const main = Effect.gen(function* () {
 					yield* eventsSchema;
 					yield* sql`ALTER TABLE events ADD COLUMN topic TEXT`;
 				} else if (engine === "pg" || engine === "mysql") {
-					for (const table of remoteBootEvent(sql, engine)) {
+					for (const table of eventTables(sql, engine)) {
 						const [ddl, parameters] = table.run.compile();
 						assert.equal(parameters.length, 0);
 						yield* sql.unsafe(ddl.replace("CREATE TABLE", "CREATE TEMPORARY TABLE"));

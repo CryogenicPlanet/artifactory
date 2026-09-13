@@ -1,9 +1,8 @@
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import { remoteMigrate } from "@comms/storage/remote-migrations";
-import { Effect, Layer, Redacted, Schema } from "effect";
+import { Effect, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
 import { initializeRemoteCore, remoteCoreSteps } from "../../src/ext/core/core-schema-remote.ts";
 
@@ -21,11 +20,8 @@ const settings = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFi
 assert(settings.database.startsWith("comms_schema_"));
 const options = {
 	connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-	attempt: "c9".repeat(32),
 };
-const layer = remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-	Layer.provide(remoteInspectorLayer(options)),
-);
+const layer = advisoryClientLayer(options);
 const tags = '[ "雪", "quoted" ]';
 const meta = '{ "nested": { "nil": null, "value": "雪😀" } }';
 const previous = '{ "body": "earlier", "tags": [ "old" ] }';

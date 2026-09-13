@@ -13,8 +13,7 @@ import { BunServices, BunHttpPlatform } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import type { RemoteStore } from "@comms/storage/store";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import { remoteAppKernelSchema } from "../../../boot/src/app-kernel-schema.ts";
 import { protectionOwnershipOperation } from "../../src/kernel/protection-schema.ts";
 import { initializeRemoteKernelSchema } from "../../src/kernel/schema.ts";
@@ -40,11 +39,8 @@ const settings = await readFile(filename, "utf8")
 if (settings.database !== "comms_schema_kernel") throw new Error("Requires isolated schema test database");
 const options = {
 	connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-	attempt: "b2".repeat(32),
 };
-const layer = remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-	Layer.provide(remoteInspectorLayer(options)),
-);
+const layer = advisoryClientLayer(options);
 let phase = "connect";
 await Effect.runPromise(
 	Effect.scoped(

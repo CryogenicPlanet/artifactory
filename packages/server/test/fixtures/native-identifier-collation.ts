@@ -1,10 +1,10 @@
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
 import { BunServices } from "@effect/platform-bun";
-import { guardianClientLayer } from "@comms/storage/remote-client";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import { Effect, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
-import { initializeRemoteBootSchema } from "../../../boot/src/remote-boot-schema.ts";
+import { initializeBootTables } from "../../../boot/src/boot-tables.ts";
 
 const Settings = Schema.Struct({
 	engine: Schema.Literals(["pg", "mysql"]),
@@ -17,23 +17,21 @@ const Settings = Schema.Struct({
 const filename = process.env.COMMS_COLLATION_CONFIG;
 if (!filename) throw new Error("Missing disposable collation configuration");
 const settings = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFile(filename, "utf8"));
-const client = guardianClientLayer({
+const client = advisoryClientLayer({
 	connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-	attempt: "d".repeat(64),
-	register: () => Effect.void,
 });
 await Effect.runPromise(
 	Effect.gen(function* () {
 		const sql = yield* SqlClient;
 		process.stdout.write("initialize\n");
-		yield* initializeRemoteBootSchema(sql, settings.engine);
+		yield* initializeBootTables(sql, settings.engine);
 		process.stdout.write("case_and_accent_distinct_ids\n");
 		for (const id of ["Case", "case", "café", "cafe"]) {
 			yield* sql`INSERT INTO source_batches(id,agent,at,state) VALUES (${id},'agent',1,'published')`;
 			assert.deepEqual(yield* sql`SELECT id FROM source_batches WHERE id=${id}`, [{ id }]);
 		}
 		assert.equal((yield* sql`SELECT id FROM source_batches`).length, 4);
-		yield* initializeRemoteBootSchema(sql, settings.engine);
+		yield* initializeBootTables(sql, settings.engine);
 		if (settings.engine === "mysql") {
 			// lock_id is an identifier without incoming foreign keys; changing its
 			// collation must succeed independently of duplicate-key/FK enforcement.
@@ -43,7 +41,7 @@ await Effect.runPromise(
 				yield* sql`SELECT COLLATION_NAME AS collation FROM information_schema.columns WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='source_batches' AND COLUMN_NAME='lock_id'`;
 			assert.equal(altered[0]?.collation, "utf8mb4_0900_ai_ci");
 			process.stdout.write("reject_altered_collation\n");
-			const reopened = yield* initializeRemoteBootSchema(sql, settings.engine).pipe(Effect.result);
+			const reopened = yield* initializeBootTables(sql, settings.engine).pipe(Effect.result);
 			assert.equal(reopened._tag, "Failure", "Accent-insensitive identifier store was accepted on reopen");
 			if (reopened._tag === "Failure") {
 				assert.equal(reopened.failure._tag, "SchemaShapeError");

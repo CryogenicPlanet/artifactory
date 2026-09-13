@@ -1,9 +1,8 @@
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
-import { Effect, Layer, Redacted, Result, Schema } from "effect";
+import { Effect, Redacted, Result, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import { remoteMigrate } from "@comms/storage/remote-migrations";
 import { initializeRemoteCore, remoteCoreSteps } from "../../src/ext/core/core-schema-remote.ts";
 import { postgresSearchMode } from "../../src/ext/core/core-search-schema.ts";
@@ -25,11 +24,8 @@ const settings = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFi
 assert(settings.database.startsWith("comms_schema_unaccent"));
 const options = {
 	connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-	attempt: "ac".repeat(32),
 };
-const layer = remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-	Layer.provide(remoteInspectorLayer(options)),
-);
+const layer = advisoryClientLayer(options);
 let phase = "initialize";
 try {
 	await Effect.runPromise(

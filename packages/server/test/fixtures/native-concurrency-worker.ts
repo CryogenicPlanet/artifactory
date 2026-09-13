@@ -2,11 +2,11 @@ import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { BunServices } from "@effect/platform-bun";
-import { guardianClientLayer } from "@comms/storage/remote-client";
+import { directClientLayer } from "@comms/storage/remote-client";
 import { Effect, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { writerGate } from "../../src/kernel/database.ts";
-import { initializeRemoteBootSchema } from "../../../boot/src/remote-boot-schema.ts";
+import { initializeBootTables } from "../../../boot/src/boot-tables.ts";
 import { Events, layer as eventsLayer } from "../../../boot/src/events.ts";
 import { EditLock, layer as editLayer } from "../../../boot/src/edit-lock.ts";
 
@@ -30,16 +30,14 @@ const barrier = Effect.promise(async () => {
 	assert.equal(line.value, "go");
 });
 const emit = (value: unknown) => Effect.sync(() => process.stdout.write(`${JSON.stringify(value)}\n`));
-// SQL contention fixture only: no keeper or lifecycle proof is claimed by this local ACK.
-const client = guardianClientLayer({
+// Independent sessions intentionally exercise SQL epoch and row-lock contention, without writer admission.
+const client = directClientLayer({
 	connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-	attempt: "c".repeat(64),
-	register: () => Effect.void,
 });
 const main = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	if (mode === "initialize") {
-		if (settings.database.endsWith("boot")) yield* initializeRemoteBootSchema(sql, settings.engine);
+		if (settings.database.endsWith("boot")) yield* initializeBootTables(sql, settings.engine);
 		else {
 			yield* sql`CREATE TABLE kernel_writer (singleton INTEGER PRIMARY KEY, epoch VARCHAR(64) NOT NULL)`;
 			yield* sql`INSERT INTO kernel_writer VALUES(1,'stale')`;

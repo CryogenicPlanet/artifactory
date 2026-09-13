@@ -1,9 +1,8 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Console, Context, Crypto, Effect, FileSystem, Layer, Redacted, Schema } from "effect";
+import { Console, Context, Effect, FileSystem, Layer, Redacted, Schema } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
 import { SqlClient } from "effect/unstable/sql";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { directClientLayer } from "@comms/storage/remote-client";
 import { type RemoteConnection } from "@comms/storage/remote-session";
 import { parseDescriptor } from "@comms/storage/store";
 import { makeRemoteAppInitializer } from "../../src/app-kernel-initialize.ts";
@@ -18,22 +17,10 @@ const Settings = Schema.Struct({
 	username: Schema.String,
 	password: Schema.String,
 });
-const open = (connection: RemoteConnection, bootConnection: RemoteConnection) =>
-	Effect.gen(function* () {
-		const attempt = (yield* (yield* Crypto.Crypto).randomUUIDv4.pipe(Effect.orDie)).replaceAll("-", "").repeat(2);
-		const options = { connection, attempt };
-		const context = yield* Layer.build(
-			remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-				Layer.provide(
-					remoteInspectorLayer({
-						...options,
-						...(connection.engine === "mysql" ? { mysqlBootConnection: bootConnection } : {}),
-					}),
-				),
-			),
-		);
-		return Context.get(context, SqlClient.SqlClient);
-	});
+// Independent fixture connections inspect and inject faults alongside recovery operations.
+const open = (connection: RemoteConnection) =>
+	Effect.map(Layer.build(directClientLayer({ connection })), (context) => Context.get(context, SqlClient.SqlClient));
+
 const main = Effect.gen(function* () {
 	const [directory, engine, mode] = process.argv.slice(2);
 	if (!directory || !mode || (engine !== "pg" && engine !== "mysql"))
@@ -65,9 +52,9 @@ const main = Effect.gen(function* () {
 		).pipe(Effect.flatMap((store) => (store._tag === "file" ? Effect.die("Expected remote") : Effect.succeed(store))));
 	const bootStore = yield* descriptor(bootConfig);
 	const appStore = yield* descriptor(appConfig);
-	const boot = yield* open(connection(bootConfig), connection(bootConfig));
-	const app = yield* open(connection(bootAppConfig), connection(bootConfig));
-	const operator = yield* open(connection(appConfig), connection(bootConfig));
+	const boot = yield* open(connection(bootConfig));
+	const app = yield* open(connection(bootAppConfig));
+	const operator = yield* open(connection(appConfig));
 	const suffix = engine === "mysql" ? " ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin" : "";
 	yield* boot.unsafe(
 		`CREATE TABLE IF NOT EXISTS settings (${engine === "mysql" ? "`key`" : "key"} VARCHAR(256) PRIMARY KEY,value TEXT NOT NULL)${suffix}`,

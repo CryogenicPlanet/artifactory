@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { Effect, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { guardianClientLayer } from "@comms/storage/remote-client";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 
 const Settings = Schema.Struct({
 	engine: Schema.Literals(["pg", "mysql"]),
@@ -42,10 +42,8 @@ await Effect.runPromise(
 		}),
 	).pipe(
 		Effect.provide(
-			guardianClientLayer({
+			advisoryClientLayer({
 				connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-				attempt: "c1".repeat(32),
-				register: () => Effect.void,
 			}),
 		),
 	),

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { BunServices } from "@effect/platform-bun";
 import { Crypto, Effect, Ref, Redacted, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { guardianClientLayer } from "@comms/storage/remote-client";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import { parseDescriptor } from "@comms/storage/store";
 import { remoteAppKernelOperations } from "../../../boot/src/app-kernel-schema.ts";
 import { initializeRemoteKernelSchema } from "../../src/kernel/schema.ts";
@@ -210,10 +210,8 @@ await Effect.runPromise(
 		}),
 	).pipe(
 		Effect.provide(
-			guardianClientLayer({
+			advisoryClientLayer({
 				connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-				attempt: "d1".repeat(32),
-				register: () => Effect.void,
 			}),
 		),
 		Effect.provide(BunServices.layer),

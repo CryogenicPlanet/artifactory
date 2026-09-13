@@ -1,10 +1,9 @@
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, FileSystem, Layer, Redacted, Schema } from "effect";
+import { Effect, FileSystem, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { directClientLayer } from "@comms/storage/remote-client";
 import { remoteAppKernelSchema } from "../../../boot/src/app-kernel-schema.ts";
 import { initializeRemoteKernelSchema } from "../../src/kernel/schema.ts";
 import { assertNoPendingMigration } from "../../src/kernel/migration-intent.ts";
@@ -24,11 +23,8 @@ const settings = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFi
 const replacing = process.argv[2] === "replace";
 const options = {
 	connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-	attempt: (replacing ? "c8" : "b9").repeat(32),
 };
-const layer = remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-	Layer.provide(remoteInspectorLayer(options)),
-);
+const layer = directClientLayer(options);
 let phase = "connect";
 await Effect.runPromise(
 	Effect.scoped(

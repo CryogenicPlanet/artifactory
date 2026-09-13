@@ -1,10 +1,9 @@
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
 import { BunServices } from "@effect/platform-bun";
-import { Deferred, Effect, Layer, Redacted, Ref, Schema } from "effect";
+import { Deferred, Effect, Redacted, Ref, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import { protectionOwnershipOperation } from "../../src/kernel/protection-schema.ts";
 import { initializeRemoteKernelSchema } from "../../src/kernel/schema.ts";
 import { makeExtensionMigrate } from "../../src/kernel/extension-migrations.ts";
@@ -30,11 +29,8 @@ const settings = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFi
 if (!settings.database.startsWith("comms_schema_")) throw new Error("Disposable schema database required");
 const options = {
 	connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-	attempt: "b7".repeat(32),
 };
-const layer = remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-	Layer.provide(remoteInspectorLayer(options)),
-);
+const layer = advisoryClientLayer(options);
 
 await Effect.runPromise(
 	Effect.gen(function* () {

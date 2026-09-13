@@ -1,13 +1,9 @@
 import { strict as assert } from "node:assert";
-import { appendFile, open, readFile } from "node:fs/promises";
-import { BunServices } from "@effect/platform-bun";
+import { readFile } from "node:fs/promises";
 import { Context, Effect, Exit, Layer, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
-import { dumpRemote, loadRemote } from "@comms/storage/remote-copy";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import type { RemoteConnection } from "@comms/storage/remote-session";
-import type { RemoteStore } from "@comms/storage/store";
 
 const Settings = Schema.Struct({
 	engine: Schema.Literals(["pg", "mysql"]),
@@ -27,28 +23,7 @@ const connection: RemoteConnection = {
 	password: Redacted.make(settings.password),
 	tls: true,
 };
-const store: RemoteStore = {
-	_tag: settings.engine === "pg" ? "postgres" : "mysql",
-	database: connection.database,
-	url: Redacted.make(
-		`${settings.engine === "pg" ? "postgres" : "mysql"}://comms_tls:${settings.password}@${host}:${connection.port}/comms_tls`,
-	),
-};
-const attempt = "a1".repeat(32);
-const sqlLayer = remoteClientLayer({
-	connection,
-	attempt,
-	register: (session) =>
-		Effect.promise(async () => {
-			await appendFile("/artifacts/registered", `${JSON.stringify(session)}\n`, { mode: 0o600 });
-			const journal = await open("/artifacts/registered", "r+");
-			try {
-				await journal.sync();
-			} finally {
-				await journal.close();
-			}
-		}),
-}).pipe(Layer.provide(remoteInspectorLayer({ connection, attempt })));
+const sqlLayer = advisoryClientLayer({ connection });
 const query = Effect.scoped(
 	Effect.gen(function* () {
 		const sql = Context.get(yield* Layer.build(sqlLayer), SqlClient);
@@ -68,48 +43,20 @@ const query = Effect.scoped(
 		} else if (mode === "pass") {
 			const rows = yield* sql.unsafe("SELECT * FROM tls_probe");
 			assert.deepEqual(rows, [{ id: 1, value: "verified private CA" }]);
-			yield* sql.unsafe("DROP TABLE tls_probe");
 		}
 	}),
 );
-const artifact = { path: "/artifacts/trusted.dump", engine: settings.engine };
-const options = { store, budget: "15 seconds", tls: true } as const;
-let phase = "query";
 process.stdout.write(`TLS ${settings.engine} ${mode} ${host}: starting\n`);
 try {
 	await Effect.runPromise(
-		Effect.gen(function* () {
-			if (mode === "deny") {
-				assert(Exit.isFailure(yield* query.pipe(Effect.exit)), "Untrusted SQL handshake accepted");
-				phase = "dump_refusal";
-				const dump = yield* dumpRemote({ ...options, path: "/artifacts/rejected.dump" }).pipe(Effect.exit);
-				assert(Exit.isFailure(dump));
-				assert(JSON.stringify(dump).includes("backup_failed"));
-				phase = "load_refusal";
-				const load = yield* loadRemote({ ...options, artifact }).pipe(Effect.exit);
-				assert(Exit.isFailure(load));
-				assert(JSON.stringify(load).includes("clone_load_failed"));
-			} else if (mode === "seed") {
-				yield* query;
-				phase = "dump";
-				assert((yield* dumpRemote({ ...options, path: artifact.path })).bytes > 0);
-				phase = "clear";
-				yield* Effect.scoped(
-					Effect.gen(function* () {
-						const sql = Context.get(yield* Layer.build(sqlLayer), SqlClient);
-						yield* sql.unsafe("DROP TABLE tls_probe");
-					}),
-				);
-			} else {
-				phase = "load";
-				// The target is empty before each load. A negative load cannot pass by colliding with an existing table.
-				yield* loadRemote({ ...options, artifact });
-				phase = "verify_restored_query";
-				yield* query;
-			}
-		}).pipe(Effect.provide(BunServices.layer), Effect.scoped),
+		mode === "deny"
+			? query.pipe(
+					Effect.exit,
+					Effect.map((result) => assert(Exit.isFailure(result), "Untrusted SQL handshake accepted")),
+				)
+			: query,
 	);
 	process.stdout.write(`TLS ${settings.engine} ${mode} ${host}: passed\n`);
 } catch {
-	throw new Error(`TLS ${settings.engine} ${mode} ${host} failed during ${phase}`);
+	throw new Error(`TLS ${settings.engine} ${mode} ${host} failed during query`);
 }

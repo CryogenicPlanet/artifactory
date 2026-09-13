@@ -3,24 +3,16 @@ import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Console, Context, Crypto, Effect, FileSystem, Layer, Redacted, Schema } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
 import { SqlClient } from "effect/unstable/sql";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { directClientLayer } from "@comms/storage/remote-client";
 import { type RemoteConnection } from "@comms/storage/remote-session";
 import { parseDescriptor, type RemoteStore } from "@comms/storage/store";
 import { remoteRecovery } from "../../src/app-recovery.ts";
 import { remoteAppStoreIdentity } from "../../src/app-store-identity.ts";
 import { EventError, layer as eventsLayer } from "../../src/events.ts";
 
-const open = (connection: RemoteConnection, _label: string) =>
-	Effect.gen(function* () {
-		const crypto = yield* Crypto.Crypto;
-		const attempt = (yield* crypto.randomUUIDv4.pipe(Effect.orDie)).replaceAll("-", "").repeat(2);
-		const options = { connection, attempt };
-		const context = yield* Layer.build(
-			remoteClientLayer({ ...options, register: () => Effect.void }).pipe(Layer.provide(remoteInspectorLayer(options))),
-		);
-		return Context.get(context, SqlClient.SqlClient);
-	});
+// Independent fixture connections inspect and inject faults alongside recovery operations.
+const open = (connection: RemoteConnection) =>
+	Effect.map(Layer.build(directClientLayer({ connection })), (context) => Context.get(context, SqlClient.SqlClient));
 
 const Settings = Schema.Struct({
 	engine: Schema.Literals(["pg", "mysql"]),
@@ -60,8 +52,8 @@ const main = Effect.gen(function* () {
 		);
 	const appStore = yield* descriptor(appConfig);
 	const bootStore = yield* descriptor(bootConfig);
-	const boot = yield* open(connection(bootConfig), "recovery-native-boot");
-	const app = yield* open(connection(appConfig), "recovery-native-inspection");
+	const boot = yield* open(connection(bootConfig));
+	const app = yield* open(connection(appConfig));
 	const engineSuffix =
 		appConfig.engine === "mysql" ? " ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin" : "";
 	for (const table of ["settings", "seq"]) yield* boot`DROP TABLE IF EXISTS ${boot(table)}`;
@@ -93,12 +85,12 @@ const main = Effect.gen(function* () {
 			`CREATE TABLE IF NOT EXISTS outbox(seq BIGINT PRIMARY KEY,transaction_id VARCHAR(128) NOT NULL,event TEXT NOT NULL,shipped_at BIGINT)${engineSuffix}`,
 		);
 	});
-	// Guarded leases exercise real SQL. Durable registration and root operation closure belong to the guardian suite.
+	// This fixture tests durable recovery evidence through independent SQL sessions.
 	const withStore = <A, E>(store: RemoteStore, effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
 		Effect.scoped(
 			Effect.gen(function* () {
 				assert.equal(store.database, appConfig.database);
-				const sql = yield* open(connection(appConfig), "recovery-native-operation");
+				const sql = yield* open(connection(appConfig));
 				return yield* effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 			}).pipe(Effect.provideService(Reactivity.Reactivity, reactivity), Effect.provideService(Crypto.Crypto, crypto)),
 		);

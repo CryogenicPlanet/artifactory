@@ -3,8 +3,7 @@ import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Context, Effect, FileSystem, Layer, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
 import { on } from "@comms/storage/dialect";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { RemoteInspector, remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 
 const settings = Schema.fromJsonString(
 	Schema.Struct({
@@ -47,16 +46,7 @@ export const testStore = (options: {
 			if (config.engine !== options.engine || config.database !== options.database)
 				return yield* Effect.fail(new Error("Dedicated test store required"));
 			const connection = { ...config, password: Redacted.make(config.password), tls: false };
-			const attempt = "d3".repeat(32);
-			const inspector = Context.get(yield* Layer.build(remoteInspectorLayer({ connection, attempt })), RemoteInspector);
-			return Context.get(
-				yield* Layer.build(
-					remoteClientLayer({ connection, attempt, register: () => Effect.void }).pipe(
-						Layer.provide(Layer.succeed(RemoteInspector, inspector)),
-					),
-				),
-				SqlClient,
-			);
+			return Context.get(yield* Layer.build(advisoryClientLayer({ connection })), SqlClient);
 		});
 		const existing = yield* on(sql, {
 			sqlite: () => sql`SELECT name FROM sqlite_schema WHERE type='table'`,

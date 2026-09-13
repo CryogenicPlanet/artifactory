@@ -1,10 +1,9 @@
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, FileSystem, Layer, Redacted, Schema } from "effect";
+import { Effect, FileSystem, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import { remoteAppKernelSchema } from "../../../boot/src/app-kernel-schema.ts";
 import { protectionOwnershipOperation } from "../../src/kernel/protection-schema.ts";
 import { initializeRemoteKernelSchema } from "../../src/kernel/schema.ts";
@@ -25,11 +24,8 @@ const settings = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFi
 if (settings.database !== "comms_schema_guard") throw new Error("Requires exclusive migration guard database");
 const options = {
 	connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-	attempt: "a7".repeat(32),
 };
-const layer = remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-	Layer.provide(remoteInspectorLayer(options)),
-);
+const layer = advisoryClientLayer(options);
 let phase = "connect";
 await Effect.runPromise(
 	Effect.scoped(

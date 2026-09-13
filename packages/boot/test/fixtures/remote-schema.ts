@@ -1,10 +1,9 @@
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
-import { Effect, Layer, Redacted, Schema } from "effect";
+import { Effect, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
-import { initializeRemoteBootSchema } from "../../src/remote-boot-schema.ts";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
+import { initializeBootTables } from "../../src/boot-tables.ts";
 const Settings = Schema.Struct({
 	engine: Schema.Literals(["pg", "mysql"]),
 	host: Schema.String,
@@ -20,16 +19,13 @@ const settings = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFi
 if (!settings.database.startsWith("comms_schema_")) throw new Error("Disposable schema database required");
 const options = {
 	connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-	attempt: "a1".repeat(32),
 };
-const layer = remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-	Layer.provide(remoteInspectorLayer(options)),
-);
+const layer = advisoryClientLayer(options);
 await Effect.runPromise(
 	Effect.gen(function* () {
 		const sql = yield* SqlClient;
-		yield* initializeRemoteBootSchema(sql, settings.engine);
-		yield* initializeRemoteBootSchema(sql, settings.engine);
+		yield* initializeBootTables(sql, settings.engine);
+		yield* initializeBootTables(sql, settings.engine);
 		{
 			const expectFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 				effect.pipe(
@@ -78,7 +74,7 @@ await Effect.runPromise(
 			yield* sql`UPDATE db_restore_requests SET phase='restored' WHERE proof_id='first'`;
 			yield* sql`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES ('second','hash','session','backup','working',0)`;
 			yield* expectFailure(sql`INSERT INTO seq(singleton,${sql("next")},published_through) VALUES (2,1,0)`);
-			yield* initializeRemoteBootSchema(sql, settings.engine);
+			yield* initializeBootTables(sql, settings.engine);
 			assert.equal((yield* sql`SELECT path FROM staging WHERE lock_id='fixture'`)[0]?.path, path);
 			assert.equal((yield* sql`SELECT migration_id FROM boot_migrations`).length, 19);
 			process.stdout.write("boot native constraints, long values, binary, sequence and reopen durability passed\n");
@@ -90,7 +86,7 @@ await Effect.runPromise(
 await Effect.runPromise(
 	Effect.gen(function* () {
 		const sql = yield* SqlClient;
-		yield* initializeRemoteBootSchema(sql, settings.engine);
+		yield* initializeBootTables(sql, settings.engine);
 		assert.equal(
 			(yield* sql`SELECT path FROM staging WHERE lock_id='fixture'`)[0]?.path,
 			`pages/${"雪😀segment/".repeat(600)}file.md`,

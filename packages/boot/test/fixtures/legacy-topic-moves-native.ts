@@ -1,10 +1,9 @@
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Console, Context, Crypto, Effect, FileSystem, Layer, Redacted, Schema } from "effect";
+import { Console, Context, Effect, FileSystem, Layer, Redacted, Schema } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
 import { SqlClient } from "effect/unstable/sql";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { directClientLayer } from "@comms/storage/remote-client";
 import { type RemoteConnection } from "@comms/storage/remote-session";
 import { hasLegacyTopicMoves } from "../../src/legacy-topic-moves.ts";
 
@@ -16,22 +15,10 @@ const Settings = Schema.Struct({
 	username: Schema.String,
 	password: Schema.String,
 });
-const open = (connection: RemoteConnection, bootConnection: RemoteConnection) =>
-	Effect.gen(function* () {
-		const attempt = (yield* (yield* Crypto.Crypto).randomUUIDv4.pipe(Effect.orDie)).replaceAll("-", "").repeat(2);
-		const options = { connection, attempt };
-		const context = yield* Layer.build(
-			remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-				Layer.provide(
-					remoteInspectorLayer({
-						...options,
-						...(connection.engine === "mysql" ? { mysqlBootConnection: bootConnection } : {}),
-					}),
-				),
-			),
-		);
-		return Context.get(context, SqlClient.SqlClient);
-	});
+// Independent fixture connections inspect and inject faults alongside recovery operations.
+const open = (connection: RemoteConnection) =>
+	Effect.map(Layer.build(directClientLayer({ connection })), (context) => Context.get(context, SqlClient.SqlClient));
+
 const main = Effect.gen(function* () {
 	const [directory, engine] = process.argv.slice(2);
 	if (!directory || (engine !== "pg" && engine !== "mysql"))
@@ -43,7 +30,7 @@ const main = Effect.gen(function* () {
 	if (config.database !== "comms_initialize_boot" || config.engine !== engine)
 		return yield* Effect.die("Refusing non-disposable store");
 	const connection: RemoteConnection = { ...config, password: Redacted.make(config.password), tls: false };
-	const sql = yield* open(connection, connection);
+	const sql = yield* open(connection);
 	assert.equal(yield* hasLegacyTopicMoves(sql), false);
 	for (const table of ["topic_moves", "topic_page_moves", "TOPIC_MOVES"]) {
 		yield* sql`CREATE TABLE ${sql(table)} (evidence TEXT)`;

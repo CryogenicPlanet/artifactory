@@ -1,10 +1,9 @@
 import { strict as assert } from "node:assert";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { Effect, Layer, Redacted, Result, Schema } from "effect";
+import { Effect, Redacted, Result, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
-import { remoteClientLayer } from "@comms/storage/remote-client";
-import { remoteInspectorLayer } from "@comms/storage/remote-inspector";
+import { advisoryClientLayer } from "@comms/storage/remote-client";
 import { remoteMigrate, type RemoteStep } from "@comms/storage/remote-migrations";
 import { CoreJsonSchemaError } from "../../src/ext/core/core-json-schema.ts";
 import { initializeRemoteCore, remoteCoreSteps } from "../../src/ext/core/core-schema-remote.ts";
@@ -22,11 +21,8 @@ const settings = Schema.decodeSync(Schema.fromJsonString(Settings))(await readFi
 if (!settings.database.startsWith("comms_schema_")) throw new Error("Disposable schema database required");
 const options = {
 	connection: { ...settings, password: Redacted.make(settings.password), tls: false },
-	attempt: "c1".repeat(32),
 };
-const layer = remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-	Layer.provide(remoteInspectorLayer(options)),
-);
+const layer = advisoryClientLayer(options);
 // This fixture requires a fresh disposable database and never drops existing tables.
 await Effect.runPromise(
 	Effect.gen(function* () {
