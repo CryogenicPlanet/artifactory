@@ -64,7 +64,6 @@ export const supervise = Effect.fn("supervise")(function* (
 	redact = logRedactor([]),
 ) {
 	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
-	const copyBudget = yield* Config.Duration("REHEARSAL_COPY_BUDGET").pipe(Config.withDefault(Duration.seconds(30)));
 	const crypto = yield* Crypto.Crypto;
 	const path = yield* Path.Path;
 	const fs = yield* FileSystem.FileSystem;
@@ -151,6 +150,9 @@ export const supervise = Effect.fn("supervise")(function* (
 		epochOverride?: string,
 	) =>
 		Effect.gen(function* () {
+			const copyBudget = yield* Config.Duration("REHEARSAL_COPY_BUDGET").pipe(
+				Config.withDefault(Duration.seconds(store._tag === "file" ? 30 : 120)),
+			);
 			yield* assertClosure;
 			const owners = yield* ChildAttempts;
 			const secret = Buffer.from(yield* crypto.randomBytes(32)).toString("hex");
