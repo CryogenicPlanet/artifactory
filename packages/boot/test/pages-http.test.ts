@@ -588,9 +588,13 @@ it("conditionally writes raw bytes on both aliases without lost updates or retir
 		const query = target.includes("?") ? "&" : "?";
 		const before = await env.sql("SELECT * FROM staging");
 		const historyBefore = await env.sql("SELECT id FROM versions");
+		// Pages publish immediately and need no lock and no reload, so a page refusal names pages.
+		const message = root === "pages" ? "Page publication refused." : "Source edit refused.";
 		const missing = await app.call(target, { method: "PUT", body: "must not create" });
 		expect(missing.status).toBe(400);
-		expect(await missing.json()).toMatchObject({ error: { code: "precondition_required", retriable: false } });
+		expect(await missing.json()).toMatchObject({
+			error: { code: "precondition_required", retriable: false, message },
+		});
 		for (const suffix of ["baseVersion=", "baseVersion=bad", "baseVersion=null&baseVersion=null"])
 			expect((await app.call(`${target}${query}${suffix}`, { method: "PUT", body: "invalid" })).status).toBe(400);
 		expect(
@@ -634,7 +638,7 @@ it("conditionally writes raw bytes on both aliases without lost updates or retir
 		expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
 		const stale = await app.call(target, { method: "DELETE", headers: { "if-match": etag } });
 		expect(stale.status).toBe(409);
-		expect(await stale.json()).toMatchObject({ error: { code: "stale_base", retriable: false } });
+		expect(await stale.json()).toMatchObject({ error: { code: "stale_base", retriable: false, message } });
 		const current = await app.call(readTarget);
 		const currentTag = current.headers.get("etag");
 		if (currentTag === null) throw new Error("Missing replacement ETag");
@@ -650,4 +654,28 @@ it("conditionally writes raw bytes on both aliases without lost updates or retir
 	expect(await env.sql("SELECT * FROM source_changes")).toEqual([]);
 	expect(await env.sql("SELECT COUNT(*) AS n FROM versions WHERE path='pages/conditional.bin'")).toEqual([{ n: 3 }]);
 	await expect(readFile(join(env.root, "data/app/conditional.bin"))).rejects.toMatchObject({ code: "ENOENT" });
+}, 15000);
+
+it("serves raw Markdown page reads as Markdown while app source bytes stay opaque", async (test) => {
+	const env = await fixture(test),
+		app = await env.start();
+	expect(
+		(await app.call(`${app.url}/api/fs/pages/typed.md?baseVersion=null`, { method: "PUT", body: "# note\n" })).status,
+	).toBe(200);
+	const page = await app.call(`${app.url}/_boot/fs/pages/typed.md`);
+	expect(page.status).toBe(200);
+	expect(page.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+	expect(await page.text()).toBe("# note\n");
+	expect((await app.call(`${app.url}/api/lock`, { method: "POST", body: "{}" })).status).toBe(200);
+	expect(
+		(
+			await app.call(`${app.url}/api/fs/app/typed.md?reload=0&baseVersion=null`, {
+				method: "PUT",
+				body: "# source\n",
+			})
+		).status,
+	).toBe(200);
+	const source = await app.call(`${app.url}/_boot/fs/app/typed.md`);
+	expect(source.status).toBe(200);
+	expect(source.headers.get("content-type")).toBe("application/octet-stream");
 }, 15000);

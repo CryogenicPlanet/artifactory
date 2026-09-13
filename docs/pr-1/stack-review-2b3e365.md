@@ -99,7 +99,7 @@ Replacement text for `docs/database.md` §4.3, replacing the paragraph beginning
 Two changes to ask for while accepting it:
 
 - `render` should return `Redacted.Redacted`, as §4.2 specifies, not `string` (`packages/storage/src/store.ts:17`). With `file:` there is no credential and no leak, but the return type is the thing that will force `supervisor.ts:128` and the two stderr sites to be revisited when `postgres://` lands. As a plain `string` nothing forces it, and `redactUrls` is already missing.
-- The percent-encoding in `render`/`parse` is not in the design's §4.1 grammar and should be, because it makes comms' `file:` form deliberately non-RFC-8089 (`file:///path` is rejected at `store.ts:24`, pinned at `test/store.test.ts:16`). Add to §4.1: "`file:` takes a single-slash absolute path with each segment percent-encoded, so that `?`, `#` and `%` in a filename are filename characters and never connection options; `file://` and `file:///` are rejected."
+- The percent-encoding in `render`/`parse` is not in the design's §4.1 grammar and should be, because it makes chirp's `file:` form deliberately non-RFC-8089 (`file:///path` is rejected at `store.ts:24`, pinned at `test/store.test.ts:16`). Add to §4.1: "`file:` takes a single-slash absolute path with each segment percent-encoded, so that `?`, `#` and `%` in a filename are filename characters and never connection options; `file://` and `file:///` are rejected."
 
 ### 2b. The `APP_DATABASE` alias
 
@@ -153,7 +153,7 @@ The exception is narrow in the right ways:
 - It never touches the artefact. The write lands on the disposable copy in the restore staging directory (`db-ops.ts:69`, `:74-75`), not on `backup.path`. Asserted at `test/app-store-identity.test.ts:114`.
 - A stamped backup that already carries a *different* identity is still refused: `verifyAppIdentity` only tolerates an absent table, and a present row with a foreign `store_id` fails regardless of the stamp (`:158`).
 
-So a foreign backup cannot be stamped through any comms path. The residual route is an operator writing a foreign board's file into `<DATA_DIR>/backups/<id>.db` under an already-stamped id *and* dropping its `store_identity` table first. That requires filesystem write access to the data directory, which `SPEC.md` §7.9 already treats as inside the trust boundary.
+So a foreign backup cannot be stamped through any chirp path. The residual route is an operator writing a foreign board's file into `<DATA_DIR>/backups/<id>.db` under an already-stamped id *and* dropping its `store_identity` table first. That requires filesystem write access to the data directory, which `SPEC.md` §7.9 already treats as inside the trust boundary.
 
 Two changes to ask for:
 

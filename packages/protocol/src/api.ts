@@ -7,7 +7,7 @@ import { messageGroup } from "./message-http.ts";
 import { profilesGroup } from "./profiles-http.ts";
 import { eventsGroup } from "./events-http.ts";
 import { streamGroup } from "./stream-http.ts";
-const common = HttpApi.make("comms")
+const common = HttpApi.make("chirp")
 	.add(topicManagementGroup)
 	.add(messageGroup)
 	.add(profilesGroup)

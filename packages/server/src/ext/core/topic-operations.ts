@@ -6,7 +6,7 @@ import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { type EventRecord } from "@comms/protocol/events";
 import { type BootChannel, KernelError } from "../../kernel/boot-channel.ts";
 import type { Mutate } from "../../kernel/mutate.ts";
-import { validTopic } from "./messages.ts";
+import { topicPathDetail, validTopic } from "./messages.ts";
 import type { Identity } from "../../kernel/identity.ts";
 
 const StoredTopic = Schema.Struct({
@@ -28,11 +28,19 @@ export const mutateTopic = (
 	key?: string,
 ) =>
 	Effect.gen(function* () {
-		if (!validTopic(path) || (key !== undefined && (key.length < 1 || key.length > 200)))
-			return yield* new KernelError({ code: "input_invalid" });
+		if (!validTopic(path)) return yield* new KernelError({ code: "input_invalid", detail: topicPathDetail("path") });
+		if (key !== undefined && (key.length < 1 || key.length > 200))
+			return yield* new KernelError({
+				code: "input_invalid",
+				detail: { field: "Idempotency-Key", hint: "Idempotency-Key accepts 1 through 200 characters." },
+			});
 		const archive = "archived" in input;
 		const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))({ path, input });
-		if (Buffer.byteLength(encoded) > 131072) return yield* new KernelError({ code: "input_invalid" });
+		if (Buffer.byteLength(encoded) > 131072)
+			return yield* new KernelError({
+				code: "input_invalid",
+				detail: { field: "meta", hint: "The encoded topic path and metadata must stay under 131072 bytes." },
+			});
 		const now = (yield* DateTime.nowAsDate).getTime();
 		return yield* mutate({
 			...(key === undefined

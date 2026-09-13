@@ -1,4 +1,5 @@
 import { errorSchema, policy } from "@comms/protocol/errors";
+import { applySecurity, type RouteScope } from "./api-security.ts";
 import { templatePattern } from "./kernel/extension-routes.ts";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
 import { Schema } from "effect";
@@ -8,7 +9,7 @@ interface RouteDescription {
 	readonly method: HttpMethod;
 	readonly path: `/${string}`;
 	readonly description: string;
-	readonly scope: string;
+	readonly scope: RouteScope;
 	readonly operation?: OpenApi.OpenAPISpecOperation;
 }
 
@@ -95,5 +96,17 @@ export const document = (
 			});
 		}
 	}
+	// Every mounted route already declares the scope it needs; say so in the document too.
+	const scopes = new Map(
+		registrations.map((route) => {
+			const canonical =
+				registrations.find((other) => templatePattern(other.path) === templatePattern(route.path))?.path ?? route.path;
+			return [
+				`${route.method.toLowerCase()} ${canonical.replace(/:([A-Za-z_]\w*)/g, "{$1}").replace(/\*$/, "{*}")}`,
+				route.scope,
+			] as const;
+		}),
+	);
+	applySecurity(result.paths, (path, method) => scopes.get(`${method} ${path}`));
 	return result;
 };

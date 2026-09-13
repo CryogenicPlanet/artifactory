@@ -615,7 +615,7 @@ SPEC §6 lists `GET /.well-known/agent.json` among the bootloader routes that "c
 
 ## size and shape versus pi
 
-**Summary.** Measured, comms is not bigger than pi: 14,339 non-test TS lines in 134 files (boot 7,239/61, server 4,423/48, ui 2,528/21, root scripts 149/5) plus 918 CSS, against pi-mono's coding-agent/src at 70,052 lines in 258 files — 0.20x. In every feature pi and comms share, comms is smaller, often by 5-10x (extension loading 793 vs 4,130; dependency preparation 485 vs 4,933; UI 2,528 vs 38,769 for interactive-mode + tui). The owner's instinct is right about something else: the ratio of infrastructure to product, and the size of the *immutable* half. SPEC.md:377 budgets boot at "a few hundred lines, two deps"; it is 7,239 lines, 61 files, 5 deps, and 50% of the non-test tree — so half the codebase is the part an agent cannot repair by editing, which is the inverse of pi's shape (one immutable binary, ~26-line extensions). Inside the hot half, three mechanisms are paid for twice: the durable mutation protocol is hand-copied into 7 files while operational-events.ts already is the generic combinator; HttpApi is declared for 19 endpoints and then bypassed by handleRaw in all 19; and the UI re-declares server schemas across 7 hand-rolled fetch clients while HttpApiClient ships unused in the pinned effect rc. Removing/merging those plus the four parallel idempotency tables and the six boot *-schema.ts files cuts ~950-1,000 lines (~7%) and ~15 files without touching a single SPEC guarantee. The remaining ~6,400 lines (durable cutover 2,670, passkeys/enrollment/refresh 2,265, boot event log + SSE 942, preparation 485) are irreducible because SPEC §4.4, §6.1, §6.3 and §7.7 specify them almost line by line.
+**Summary.** Measured, chirp is not bigger than pi: 14,339 non-test TS lines in 134 files (boot 7,239/61, server 4,423/48, ui 2,528/21, root scripts 149/5) plus 918 CSS, against pi-mono's coding-agent/src at 70,052 lines in 258 files — 0.20x. In every feature pi and chirp share, chirp is smaller, often by 5-10x (extension loading 793 vs 4,130; dependency preparation 485 vs 4,933; UI 2,528 vs 38,769 for interactive-mode + tui). The owner's instinct is right about something else: the ratio of infrastructure to product, and the size of the *immutable* half. SPEC.md:377 budgets boot at "a few hundred lines, two deps"; it is 7,239 lines, 61 files, 5 deps, and 50% of the non-test tree — so half the codebase is the part an agent cannot repair by editing, which is the inverse of pi's shape (one immutable binary, ~26-line extensions). Inside the hot half, three mechanisms are paid for twice: the durable mutation protocol is hand-copied into 7 files while operational-events.ts already is the generic combinator; HttpApi is declared for 19 endpoints and then bypassed by handleRaw in all 19; and the UI re-declares server schemas across 7 hand-rolled fetch clients while HttpApiClient ships unused in the pinned effect rc. Removing/merging those plus the four parallel idempotency tables and the six boot *-schema.ts files cuts ~950-1,000 lines (~7%) and ~15 files without touching a single SPEC guarantee. The remaining ~6,400 lines (durable cutover 2,670, passkeys/enrollment/refresh 2,265, boot event log + SSE 942, preparation 485) are irreducible because SPEC §4.4, §6.1, §6.3 and §7.7 specify them almost line by line.
 
 **Owner question.**
 
@@ -623,60 +623,60 @@ HOW MUCH BIGGER THAN PI, EXCLUDING TESTS?
 
 It is 5x SMALLER, not bigger. All counts from wc -l on the files listed.
 
-comms non-test TypeScript: 14,339 lines / 134 files
+chirp non-test TypeScript: 14,339 lines / 134 files
   packages/boot/src        7,239 / 61
   packages/server/src      4,423 / 48
   packages/ui/src          2,528 / 21   (+918 CSS in 9 files)
   root helpers/scripts       149 / 5    (stage-runtime 19, stage-migrations 10, ui/dev 19, vite.config 22, scripts/check-invariants 79)
 
 pi-mono packages/coding-agent/src: 70,052 / 258 files (core 29,802/84; modes 20,662/60; core/extensions 4,130/5; core/package-manager.ts 2,699; agent-session.ts 3,552)
-Ratio: comms = 0.20x pi's coding-agent src; 0.15x if you add packages/tui (18,107/42) which comms has no equivalent of.
+Ratio: chirp = 0.20x pi's coding-agent src; 0.15x if you add packages/tui (18,107/42) which chirp has no equivalent of.
 
-FEATURE-BY-FEATURE TABLE (comms lines/files | pi lines/files | ratio | reason)
+FEATURE-BY-FEATURE TABLE (chirp lines/files | pi lines/files | ratio | reason)
 
 1. Extension loading + API surface
-   comms 793 / 9 — kernel/ext.ts 442, extension-api.ts 56, extension-discovery.ts 53, extension-work.ts 34, extension-events.ts 51, extension-cron.ts 19, extension-data.ts 83, extension-page.ts 22, extension-http.ts 33
+   chirp 793 / 9 — kernel/ext.ts 442, extension-api.ts 56, extension-discovery.ts 53, extension-work.ts 34, extension-events.ts 51, extension-cron.ts 19, extension-data.ts 83, extension-page.ts 22, extension-http.ts 33
    pi 4,130 / 5 — extensions/types.ts 1,797, runner.ts 1,286, loader.ts 809, index.ts 193, wrapper.ts 45
-   0.19x. pi's API is ~60 hooks/events over a TUI (ExtensionUIContext alone declares ~40 methods, types.ts:133-283) plus jiti + a 46-entry virtual-module table for compiled binaries (loader.ts:49-78). comms exposes 4 verbs (route/page/cron/on) and uses native dynamic import because each generation is a fresh process (ext.ts:193).
+   0.19x. pi's API is ~60 hooks/events over a TUI (ExtensionUIContext alone declares ~40 methods, types.ts:133-283) plus jiti + a 46-entry virtual-module table for compiled binaries (loader.ts:49-78). chirp exposes 4 verbs (route/page/cron/on) and uses native dynamic import because each generation is a fresh process (ext.ts:193).
 
 2. Dependency preparation
-   comms 485 / 4 — generation-preparation.ts 270, preparation-process.ts 73, preparation-keeper.ts 89, prepared-tree.ts 53
+   chirp 485 / 4 — generation-preparation.ts 270, preparation-process.ts 73, preparation-keeper.ts 89, prepared-tree.ts 53
    pi 4,933 / 4 — package-manager.ts 2,699, package-manager-cli.ts 1,102, resource-loader.ts 1,097, pi-manifest.ts 35
-   0.10x. comms does one thing: `bun install --frozen-lockfile --ignore-scripts` into a content-hashed artifact then promote by rename (preparation-keeper.ts:24, generation-preparation.ts:150-170). pi resolves npm ranges, git sources, user/project scopes, updates, and an install CLI.
+   0.10x. chirp does one thing: `bun install --frozen-lockfile --ignore-scripts` into a content-hashed artifact then promote by rename (preparation-keeper.ts:24, generation-preparation.ts:150-170). pi resolves npm ranges, git sources, user/project scopes, updates, and an install CLI.
 
 3. Auth / identity
-   comms 2,265 / 21 — auth 356 + auth-http 261 + auth-schema 18 + auth-page 64, tokens 270 + token-http 39, token-mint 181 + -http 38 + -schema 52, refresh-receipt 78 + refresh-schema 52, enrollment 229 + -http 125 + -schema 39 + -page 57, passkey-management 159 + -http 52 + -schema 56, account-queries 68 + account-http 43, agent-roster 28
+   chirp 2,265 / 21 — auth 356 + auth-http 261 + auth-schema 18 + auth-page 64, tokens 270 + token-http 39, token-mint 181 + -http 38 + -schema 52, refresh-receipt 78 + refresh-schema 52, enrollment 229 + -http 125 + -schema 39 + -page 57, passkey-management 159 + -http 52 + -schema 56, account-queries 68 + account-http 43, agent-roster 28
    pi 506 / 1 — core/auth-storage.ts (provider OAuth tokens only)
-   4.5x. pi has no human auth. comms' size is dictated almost verbatim by SPEC §4.4: AES-256-GCM HKDF refresh receipts, 60s grace, family revocation, Idempotency-Key binding, five passkey-signed actions. refresh-receipt.ts is a direct transcription of SPEC.md:172.
+   4.5x. pi has no human auth. chirp's size is dictated almost verbatim by SPEC §4.4: AES-256-GCM HKDF refresh receipts, 60s grace, family revocation, Idempotency-Key binding, five passkey-signed actions. refresh-receipt.ts is a direct transcription of SPEC.md:172.
 
 4. Hot reload / cutover / supervision
-   comms 2,670 / 21 — cutover 299 + cutover-schema 9, supervisor 253, child-process 127, child-keeper 65, child-attempts 66, generations 62, app-recovery 108, kernel-boot 25, edit-lock 351 + lock-break 57 + lock-break-schema 7, edit-http 271, source-files 308 + source-journal 201 + source-io 139 + source-schema 70, snapshots 120, server kernel lifecycle 17 + health 98 + health-probe 17
+   chirp 2,670 / 21 — cutover 299 + cutover-schema 9, supervisor 253, child-process 127, child-keeper 65, child-attempts 66, generations 62, app-recovery 108, kernel-boot 25, edit-lock 351 + lock-break 57 + lock-break-schema 7, edit-http 271, source-files 308 + source-journal 201 + source-io 139 + source-schema 70, snapshots 120, server kernel lifecycle 17 + health 98 + health-probe 17
    pi ~150 / 3 — resource-loader.ts:388-448 reload(), loader.ts clearExtensionCache(), runner.ts:593 invalidate()
-   ~18x. Not comparable work: pi re-imports modules in-process and a bad extension is just disabled. comms must hold a public port, blue/green two children, prove keeper closure receipts, freeze/drain, and lose no acknowledged write (SPEC §7.1 invariant 8, §7.7). This single axis is where the "feels bigger" comes from and it is spec-mandated.
+   ~18x. Not comparable work: pi re-imports modules in-process and a bad extension is just disabled. chirp must hold a public port, blue/green two children, prove keeper closure receipts, freeze/drain, and lose no acknowledged write (SPEC §7.1 invariant 8, §7.7). This single axis is where the "feels bigger" comes from and it is spec-mandated.
 
 5. Event log / streaming
-   comms 942 / 8 — boot events 220, event-http 183, public-event-http 107, event-retention 57, request-events 65, traffic 63, server operational-events 104, boot-channel 143
+   chirp 942 / 8 — boot events 220, event-http 183, public-event-http 107, event-retention 57, request-events 65, traffic 63, server operational-events 104, boot-channel 143
    pi 33 / 1 — core/event-bus.ts (in-memory emit/on)
    29x. Different primitive: SPEC §6.1 makes the log durable, queryable, long-pollable, SSE-resumable, retained by age/bytes, and stored in boot.db so an app swap never drops a tail.
 
 6. Storage / persistence
-   comms 712 / 11 — kernel/database 89, migrations 51, sql-read 74, sql-http 55, boot-schema 75, app-backup 66, backup-drill 88, backup-metadata 19, backup-inventory 36, scheduled-backup 115, storage-maintenance 44
+   chirp 712 / 11 — kernel/database 89, migrations 51, sql-read 74, sql-http 55, boot-schema 75, app-backup 66, backup-drill 88, backup-metadata 19, backup-inventory 36, scheduled-backup 115, storage-maintenance 44
    pi 5,298 / 2 — session-manager.ts 1,746, agent-session.ts 3,552 (JSONL session tree, forking, compaction)
-   0.13x. comms leans on Effect SQL; pi hand-rolls a session store.
+   0.13x. chirp leans on Effect SQL; pi hand-rolls a session store.
 
 7. HTTP layer
-   comms 2,047 / 18 — boot proxy 331 + public-pages 184 + application 122 + index 111; server server.ts 247, conversation 192, conversation-request 79, topics-http 137, topic-management-http 83, message-http 76, pages-http 75, reaction-http 66, board-http 59, search-http 49, profiles-http 91, onboarding 95, start 36, main 5
+   chirp 2,047 / 18 — boot proxy 331 + public-pages 184 + application 122 + index 111; server server.ts 247, conversation 192, conversation-request 79, topics-http 137, topic-management-http 83, message-http 76, pages-http 75, reaction-http 66, board-http 59, search-http 49, profiles-http 91, onboarding 95, start 36, main 5
    pi 2,583 / 5 — experimental/server.ts 798, modes/rpc/*.ts 1,785
-   0.79x. Roughly at parity; see finding C3 — a quarter of comms' share is HttpApi declarations that are never executed.
+   0.79x. Roughly at parity; see finding C3 — a quarter of chirp's share is HttpApi declarations that are never executed.
 
 8. UI
-   comms 2,528 / 21 (+918 CSS) — app.tsx 322, profile 284, account-tokens 222, extensions 179, composer 170, search 162, reactions 136, topic-controls 131, 7 api clients 437, rest
+   chirp 2,528 / 21 (+918 CSS) — app.tsx 322, profile 284, account-tokens 222, extensions 179, composer 170, search 162, reactions 136, topic-controls 131, 7 api clients 437, rest
    pi 38,769 / 102 — modes/interactive 18,631/53 + packages/tui 18,107/42 (+theme.ts 1,234, tree-selector 1,427)
    0.07x. A browser + React is a much cheaper target than a hand-built TUI toolkit.
 
 CONCEPTS TO ADD ONE FEATURE END TO END
 
-comms, "pin a message" (POST /api/messages/:id/pin with a queryable column) — 8 existing files edited, 3 new, 6 layers:
+chirp, "pin a message" (POST /api/messages/:id/pin with a queryable column) — 8 existing files edited, 3 new, 6 layers:
   1. kernel/database.ts:19 raise the `version > 6` guard; add an `if (version < 7)` branch (:84-87 pattern); add the post-ladder assertion SELECT (:71-83)
   2. kernel/published-messages.ts:7-13 add a `CASE WHEN updated_seq>ceiling THEN json_extract(previous,'$.pinned')` column, or pending-publication reads silently return NULL
   3. NEW kernel/pin-operations.ts — re-implement the whole mutation protocol (~90 lines, copied from reaction-operations.ts:22-125)
@@ -690,7 +690,7 @@ comms, "pin a message" (POST /api/messages/:id/pin with a queryable column) — 
 
 pi, "add a tool" — 1 new file, 0 existing files, 0 layers: drop a 26-line file into `.pi/extensions/` (examples/extensions/hello.ts is 26 lines) and `discoverExtensionsInDir` (loader.ts:~620) finds it. With its own npm deps: add a package.json with a `pi.extensions` field (examples/extensions/with-deps, 32 lines).
 
-comms *has* that path — ext/standup.ts is 29 lines and adds a route with zero edits elsewhere — but it stops at the schema: an extension can only read existing tables plus `ctx.kv`, a 64KB-per-key JSON blob with no indexes (extension-data.ts:42-80). So anything needing a queryable column cannot be an extension, which is why ext/ holds one demo and the kernel holds 1,663 lines of product in 15 files.
+chirp *has* that path — ext/standup.ts is 29 lines and adds a route with zero edits elsewhere — but it stops at the schema: an extension can only read existing tables plus `ctx.kv`, a 64KB-per-key JSON blob with no indexes (extension-data.ts:42-80). So anything needing a queryable column cannot be an extension, which is why ext/ holds one demo and the kernel holds 1,663 lines of product in 15 files.
 
 COULD IT BE MATERIALLY SMALLER?
 
@@ -775,7 +775,7 @@ SPEC §6 says the message/topic/inbox/read/ctx/search/reaction/profile routes sh
 
 **Evidence.** `wc -l packages/server/src/ext/*` → standup.ts 29, README.md 3. SPEC.md:304 `**Extension routes**, shipped in app/ext/core.ts (the first thing an agent will extend)` followed by the 15-route table. AGENTS.md line 5: "Keep optional product features in extensions." The reason is structural, not a forgotten port: the Api (extension-api.ts:38-55) offers route/page/cron/on and a RequestContext with `db: SqlClient` plus `ExtensionData` — whose only writable store is `ctx.kv`, a per-key JSON blob capped at 65,536 bytes with no index and no query (extension-data.ts:42-80). An extension can read existing tables but cannot own a table or a column, so anything needing a queryable field must be kernel code.
 
-**Scenario.** This is the concrete mechanism behind "feels much bigger": because the extension boundary cannot carry schema, every feature lands in the kernel and fans out across database.ts's version ladder, a new *-operations.ts, messages.ts's service record, published-messages.ts's projection, a new *-http.ts, two edits in conversation.ts, a UI api client and a UI component. That is 8 existing files plus 3 new for one route (worked through for "pin a message" in axis_answer), versus pi's one new 26-line file and zero edits. pi's 4,130-line extension system earns its size because every bundled capability is registered through it; comms' 793 lines are paid for and unused.
+**Scenario.** This is the concrete mechanism behind "feels much bigger": because the extension boundary cannot carry schema, every feature lands in the kernel and fans out across database.ts's version ladder, a new *-operations.ts, messages.ts's service record, published-messages.ts's projection, a new *-http.ts, two edits in conversation.ts, a UI api client and a UI component. That is 8 existing files plus 3 new for one route (worked through for "pin a message" in axis_answer), versus pi's one new 26-line file and zero edits. pi's 4,130-line extension system earns its size because every bundled capability is registered through it; chirp's 793 lines are paid for and unused.
 
 **Spec.** SPEC.md:304 (§6 extension routes in app/ext/core.ts), SPEC §7.3 (extension contract mirrors pi), AGENTS.md "Keep optional product features in extensions"
 
