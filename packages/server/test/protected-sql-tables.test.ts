@@ -27,22 +27,67 @@ export default api => Effect.gen(function*(){
 	await fixture.sql("INSERT INTO repair_parent VALUES(1)");
 	await fixture.sql("INSERT INTO extension_evidence VALUES(1,'retained')");
 	const check = async (running: typeof app) => {
+		expect(
+			(
+				await running.post(
+					"/api/sql",
+					{
+						sql: "CREATE TABLE IF NOT EXISTS extension_evidence_notes(value TEXT)",
+					},
+					cookie,
+				)
+			).status,
+		).toBe(200);
+		expect(
+			(
+				await running.post(
+					"/api/sql",
+					{
+						sql: "INSERT INTO extension_evidence_notes VALUES('extension_evidence')",
+					},
+					cookie,
+				)
+			).status,
+		).toBe(200);
+		const editableHistory = await fixture.sql("SELECT * FROM migrations ORDER BY migration_id");
 		for (const sql of [
 			"DELETE FROM extension_evidence",
+			'DELETE FROM main."extension_evidence"',
+			"WITH selected AS (SELECT 1) DELETE FROM extension_evidence",
+			"CREATE INDEX forbidden_evidence_index ON extension_evidence(value)",
 			"DROP TABLE extension_evidence",
 			"ALTER TABLE extension_evidence RENAME TO lost",
 			"DELETE FROM protected_sql_tables",
 			"DROP TABLE protected_sql_tables",
 			"DELETE FROM extension_migrations",
+			"DELETE FROM core_migrations",
+			"DELETE FROM migrations",
+			"DROP TABLE migrations",
+			"UPDATE migrations SET name='changed'",
+			"DROP TABLE core_migrations",
 			"UPDATE webhook_subscriptions SET cursor=999",
 			"DELETE FROM topic_page_continuations",
 		])
 			expect((await running.post("/api/sql", { sql }, cookie)).status, sql).toBe(501);
+		expect(await fixture.sql("SELECT * FROM migrations ORDER BY migration_id")).toEqual(editableHistory);
 		await fixture.sql(
 			"CREATE TRIGGER evidence_guard AFTER UPDATE ON repair_parent BEGIN DELETE FROM extension_evidence; END",
 		);
 		expect((await running.post("/api/sql", { sql: "UPDATE repair_parent SET id=id" }, cookie)).status).toBe(400);
 		await fixture.sql("DROP TRIGGER evidence_guard");
+		await fixture.sql("CREATE INDEX retained_evidence_index ON extension_evidence(value)");
+		expect((await running.post("/api/sql", { sql: "DROP INDEX retained_evidence_index" }, cookie)).status).toBe(501);
+		expect(await fixture.sql("SELECT name FROM sqlite_schema WHERE name='retained_evidence_index'")).toEqual([
+			{ name: "retained_evidence_index" },
+		]);
+		await fixture.sql("DROP INDEX retained_evidence_index");
+		const ledger = await fixture.sql("SELECT migration_id,name FROM core_migrations ORDER BY migration_id");
+		await fixture.sql(
+			"CREATE TRIGGER ledger_guard AFTER UPDATE ON repair_parent BEGIN DELETE FROM core_migrations; END",
+		);
+		expect((await running.post("/api/sql", { sql: "UPDATE repair_parent SET id=id" }, cookie)).status).toBe(400);
+		await fixture.sql("DROP TRIGGER ledger_guard");
+		expect(await fixture.sql("SELECT migration_id,name FROM core_migrations ORDER BY migration_id")).toEqual(ledger);
 		expect(await fixture.sql("SELECT * FROM extension_evidence")).toEqual([{ id: 1, value: "retained" }]);
 		expect((await running.post("/api/sql", { sql: "INSERT INTO repair_parent VALUES(2)" }, cookie)).status).toBe(200);
 		await fixture.sql("DELETE FROM repair_parent WHERE id=2");

@@ -11,6 +11,7 @@ const main = Effect.gen(function* () {
 	yield* initializeBootSchema;
 	if (process.argv[3] === "v17") {
 		yield* sql`ALTER TABLE backups DROP COLUMN engine`;
+		yield* sql`DROP TABLE boot_migrations`;
 		yield* sql`PRAGMA user_version=17`;
 		yield* sql`INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation,legacy_store_id)
 			VALUES('retained','/retained/exact.db','pre-flip',4096,123,42,7,'adopted-store')`;
@@ -51,6 +52,7 @@ const main = Effect.gen(function* () {
 	yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 	yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
 	yield* sql`ALTER TABLE backups DROP COLUMN legacy_store_id`;
+	yield* sql`DROP TABLE IF EXISTS boot_migrations`;
 	yield* sql`ALTER TABLE backups DROP COLUMN engine`;
 	yield* sql`PRAGMA user_version=11`;
 	yield* sql`INSERT INTO backups VALUES('legacy','/retained/legacy.db','pre-flip',1234,99)`;

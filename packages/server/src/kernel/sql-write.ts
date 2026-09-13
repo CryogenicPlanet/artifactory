@@ -4,6 +4,8 @@ import { type BootChannel, KernelError } from "./boot-channel.ts";
 import type { Identity } from "./identity.ts";
 import type { Mutate } from "./mutate.ts";
 import { sqlInput, sqlQueryFailure, type SqlInput } from "./sql-input.ts";
+import { preserveMigrationState } from "./migration-state.ts";
+import { sqlTableTargets } from "./sql-table-targets.ts";
 import { kernelSqlTables, protectedSqlTables } from "./protected-sql-tables.ts";
 import { SqlRows, sqlRows } from "./sql-result.ts";
 
@@ -16,7 +18,7 @@ export const writeShape = (input: typeof SqlInput.Type, protectedTables: Readonl
 			/\b(?:pragma|attach|detach|vacuum|rollback|load_extension|trigger|temp|temporary|sqlite_master|sqlite_schema|sqlite_temp_master|sqlite_temp_schema)\b/i.test(
 				input.sql,
 			) ||
-			protectedTables.some((name) => new RegExp(`\\b${name}(?:\\b|_)`, "i").test(input.sql))
+			sqlTableTargets(input.sql).some((name) => protectedTables.includes(name))
 		)
 			return yield* new KernelError({ code: "sql_unsupported" });
 	});
@@ -60,32 +62,27 @@ export const writeSql = (
 				Effect.gen(function* () {
 					const protectedTables = yield* protectedSqlTables(sql);
 					yield* writeShape(input, protectedTables);
-					const existing = yield* sql`SELECT name FROM sqlite_master WHERE type='table'`.pipe(
-						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ name: Schema.String })))),
-					);
-					const guarded = protectedTables.filter((table) => existing.some(({ name }) => name.toLowerCase() === table));
 					const range = yield* reserve(1);
-					// Also protect recovery records reached indirectly through an existing domain trigger.
-					// Guard DDL and caller SQL share this transaction, so failures remove both together.
-					for (const table of guarded)
-						for (const operation of ["INSERT", "UPDATE", "DELETE"]) {
-							yield* sql.unsafe(
-								`CREATE TEMP TRIGGER comms_sql_guard_${table}_${operation} BEFORE ${operation} ON main.${table} BEGIN SELECT RAISE(ABORT,'reserved SQL bookkeeping'); END`,
-							);
-						}
 					const count = sql`SELECT total_changes() AS count`.pipe(
 						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ count: Schema.Int })))),
 						Effect.map((rows) => rows[0]?.count ?? 0),
 					);
 					const before = yield* count;
-					const raw = yield* sql
-						.unsafe<Record<string, unknown>>(input.sql, input.params ?? [])
-						.pipe(Effect.provideService(SqlClient.SafeIntegers, true), Effect.mapError(sqlQueryFailure));
+					const raw = yield* preserveMigrationState(
+						sql,
+						sql
+							.unsafe<Record<string, unknown>>(input.sql, input.params ?? [])
+							.pipe(Effect.provideService(SqlClient.SafeIntegers, true), Effect.mapError(sqlQueryFailure)),
+						protectedTables,
+					).pipe(
+						Effect.mapError((error) =>
+							error instanceof KernelError && error.code === "extension_migration_invalid"
+								? new KernelError({ code: "sql_unsupported" })
+								: error,
+						),
+					);
 					const changes = (yield* count) - before;
 					const rows = yield* sqlRows(raw);
-					for (const table of guarded)
-						for (const operation of ["INSERT", "UPDATE", "DELETE"])
-							yield* sql.unsafe(`DROP TRIGGER temp.comms_sql_guard_${table}_${operation}`);
 					const outcome = { ...rows, changes, seq: range.from };
 					return {
 						outcome,

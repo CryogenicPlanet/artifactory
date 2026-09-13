@@ -1,3 +1,6 @@
+import { execFile } from "node:child_process";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { Schema } from "effect";
 import { expect, it } from "vitest";
@@ -118,7 +121,14 @@ for (const mode of ["constraint", "trigger"] as const)
 				"boot.db",
 			),
 		).toEqual([]);
-		expect(await fixture.sql("SELECT pending_id FROM seq", "boot.db")).toEqual([{ pending_id: null }]);
+		// A live replacement may already be publishing system messages about its recovery.
+		// Only reservations owned by the retired writer or failed transaction must be gone.
+		expect(
+			await fixture.sql(
+				`SELECT pending_id,pending_attempt FROM seq WHERE pending_attempt='${epoch}' OR pending_id='${failedBatch.id}'`,
+				"boot.db",
+			),
+		).toEqual([]);
 		expect(await (await app.post("/api/sql", sqlInput, cookie, "seed")).json()).toEqual(seedOutcome);
 		expect(
 			await (
@@ -135,3 +145,34 @@ for (const mode of ["constraint", "trigger"] as const)
 		expect(await resumed.json()).toMatchObject({ rows: [{ value: 4 }], changes: 1 });
 		expect(await fixture.sql("SELECT value FROM repair ORDER BY value")).toEqual([{ value: 1 }, { value: 4 }]);
 	}, 30000);
+
+it("distinguishes an aborted old reservation from legitimate replacement publication", async (test) => {
+	const fixture = await conversation(test);
+	const run = async (input: { op: string; epoch: string; transaction?: string }) => {
+		const { stdout } = await promisify(execFile)("bun", [
+			join(import.meta.dirname, "../../boot/test/fixtures/events-store.ts"),
+			fixture.root,
+			JSON.stringify(input),
+		]);
+		expect(Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(stdout)).toMatchObject({ _tag: "Success" });
+	};
+	await run({ op: "recover", epoch: "retired" });
+	await run({ op: "reserve", epoch: "retired", transaction: "failed-write" });
+	// The old app has no commit evidence, so real AppRecovery aborts its range before the next owner writes.
+	await run({ op: "recover", epoch: "replacement" });
+	await run({ op: "reserve", epoch: "replacement", transaction: "new-write" });
+	expect(await fixture.sql("SELECT pending_id,pending_attempt FROM seq", "boot.db")).toEqual([
+		{ pending_id: "new-write", pending_attempt: "replacement" },
+	]);
+	expect(
+		await fixture.sql(
+			"SELECT pending_id,pending_attempt FROM seq WHERE pending_attempt='retired' OR pending_id='failed-write'",
+			"boot.db",
+		),
+	).toEqual([]);
+	expect(await fixture.sql("SELECT state FROM event_batches WHERE id='failed-write'", "boot.db")).toEqual([
+		{ state: "aborted" },
+	]);
+	expect(await fixture.sql("SELECT epoch FROM kernel_writer")).toEqual([{ epoch: "replacement" }]);
+	await run({ op: "abort", epoch: "replacement", transaction: "new-write" });
+}, 10000);

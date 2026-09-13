@@ -122,6 +122,7 @@ describe("typed source tree publication", () => {
 			"ALTER TABLE generations DROP COLUMN backup_id",
 			"ALTER TABLE edit_lock DROP COLUMN reset_pin",
 			"ALTER TABLE backups DROP COLUMN legacy_store_id",
+			"DROP TABLE IF EXISTS boot_migrations",
 			"ALTER TABLE backups DROP COLUMN engine",
 			"PRAGMA user_version=12",
 			"INSERT INTO source_batches VALUES ('legacy',NULL,'codex',1,'publishing')",
