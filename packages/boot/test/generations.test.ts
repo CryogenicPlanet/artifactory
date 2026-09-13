@@ -307,12 +307,27 @@ await helper.exited;
 		const first = await launch(test, env);
 		await expect.poll(async () => (await first.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		await first.stop();
-		// Reconstruct the pre-identity pair, including its app store, before dropping boot settings.
-		await execute("bun", [
-			join(import.meta.dirname, "fixtures/store.ts"),
-			join(env.data, "comms.db"),
-			"DROP TABLE store_identity",
+		// The original boot-only scaffold's child never opened SQL. Remove only the
+		// empty kernel store introduced by this fixture's modern first launcher.
+		const appRows = async (statement: string): Promise<unknown> =>
+			JSON.parse(
+				(await execute("bun", [join(import.meta.dirname, "fixtures/store.ts"), join(env.data, "comms.db"), statement]))
+					.stdout,
+			);
+		expect(
+			await appRows("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"),
+		).toEqual([
+			{ name: "kernel_writer" },
+			{ name: "mutation_batches" },
+			{ name: "outbox" },
+			{ name: "store_identity" },
 		]);
+		expect(
+			await appRows(
+				"SELECT (SELECT COUNT(*) FROM mutation_batches) AS batches,(SELECT COUNT(*) FROM outbox) AS events",
+			),
+		).toEqual([{ batches: 0, events: 0 }]);
+		for (const suffix of ["", "-wal", "-shm"]) await rm(join(env.data, `comms.db${suffix}`), { force: true });
 		await sql(env.data, "DROP TABLE settings");
 		await sql(env.data, "DROP TABLE passkeys");
 		await sql(env.data, "DROP TABLE auth_challenges");
@@ -325,7 +340,16 @@ await helper.exited;
 		await rm(join(env.data, "app"), { recursive: true });
 		await rm(env.seed, { recursive: true });
 		const migrated = await launch(test, env);
-		await expect.poll(async () => (await migrated.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
+		await expect
+			.poll(
+				async () => {
+					const child = (await migrated.state()).child;
+					if (child.state === "failed") throw new Error(JSON.stringify(child));
+					return child;
+				},
+				{ timeout: 5000 },
+			)
+			.toMatchObject({ state: "live" });
 		expect((await migrated.state()).child.generation).toBe(1);
 		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 19 }]);
 		expect(await sql(env.data, "SELECT value FROM settings WHERE key = 'app_seeded'")).toEqual([{ value: "1" }]);
