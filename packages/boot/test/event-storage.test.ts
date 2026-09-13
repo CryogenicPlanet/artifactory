@@ -258,3 +258,38 @@ it("recovers a failed initial volume measurement on admission without waiting fo
 		admission: { _tag: "Success" },
 	});
 });
+
+it("evicts request traffic before older lifecycle history, then evicts lifecycle rows oldest first", async (test) => {
+	const app = await store(test);
+	await app.seed(2304);
+	await app.sql("UPDATE events SET event=json_set(event,'$.type','generation.failed') WHERE seq<=128");
+	expect(await app.prune()).toMatchObject({ status: { status: "over_budget", deleted: 2048 } });
+	expect(
+		await app.sql(
+			"SELECT min(seq) AS first,max(seq) AS last,count(*) AS count FROM events WHERE type='generation.failed'",
+		),
+	).toEqual([{ first: 1, last: 128, count: 128 }]);
+	expect(await app.sql("SELECT min(seq) AS first,count(*) AS count FROM events WHERE type='http.request'")).toEqual([
+		{ first: 2177, count: 128 },
+	]);
+	// Once request rows are exhausted, the same cap still bounds lifecycle history.
+	await app.sql(
+		"CREATE TRIGGER stop_lifecycle_prune BEFORE DELETE ON events WHEN old.seq=1 BEGIN SELECT RAISE(ABORT,'lifecycle reached'); END",
+	);
+	await app.prune();
+	// Mixed chunks are atomic: a failure cannot delete their request subset.
+	expect(await app.sql("SELECT count(*) AS count FROM events")).toEqual([{ count: 256 }]);
+	await app.sql("DROP TRIGGER stop_lifecycle_prune");
+	await app.prune();
+	expect(await app.sql("SELECT count(*) AS count FROM events")).toEqual([{ count: 0 }]);
+});
+
+it("retains the newest lifecycle events once request traffic is exhausted", async (test) => {
+	const app = await store(test);
+	await app.seed(2304);
+	await app.sql("UPDATE events SET event=json_set(event,'$.type','generation.failed')");
+	expect(await app.prune()).toMatchObject({ status: { status: "over_budget", deleted: 2048 } });
+	expect(await app.sql("SELECT min(seq) AS first,max(seq) AS last,count(*) AS count FROM events")).toEqual([
+		{ first: 2049, last: 2304, count: 256 },
+	]);
+});

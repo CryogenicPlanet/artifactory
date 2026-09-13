@@ -4,7 +4,7 @@ import type { SqlClient } from "effect/unstable/sql/SqlClient";
 
 export const mentionsIn = (body: string): ReadonlyArray<string> => {
 	const targets = new Set<string>();
-	for (const match of body.matchAll(/(?<![\p{L}\p{N}\p{M}@])(@[a-z0-9][a-z0-9._/-]*)(?![/._-])(?=$|[\s\p{P}|])/gu)) {
+	for (const match of body.matchAll(/(?<![\p{L}\p{N}\p{M}@/:])(@[a-z0-9][a-z0-9._/-]*)(?![\p{L}\p{N}\p{M}@/._-])/gu)) {
 		// Consume the whole path before trimming punctuation; never backtrack to a valid prefix.
 		const target = match[1]?.replace(/[._-]+$/u, "");
 		if (target && target.length <= 200 && /^@[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(target))
