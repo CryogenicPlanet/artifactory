@@ -2,19 +2,18 @@
 
 The lead owns integration and acceptance. Writers use isolated checkouts; only the lead integrates and advances the reviewed PR stack. Explicit user decisions and the current review guide implementation; distinguish those decisions from agent-proposed scope changes. Preserve the uncommitted owner files: `SPEC.md`, `docs/tech.md`, `docs/database.md`, and `docs/pr-1/`.
 
-## Current review wave — composition and acceptance pending
+## Current review wave — integrated, acceptance pending
 
-The [review disposition ledger](stack-review-status.md) maps each comment to its lower layer, frozen fix or remaining implementation. The previous database acceptance below predates this wave. Five reviewer verification comments posted on 13 September at 00:47–00:48 UTC accept many original fixes but add isolated-layout repair, backup caller-budget, descriptor-path and lower dialect/codec follow-ups. The [latest verification table](stack-review-status.md) assigns those actions; protection notes overlap pending item 48/core13.
+Transfer `3db1bc0` composes runtime `ae04432` and lower PR3 `92fbd7b`, PR4 `0d84963`, PR7 `0085b6a` and PR8 `f1f16e6`. PR2 merged older `2bb3922`; its subsequent descriptor fixes are carried by PR3. The [review ledger](stack-review-status.md) maps actual comments to these layers and documents explicit disagreements.
 
-| Order | Work | Dependency / acceptance |
-| --- | --- | --- |
-| 1 | Compose descriptor `29d05a3`, identity `f3117fb`, DbOps `a5a981d` and portable callers `a9c510a` | Preserve newer runtime implementations and all historical migration IDs; verify the lower PRs as well as the final stack. |
-| 2 | Compose base fixes 44/45/49/50 and retention | Frozen hashes are in the review ledger. Retain auth, recovery ownership and acknowledged data; line count is not acceptance. |
-| 3 | Finish repair admission 46 and protection lifecycle 48 | **Pending implementation/composition**, including core rung 13, portable histories and transfer inventory expectations. |
-| 4 | Compose shared fixtures `e60a424` and lease accounting `ea3cc83`; finish named documentation dispositions | Lease measurements cover native local mechanism cost, not guardian IPC, managed-server capacity or a universal freeze bound. |
-| 5 | Accept the combined checkout and pushed stack | Actual Node 22.22.3, at most two local test workers, check/build and relevant full/native/image/Linux/recovery checks. Record branch heads separately from CI synthetic merges. |
+| Work | Current state / remaining dependency |
+| --- | --- |
+| Base repair and ownership | Items 44–50 are integrated, including safe failed-state revert, ownerless publication repair, reserved-route readiness and retained source outcomes. Final regression acceptance is pending. |
+| Protection and migrations | Core13 reindexes mentions; core14 adds protection ownership/retirement. Target checks and shared declaration checksums compose with portable histories and transfer proofs. Historic IDs remain unchanged. PR7's duplicate-entry/SQL-target backport is pending; complete registry lifecycle remains in runtime. |
+| Latest database nits | Relative rehearsal paths, isolated repair admission, engine-specific backup caller budgets, portable cursor/publication SQL and raw-JSON CI wiring are integrated. |
+| Validation | Full suite running at exact `3db1bc0`, actual Node 22.22.3, two workers. Final combined/native/Linux/image/recovery CI acceptance is pending; record synthetic merge commits separately from branch heads. |
 
-The user's subsequent boot ownership decisions cover 35/36/47: boot-owned events, no convenience calendar retention or retired topic-move coordinator, and preserved source versioning/revert. They do not authorize weaker recovery or loss of messages, pages and identities. Direct DDL, MySQL views/triggers, failed-clone retention and broader test parity remain separate build/design questions; do not confuse them with the concrete unresolved review requests.
+Scope remains boot lifecycle, auth and recovery with preserved messages, pages, identities and source versioning. Broader direct-DDL, custom MySQL schema objects, failed-clone retention and full engine parity remain separate design limitations. Local lease/recovery measurements do not promise a universal deadline when closure is unproved. The older accepted results below are historical evidence, not acceptance of this wave.
 
 ## Accepted database checkpoint before this review wave
 

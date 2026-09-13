@@ -2,7 +2,15 @@
 
 This is the handoff and remaining-work ledger for Codex. Implementation resumed with explicit owner authorization after the review landed. This records integrated changes, active isolated work and remaining requirements; worker reports alone are not completion claims.
 
-## Current database stack — combined suite and acceptance CI pass
+## Current handoff — integrated review fixes, acceptance pending
+
+Frozen test checkout: transfer `3db1bc0`, composing runtime `ae04432` and lower heads PR3 `92fbd7b`, PR4 `0d84963`, PR7 `0085b6a`, PR8 `f1f16e6`. PR2 merged older `2bb3922`; PR3 carries its later descriptor follow-ups. Do not edit the checkout while its full suite runs with actual Node 22.22.3 and two workers.
+
+Repair admission 46 and protection lifecycle 48 are implemented, not pending writers. Core13 is the mention reindex; core14 owns protection provenance/retirement. Transfer proofs and receipt checksums include protection options. Isolated repair, backup caller budgets and native cursor/JSON follow-ups are composed. The [review ledger](stack-review-status.md) distinguishes exact lower fixes, later-runtime dispositions and refuted allegations.
+
+Remaining acceptance: finish the combined suite and CI, resolve any actual failures, then record tested heads/merge commits and update PR bodies. Do not substitute old full-suite totals or isolated focused passes. Owner SPEC/tech/database/review files and running dogfood data remain protected. Historical sections below intentionally preserve old failures and unintegrated handoff evidence; their status does not override this paragraph.
+
+## Accepted database checkpoint before the latest review wave
 
 Exact transfer integration `4587a6c` passes the combined full suite with actual Node 22.22.3 and two workers: **1,237 passed and 123 skipped (1,360 tests)**, across **278 passed files and 47 skipped (325 files)**, in **695.07s**. Check, build and fresh composition review pass. Transfer head `a8e96c2` at tested merge `058c278` also passes Linux with 1,237 tests passed and 123 skipped, across 278 passed files and 47 skipped, plus image, QEMU, both native parity groups, both boards and all twelve transfer scenarios. All twelve repair cases per engine also pass at that merge; all reported checks are green. The final documentation/keeper-fixture composition may start new CI runs, which retain their own tested-checkout attribution.
 
