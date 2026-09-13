@@ -73,11 +73,11 @@ it("serves editable public orientation with negotiated HTML, a source version an
 			{ commsBootSession: [] },
 			{ commsBootAccess: [] },
 		]);
-		expect(discovery.paths[path][method]["x-comms-scopes"], `${method} ${path}`).toEqual([scope]);
+		expect(discovery.paths[path][method]["x-chirp-scopes"], `${method} ${path}`).toEqual([scope]);
 	}
 	for (const path of ["/init", "/init.md"]) {
 		expect(discovery.paths[path].get.security).toEqual([]);
-		expect(discovery.paths[path].get["x-comms-scopes"]).toEqual([]);
+		expect(discovery.paths[path].get["x-chirp-scopes"]).toEqual([]);
 	}
 	// The error union is declared on every operation; it is referenced once, never inlined again.
 	const refusals = Object.entries(
