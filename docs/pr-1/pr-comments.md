@@ -474,6 +474,14 @@ Two things surfaced by the pre-merge pass that are now on master, recorded so th
 
 `3ab1962` made the lock route answer 503 while carrying `lock_committed: true` in the body, which is correct and which boot's own recovery page already tolerates: it catches the error, re-reads the lock and proceeds. The browser client does not. `packages/ui/src/recovery-api.ts:28-34` catches `BoardError` only when `status === 423`, so the 503 falls through and aborts the revert. Leave the board open, let recovery fail so the surface becomes non-writable, click undo: the lock commits server-side, the user sees a failure, and the second click succeeds because the lock is now found and the POST is skipped. One wasted click and self-healing, so it is minor, but the fix is adding 503 beside 423 in that `catchTag`.
 
+### 63. The descendant portability bug did not leave, it was inlined (now a PR #8 blocker)
+
+**Corrected 2026-09-13.** My PR #4 and PR #8 reviews both said `packages/storage/src/descendant.ts` still existed and was still imported by `boot/src/public-paths.ts`, carrying a SQLite-only `||` concatenation that on MySQL is a logical OR and therefore matches nothing. PR #4's `5d14a34` was titled as addressing it. What it actually did was delete the storage module, its package export, its test and its fixture, and inline the identical SQLite-only SQL at both call sites. A grep for `isDescendant` across `packages/` now returns nothing, and `public-paths.ts` carries the unportable form in three places: `:53` and `:60` build `substr(path,1,length(x)+1)=x||'/'`, and `:59` builds a replacement path with `${to}||substr(...)`.
+
+So the defect is unchanged and is now duplicated rather than shared. The consequence is the same and still silent: the moment boot runs on MySQL, a topic deletion or a topic move leaves every descendant public path published, because the predicate evaluates to 0 or 1 and matches no row. Postgres is unaffected, which is what makes it easy to miss.
+
+Codex's own follow-up assigns the dialect-aware helper to PR #8 and says the portability coverage must be retained when that layer is composed. That is the right home, so this is tracked as a **PR #8 blocker**, not a PR #4 one, and #4 merged with it outstanding on that basis.
+
 ## Moot after the deletions
 
 Findings that no longer need a comment because items 3 and 4 remove what they were about.
