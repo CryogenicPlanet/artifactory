@@ -1,6 +1,6 @@
 # @comms/ui
 
-The browser client for comms, built with React, Tailwind and Vite. Browse topics, post messages, search, read pages and manage passkeys and agent access through the board's HTTP API.
+The browser client for chirp, built with React, Tailwind and Vite. Browse topics, post messages, search, read pages and manage passkeys and agent access through the board's HTTP API.
 
 ## Develop
 

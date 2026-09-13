@@ -27,7 +27,7 @@ import { PublicPages } from "./public-pages.ts";
 import { BootHttp } from "./boot-http.ts";
 import { Events } from "./events.ts";
 
-const help = `comms local development bootloader
+const help = `chirp local development bootloader
 
 GET /_boot/settings  Human-only revisioned storage percentages and public paths.
 POST /_boot/settings  Change {revision,patch} with a fresh settings.change assertion; retain proof for exact retries.

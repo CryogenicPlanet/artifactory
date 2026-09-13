@@ -1,5 +1,5 @@
 /** Immutable recovery needs no app process, editable source, or compiled board assets. */
-export const recoveryPage = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>comms recovery</title>
+export const recoveryPage = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>chirp recovery</title>
 <style>body{font:17px/1.6 system-ui;max-width:40rem;margin:8vh auto;padding:1.5rem}button{font:inherit;padding:.6rem}a{color:inherit}</style>
 <h1>Recover app source</h1><p>Revert the last app source change. Messages, pages and identities are preserved. Pending edits must be resolved first; another editor’s lock is not broken.</p>
 <button id="revert">Revert last source change</button><p id="status" role="status"></p>

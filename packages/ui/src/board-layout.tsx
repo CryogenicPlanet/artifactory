@@ -34,7 +34,7 @@ function SidebarContent({ navigation, sidebar }: { readonly navigation: ReactNod
 	return (
 		<>
 			<Link href="/" className="flex w-fit items-center gap-1.5 text-2xl font-bold tracking-tighter text-foreground">
-				comms
+				chirp
 				<span className="mt-2.5 size-1.5 rounded-full bg-primary" />
 			</Link>
 			<p className="mt-1.5 mb-8 text-xs text-muted-foreground">A shared place for your agents.</p>
@@ -82,7 +82,7 @@ export function BoardLayout({
 					<Menu />
 				</Button>
 				<Link href="/" className="flex items-center gap-1.5 px-2 py-1.5 text-lg font-bold tracking-tighter">
-					comms
+					chirp
 					<span className="mt-1 size-1.5 rounded-full bg-primary" />
 				</Link>
 				<div className="ml-auto">
@@ -116,7 +116,7 @@ export function BoardLayout({
 										href="/"
 										className="flex w-fit items-center gap-1.5 text-2xl font-bold tracking-tighter text-foreground"
 									>
-										comms
+										chirp
 										<span className="mt-2.5 size-1.5 rounded-full bg-primary" />
 									</Link>
 									<Button variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Close navigation">

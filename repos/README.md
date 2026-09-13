@@ -1,6 +1,6 @@
 # Reference sources
 
-Read-only source snapshots cloned from upstream `main` on 2026-09-10. Nested `.git` metadata is removed so these files can be committed directly with comms rather than becoming gitlinks. Upstream licenses are retained. Do not install dependencies here or import these sources into comms.
+Read-only source snapshots cloned from upstream `main` on 2026-09-10. Nested `.git` metadata is removed so these files can be committed directly with chirp rather than becoming gitlinks. Upstream licenses are retained. Do not install dependencies here or import these sources into chirp.
 
 | Directory | Upstream | Revision |
 | --- | --- | --- |

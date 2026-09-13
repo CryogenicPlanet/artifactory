@@ -1,4 +1,4 @@
-# comms: tech choices
+# chirp: tech choices
 
 ## Current scaffold decision (2026-09-10)
 
@@ -41,7 +41,7 @@ This decision supersedes the older five-package layout, cross-package import res
 
 ## 2. Effect v4
 
-**`effect@rc` (4.0.0-rc.113), accepted with its churn.** v4 folds `@effect/platform`, `@effect/sql`, `@effect/rpc`, and effect-atom into the core package under `effect/unstable/*`. The modules comms uses, all `@since 4.0.0`:
+**`effect@rc` (4.0.0-rc.113), accepted with its churn.** v4 folds `@effect/platform`, `@effect/sql`, `@effect/rpc`, and effect-atom into the core package under `effect/unstable/*`. The modules chirp uses, all `@since 4.0.0`:
 
 | Module | Used for |
 | --- | --- |
@@ -81,7 +81,7 @@ git subtree add --prefix=repos/effect  https://github.com/Effect-TS/effect.git m
 git subtree add --prefix=repos/pi-mono https://github.com/badlogic/pi-mono.git main --squash
 ```
 
-`AGENTS.md` says: vendored repos are read-only reference; prefer their examples over web search; never import from `repos/`; inspect `repos/effect/` for Effect patterns and `repos/pi-mono/packages/coding-agent/examples/extensions/` for the extension model comms mirrors. `.vscode/settings.json` excludes `repos/**` from auto-import. `git subtree pull` on the same prefixes updates them.
+`AGENTS.md` says: vendored repos are read-only reference; prefer their examples over web search; never import from `repos/`; inspect `repos/effect/` for Effect patterns and `repos/pi-mono/packages/coding-agent/examples/extensions/` for the extension model chirp mirrors. `.vscode/settings.json` excludes `repos/**` from auto-import. `git subtree pull` on the same prefixes updates them.
 
 ## 3. Monorepo
 
@@ -113,7 +113,7 @@ The spec's invariant is "a SQL database is the only state". Both stores, boot st
 | `DATABASE_URL` | Backend | When |
 | --- | --- | --- |
 | unset | `@effect/sql-sqlite-bun`, two files under `/data` | Default. Single box, zero setup. |
-| `postgres://…` | `@effect/sql-pg` | Railway/Fly Postgres for durable state, or "I want Postgres". Still exactly one comms container: multi-container is unsupported (`docs/database.md` §9.6). |
+| `postgres://…` | `@effect/sql-pg` | Railway/Fly Postgres for durable state, or "I want Postgres". Still exactly one chirp container: multi-container is unsupported (`docs/database.md` §9.6). |
 | `mysql://…` | `@effect/sql-mysql2` | Shipped and tested; weaker guarantees compensated per `docs/database.md`. |
 
 One engine per deployment for both stores (SPEC §12, decided 2026-09-10): unset means SQLite files under `/data`; set, both stores move to one Postgres or MySQL server as two databases with two roles, `DATABASE_URL` for the app's role and `BOOT_DATABASE_URL` for boot's, and setting only one is a configuration error. A deployment never mixes engines. `DbOps` gains `capacity()` (reported as unknown on a remote engine) and `cloneForRehearsal` returns a store descriptor, not a path. Full design in `docs/pr-1/database-interoperability.md`.
@@ -187,7 +187,7 @@ Env: `PORT`, `DATA_DIR`, `RP_ID`, optional `DATABASE_URL`, optional `BOOT_DATABA
 
 ## 11. Designed to be edited by agents
 
-This repo will be edited mostly by agents, and the same code is edited again on the box over `/api/fs`. pi-mono is the reference for what that takes, and the shallow clone in the scratchpad shows the specifics: tests in `packages/*/test/`, never next to source; a root `AGENTS.md` of 124 terse lines; a single `check` script that runs the formatter, the type checker, and a set of custom repo invariants; direct dependencies pinned exact; explicit rules for several agents working in one checkout at once. Two things pi-mono does that comms should not copy: 6,600-line files (`interactive-mode.ts`) and a 3,500-line `agent-session.ts`. An agent reading those in full, which its own `AGENTS.md` demands, spends most of its context on one file.
+This repo will be edited mostly by agents, and the same code is edited again on the box over `/api/fs`. pi-mono is the reference for what that takes, and the shallow clone in the scratchpad shows the specifics: tests in `packages/*/test/`, never next to source; a root `AGENTS.md` of 124 terse lines; a single `check` script that runs the formatter, the type checker, and a set of custom repo invariants; direct dependencies pinned exact; explicit rules for several agents working in one checkout at once. Two things pi-mono does that chirp should not copy: 6,600-line files (`interactive-mode.ts`) and a 3,500-line `agent-session.ts`. An agent reading those in full, which its own `AGENTS.md` demands, spends most of its context on one file.
 
 ### Structure
 
@@ -211,7 +211,7 @@ This repo will be edited mostly by agents, and the same code is edited again on 
 
 ### `AGENTS.md`
 
-Short, imperative, in pi's register. The rules that matter most for comms, in the order agents violate them:
+Short, imperative, in pi's register. The rules that matter most for chirp, in the order agents violate them:
 
 1. Read a file in full before editing it. Read `packages/<pkg>/docs/README.md` before editing a package.
 2. Run `bun run check` after code changes and fix everything. Do not run `bun run build` or tests unless asked, or unless you changed a test.

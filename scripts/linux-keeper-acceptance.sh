@@ -2,7 +2,7 @@
 # Kernel acceptance only: requires Linux Docker and the UID-isolated image.
 # Every resource is disposable. Container restart is not a machine reboot test.
 set -eu
-image=${1:-comms:local}
+image=${1:-chirp:local}
 container=
 volume=
 cleanup() {
