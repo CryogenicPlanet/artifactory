@@ -158,8 +158,9 @@ it("stamps copy recovery as version19 so an image supporting18 refuses before op
 	expect(await app.run("recover")).toMatchObject({ result: "Success" });
 	const schema = join(app.root, "packages/boot/src/boot-schema.ts");
 	const source = await readFile(schema, "utf8");
-	expect(source.split("const supported = 19;")).toHaveLength(2);
-	await writeFile(schema, source.replace("const supported = 19;", "const supported = 18;"));
+	const newest = '{ id: 19, name: "sqlite_copy_ownership", run: Effect.void },';
+	expect(source.split(newest)).toHaveLength(2);
+	await writeFile(schema, source.replace(newest, ""));
 	const before = await readFile(join(app.root, "app.db"));
 	expect(await app.run("schema")).toMatchObject({ result: "Failure", error: { _tag: "BootSchemaTooNew" } });
 	expect(await readFile(join(app.root, "app.db"))).toEqual(before);
