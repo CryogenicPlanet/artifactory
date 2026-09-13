@@ -79,7 +79,7 @@ const Row = Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.Strin
 export const readSettings = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const rows =
-		yield* sql`SELECT key,value FROM settings WHERE key IN ('storage_policy','public_paths','settings_revision')`.pipe(
+		yield* sql`SELECT ${sql("key")},value FROM settings WHERE ${sql("key")} IN ('storage_policy','public_paths','settings_revision')`.pipe(
 			Effect.flatMap(Schema.decodeUnknownEffect(Row)),
 		);
 	const get = <A>(key: string, schema: Schema.ConstraintDecoder<A>, fallback: A) => {
@@ -99,7 +99,7 @@ export const readSettings = Effect.gen(function* () {
 const readPolicy = <A>(key: string, schema: Schema.ConstraintDecoder<A>, fallback: A) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		const row = (yield* sql`SELECT key,value FROM settings WHERE key=${key}`.pipe(
+		const row = (yield* sql`SELECT ${sql("key")},value FROM settings WHERE ${sql("key")}=${key}`.pipe(
 			Effect.flatMap(Schema.decodeUnknownEffect(Row)),
 		))[0];
 		return row ? yield* Schema.decodeEffect(Schema.fromJsonString(schema))(row.value) : fallback;

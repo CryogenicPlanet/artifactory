@@ -1,3 +1,4 @@
+import { on } from "@comms/storage/dialect";
 import { lockBootWrite } from "./boot-write-lock.ts";
 import { Context, Crypto, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -242,11 +243,15 @@ const make = Effect.gen(function* () {
 		writes: readonly { readonly path: string; readonly content: Uint8Array | null; readonly mode?: number | null }[],
 		options: { readonly requireEmpty?: boolean } = {},
 	) {
-		const staged: Array<Omit<typeof StagedFile.Type, "at">> = [];
+		const staged: Array<Omit<typeof StagedFile.Type, "at"> & { readonly pathHash: string }> = [];
 		for (const write of writes) {
 			const content = write.content?.slice() ?? null;
 			const sha = content === null ? null : Buffer.from(yield* crypto.digest("SHA-256", content)).toString("hex");
-			staged.push({ path: write.path, content, sha, mode: content === null ? null : (write.mode ?? null) });
+			const digest = crypto
+				.digest("SHA-256", new TextEncoder().encode(write.path))
+				.pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
+			const pathHash = yield* on(sql, { sqlite: () => Effect.succeed(""), pg: () => digest, mysql: () => digest });
+			staged.push({ path: write.path, content, sha, pathHash, mode: content === null ? null : (write.mode ?? null) });
 		}
 		return yield* withLockTransaction<Lock>((lock, now, transitions) =>
 			Effect.gen(function* () {
@@ -255,14 +260,40 @@ const make = Effect.gen(function* () {
 				if (lock.cutover_in_flight) return reject("cutover_in_flight", lock, transitions);
 				if (options.requireEmpty && (yield* files(lock.id)).length > 0)
 					return reject("staging_not_empty", lock, transitions);
-				for (const file of staged)
+				const paths = new Map<string, string>();
+				for (const file of staged) {
 					if (
 						!validPath(file.path) ||
 						(file.mode !== null && (!Number.isSafeInteger(file.mode) || file.mode < 0 || file.mode > 0o777))
 					)
 						return reject("invalid_path", lock, transitions);
+					// Remote indexes use a digest because source paths have no byte-length cap.
+					// Refuse a collision before changing any member of this staged batch.
+					const samePath = Effect.gen(function* () {
+						const digest = file.pathHash;
+						const previous = paths.get(digest);
+						if (previous !== undefined && previous !== file.path) return false;
+						paths.set(digest, file.path);
+						const rows = yield* sql`SELECT path FROM staging WHERE lock_id=${lock.id} AND path_hash=${digest}`.pipe(
+							Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ path: Schema.String })))),
+						);
+						return rows.every((row) => row.path === file.path);
+					});
+					if (!(yield* on(sql, { sqlite: () => Effect.succeed(true), pg: () => samePath, mysql: () => samePath })))
+						return reject("invalid_path", lock, transitions);
+				}
 				for (const file of staged)
-					yield* sql`INSERT INTO staging (lock_id,path,content,sha,at,mode) VALUES (${lock.id},${file.path},${file.content},${file.sha},${now},${file.mode}) ON CONFLICT(lock_id,path) DO UPDATE SET content=excluded.content,sha=excluded.sha,at=excluded.at,mode=excluded.mode`;
+					yield* sql`INSERT INTO staging (lock_id,path,content,sha,at,mode) VALUES (${lock.id},${file.path},${file.content},${file.sha},${now},${file.mode}) ${on(
+						sql,
+						{
+							sqlite: () =>
+								sql`ON CONFLICT(lock_id,path) DO UPDATE SET content=excluded.content,sha=excluded.sha,at=excluded.at,mode=excluded.mode`,
+							pg: () =>
+								sql`ON CONFLICT(lock_id,path_hash) DO UPDATE SET content=excluded.content,sha=excluded.sha,at=excluded.at,mode=excluded.mode`,
+							mysql: () =>
+								sql`AS incoming ON DUPLICATE KEY UPDATE content=incoming.content,sha=incoming.sha,at=incoming.at,mode=incoming.mode`,
+						},
+					)}`;
 				yield* renew(lock, now);
 				transitions.push({
 					type: "staged",
@@ -305,7 +336,7 @@ const make = Effect.gen(function* () {
 						pending_release: null,
 						reset_pin: 0,
 					};
-					yield* sql`INSERT INTO edit_lock ${sql.insert({ singleton: 1, ...value })} ON CONFLICT(singleton) DO UPDATE SET ${sql.update(value)}`;
+					yield* sql`INSERT INTO edit_lock ${sql.insert({ singleton: 1, ...value })} ${on(sql, { sqlite: () => sql`ON CONFLICT(singleton) DO UPDATE SET ${sql.update(value)}`, pg: () => sql`ON CONFLICT(singleton) DO UPDATE SET ${sql.update(value)}`, mysql: () => sql`ON DUPLICATE KEY UPDATE ${sql.update(value)}` })}`;
 					transitions.push({
 						type: lock ? "renewed" : "acquired",
 						lock_id: value.id,

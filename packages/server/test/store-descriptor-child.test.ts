@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
-for (const selection of ["descriptor", "legacy", "mismatch"] as const)
+for (const selection of ["descriptor", "legacy", "mismatch", "remote-mismatch"] as const)
 	it(`starts with ${selection} store configuration only when its selection is valid`, async (test) => {
 		const root = await mkdtemp(join(tmpdir(), "comms-descriptor-child-"));
 		test.onTestFinished(() => rm(root, { recursive: true, force: true }));
@@ -20,7 +20,12 @@ for (const selection of ["descriptor", "legacy", "mismatch"] as const)
 				BOOT_URL: "http://127.0.0.1:1",
 				BOOT_SECRET: "descriptor-test-secret",
 				PAGES_DIRECTORY: root,
-				...(selection === "legacy" ? {} : { APP_STORE: `file:${filename}` }),
+				...(selection === "legacy"
+					? {}
+					: {
+							APP_STORE:
+								selection === "remote-mismatch" ? "postgres://app:descriptor-private@db/board" : `file:${filename}`,
+						}),
 				...(selection === "descriptor"
 					? {}
 					: { APP_DATABASE: selection === "legacy" ? filename : join(root, "other.db") }),
@@ -40,10 +45,13 @@ for (const selection of ["descriptor", "legacy", "mismatch"] as const)
 			child.kill("SIGKILL");
 			await exited;
 		});
-		if (selection === "mismatch") {
+		if (selection === "mismatch" || selection === "remote-mismatch") {
 			await expect.poll(() => child.exitCode).not.toBeNull();
 			expect(child.exitCode).not.toBe(0);
-			expect(output).toContain("APP_STORE: store_descriptor_mismatch");
+			expect(output).toContain(
+				`${selection === "remote-mismatch" ? "APP_DATABASE" : "APP_STORE"}: store_descriptor_mismatch`,
+			);
+			expect(output).not.toContain("descriptor-private");
 			expect(output).not.toContain("COMMS_CHILD_PORT=");
 			expect(await readdir(root)).toEqual([]);
 		} else {

@@ -1,3 +1,4 @@
+import { transferPolicy } from "./app-store-identity.ts";
 import { bootRoute } from "./boot-route.ts";
 import { requestBytes } from "./request-bytes.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
@@ -28,6 +29,7 @@ const abortBody = Schema.Struct({ transaction: Schema.String });
 const recoveryHint =
 	"Inspect authenticated /_boot/status and recovery evidence before retrying; preserve the pending reservation and journal.";
 const eventHints = {
+	...transferPolicy,
 	...childErrorPolicy,
 	app_evidence_invalid: { hint: recoveryHint },
 	app_fence_invalid: { hint: recoveryHint },
@@ -106,6 +108,8 @@ const failure = (code: keyof typeof eventHints, status: number, route = "the req
 	);
 // Query and child mutation routes retain their existing distinct refusal statuses.
 const eventStatus = {
+	store_transferred: [409, 409],
+	store_transfer_incomplete: [409, 409],
 	app_evidence_invalid: [400, 409],
 	app_fence_invalid: [400, 409],
 	app_store_missing: [400, 409],

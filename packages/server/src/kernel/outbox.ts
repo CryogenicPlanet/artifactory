@@ -1,3 +1,4 @@
+import { on } from "@comms/storage/dialect";
 import { Clock, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { EventRecord } from "@comms/protocol/events";
@@ -83,7 +84,7 @@ export const makeOutboxRelay = (
 		}
 		const now = yield* Clock.currentTimeMillis;
 		// Idle relay passes need no writer lock when there is nothing to expire.
-		const expired = yield* sql`SELECT rowid FROM idempotency WHERE expires_at<=${now}
+		const expired = yield* sql`SELECT 1 FROM idempotency WHERE expires_at<=${now}
 			AND NOT EXISTS(SELECT 1 FROM outbox) LIMIT 1`;
 		if (expired.length === 0) return;
 		// Conservatively protect every receipt while any durable publication evidence remains.
@@ -91,10 +92,26 @@ export const makeOutboxRelay = (
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
 				yield* writerGate(sql, boot.epoch);
-				yield* sql`DELETE FROM idempotency WHERE rowid IN (
-			SELECT rowid FROM idempotency WHERE expires_at<=${now}
-			AND NOT EXISTS(SELECT 1 FROM outbox) ORDER BY expires_at,rowid LIMIT 256
-		)`;
+				const remoteExpiry = Effect.gen(function* () {
+					const expired = yield* sql`SELECT row_id FROM idempotency WHERE expires_at<=${now}
+					 AND NOT EXISTS(SELECT 1 FROM outbox) ORDER BY expires_at,row_id LIMIT 256`.pipe(
+						Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ row_id: Schema.Int })))),
+					);
+					if (expired.length > 0)
+						yield* sql`DELETE FROM idempotency WHERE ${sql.in(
+							"row_id",
+							expired.map((row) => row.row_id),
+						)}`;
+				});
+				yield* on(sql, {
+					sqlite: () =>
+						sql`DELETE FROM idempotency WHERE rowid IN (
+					 SELECT rowid FROM idempotency WHERE expires_at<=${now}
+					 AND NOT EXISTS(SELECT 1 FROM outbox) ORDER BY expires_at,rowid LIMIT 256
+					)`.pipe(Effect.asVoid),
+					pg: () => remoteExpiry,
+					mysql: () => remoteExpiry,
+				});
 			}),
 		);
 		yield* onRemaining;

@@ -9,6 +9,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 const keeper = Effect.gen(function* () {
 	const encoded = yield* Config.Redacted("COMMS_CHILD_CONFIG");
 	const supplied = yield* Schema.decodeEffect(Schema.fromJsonString(ChildConfiguration))(Redacted.value(encoded)).pipe(
+		Effect.mapError(() => new Error("Invalid app configuration")),
 		Effect.orDie,
 	);
 	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
@@ -75,30 +76,32 @@ const keeper = Effect.gen(function* () {
 					throw new Error("Child group closure could not be verified");
 				}
 			}).pipe(Effect.orDie);
+			const localClosure = Effect.gen(function* () {
+				// Scoped spawner release skips a successful exited leader even when
+				// descendants still hold the app store. Kill before accepting proof.
+				if (yield* groupRunning) yield* child.kill({ forceKillAfter: "2 seconds" }).pipe(Effect.exit);
+				yield* Scope.close(scope, Exit.void);
+				// Scope cleanup may swallow kill errors; observing exit is the actual closure proof.
+				yield* child.exitCode.pipe(Effect.exit);
+				if (yield* child.isRunning.pipe(Effect.orDie)) return yield* Effect.die("Child closure could not be verified");
+				let absent = false;
+				for (let attempt = 0; attempt < 25; attempt++) {
+					const probe = yield* groupRunning.pipe(Effect.exit);
+					if (probe._tag === "Success" && !probe.value) {
+						absent = true;
+						break;
+					}
+					yield* Effect.sleep("20 millis");
+				}
+				if (!absent) return yield* Effect.die("Child group closure could not be verified");
+			});
 			yield* Effect.addFinalizer(() =>
 				Effect.gen(function* () {
-					// Scoped spawner release skips a successful exited leader even when
-					// descendants still hold the app store. Kill before accepting proof.
-					if (yield* groupRunning) yield* child.kill({ forceKillAfter: "2 seconds" }).pipe(Effect.exit);
-					yield* Scope.close(scope, Exit.void);
-					// Scope cleanup may swallow kill errors; observing exit is the actual closure proof.
-					yield* child.exitCode.pipe(Effect.exit);
-					if (yield* child.isRunning.pipe(Effect.orDie))
-						return yield* Effect.die("Child closure could not be verified");
-					let absent = false;
-					for (let attempt = 0; attempt < 25; attempt++) {
-						const probe = yield* groupRunning.pipe(Effect.exit);
-						if (probe._tag === "Success" && !probe.value) {
-							absent = true;
-							break;
-						}
-						yield* Effect.sleep("20 millis");
-					}
-					if (!absent) return yield* Effect.die("Child group closure could not be verified");
+					yield* localClosure;
 					if (isolated && config.env.STATE === "rehearsal")
 						yield* fs.remove(`/data/rehearsals/${config.attempt}`, { recursive: true }).pipe(Effect.orDie);
 					yield* receipt;
-				}).pipe(Effect.ensuring(Scope.close(scope, Exit.void))),
+				}).pipe(Effect.ensuring(Scope.close(scope, Exit.void)), Effect.orDie),
 			);
 			yield* Console.log(`COMMS_CHILD_PID=${child.pid}`);
 			yield* child.stdout.pipe(Stream.run(stdio.stdout()), Effect.forkScoped);

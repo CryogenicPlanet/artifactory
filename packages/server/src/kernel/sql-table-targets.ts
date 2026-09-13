@@ -13,8 +13,14 @@ export const sqlTableTargets = (statement: string) => {
 		let next = index + 1;
 		while (/^(IF|NOT|EXISTS|OR|ABORT|FAIL|IGNORE|REPLACE|ROLLBACK)$/i.test(tokens[next] ?? "")) next++;
 		while (tokens[next + 1] === ".") next += 2;
-		const name = tokens[next];
-		if (name) targets.push(name.replace(/^["'`[]|["'`\]]$/g, "").toLowerCase());
+		while (tokens[next]) {
+			while (tokens[next + 1] === ".") next += 2;
+			const name = tokens[next];
+			if (name) targets.push(name.replace(/^["'`[]|["'`\]]$/g, "").toLowerCase());
+			if (token.toUpperCase() !== "TABLE" || tokens[index - 1]?.toUpperCase() !== "DROP" || tokens[next + 1] !== ",")
+				break;
+			next += 2;
+		}
 	}
 	return targets;
 };

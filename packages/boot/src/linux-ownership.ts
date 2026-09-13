@@ -1,5 +1,5 @@
 import { Redacted } from "effect";
-import { childStore, render } from "@comms/storage/store";
+import { childStore, parseDescriptor, render, StoreError } from "@comms/storage/store";
 import type { PlatformError } from "effect/PlatformError";
 import { Effect, FileSystem, Path } from "effect";
 import type { ChildConfiguration } from "./keeper-configuration.ts";
@@ -95,7 +95,18 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 		return yield* Effect.die("Invalid app snapshot");
 	if (!/^[a-f0-9]{64}$/.test(config.attempt) || config.receipt !== `/data/attempts/${config.attempt}.closed`)
 		return yield* Effect.die("Invalid app receipt");
-	const store = yield* childStore(config.env.APP_STORE, config.env.APP_DATABASE).pipe(Effect.orDie);
+	const descriptor = config.env.APP_STORE;
+	const parsed = yield* (
+		descriptor === undefined
+			? childStore(undefined, config.env.APP_DATABASE)
+			: parseDescriptor(descriptor).pipe(
+					Effect.mapError((error) => new StoreError({ code: error.code, variable: "APP_STORE" })),
+				)
+	).pipe(Effect.orDie);
+	const store =
+		parsed._tag === "file" ? yield* childStore(descriptor, config.env.APP_DATABASE).pipe(Effect.orDie) : parsed;
+	if (store._tag !== "file" && config.env.APP_DATABASE !== undefined)
+		return yield* Effect.die("Invalid remote app configuration");
 	yield* regular(config.entry);
 	// Saved pre-generation dependency stores remain referenced by legacy snapshots.
 	if (yield* fs.exists("/data/prepared")) yield* ownTree("/data/prepared", 1000, 1003, true);
@@ -107,6 +118,9 @@ export const prepareApp = Effect.fn("ownership.app")(function* (
 	}
 	if (yield* fs.exists(`${config.cwd}.board`)) yield* ownTree(`${config.cwd}.board`, 1000, 1003, true);
 	if (yield* fs.exists("/data/pages")) yield* sharePages("/data/pages");
+	if (store._tag !== "file") {
+		return { ...config, env: { ...config.env, TMPDIR: "/data/runtime", HOME: "/data/runtime" } };
+	}
 	const filename = store.filename;
 	if (config.env.STATE !== "rehearsal") {
 		if (filename !== "/data/store/comms.db") return yield* Effect.die("Invalid live database");

@@ -3,8 +3,8 @@ import { SqlClient } from "effect/unstable/sql";
 import { KernelBoot, validateKernelBootId } from "./kernel-boot.ts";
 import { ChildError } from "./child-process.ts";
 
-/** Durable process ownership evidence. A missing receipt is never interpreted as a dead process. */
-const make = (directory: string) =>
+/** SQLite replacement needs process receipts. Remote SQL admission belongs to the writing session lock. */
+const make = (directory: string, remote = false) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const fs = yield* FileSystem.FileSystem;
@@ -16,6 +16,7 @@ const make = (directory: string) =>
 			Effect.gen(function* () {
 				const expected = path.join(receipts, `${id}.closed`);
 				if (receipt !== expected) return yield* new ChildError({ code: "child_receipt_invalid" });
+				if (remote) return true;
 				const content = yield* fs.readFileString(receipt).pipe(Effect.orElseSucceed(() => ""));
 				if (content !== id) return false;
 				yield* sql`UPDATE child_attempts SET closed=1 WHERE id=${id}`;
@@ -28,12 +29,16 @@ const make = (directory: string) =>
 					const id = Buffer.from(yield* crypto.randomBytes(32)).toString("hex");
 					const receipt = path.join(receipts, `${id}.closed`);
 					// Editable imports can open the store before the go handshake. Reservation is the durable spawn intent.
-					yield* sql`INSERT INTO child_attempts(id,generation,receipt,boot_id,opened) VALUES(${id},${generation},${receipt},${bootId},1)`;
+					if (!remote)
+						yield* sql`INSERT INTO child_attempts(id,generation,receipt,boot_id,opened) VALUES(${id},${generation},${receipt},${bootId},1)`;
 					return { id, receipt };
 				}),
-			opened: (id: string) => sql`UPDATE child_attempts SET opened=1 WHERE id=${id}`.pipe(Effect.asVoid),
+			opened: (id: string) =>
+				remote ? Effect.void : sql`UPDATE child_attempts SET opened=1 WHERE id=${id}`.pipe(Effect.asVoid),
 			closed,
 			recover: Effect.gen(function* () {
+				// Do not label old remote processes closed: no local receipt proves remote session ownership.
+				if (remote) return;
 				// Older versions marked opened only after imports; their unopened rows also need closure proof.
 				const owners = yield* sql`SELECT id,receipt,boot_id FROM child_attempts WHERE closed=0`.pipe(
 					Effect.flatMap(
@@ -65,4 +70,4 @@ const make = (directory: string) =>
 export class ChildAttempts extends Context.Service<ChildAttempts, Effect.Success<ReturnType<typeof make>>>()(
 	"comms/boot/ChildAttempts",
 ) {}
-export const layer = (directory: string) => Layer.effect(ChildAttempts, make(directory));
+export const layer = (directory: string, remote = false) => Layer.effect(ChildAttempts, make(directory, remote));

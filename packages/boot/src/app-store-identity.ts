@@ -1,3 +1,7 @@
+import { on } from "@comms/storage/dialect";
+import { withDatabase, type RemoteStore } from "@comms/storage/store";
+import { lockBootWrite } from "./boot-write-lock.ts";
+import { decodeRows } from "./decode-rows.ts";
 import { backupPath } from "./backup-metadata.ts";
 import { Clock, Crypto, Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -177,13 +181,162 @@ export const verifyAppIdentity = (adoption: Adoption, allowMissing: boolean) =>
 
 export const isAppStoreIdentityError = (
 	error: unknown,
-): error is EventError & { readonly code: "app_store_missing" | "app_store_identity_invalid" | "app_store_mismatch" } =>
+): error is EventError & {
+	readonly code:
+		| "app_store_missing"
+		| "app_store_identity_invalid"
+		| "app_store_mismatch"
+		| "store_transferred"
+		| "store_transfer_incomplete";
+} =>
 	Schema.is(EventError)(error) &&
 	(error.code === "app_store_missing" ||
 		error.code === "app_store_identity_invalid" ||
-		error.code === "app_store_mismatch");
+		error.code === "app_store_mismatch" ||
+		error.code === "store_transferred" ||
+		error.code === "store_transfer_incomplete");
 export const appIdentityPolicy = {
 	status: 409,
 	retriable: false,
-	hint: "Preserve both stores and recovery journals. Inspect /_boot/status and the backup catalog. A human can restore a matching-board backup after prior owners close and pending publication is resolved; boot preserves the original files. Do not initialize or replace the selected store identity.",
+	hint: "Preserve both stores and recovery journals. Inspect /_boot/status and the backup catalog. For SQLite, a human can restore a matching-board backup after prior owners close and pending publication is resolved; boot preserves the original files. For remote stores, restore a matching-board snapshot through the database provider, then restart chirp to verify its identity. Do not initialize or replace the selected store identity.",
 } as const;
+
+export const transferPolicy = {
+	store_transferred: {
+		status: 409,
+		retriable: false,
+		hint: "This store was transferred. Use the verified target board; preserve the source and transfer records. Do not clear the retirement marker to restart it.",
+	},
+	store_transfer_incomplete: {
+		status: 409,
+		retriable: false,
+		hint: "The target transfer is incomplete. Preserve both stores and transfer records; finish verification with the offline transfer procedure before starting this board.",
+	},
+} as const;
+
+export const RemoteAdoption = Schema.Struct({
+	store_id: Schema.String,
+	initialized_at: Schema.Int,
+	engine: Schema.Literals(["postgres", "mysql"]),
+	database: Schema.String,
+	phase: Schema.Literals(["pending", "ready"]),
+});
+export type RemoteAdoption = typeof RemoteAdoption.Type;
+
+/** Only the database name is durable; credentials always come from the configured endpoint. */
+export const remoteAppStoreIdentity = (configured: RemoteStore) =>
+	Effect.gen(function* () {
+		const boot = yield* SqlClient.SqlClient;
+		const crypto = yield* Crypto.Crypto;
+		const read = Effect.gen(function* () {
+			const rows =
+				yield* boot`SELECT ${boot("key")},value FROM settings WHERE ${boot("key")} IN ('app_store_adoption','app_store_id','app_store_initialized','app_store_database','transferred_to','transfer_state')`.pipe(
+					decodeRows(Schema.Struct({ key: Schema.String, value: Schema.String })),
+				);
+			const value = (key: string) => rows.find((row) => row.key === key)?.value;
+			if (value("transferred_to") !== undefined) return yield* new EventError({ code: "store_transferred" });
+			if (value("transfer_state") !== undefined && value("transfer_state") !== "complete")
+				return yield* new EventError({ code: "store_transfer_incomplete" });
+			const raw = value("app_store_adoption");
+			const id = value("app_store_id");
+			const initialized = value("app_store_initialized") !== undefined;
+			const database = value("app_store_database");
+			if (raw === undefined) {
+				if (id !== undefined || initialized || database !== undefined) return yield* invalid();
+				return { adoption: undefined, store: configured };
+			}
+			const adoption = yield* Schema.decodeEffect(Schema.fromJsonString(RemoteAdoption))(raw).pipe(
+				Effect.mapError(invalid),
+			);
+			if (
+				!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(adoption.store_id) ||
+				adoption.initialized_at < 0 ||
+				adoption.engine !== configured._tag ||
+				(adoption.phase === "ready"
+					? id !== adoption.store_id || !initialized || database !== adoption.database
+					: id !== undefined || initialized || database !== undefined)
+			)
+				return yield* invalid();
+			const store = yield* withDatabase(configured, adoption.database);
+			return { adoption, store };
+		});
+		const store = read.pipe(Effect.map((state) => state.store));
+		const reserve = boot.withTransaction(
+			Effect.gen(function* () {
+				yield* lockBootWrite(boot);
+				const state = yield* read;
+				if (state.adoption) return state.adoption;
+				const adoption: RemoteAdoption = {
+					store_id: yield* crypto.randomUUIDv4,
+					initialized_at: yield* Clock.currentTimeMillis,
+					engine: configured._tag,
+					database: state.store.database,
+					phase: "pending",
+				};
+				yield* boot`INSERT INTO settings(${boot("key")},value) VALUES('app_store_adoption',${Schema.encodeSync(Schema.fromJsonString(RemoteAdoption))(adoption)})`;
+				return adoption;
+			}),
+		);
+		const complete = (adoption: RemoteAdoption) =>
+			boot.withTransaction(
+				Effect.gen(function* () {
+					yield* lockBootWrite(boot);
+					const { adoption: saved } = yield* read;
+					if (
+						!saved ||
+						saved.store_id !== adoption.store_id ||
+						saved.database !== adoption.database ||
+						saved.engine !== adoption.engine ||
+						saved.initialized_at !== adoption.initialized_at
+					)
+						return yield* invalid();
+					if (saved.phase === "ready") return;
+					yield* boot`INSERT INTO settings(${boot("key")},value) VALUES ('app_store_id',${adoption.store_id}),('app_store_initialized','1'),('app_store_database',${adoption.database})`;
+					yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(RemoteAdoption))({ ...saved, phase: "ready" })} WHERE ${boot("key")}='app_store_adoption'`;
+				}),
+			);
+		const status = read.pipe(
+			Effect.map(({ adoption, store }) => ({
+				app_store_id: adoption?.store_id ?? null,
+				adoption_phase: adoption?.phase ?? null,
+				selected_database: store.database,
+				recorded_database: adoption?.database ?? null,
+			})),
+		);
+		return { store, reserve, complete, status };
+	});
+
+/** Remote DDL has already completed outside this transaction. Only pending adoption may seed the row. */
+export const verifyRemoteAppIdentity = (adoption: RemoteAdoption) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const tables = yield* on(sql, {
+			sqlite: () => sql`SELECT name FROM sqlite_master WHERE name='store_identity'`,
+			pg: () =>
+				sql`SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='store_identity'`,
+			mysql: () =>
+				sql`SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='store_identity'`,
+		});
+		if (tables.length !== 1) return yield* new EventError({ code: "app_store_missing" });
+		const rows =
+			yield* sql`SELECT singleton,store_id,initialized_at,transferred_to FROM store_identity FOR UPDATE`.pipe(
+				Effect.flatMap((rows) =>
+					Schema.decodeUnknownEffect(Schema.Array(Identity))(rows).pipe(Effect.mapError(invalid)),
+				),
+			);
+		if (rows.length === 0 && adoption.phase === "pending") {
+			yield* sql`INSERT INTO store_identity(singleton,store_id,initialized_at,transferred_to) VALUES(1,${adoption.store_id},${adoption.initialized_at},NULL)`;
+			return true;
+		}
+		const row = rows[0];
+		if (!row) return yield* new EventError({ code: "app_store_missing" });
+		if (rows.length !== 1 || row.singleton !== 1 || row.initialized_at < 0) return yield* invalid();
+		if (row.transferred_to !== null) return yield* new EventError({ code: "store_transferred" });
+		if (row.store_id !== adoption.store_id)
+			return yield* new EventError({
+				code: "app_store_mismatch",
+				identity: storeIdentityDiagnostic(adoption.store_id, row.store_id),
+			});
+		if (row.initialized_at !== adoption.initialized_at) return yield* invalid();
+		return false;
+	});

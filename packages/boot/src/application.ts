@@ -1,3 +1,5 @@
+import type { Store } from "@comms/storage/store";
+import { on } from "@comms/storage/dialect";
 import { Cause, Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { ChildError } from "./child-process.ts";
@@ -36,6 +38,36 @@ export const snapshotEntry = Effect.fn("snapshotEntry")(function* (generation: G
 	return entry;
 });
 
+/** Capabilities belong to this frozen source, never the current image or editable tree. */
+export const snapshotStoreEntry = Effect.fn("snapshotStoreEntry")(function* (
+	generation: Generation,
+	dataDirectory: string,
+	store: Store,
+) {
+	const entry = yield* snapshotEntry(generation, dataDirectory);
+	const fs = yield* FileSystem.FileSystem;
+	const path = yield* Path.Path;
+	const manifest = path.join(generation.snapshot_dir ?? "", "package.json");
+	const incompatible = () => new ChildError({ code: "generation_store_incompatible" });
+	const engine = store._tag === "file" ? "sqlite" : store._tag === "postgres" ? "pg" : "mysql";
+	const declaration = Schema.Struct({
+		comms: Schema.optionalKey(
+			Schema.Struct({
+				storage_engines: Schema.optionalKey(Schema.Array(Schema.Literals(["sqlite", "pg", "mysql"]))),
+			}),
+		),
+	});
+	const engines = yield* Effect.gen(function* () {
+		if (!(yield* fs.readDirectory(generation.snapshot_dir ?? "")).includes("package.json")) return undefined;
+		const info = yield* fs.stat(manifest);
+		if (info.type !== "File" || (yield* fs.realPath(manifest)) !== manifest) return yield* incompatible();
+		const parsed = yield* Schema.decodeEffect(Schema.fromJsonString(declaration))(yield* fs.readFileString(manifest));
+		return parsed.comms?.storage_engines;
+	}).pipe(Effect.mapError(incompatible));
+	if (!(engines ?? ["sqlite"]).includes(engine)) return yield* incompatible();
+	return entry;
+});
+
 /** Seeds only an absent editable tree. Every attempted new snapshot has a durable reservation. */
 export const prepareGeneration = Effect.fn("prepareGeneration")(function* (options: ApplicationSource) {
 	const fs = yield* FileSystem.FileSystem;
@@ -45,7 +77,10 @@ export const prepareGeneration = Effect.fn("prepareGeneration")(function* (optio
 	const sql = yield* SqlClient.SqlClient;
 	const existing = yield* generations.list;
 	const good = existing.filter((generation) => generation.good === 1 && generation.snapshot_dir !== null);
-	if (options.seedPagesDirectory && (yield* sql`SELECT key FROM settings WHERE key='pages_seeded'`).length === 0) {
+	if (
+		options.seedPagesDirectory &&
+		(yield* sql`SELECT ${sql("key")} FROM settings WHERE ${sql("key")}='pages_seeded'`).length === 0
+	) {
 		const seed = sources.withCommitted(seedPages(options));
 		// Optional first-time page seeding cannot veto recovery from an immutable healthy app snapshot.
 		yield* good.length > 0
@@ -99,13 +134,18 @@ export const seedPages = Effect.fn("seedPages")(function* (options: ApplicationS
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const sql = yield* SqlClient.SqlClient;
-	if ((yield* sql`SELECT key FROM settings WHERE key='pages_seeded'`).length > 0) return;
+	if ((yield* sql`SELECT ${sql("key")} FROM settings WHERE ${sql("key")}='pages_seeded'`).length > 0) return;
 	const root = yield* fs.realPath(options.dataDirectory);
 	const target = path.join(root, "pages");
 	if ((yield* fs.readDirectory(root)).includes("pages")) {
 		if ((yield* fs.realPath(target)) !== target || (yield* fs.stat(target)).type !== "Directory")
 			return yield* new SnapshotRejected({ path: target, reason: "Pages root must be a regular directory" });
-		yield* sql`INSERT OR IGNORE INTO settings (key,value) VALUES ('pages_seeded','1')`;
+		yield* on(sql, {
+			sqlite: () => sql`INSERT OR IGNORE INTO settings (${sql("key")},value) VALUES ('pages_seeded','1')`,
+			pg: () => sql`INSERT INTO settings (${sql("key")},value) VALUES ('pages_seeded','1') ON CONFLICT DO NOTHING`,
+			mysql: () =>
+				sql`INSERT INTO settings (${sql("key")},value) VALUES ('pages_seeded','1') ON DUPLICATE KEY UPDATE value=value`,
+		});
 		return;
 	}
 	yield* Effect.scoped(
@@ -114,7 +154,12 @@ export const seedPages = Effect.fn("seedPages")(function* (options: ApplicationS
 			const copied = path.join(temporary, "pages");
 			yield* copySource(options.seedPagesDirectory ?? "", copied);
 			// Commit intent before publication; an interrupted initialization requires explicit repair.
-			yield* sql`INSERT OR IGNORE INTO settings (key,value) VALUES ('pages_seeded','1')`;
+			yield* on(sql, {
+				sqlite: () => sql`INSERT OR IGNORE INTO settings (${sql("key")},value) VALUES ('pages_seeded','1')`,
+				pg: () => sql`INSERT INTO settings (${sql("key")},value) VALUES ('pages_seeded','1') ON CONFLICT DO NOTHING`,
+				mysql: () =>
+					sql`INSERT INTO settings (${sql("key")},value) VALUES ('pages_seeded','1') ON DUPLICATE KEY UPDATE value=value`,
+			});
 			yield* fs.rename(copied, target);
 			yield* (yield* fs.open(root)).sync;
 		}),

@@ -233,6 +233,33 @@ it("reclaims a SIGKILL orphan after artifact fsync before manifest recording", a
 	expect(await app.contents("")).toBe("original");
 });
 
+it.for(["prepare", "rollback"])(
+	"refuses a symlinked parent during %s even with an empty before-image",
+	async (mode, test) => {
+		const app = await fixture(test);
+		const selected = join(app.root, "store");
+		const outside = join(app.root, "elsewhere");
+		await mkdir(selected);
+		await mkdir(outside);
+		const run = async (action: string) =>
+			(
+				await promisify(execFile)("bun", [
+					join(import.meta.dirname, "fixtures/restore-before-image.ts"),
+					app.root,
+					action,
+					"{}",
+					"store/comms.db",
+				])
+			).stdout;
+		if (mode === "rollback") expect(await run("prepare")).toContain('"files":[]');
+		await rm(selected, { recursive: true });
+		await symlink(outside, selected);
+		if (mode === "rollback") await writeFile(join(outside, "comms.db"), "outside-preserved");
+		expect(await run(mode)).toContain('"Failure"');
+		if (mode === "rollback") expect(await readFile(join(outside, "comms.db"), "utf8")).toBe("outside-preserved");
+		else expect(await readdir(outside)).toEqual([]);
+	},
+);
 it("constructs before isolated layout recovery and validates the canonical parent only when preparing", async (test) => {
 	const app = await fixture(test);
 	expect(await app.run("isolated-construct")).toContain('"constructed"');

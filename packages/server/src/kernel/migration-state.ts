@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
+import { preserveRemoteMigrationState } from "./migration-state-remote.ts";
 import { kernelSqlTables } from "./protected-sql-tables.ts";
 
 const Objects = Schema.Array(
@@ -19,6 +20,8 @@ export const preserveMigrationState = <A, E, R>(
 	tables: ReadonlyArray<string> = kernelSqlTables,
 ) =>
 	Effect.gen(function* () {
+		if (!sql.onDialectOrElse({ sqlite: () => true, orElse: () => false }))
+			return yield* preserveRemoteMigrationState(sql, operation, tables);
 		const inventory =
 			sql`SELECT type,name,tbl_name,sql FROM main.sqlite_schema WHERE lower(tbl_name) IN ${sql.in(tables)} ORDER BY type,name`.pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(Objects)),

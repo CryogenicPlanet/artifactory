@@ -15,8 +15,9 @@ const program = Effect.gen(function* () {
 	const allocated = yield* Ref.make(0);
 	const passes = yield* Ref.make<ReadonlyArray<number>>([]);
 	const countPass = Clock.currentTimeMillis.pipe(Effect.flatMap((at) => Ref.update(passes, (items) => [...items, at])));
-	const boot: BootChannel["Service"] = {
+	const boot: BootChannel["Service"] & { readonly filename: string } = {
 		epoch: "writer",
+		store: { _tag: "file", filename: ":memory:" },
 		filename: ":memory:",
 		generation: 1,
 		backup: Effect.void,

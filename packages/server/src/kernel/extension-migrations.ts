@@ -1,15 +1,19 @@
+import { extensionChecksums } from "./extension-checksum.ts";
+import { on } from "@comms/storage/dialect";
+import { assertNoPendingMigration, mysqlMigration } from "./migration-intent.ts";
+import { Effect, Schema, Semaphore } from "effect";
 import { preserveMigrationState } from "./migration-state.ts";
-import { Crypto, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "./boot-channel.ts";
 import { registerProtectedSqlTable } from "./protected-sql-tables.ts";
+import { extensionProtection } from "./protection-ownership.ts";
 import { writerGate } from "./database.ts";
 
 /** Loader-only migrations share the startup writer fence; they never publish candidate events. */
 export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, extension: string) =>
 	Effect.gen(function* () {
-		const crypto = yield* Crypto.Crypto;
-		return (name: string, statement: string, options?: { readonly protect?: boolean }) =>
+		const gate = yield* Semaphore.make(1);
+		return (name: string, statement: string, options?: { readonly protect?: boolean; readonly unprotect?: string }) =>
 			Effect.gen(function* () {
 				if (
 					!name ||
@@ -30,32 +34,69 @@ export const makeExtensionMigrate = (sql: SqlClient.SqlClient, epoch: string, ex
 					: undefined;
 				if (options?.protect && table === undefined)
 					return yield* new KernelError({ code: "extension_migration_invalid" });
-				const checksum = Buffer.from(yield* crypto.digest("SHA-256", new TextEncoder().encode(statement))).toString(
-					"hex",
-				);
-				yield* sql.withTransaction(
+				const { checksum, legacyChecksum } = yield* extensionChecksums(statement, options);
+				const mysql = on(sql, { sqlite: () => false, pg: () => false, mysql: () => true });
+				const prior = sql.withTransaction(
 					Effect.gen(function* () {
 						yield* writerGate(sql, epoch);
-						yield* sql`CREATE TABLE IF NOT EXISTS extension_migrations(extension TEXT NOT NULL,name TEXT NOT NULL,checksum TEXT NOT NULL,PRIMARY KEY(extension,name))`;
+						yield* assertNoPendingMigration(sql);
+						yield* on(sql, {
+							sqlite: () =>
+								sql`CREATE TABLE IF NOT EXISTS extension_migrations(extension TEXT NOT NULL,name TEXT NOT NULL,checksum TEXT NOT NULL,PRIMARY KEY(extension,name))`.pipe(
+									Effect.asVoid,
+								),
+							pg: () => Effect.void,
+							mysql: () => Effect.void,
+						});
 						const previous =
 							yield* sql`SELECT checksum FROM extension_migrations WHERE extension=${extension} AND name=${name}`.pipe(
 								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ checksum: Schema.String })))),
 							);
 						if (previous.length > 0) {
-							if (previous[0]?.checksum !== checksum)
+							if (
+								previous[0]?.checksum !== checksum &&
+								!(options?.unprotect === undefined && previous[0]?.checksum === legacyChecksum)
+							)
 								return yield* new KernelError({ code: "extension_migration_conflict" });
-							return;
+							return true;
 						}
-						// IF NOT EXISTS must not turn a no-op into ownership of another table.
+						// IF NOT EXISTS cannot adopt someone else's existing object.
 						if (
 							table !== undefined &&
-							(yield* sql`SELECT name FROM sqlite_schema WHERE name=${table} COLLATE NOCASE`).length
+							(yield* on(sql, {
+								sqlite: () => sql`SELECT name FROM sqlite_schema WHERE name=${table} COLLATE NOCASE`,
+								pg: () =>
+									sql`SELECT c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND lower(c.relname)=lower(${table}::text)`,
+								mysql: () =>
+									sql`SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND lower(TABLE_NAME)=lower(${table})`,
+							})).length
 						)
 							return yield* new KernelError({ code: "extension_migration_invalid" });
-						yield* preserveMigrationState(sql, sql.unsafe(statement));
-						if (table !== undefined) yield* registerProtectedSqlTable(sql, table);
-						yield* sql`INSERT INTO extension_migrations(extension,name,checksum) VALUES(${extension},${name},${checksum})`;
+						yield* extensionProtection(sql, extension, statement, options?.unprotect);
+						return false;
 					}),
 				);
-			});
+				let finishProtection: Effect.Effect<void, Effect.Error<ReturnType<typeof extensionProtection>>> = Effect.void;
+				const operation = Effect.gen(function* () {
+					const protection = yield* extensionProtection(sql, extension, statement, options?.unprotect);
+					yield* preserveMigrationState(sql, sql.unsafe(statement), protection.tables);
+					finishProtection = protection.receipt;
+				});
+				const receipt = Effect.gen(function* () {
+					yield* finishProtection;
+					if (table !== undefined) yield* registerProtectedSqlTable(sql, table, { extension, migration: name });
+					yield* sql`INSERT INTO extension_migrations(extension,name,checksum) VALUES(${extension},${name},${checksum})`;
+				});
+				if (mysql) {
+					if (yield* prior) return;
+					return yield* mysqlMigration(sql, epoch, extension, name, sql.withTransaction(operation), receipt);
+				}
+				yield* sql.withTransaction(
+					Effect.gen(function* () {
+						if (yield* prior) return;
+						yield* operation;
+						yield* receipt;
+					}),
+				);
+			}).pipe(gate.withPermit);
 	});

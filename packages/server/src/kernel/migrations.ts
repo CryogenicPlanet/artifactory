@@ -1,3 +1,7 @@
+import { migrationProtection } from "./migration-protection.ts";
+import { migrationWarnings, observeMigrationDialect } from "./migration-portability.ts";
+import { on } from "@comms/storage/dialect";
+import { assertNoPendingMigration, mysqlMigration } from "./migration-intent.ts";
 import { preserveMigrationState } from "./migration-state.ts";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { Migrator, SqlClient } from "effect/unstable/sql";
@@ -7,6 +11,8 @@ import { writerGate } from "./database.ts";
 export const migrate = (directory: string, epoch: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const warnings = yield* migrationWarnings;
+		const unbranched: string[] = [];
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
 		const loader = Effect.gen(function* () {
@@ -41,11 +47,30 @@ export const migrate = (directory: string, epoch: string) =>
 				id,
 				name,
 				load.pipe(
-					Effect.map((loaded: unknown) => {
-						const first = exported(loaded) ? loaded.default : loaded;
-						const effect = exported(first) ? first.default : first;
-						return Effect.isEffect(effect) ? preserveMigrationState(sql, effect) : loaded;
-					}),
+					Effect.flatMap((loaded: unknown) =>
+						Effect.gen(function* () {
+							const releaseProtection = yield* migrationProtection(sql, loaded);
+							const first = exported(loaded) ? loaded.default : loaded;
+							const effect = exported(first) ? first.default : first;
+							return Effect.isEffect(effect)
+								? on<ReturnType<typeof writerGate> | typeof Effect.void>(sql, {
+										sqlite: () => Effect.void,
+										pg: () => Effect.void,
+										// DDL releases MySQL's batch fence; reject stale ownership before capturing the next baseline.
+										mysql: () => writerGate(sql, epoch),
+									}).pipe(
+										Effect.andThen(
+											preserveMigrationState(
+												sql,
+												warnings
+													? observeMigrationDialect(sql, effect, () => unbranched.push(`${id}_${name}`))
+													: effect,
+											).pipe(Effect.tap(() => releaseProtection)),
+										),
+									)
+								: loaded;
+						}),
+					),
 				),
 			]);
 		}).pipe(
@@ -55,10 +80,34 @@ export const migrate = (directory: string, epoch: string) =>
 					: new Migrator.MigrationError({ kind: "Failed", cause, message: "Cannot read app migrations" }),
 			),
 		);
-		return yield* sql.withTransaction(
-			Effect.gen(function* () {
-				yield* writerGate(sql, epoch);
-				return yield* Migrator.make({})({ loader, table: "migrations" });
-			}),
-		);
+		const report = warnings
+			? Effect.suspend(() => Effect.forEach(unbranched, (name) => warnings.record(name), { discard: true }))
+			: Effect.void;
+		yield* assertNoPendingMigration(sql);
+		if (on(sql, { sqlite: () => false, pg: () => false, mysql: () => true })) {
+			const resolved = yield* loader;
+			if (new Set(resolved.map(([id]) => id)).size !== resolved.length)
+				return yield* new Migrator.MigrationError({ kind: "Duplicates", message: "Duplicate app migration id" });
+			const applied = yield* sql`SELECT migration_id FROM migrations ORDER BY migration_id DESC LIMIT 1`.pipe(
+				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ migration_id: Schema.Int })))),
+			);
+			if (!resolved.some(([id]) => id > (applied[0]?.migration_id ?? 0))) return [];
+			// Migrator may commit receipts before MySQL DDL. The durable intent makes the whole batch untrusted until success.
+			return yield* mysqlMigration(
+				sql,
+				epoch,
+				"editable",
+				"batch",
+				Migrator.make({})({ loader: Effect.succeed(resolved), table: "migrations" }),
+				Effect.void,
+			).pipe(Effect.tap(() => report));
+		}
+		return yield* sql
+			.withTransaction(
+				Effect.gen(function* () {
+					yield* writerGate(sql, epoch);
+					return yield* Migrator.make({})({ loader, table: "migrations" });
+				}),
+			)
+			.pipe(Effect.tap(() => report));
 	});

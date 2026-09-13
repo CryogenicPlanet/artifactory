@@ -36,6 +36,8 @@
 	"packageManager": "bun@1.4.0",
 	"patchedDependencies": {
 		"@effect/platform-bun@4.0.0-rc.113": "patches/@effect%2Fplatform-bun@4.0.0-rc.113.patch",
-		"@effect/sql-mysql2@4.0.0-rc.113": "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"
+		"@effect/sql-mysql2@4.0.0-rc.113": "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch",
+		"@effect/sql-pg@4.0.0-rc.113": "patches/@effect%2Fsql-pg@4.0.0-rc.113.patch",
+		"effect@4.0.0-rc.113": "patches/effect@4.0.0-rc.113.patch"
 	}
 }

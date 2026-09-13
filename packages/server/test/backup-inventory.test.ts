@@ -57,13 +57,20 @@ it("lists backup metadata with a human session and rejects every Authorization h
 		"INSERT INTO backups(id,path,reason,bytes,taken_at,published_through,generation) VALUES ('legacy','/private/backup-never-created.db','pre-flip',2048,10,NULL,NULL),('new','/private/current.db','hourly',4096,20,123,7)",
 		"boot.db",
 	);
+	const [identity] = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ value: Schema.String })))(
+		await fixture.sql("SELECT value FROM settings WHERE key='app_store_id'", "boot.db"),
+	);
+	if (!identity) throw new Error("Missing adopted store identity");
+	await fixture.sql(
+		"UPDATE backups SET legacy_store_id=(SELECT value FROM settings WHERE key='app_store_id') WHERE id='legacy'",
+		"boot.db",
+	);
 	const response = await fetch(url, { headers: { cookie } });
 	expect(response.status).toBe(200);
 	expect(response.headers.get("cache-control")).toBe("no-store");
 	expect(response.headers.get("x-content-type-options")).toBe("nosniff");
 	expect(response.headers.get(tokenExpiresHeader)).toMatch(/^\d+$/);
 	expect(await response.json()).toEqual({
-		expected_store_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
 		items: [
 			{
 				id: "new",
@@ -83,10 +90,22 @@ it("lists backup metadata with a human session and rejects every Authorization h
 				taken_at: 10,
 				published_through: null,
 				generation: null,
-				provenance: { kind: "not_recorded", store_id: null },
+				provenance: { kind: "legacy_adoption", store_id: identity.value },
 			},
 		],
 		next: null,
+		expected_store_id: identity.value,
+	});
+	// Catalog reads never echo malformed identity bytes, including a valid UUID followed by a newline.
+	await fixture.sql(
+		"UPDATE backups SET legacy_store_id=(SELECT value FROM settings WHERE key='app_store_id') || char(10) WHERE id='legacy'",
+		"boot.db",
+	);
+	expect(await (await fetch(url, { headers: { cookie } })).json()).toMatchObject({
+		items: [
+			{ id: "new", provenance: { kind: "not_recorded", store_id: null } },
+			{ id: "legacy", provenance: { kind: "legacy_adoption", store_id: null } },
+		],
 	});
 
 	const expected = "12345678-1234-4234-8234-123456789abc";

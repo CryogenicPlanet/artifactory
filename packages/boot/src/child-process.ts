@@ -1,6 +1,7 @@
 import { healthReadyHeader, kernelProtocolHeader, writerEpochHeader } from "@comms/protocol/headers";
 import { readRehearsalReport } from "./rehearsal-report.ts";
 import { ChildConfiguration } from "./keeper-configuration.ts";
+import { logRedactor } from "./log-redaction.ts";
 import { Cause, Deferred, Effect, Exit, FileSystem, Path, Ref, Schema, Scope, Stream } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -22,6 +23,8 @@ export class ChildError extends Schema.TaggedError<ChildError>()("ChildError", {
 		"cutover_backup_invalid",
 		"cutover_backup_missing",
 		"cutover_recovery_required",
+		"remote_cutover_requires_operator",
+		"generation_store_incompatible",
 		"health_failed",
 		"incompatible_schema",
 		"keeper_closure_unproven",
@@ -43,7 +46,9 @@ export class ChildError extends Schema.TaggedError<ChildError>()("ChildError", {
 	stderr: Schema.optionalKey(Schema.String),
 }) {
 	get message() {
-		return `Child operation failed: ${this.code}`;
+		return this.code === "remote_cutover_requires_operator"
+			? "Remote candidate may have changed the database. Automatic data rollback is unavailable; inspect the failed migration and use your provider restore or a forward repair before restarting chirp."
+			: `Child operation failed: ${this.code}`;
 	}
 }
 export type Launch = typeof ChildConfiguration.Type;
@@ -58,6 +63,7 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch, 
 	const entry = yield* path.fromFileUrl(new URL(`./child-keeper.${extension}`, import.meta.url));
 	const scope = yield* Scope.fork(yield* Effect.scope);
 	const stderr = yield* Ref.make("");
+	const redact = logRedactor([options.env.APP_STORE ?? "", options.env.BOOT_SECRET ?? ""]);
 	return yield* Effect.gen(function* () {
 		const configuration = yield* Schema.encodeEffect(Schema.fromJsonString(ChildConfiguration))(options);
 		const handle = yield* spawner
@@ -103,9 +109,28 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch, 
 			),
 			Effect.forkIn(scope),
 		);
+		let errorLine = "";
+		let oversized = false;
+		const retain = (text: string) => Ref.update(stderr, (prior) => (prior + redact(text)).slice(-8192));
 		yield* handle.stderr.pipe(
 			Stream.decodeText(),
-			Stream.runForEach((chunk) => Ref.update(stderr, (text) => (text + chunk).slice(-8192))),
+			Stream.runForEach((chunk) =>
+				Effect.gen(function* () {
+					for (const [index, part] of chunk.split("\n").entries()) {
+						if (index > 0) {
+							yield* retain(oversized ? "[diagnostic line too long]\n" : `${errorLine}\n`);
+							errorLine = "";
+							oversized = false;
+						}
+						if (oversized) continue;
+						if (errorLine.length + part.length > 65536) {
+							errorLine = "";
+							oversized = true;
+						} else errorLine += part;
+					}
+				}),
+			),
+			Effect.andThen(Effect.suspend(() => retain(oversized ? "[diagnostic line too long]" : errorLine))),
 			Effect.forkIn(scope),
 		);
 		// Ownership preparation copies/seals files before editable code exists. Its
@@ -178,6 +203,8 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch, 
 					Effect.mapError(() => new ChildError({ code: "keeper_closure_unproven" })),
 				);
 				if (yield* handle.isRunning) return yield* new ChildError({ code: "keeper_closure_unproven" });
+				// Remote SQL exclusion is enforced when the next writing session acquires its lock.
+				if (options.env.APP_STORE !== undefined && options.env.APP_DATABASE === undefined) return;
 				const receipt = yield* fs
 					.readFileString(options.receipt)
 					.pipe(Effect.mapError(() => new ChildError({ code: "child_closure_unproven" })));

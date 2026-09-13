@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { Effect, Path } from "effect";
-import { backupPath } from "../src/backup-metadata.ts";
+import { backupPath, backupRelativePath } from "../src/backup-metadata.ts";
 import { expect, it } from "vitest";
 
 it("migrates legacy backups without inventing their publication fence or generation", async (test) => {
@@ -38,4 +38,37 @@ it("uses the capture engine to name each restorable artifact", async () => {
 		}).pipe(Effect.provide(Path.layer)),
 	);
 	expect(paths).toEqual(["/data/backups/saved.db", "/data/backups/saved.dump", "/data/backups/saved.sql"]);
+});
+
+it("accepts catalogued legacy remote names without inferring engines or arbitrary locations", async () => {
+	const path = await Effect.runPromise(Path.Path.pipe(Effect.provide(Path.layer)));
+	for (const engine of ["pg", "mysql"] as const) {
+		for (const root of ["/data", "/canonical"]) {
+			expect(
+				backupRelativePath(path, "/data", "/canonical", { id: "saved", engine, path: `${root}/backups/saved.db` }),
+			).toBe("backups/saved.db");
+			const current = backupPath(path, root, "saved", engine);
+			expect(backupRelativePath(path, "/data", "/canonical", { id: "saved", engine, path: current })).toBe(
+				`backups/${path.basename(current)}`,
+			);
+		}
+		for (const filename of [
+			"/elsewhere/backups/saved.db",
+			"/data/backups/../saved.db",
+			"/data/backups/other.db",
+			"/data/backups/saved.zip",
+		]) {
+			expect(backupRelativePath(path, "/data", "/canonical", { id: "saved", engine, path: filename })).toBeNull();
+		}
+	}
+	expect(
+		backupRelativePath(path, "/data", "/canonical", {
+			id: "saved",
+			engine: "sqlite",
+			path: "/data/backups/saved.dump",
+		}),
+	).toBeNull();
+	expect(
+		backupRelativePath(path, "/data", "/canonical", { id: "../saved", engine: "pg", path: "/data/saved.db" }),
+	).toBeNull();
 });

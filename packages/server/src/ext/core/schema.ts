@@ -1,3 +1,6 @@
+import { on } from "@comms/storage/dialect";
+import { migrateProtectionOwnership } from "../../kernel/protection-schema.ts";
+import { initializeRemoteCore } from "./core-schema-remote.ts";
 import { inspectMigrations, migrate } from "@comms/storage/migrations";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -9,6 +12,30 @@ import { migrateIdempotency } from "./legacy-idempotency.ts";
 export const initialize = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const boot = yield* BootChannel;
+	if (on(sql, { sqlite: () => false, pg: () => true, mysql: () => true })) {
+		yield* initializeRemoteCore(sql, boot.epoch);
+		yield* sql.withTransaction(
+			Effect.gen(function* () {
+				yield* writerGate(sql, boot.epoch);
+				yield* registerProtectedSqlTable(sql, "topic_page_continuations");
+				// Completed ledgers do not recreate missing objects. Probe the live contract,
+				// while permitting extensions to add their own columns and indexes.
+				yield* sql`SELECT path,parent,name,meta,last_seq,created_at,archived_at,updated_seq,previous,deleted_at FROM topics LIMIT 1`;
+				yield* sql`SELECT id,seq,topic,agent,instance,body,tags,meta,created_at,edited_at,deleted_at,updated_seq,previous,mentions,previous_mentions FROM messages LIMIT 1`;
+				yield* sql`SELECT instance,${sql("key")},kind,input_hash,outcome,expires_at FROM idempotency LIMIT 1`;
+				yield* sql`SELECT instance,topic,seq FROM ${sql("reads")} LIMIT 1`;
+				yield* sql`SELECT ns,${sql("key")},value,updated_seq,previous FROM kv LIMIT 1`;
+				yield* sql`SELECT seq,from_path,to_path,marker,completed FROM topic_page_continuations LIMIT 1`;
+				yield* on(sql, {
+					sqlite: () => Effect.void,
+					pg: () => sql`SELECT body_tsv,previous_body_tsv FROM messages LIMIT 1`.pipe(Effect.asVoid),
+					mysql: () => sql`SELECT previous_body FROM messages LIMIT 1`.pipe(Effect.asVoid),
+				});
+			}),
+		);
+		return;
+	}
+
 	const steps = (version: number) => [
 		{
 			id: 1,
@@ -106,6 +133,10 @@ export const initialize = Effect.gen(function* () {
 				if (version === 9) yield* reindexMentions(sql);
 			}),
 		},
+		{ id: 11, name: "domain_json", run: Effect.void },
+		{ id: 12, name: "search_diacritics", run: Effect.void },
+		{ id: 13, name: "mention_symbol_boundaries", run: reindexMentions(sql) },
+		{ id: 14, name: "protection_ownership", run: migrateProtectionOwnership(sql) },
 	];
 	const supported = steps(0).length;
 	yield* sql`PRAGMA busy_timeout = 2000`;

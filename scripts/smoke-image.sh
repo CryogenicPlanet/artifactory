@@ -2,6 +2,11 @@
 # Uses a new disposable container and volume; never touches an existing instance.
 set -eu
 image=${1:-chirp:local}
+# Check the immutable tools as the same unprivileged account used by boot.
+docker run --rm --read-only --user 1000:1000 --entrypoint /bin/sh "$image" -ec '
+    test "$(dpkg --print-architecture)" = amd64
+    test -s /etc/ssl/certs/ca-certificates.crt
+'
 container=
 volume=
 cleanup() {

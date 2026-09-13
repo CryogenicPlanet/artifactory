@@ -1,3 +1,5 @@
+import { snapshotStoreEntry } from "./application.ts";
+import type { BackupRecord } from "./backup-metadata.ts";
 import { Effect, FileSystem, Path, Ref } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { DbOps } from "./db-ops.ts";
@@ -8,7 +10,7 @@ import type { DatabaseRestoreRequest } from "./database-restore-schema.ts";
 import { Events } from "./events.ts";
 import { GenerationPreparation } from "./generation-preparation.ts";
 import { generationSource } from "./generation-source.ts";
-import { Generations } from "./generations.ts";
+import { Generations, type Generation } from "./generations.ts";
 import { copySource, Snapshots, layer as snapshotsLayer } from "./snapshots.ts";
 import { storageHeadroom } from "./storage-headroom.ts";
 import type { Supervisor } from "./supervisor.ts";
@@ -17,20 +19,18 @@ import type { Supervisor } from "./supervisor.ts";
  * This creates an immutable candidate; editable source is published only at acceptance. */
 export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(function* (
 	record: DatabaseRestoreRequest,
-	backupPath: string,
+	artifact: BackupRecord,
 	supervisor: Supervisor,
 ) {
 	const sql = yield* SqlClient.SqlClient;
 	const generations = yield* Generations;
 	const recovery = yield* AppRecovery;
-	const backup = yield* DbOps;
-	const events = yield* Events;
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const root = recovery.dataDirectory;
-	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
 	const source = (yield* generations.list).find((item) => item.n === record.source_generation && item.good === 1);
 	if (!source) return yield* new ChildError({ code: "restore_snapshot_missing" });
+	yield* snapshotStoreEntry(source, root, yield* recovery.store);
 	const directory = yield* generationSource(root, source.n);
 	const temporarySource = yield* fs.makeTempDirectoryScoped({ directory: root, prefix: ".restore-source-" });
 	const materialized = path.join(temporarySource, "app");
@@ -47,32 +47,56 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 	yield* generations.setSnapshot(candidate.n, snapshot.directory);
 	yield* sql`UPDATE generations SET backup_id=${record.backup} WHERE n=${candidate.n}`;
 	const generation = { ...candidate, snapshot_dir: snapshot.directory, backup_id: record.backup };
-	yield* Effect.scoped(
+	const report = yield* rehearseRestoreGeneration(generation, artifact, record.proof_id, supervisor);
+	yield* generations.rehearsed(generation.n, report);
+	return generation;
+}, Effect.scoped);
+
+/** Exercise the selected immutable source against a private copy before replacing the current store. */
+export const rehearseRestoreGeneration = Effect.fn("rehearseRestoreGeneration")(function* (
+	generation: Generation,
+	artifact: BackupRecord,
+	proofId: string,
+	supervisor: Supervisor,
+) {
+	const recovery = yield* AppRecovery;
+	const backup = yield* DbOps;
+	const events = yield* Events;
+	const fs = yield* FileSystem.FileSystem;
+	const path = yield* Path.Path;
+	const root = recovery.dataDirectory;
+	const context = yield* Effect.context<Generations | AppRecovery | ChildAttempts>();
+	return yield* Effect.scoped(
 		Effect.gen(function* () {
 			const temporary = yield* fs.makeTempDirectoryScoped({ directory: root, prefix: ".restore-rehearsal-" });
-			yield* (yield* storageHeadroom(root)).check(Number((yield* fs.stat(backupPath)).size));
-			const clone = path.resolve(temporary, "app.db");
-			yield* fs.copyFile(backupPath, clone);
+			yield* (yield* storageHeadroom(root)).check(Number((yield* fs.stat(artifact.path)).size));
 			// Rehearsal never publishes its private sequence space into boot.
-			const epoch = `restore-rehearsal-${record.proof_id}`;
-			yield* backup.prepareClone({ _tag: "file", filename: clone }, epoch);
+			const epoch = `restore-rehearsal-${proofId}`;
 			const report = yield* Effect.acquireUseRelease(
-				supervisor
-					.launch(generation, { _tag: "file", filename: clone }, "rehearsal", (yield* events.state).next, epoch)
-					.pipe(Effect.provideContext(context)),
-				(rehearsed) =>
-					rehearsed.process.health.pipe(
-						Effect.timeout("30 seconds"),
-						Effect.catch(() =>
-							Ref.get(rehearsed.process.stderr).pipe(
-								Effect.flatMap((stderr) => Effect.fail(new ChildError({ code: "restore_rehearsal_failed", stderr }))),
-							),
-						),
-					),
-				(rehearsed) => supervisor.retire(rehearsed).pipe(Effect.provideContext(context), Effect.orDie),
+				backup.rehearsal({ _tag: "file", filename: path.resolve(temporary, "app.db") }, epoch, artifact),
+				(clone) =>
+					Effect.gen(function* () {
+						return yield* Effect.acquireUseRelease(
+							supervisor
+								.launch(generation, clone.store, "rehearsal", (yield* events.state).next, epoch)
+								.pipe(Effect.provideContext(context)),
+							(rehearsed) =>
+								rehearsed.process.health.pipe(
+									Effect.timeout("30 seconds"),
+									Effect.catch(() =>
+										Ref.get(rehearsed.process.stderr).pipe(
+											Effect.flatMap((stderr) =>
+												Effect.fail(new ChildError({ code: "restore_rehearsal_failed", stderr })),
+											),
+										),
+									),
+								),
+							(rehearsed) => supervisor.retire(rehearsed).pipe(Effect.provideContext(context), Effect.orDie),
+						);
+					}),
+				(clone) => supervisor.assertClosure.pipe(Effect.andThen(clone.dispose), Effect.orDie),
 			);
-			yield* generations.rehearsed(generation.n, report);
+			return report;
 		}),
 	);
-	return generation;
 }, Effect.scoped);

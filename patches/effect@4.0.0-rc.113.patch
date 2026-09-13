@@ -1,0 +1,131 @@
+diff --git a/dist/unstable/sql/SqlClient.js b/dist/unstable/sql/SqlClient.js
+index f9bfd9e3cbb60d69b508aa8ae85ae1d64c20ccf3..24bd43b99aae52a2e67829080d2982c1b1a00834 100644
+--- a/dist/unstable/sql/SqlClient.js
++++ b/dist/unstable/sql/SqlClient.js
+@@ -119,23 +119,32 @@ export const makeWithTransaction = options => {
+     const connOption = Context.getOption(services, options.transactionService);
+     const conn = connOption._tag === "Some" ? Effect.succeed([undefined, connOption.value[0]]) : options.acquireConnection;
+     const id = connOption._tag === "Some" ? connOption.value[1] + 1 : 0;
+-    const transaction = Effect.flatMap(conn, ([scope, conn]) => (id === 0 ? options.begin(conn) : options.savepoint(conn, id)).pipe(Effect.flatMap(() => Effect.onExitPrimitive(Effect.provideContext(restore(effect), services.pipe(Context.add(options.transactionService, [conn, id]), Context.add(transactionSemaphore, Semaphore.makeUnsafe(1)), Context.add(Tracer.ParentSpan, span))), exit => {
++    const inherited = id > 0 ? Context.getUnsafe(services, transactionSemaphore) : undefined;
++    const controlFailure = inherited?.controlFailure ?? { cause: undefined };
++    const state = { gate: Semaphore.makeUnsafe(1), controlFailure };
++    // A failed savepoint boundary remains fatal to the outer transaction even if caught by user code.
++    const control = operation => Effect.onError(operation, cause => Effect.sync(() => { controlFailure.cause ??= cause; }));
++    const refusePoisoned = Effect.suspend(() => controlFailure.cause === undefined ? Effect.void : Effect.orDie(Effect.failCause(controlFailure.cause)));
++    const transaction = Effect.flatMap(conn, ([scope, conn]) => Effect.andThen(refusePoisoned, control(id === 0 ? options.begin(conn) : options.savepoint(conn, id))).pipe(Effect.flatMap(() => Effect.onExitPrimitive(Effect.provideContext(restore(effect), services.pipe(Context.add(options.transactionService, [conn, id]), Context.add(transactionSemaphore, state), Context.add(Tracer.ParentSpan, span))), exit => {
+       let effect;
+-      if (Exit.isSuccess(exit)) {
++      if (id === 0 && controlFailure.cause !== undefined) {
++        const failed = Effect.orDie(Effect.failCause(controlFailure.cause));
++        effect = Effect.onExit(failed, () => Effect.orDie(control(options.rollback(conn))));
++      } else if (Exit.isSuccess(exit)) {
+         if (id === 0) {
+           span.event("db.transaction.commit", clock.currentTimeNanosUnsafe());
+-          effect = Effect.orDie(options.commit(conn));
++          effect = Effect.orDie(control(options.commit(conn)));
+         } else {
+           span.event("db.transaction.savepoint", clock.currentTimeNanosUnsafe());
+           effect = Effect.void;
+         }
+       } else {
+         span.event("db.transaction.rollback", clock.currentTimeNanosUnsafe());
+-        effect = Effect.orDie(id > 0 ? options.rollbackSavepoint(conn, id) : options.rollback(conn));
++        effect = Effect.orDie(control(id > 0 ? options.rollbackSavepoint(conn, id) : options.rollback(conn)));
+       }
+       return Effect.flatMap(effect, () => exit);
+     }, true)), scope ? eff => Effect.onExitPrimitive(eff, exit => Scope.close(scope, exit), true) : identity));
+-    return id === 0 ? transaction : Context.getUnsafe(services, transactionSemaphore).withPermit(transaction);
++    return id === 0 ? transaction : Context.getUnsafe(services, transactionSemaphore).gate.withPermit(transaction);
+   })));
+ };
+ /**
+diff --git a/src/unstable/sql/SqlClient.ts b/src/unstable/sql/SqlClient.ts
+index 6682f69b410971f5410f81348fa338368925e488..9a9bd6a72a26c129dea47138dc53496384318d3b 100644
+--- a/src/unstable/sql/SqlClient.ts
++++ b/src/unstable/sql/SqlClient.ts
+@@ -8,6 +8,7 @@
+  *
+  * @since 4.0.0
+  */
++import type * as Cause from "../../Cause.ts"
+ import { Clock } from "../../Clock.ts"
+ import * as Context from "../../Context.ts"
+ import * as Effect from "../../Effect.ts"
+@@ -266,7 +267,10 @@ export const makeWithTransaction = <I, S>(options: {
+   readonly rollback: (conn: NoInfer<S>) => Effect.Effect<void, SqlError>
+   readonly rollbackSavepoint: (conn: NoInfer<S>, id: number) => Effect.Effect<void, SqlError>
+ }) => {
+-  const transactionSemaphore = Context.Service<Semaphore.Semaphore>(
++  const transactionSemaphore = Context.Service<{
++    readonly gate: Semaphore.Semaphore
++    readonly controlFailure: { cause: Cause.Cause<SqlError> | undefined }
++  }>(
+     `effect/sql/SqlClient/TransactionSemaphore/${transactionSemaphoreIdCounter++}`
+   )
+   return <R, E, A>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | SqlError, R> =>
+@@ -286,28 +290,39 @@ export const makeWithTransaction = <I, S>(options: {
+               ? Effect.succeed([undefined, connOption.value[0]] as const)
+               : options.acquireConnection
+             const id = connOption._tag === "Some" ? connOption.value[1] + 1 : 0
++            const inherited = id > 0 ? Context.getUnsafe(services, transactionSemaphore) : undefined
++            const controlFailure = inherited?.controlFailure ?? { cause: undefined }
++            const state = { gate: Semaphore.makeUnsafe(1), controlFailure }
++            // A failed savepoint boundary remains fatal to the outer transaction even if caught by user code.
++            const control = (operation: Effect.Effect<void, SqlError>) => Effect.onError(operation, (cause) =>
++              Effect.sync(() => { controlFailure.cause ??= cause }))
++            const refusePoisoned = Effect.suspend(() => controlFailure.cause === undefined
++              ? Effect.void : Effect.orDie(Effect.failCause(controlFailure.cause)))
+             const transaction = Effect.flatMap(
+               conn,
+               (
+                 [scope, conn]
+               ) =>
+-                (id === 0 ? options.begin(conn) : options.savepoint(conn, id)).pipe(
++                Effect.andThen(refusePoisoned, control(id === 0 ? options.begin(conn) : options.savepoint(conn, id))).pipe(
+                   Effect.flatMap(() =>
+                     Effect.onExitPrimitive(
+                       Effect.provideContext(
+                         restore(effect),
+                         services.pipe(
+                           Context.add(options.transactionService, [conn, id]),
+-                          Context.add(transactionSemaphore, Semaphore.makeUnsafe(1)),
++                          Context.add(transactionSemaphore, state),
+                           Context.add(Tracer.ParentSpan, span)
+                         )
+                       ),
+                       (exit) => {
+                         let effect: Effect.Effect<void>
+-                        if (Exit.isSuccess(exit)) {
++                        if (id === 0 && controlFailure.cause !== undefined) {
++                          const failed = Effect.orDie(Effect.failCause(controlFailure.cause))
++                          effect = Effect.onExit(failed, () => Effect.orDie(control(options.rollback(conn))))
++                        } else if (Exit.isSuccess(exit)) {
+                           if (id === 0) {
+                             span.event("db.transaction.commit", clock.currentTimeNanosUnsafe())
+-                            effect = Effect.orDie(options.commit(conn))
++                            effect = Effect.orDie(control(options.commit(conn)))
+                           } else {
+                             span.event("db.transaction.savepoint", clock.currentTimeNanosUnsafe())
+                             effect = Effect.void
+@@ -315,9 +330,9 @@ export const makeWithTransaction = <I, S>(options: {
+                         } else {
+                           span.event("db.transaction.rollback", clock.currentTimeNanosUnsafe())
+                           effect = Effect.orDie(
+-                            id > 0
++                            control(id > 0
+                               ? options.rollbackSavepoint(conn, id)
+-                              : options.rollback(conn)
++                              : options.rollback(conn))
+                           )
+                         }
+                         return Effect.flatMap(effect, () => exit)
+@@ -330,7 +345,7 @@ export const makeWithTransaction = <I, S>(options: {
+             )
+             return id === 0
+               ? transaction
+-              : Context.getUnsafe(services, transactionSemaphore).withPermit(transaction)
++              : Context.getUnsafe(services, transactionSemaphore).gate.withPermit(transaction)
+           })
+       )
+     )

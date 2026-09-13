@@ -1,3 +1,4 @@
+import { lockBootWrite } from "./boot-write-lock.ts";
 import { humanAgent } from "./human-agent.ts";
 import { authSecrets, refuse, canonicalProof } from "./auth-primitives.ts";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
@@ -24,6 +25,7 @@ export const makeTokenMint = <E, R>(
 			mutex.withPermit(
 				sql.withTransaction(
 					Effect.gen(function* () {
+						yield* lockBootWrite(sql);
 						const sessionHash = yield* hash(sessionSecret);
 						const liveSession = Effect.gen(function* () {
 							const now = yield* Clock.currentTimeMillis;

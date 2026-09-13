@@ -27,7 +27,8 @@ export const restoreBeforeImage = (dataDirectory: string, filename: string) =>
 		const crypto = yield* Crypto.Crypto;
 		const sql = yield* SqlClient.SqlClient;
 		const root = yield* fs.realPath(dataDirectory);
-		// Layout recovery may create the isolated store directory after this graph is constructed.
+		// The isolated store directory may not exist until layout recovery runs.
+		// Bind only supported paths here; filesystem operations below verify canonical files before use.
 		const selected = path.join(root, path.relative(path.resolve(dataDirectory), path.resolve(filename)));
 		const parent = path.dirname(selected);
 		const directory = path.join(root, "restore-before");

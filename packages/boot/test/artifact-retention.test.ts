@@ -355,3 +355,20 @@ for (const engine of ["pg", "mysql"]) {
 		expect(await app.sql("SELECT id,engine FROM backups")).toEqual([{ id: "foreign", engine: "sqlite" }]);
 	});
 }
+
+for (const engine of ["pg", "mysql"]) {
+	it(`prunes historical ${engine} .db names while preserving unknown provenance and foreign files`, async (test) => {
+		const app = await store(test);
+		await app.backup("foreign");
+		await app.backup("current");
+		await app.backup("unknown", "hourly", null);
+		await app.sql(`UPDATE backups SET engine='${engine}' WHERE id IN ('current','unknown')`);
+		expect(await app.prune({ engine, capacity: 500 })).toMatchObject({
+			success: { backup_bytes: 100, removed_backups: 1 },
+		});
+		expect(await app.exists("backups/current.db")).toBe(false);
+		for (const id of ["foreign", "unknown"])
+			expect(await readFile(join(app.root, `backups/${id}.db`), "utf8")).toBe("retained-data");
+		expect(await app.sql("SELECT id FROM backups ORDER BY id")).toEqual([{ id: "foreign" }, { id: "unknown" }]);
+	});
+}

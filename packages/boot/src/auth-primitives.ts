@@ -1,3 +1,4 @@
+import { lockBootWrite } from "./boot-write-lock.ts";
 import { type Crypto, Effect, Result } from "effect";
 import type { AssertionProof } from "./enrollment.ts";
 import type { SqlClient } from "effect/unstable/sql";
@@ -31,7 +32,7 @@ export const captureRefusal =
 /** The caller places captureRefusal at the exact proof boundary it owns.
  * Semantic results fail after COMMIT; errors, defects and interruption still roll back. */
 export const committed = <A, D, E, R>(sql: SqlClient.SqlClient, effect: Effect.Effect<Result.Result<A, D>, E, R>) =>
-	sql.withTransaction(effect).pipe(Effect.flatMap(Effect.fromResult));
+	sql.withTransaction(lockBootWrite(sql).pipe(Effect.andThen(effect))).pipe(Effect.flatMap(Effect.fromResult));
 
 /** Stable assertion bytes bind durable receipts across retries and boot upgrades. */
 export const canonicalProof = (proof: AssertionProof) =>

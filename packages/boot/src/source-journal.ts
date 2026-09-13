@@ -1,3 +1,5 @@
+import { distinctFrom } from "@comms/storage/dialect";
+import { lockBootWrite } from "./boot-write-lock.ts";
 import { decodeRows } from "./decode-rows.ts";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -26,7 +28,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 		if (batch) return yield* new SourceRejected({ code: "publication_pending", path: batch.id });
 	});
 	const rows = (batch: string) =>
-		sql`SELECT path, before, before_sha, before_mode, desired, desired_sha, desired_mode, before_directory, desired_directory FROM source_changes WHERE batch = ${batch} ORDER BY path`.pipe(
+		sql`SELECT path, ${sql("before")}, before_sha, before_mode, desired, desired_sha, desired_mode, before_directory, desired_directory FROM source_changes WHERE batch = ${batch} ORDER BY path`.pipe(
 			decodeRows(
 				Schema.Struct({
 					path: Schema.String,
@@ -61,6 +63,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 	const begin = (batch: typeof Batch.Type, changes: readonly Change[]) =>
 		sql.withTransaction(
 			Effect.gen(function* () {
+				yield* lockBootWrite(sql);
 				yield* ready;
 				yield* sql`INSERT INTO source_batches ${sql.insert(batch)}`;
 				for (const change of changes)
@@ -102,6 +105,7 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 		}
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
+				yield* lockBootWrite(sql);
 				yield* recordVersions(batch, changes);
 				for (const change of changes) {
 					if (sameImage(change.before, change.desired)) continue;
@@ -167,8 +171,8 @@ export const sourceJournal = Effect.fn("sourceJournal")(function* (io: Effect.Su
 				selection.version !== undefined
 					? sql`SELECT * FROM versions WHERE id = ${selection.version}`
 					: selection.path !== undefined
-						? sql`SELECT * FROM versions WHERE path = ${selection.path} ORDER BY (sha IS NOT previous_sha OR mode IS NOT previous_mode OR directory != previous_directory) DESC,id DESC LIMIT 1`
-						: sql`SELECT * FROM versions WHERE (path = 'app' OR path LIKE 'app/%') AND batch != COALESCE((SELECT value FROM settings WHERE key='source.watcher_baseline'),'') ORDER BY id DESC LIMIT 1`
+						? sql`SELECT * FROM versions WHERE path = ${selection.path} ORDER BY (${distinctFrom(sql, sql("sha"), sql("previous_sha"))} OR ${distinctFrom(sql, sql("mode"), sql("previous_mode"))} OR directory != previous_directory) DESC,id DESC LIMIT 1`
+						: sql`SELECT * FROM versions WHERE (path = 'app' OR path LIKE 'app/%') AND batch != COALESCE((SELECT value FROM settings WHERE ${sql("key")}='source.watcher_baseline'),'') ORDER BY id DESC LIMIT 1`
 			).pipe(decodeRows(Version));
 			const version = rows[0];
 			if (!version)

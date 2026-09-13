@@ -1,5 +1,4 @@
 import { Schema } from "effect";
-
 /** Immutable keeper wire contracts shared by each sender and receiver. */
 export const ChildConfiguration = Schema.Struct({
 	entry: Schema.String,

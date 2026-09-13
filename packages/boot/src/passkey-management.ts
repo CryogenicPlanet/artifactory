@@ -1,3 +1,4 @@
+import { lockBootWrite } from "./boot-write-lock.ts";
 import { committed, captureRefusal } from "./auth-primitives.ts";
 import { generateRegistrationOptions, verifyRegistrationResponse } from "@simplewebauthn/server";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
@@ -53,6 +54,7 @@ export const makePasskeyManagement = <E, R>(
 			mutex.withPermit(
 				sql.withTransaction(
 					Effect.gen(function* () {
+						yield* lockBootWrite(sql);
 						if (!validPasskeyLabel(label)) return yield* new AuthError({ code: "invalid_request" });
 						yield* liveSession(sessionId);
 						const credentials = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: Schema.String })))(

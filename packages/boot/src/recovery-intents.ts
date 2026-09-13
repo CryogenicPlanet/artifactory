@@ -12,9 +12,9 @@ export class RecoveryRejected extends Schema.TaggedError<RecoveryRejected>()("Re
 /** One recovery operation owns the stores. Read all durable admissions in one SQL snapshot. */
 export const recoveryIntents = (sql: SqlClient.SqlClient) =>
 	sql`SELECT
-		EXISTS(SELECT 1 FROM cutover) AS cutover,
-		EXISTS(SELECT 1 FROM db_restore_requests WHERE phase IN ('authorized','restoring','working','rollback')) AS restore,
-		EXISTS(SELECT 1 FROM source_batches WHERE state='publishing') AS source`.pipe(
+		CASE WHEN EXISTS(SELECT 1 FROM cutover) THEN 1 ELSE 0 END AS cutover,
+		CASE WHEN EXISTS(SELECT 1 FROM db_restore_requests WHERE phase IN ('authorized','restoring','working','rollback')) THEN 1 ELSE 0 END AS restore,
+		CASE WHEN EXISTS(SELECT 1 FROM source_batches WHERE state='publishing') THEN 1 ELSE 0 END AS source`.pipe(
 		Effect.flatMap(
 			Schema.decodeUnknownEffect(
 				Schema.Array(

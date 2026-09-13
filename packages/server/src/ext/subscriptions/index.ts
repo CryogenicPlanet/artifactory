@@ -6,6 +6,8 @@ import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, OpenApi } from 
 import { Input, created, SubscriptionError, validate } from "./contract.ts";
 import { makeStore } from "./store.ts";
 import { runDelivery } from "./delivery.ts";
+import { on } from "@comms/storage/dialect";
+import { SqlClient } from "effect/unstable/sql";
 
 const Receipt = Schema.Struct({
 	id: Schema.String,
@@ -53,15 +55,34 @@ export const definition = HttpApi.make("subscriptions").add(
 
 export default (api: Api) =>
 	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
 		yield* api.migrate(
 			"webhook_subscriptions",
-			`CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+			on(sql, {
+				sqlite: () => `CREATE TABLE IF NOT EXISTS webhook_subscriptions (
  id TEXT PRIMARY KEY, instance TEXT NOT NULL, agent TEXT NOT NULL, human INTEGER NOT NULL,
  input TEXT NOT NULL, idempotency_key TEXT, created_at INTEGER NOT NULL,
  start_seq INTEGER NOT NULL, created_seq INTEGER NOT NULL, deleted_seq INTEGER,
  cursor INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
  next_attempt INTEGER NOT NULL DEFAULT 0, last_error TEXT,
  UNIQUE(instance,idempotency_key))`,
+				pg: () => `CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+ id TEXT PRIMARY KEY, instance TEXT NOT NULL, agent TEXT NOT NULL, human INTEGER NOT NULL,
+ input TEXT NOT NULL, idempotency_key TEXT, created_at BIGINT NOT NULL,
+ start_seq BIGINT NOT NULL, created_seq BIGINT NOT NULL, deleted_seq BIGINT,
+ cursor BIGINT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+ next_attempt BIGINT NOT NULL DEFAULT 0, last_error TEXT,
+ UNIQUE(instance,idempotency_key))`,
+				mysql: () => `CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+ id VARCHAR(64) PRIMARY KEY, instance LONGTEXT NOT NULL, agent LONGTEXT NOT NULL, human INTEGER NOT NULL,
+ input LONGTEXT NOT NULL, idempotency_key LONGTEXT, created_at BIGINT NOT NULL,
+ start_seq BIGINT NOT NULL, created_seq BIGINT NOT NULL, deleted_seq BIGINT,
+ \`cursor\` BIGINT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+ next_attempt BIGINT NOT NULL DEFAULT 0, last_error LONGTEXT,
+ instance_hash BINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(instance,256))) STORED,
+ idempotency_hash BINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(idempotency_key,256))) STORED,
+ UNIQUE(instance_hash,idempotency_hash)) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`,
+			}),
 			{ protect: true },
 		);
 		const gate = yield* Semaphore.make(1);

@@ -43,7 +43,7 @@ const familyFor = (kind: string) => {
 export const lookupIdempotency = <A>(sql: SqlClient, crypto: Crypto.Crypto, receipt: Idempotency<A>) =>
 	Effect.gen(function* () {
 		const read = (key: string) =>
-			sql`SELECT kind,input_hash,outcome FROM idempotency WHERE instance=${receipt.instance} AND key=${key}`.pipe(
+			sql`SELECT kind,input_hash,outcome FROM idempotency WHERE instance=${receipt.instance} AND ${sql("key")}=${key}`.pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Stored))),
 				Effect.map((rows) => rows[0]),
 			);
@@ -75,7 +75,7 @@ export const storeIdempotency = <A>(sql: SqlClient, crypto: Crypto.Crypto, recei
 		const inputHash = yield* idempotencyInputHash(crypto, receipt.input);
 		const outcome = yield* Schema.encodeEffect(receipt.outcome)(value);
 		const expires = (yield* Clock.currentTimeMillis) + idempotencyReplayWindow;
-		yield* sql`INSERT INTO idempotency(instance,key,kind,input_hash,outcome,expires_at) VALUES(${receipt.instance},${idempotencyKey(receipt)},${receipt.kind},${inputHash},${outcome},${expires})`;
+		yield* sql`INSERT INTO idempotency(instance,${sql("key")},kind,input_hash,outcome,expires_at) VALUES(${receipt.instance},${idempotencyKey(receipt)},${receipt.kind},${inputHash},${outcome},${expires})`;
 	});
 
 export const operationalInput = (

@@ -146,7 +146,7 @@ it.for(["rehearsal", "published", "accepted"] as const)(
 		const reached = join(fixture.root, "reset-crash-reached");
 		const needle =
 			boundary === "rehearsal"
-				? "const report = yield* rehearsed.process.health.pipe("
+				? "rehearsed.process.health.pipe("
 				: boundary === "published"
 					? "const candidate = yield* supervisor"
 					: "const freezeMs = (yield* DateTime.nowAsDate).getTime() - frozenAt;";
@@ -155,10 +155,12 @@ it.for(["rehearsal", "published", "accepted"] as const)(
 			filename,
 			source.replace(
 				needle,
-				`if (yield* fs.exists(${JSON.stringify(armed)})) {
+				`${boundary === "rehearsal" ? "Effect.gen(function* () {" : ""}
+if (yield* fs.exists(${JSON.stringify(armed)})) {
  yield* fs.writeFileString(${JSON.stringify(reached)}, ${JSON.stringify(boundary)});
  yield* Effect.never;
-}\n${needle}`,
+}
+${boundary === "rehearsal" ? "return yield* rehearsed.process.health; }).pipe(" : needle}`,
 			),
 		);
 		const state = await fixture.initialize();
@@ -224,16 +226,16 @@ it("releases its synthetic lock when the authorizing session logs out during res
 	const armed = join(fixture.root, "reset-logout-armed");
 	const reached = join(fixture.root, "reset-logout-reached");
 	const released = join(fixture.root, "reset-logout-release");
-	const needle = "const report = yield* rehearsed.process.health.pipe(";
+	const needle = "rehearsed.process.health.pipe(";
 	expect(source.split(needle)).toHaveLength(2);
 	await writeFile(
 		filename,
 		source.replace(
 			needle,
-			`if (yield* fs.exists(${JSON.stringify(armed)})) {
+			`Effect.gen(function* () { if (yield* fs.exists(${JSON.stringify(armed)})) {
  yield* fs.writeFileString(${JSON.stringify(reached)}, "rehearsal");
  while (!(yield* fs.exists(${JSON.stringify(released)}))) yield* Effect.sleep("20 millis");
-}\n${needle}`,
+} return yield* rehearsed.process.health; }).pipe(`,
 		),
 	);
 	const state = await fixture.initialize();

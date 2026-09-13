@@ -18,5 +18,9 @@
 		"@effect/sql-sqlite-bun": "4.0.0-rc.113",
 		"@simplewebauthn/server": "14.0.1",
 		"effect": "4.0.0-rc.113"
+	},
+	"devDependencies": {
+		"@effect/sql-mysql2": "4.0.0-rc.113",
+		"@effect/sql-pg": "4.0.0-rc.113"
 	}
 }

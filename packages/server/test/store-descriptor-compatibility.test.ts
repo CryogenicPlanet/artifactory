@@ -1,5 +1,5 @@
 import { sourcePut } from "./fixtures/source-put.ts";
-import { cp, readFile } from "node:fs/promises";
+import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
@@ -12,6 +12,18 @@ it("restarts a retained APP_DATABASE-only generation after a candidate corrupts 
 	// Frozen from the last pre-descriptor base (dd733fe), so current channel edits
 	// cannot silently change the historical APP_DATABASE-only launch contract.
 	await cp(join(import.meta.dirname, "fixtures/legacy-boot-channel.ts.txt"), channelPath);
+	// Keep current schemas/domain behavior, but make their consumers use the frozen
+	// channel's historical filename contract. The channel itself stays byte-identical
+	// and never learns APP_STORE; this is not a snapshot of the entire historical app.
+	for (const [file, count] of [
+		["server.ts", 1],
+		["kernel/sql-read.ts", 2],
+	] as const) {
+		const filename = join(seed, file);
+		const source = await readFile(filename, "utf8");
+		expect(source.split("boot.store")).toHaveLength(count + 1);
+		await writeFile(filename, source.replaceAll("boot.store", '({ _tag: "file", filename: boot.filename })'));
+	}
 	const app = await fixture.launch(join(seed, "server.ts"));
 	await app.setup();
 	const cookie = await app.login();

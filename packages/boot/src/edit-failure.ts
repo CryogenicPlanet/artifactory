@@ -1,5 +1,5 @@
 import { RecoveryRejected } from "./recovery-intents.ts";
-import { isAppStoreIdentityError, appIdentityPolicy } from "./app-store-identity.ts";
+import { isAppStoreIdentityError, appIdentityPolicy, transferPolicy } from "./app-store-identity.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
 import { authErrorResponse } from "./auth-http.ts";
 import { Cause, Effect, Option, Schema } from "effect";
@@ -40,6 +40,7 @@ const unavailable = {
 	hint: "Inspect /_boot/status; wait for the active operation or storage contention to finish before retrying.",
 } as const;
 const policy = {
+	...transferPolicy,
 	topic_move_recovery_required: {
 		status: 409,
 		retriable: false,

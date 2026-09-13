@@ -73,6 +73,11 @@ export const policy = {
 		message: "The extension is disabled for this generation.",
 		hint: "Inspect /api/ext, repair the source, then reload.",
 	},
+	migration_recovery_required: {
+		status: 409,
+		message: "Migration completion cannot be verified safely.",
+		hint: "Preserve both stores and migration journals. Inspect boot recovery state and use a human-authorized restore of a known-good database if needed. Do not retry, rename the migration or delete its pending record.",
+	},
 	extension_migration_conflict: {
 		status: 409,
 		message: "The applied extension migration has different SQL.",
@@ -147,6 +152,11 @@ export const policy = {
 		status: 408,
 		message: "The readonly SQL query exceeded its execution budget.",
 		hint: "Reduce query cost or add an index before trying again. The isolated reader was stopped; the application remains available.",
+	},
+	placeholder_style: {
+		status: 400,
+		message: "SQL parameters use a different placeholder style on this engine.",
+		hint: "Use $1, $2 and so on on PostgreSQL; use ? on SQLite and MySQL. Read results report the deployment dialect.",
 	},
 	sql_query_invalid: {
 		status: 400,

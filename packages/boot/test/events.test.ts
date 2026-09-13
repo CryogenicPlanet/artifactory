@@ -426,3 +426,29 @@ it("boot diagnostics expose recovery failures behind a stuck app fence without e
 	expect(await app.sql("SELECT count(*) AS n FROM events")).toEqual([{ n: 5 }]);
 	expect(JSON.stringify(await app.run({ op: "query", since: 0 }))).not.toContain("private-startup-marker");
 });
+
+it("redacts historical diagnostic credentials before taking the failure tail", async (test) => {
+	const app = await store(test);
+	await app.run({ op: "boot", event: { ...event(0), type: "generation.failed" } });
+	const password = "synthetic-" + "p".repeat(2100) + "-private";
+	const error = `Connection refused postgres://board:url-password@db.example/board after migration`;
+	const stderr = `password ${password}\nSyntaxError in extension.ts:12`;
+	await app.sql(
+		`INSERT INTO generations(n,entry_file,status,started_at,error,stderr) VALUES(1,'server.ts','failed',1,'${error}','${stderr}')`,
+	);
+	const diagnostics = await app.run({ op: "diagnostics", redactions: [password] });
+	expect(diagnostics).toMatchObject({
+		success: {
+			items: [
+				{
+					current_failure: {
+						error: "Connection refused postgres://[redacted]@db.example/board after migration",
+						stderr: "password [redacted]\nSyntaxError in extension.ts:12",
+					},
+				},
+			],
+		},
+	});
+	// The read surface must scrub historical rows without rewriting their source evidence.
+	expect(await app.sql("SELECT error,stderr FROM generations WHERE n=1")).toEqual([{ error, stderr }]);
+});

@@ -1,13 +1,14 @@
+import type { RemoteDatabaseError } from "./remote-db-ops.ts";
+import { EventError } from "./events.ts";
 import { sqliteCopyProcess } from "./sqlite-copy-process.ts";
 import { ChildError } from "./child-process.ts";
 import { appStoreIdentity, isAppStoreIdentityError, verifyAppIdentity } from "./app-store-identity.ts";
 import type { BackupRecord } from "./backup-metadata.ts";
 import { clientLayer } from "@comms/storage/client";
-import type { FileStore } from "@comms/storage/store";
+import type { FileStore, Store } from "@comms/storage/store";
 import { Config, Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
-import { EventError } from "./events.ts";
 import { storageHeadroom } from "./storage-headroom.ts";
 
 /** SQLite online copies include committed WAL pages. Call restore only after proving all owners closed. */
@@ -68,21 +69,32 @@ const make = (store: FileStore, dataDirectory: string) =>
 					);
 				}),
 			);
-		return {
-			verify: (record: Pick<BackupRecord, "path" | "legacy_store_id">) =>
-				verifyCopy(record.path, record.legacy_store_id),
-			offlineStatus: Effect.gen(function* () {
-				const adoption = yield* identity.current;
-				if (adoption.phase !== "ready") return yield* new EventError({ code: "app_store_identity_invalid" });
-				yield* identity.status;
-				const checked = yield* verifyCopy(filename, null, true).pipe(Effect.result);
-				if (checked._tag === "Failure" && !isAppStoreIdentityError(checked.failure)) return yield* checked.failure;
-				let bytes = 0;
-				for (const suffix of ["", "-wal", "-shm", "-journal"])
-					if (yield* fs.exists(`${filename}${suffix}`)) bytes += Number((yield* fs.stat(`${filename}${suffix}`)).size);
-				return { needed: checked._tag === "Failure", storeId: adoption.store_id, bytes };
-			}),
-			dialect: "sqlite" as const,
+		const operations = {
+			...([path.resolve(dataDirectory, "comms.db"), path.resolve(dataDirectory, "store/comms.db")].includes(
+				path.resolve(filename),
+			)
+				? {
+						offlineRestore: {
+							filename,
+							verify: (record: Pick<BackupRecord, "path" | "legacy_store_id">) =>
+								verifyCopy(record.path, record.legacy_store_id),
+							status: Effect.gen(function* () {
+								const adoption = yield* identity.current;
+								if (adoption.phase !== "ready") return yield* new EventError({ code: "app_store_identity_invalid" });
+								yield* identity.status;
+								const checked = yield* verifyCopy(filename, null, true).pipe(Effect.result);
+								if (checked._tag === "Failure" && !isAppStoreIdentityError(checked.failure))
+									return yield* checked.failure;
+								let bytes = 0;
+								for (const suffix of ["", "-wal", "-shm", "-journal"])
+									if (yield* fs.exists(`${filename}${suffix}`))
+										bytes += Number((yield* fs.stat(`${filename}${suffix}`)).size);
+								return { needed: checked._tag === "Failure", storeId: adoption.store_id, bytes };
+							}),
+						},
+					}
+				: {}),
+			engine: "sqlite" as const,
 			recoverStaging: copying.recover.pipe(
 				Effect.andThen(
 					Effect.forEach(
@@ -139,6 +151,44 @@ const make = (store: FileStore, dataDirectory: string) =>
 					}),
 				),
 		};
+		return {
+			...operations,
+			rehearsal: (destination: FileStore, epoch: string, artifact?: BackupRecord) =>
+				Effect.gen(function* () {
+					if (artifact) {
+						if (artifact.engine !== "sqlite") return yield* new ChildError({ code: "backup_engine_mismatch" });
+						yield* fs.copyFile(artifact.path, destination.filename);
+					} else yield* operations.clone(destination);
+					yield* operations.prepareClone(destination, epoch);
+					// The coordinator owns this file inside its materialized source tree.
+					return { store: destination, dispose: Effect.void };
+				}),
+		};
 	});
-export class DbOps extends Context.Service<DbOps, Effect.Success<ReturnType<typeof make>>>()("comms/boot/DbOps") {}
+type Operations = Effect.Success<ReturnType<typeof make>>;
+type RemoteFailure = RemoteDatabaseError | EventError;
+type Result<A, T extends Effect.Effect<unknown, unknown, unknown>> = Effect.Effect<
+	A,
+	Effect.Error<T> | RemoteFailure,
+	Effect.Services<T>
+>;
+type Rehearsal = ReturnType<Operations["rehearsal"]>;
+/** A common effect shape keeps the coordinator independent of native versus file mechanics. */
+export interface DbOpsService {
+	readonly engine: "sqlite" | "pg" | "mysql";
+	/** SQLite-only opaque before-image repair; remote restore belongs to the provider. */
+	readonly offlineRestore?: Operations["offlineRestore"];
+	readonly estimatedBytes: Result<number, Operations["estimatedBytes"]>;
+	readonly recoverStaging: Result<void, Operations["recoverStaging"]>;
+	readonly recoverCopy: Result<void, Operations["recoverCopy"]>;
+	readonly clone: (destination: FileStore) => Result<bigint, ReturnType<Operations["clone"]>>;
+	readonly prepareClone: (clone: FileStore, epoch: string) => Result<void, ReturnType<Operations["prepareClone"]>>;
+	readonly restoreInto: (
+		artifact: Parameters<Operations["restoreInto"]>[0],
+	) => Result<Store, ReturnType<Operations["restoreInto"]>>;
+	readonly rehearsal: (
+		...args: Parameters<Operations["rehearsal"]>
+	) => Result<{ readonly store: Store; readonly dispose: Result<void, Rehearsal> }, Rehearsal>;
+}
+export class DbOps extends Context.Service<DbOps, DbOpsService>()("comms/boot/DbOps") {}
 export const layer = (store: FileStore, dataDirectory: string) => Layer.effect(DbOps, make(store, dataDirectory));

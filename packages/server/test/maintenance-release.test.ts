@@ -39,7 +39,7 @@ it.for(["selection", "lock-release"] as const)(
 		const armed = join(fixture.root, "restore-failure");
 		const needle =
 			boundary === "selection"
-				? "yield* close;\n\t\t\t\t\tyield* supervisor.assertClosure;\n\t\t\t\t\tyield* sql`UPDATE db_restore_requests SET phase='restoring' WHERE proof_id=${record.proof_id}`;"
+				? "yield* close;\n\t\t\t\t\t\t\tyield* supervisor.assertClosure;\n\t\t\t\t\t\t\tyield* sql`UPDATE db_restore_requests SET phase='restoring' WHERE proof_id=${record.proof_id}`;"
 				: "if (!record.lock_id || !record.lock_family) return;";
 		expect(source.split(needle)).toHaveLength(2);
 		await writeFile(

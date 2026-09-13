@@ -36,6 +36,16 @@ export const childErrorPolicy = {
 	cutover_backup_invalid: recovery,
 	cutover_backup_missing: recovery,
 	cutover_recovery_required: recovery,
+	remote_cutover_requires_operator: {
+		status: 409,
+		retriable: false,
+		hint: "Inspect the failed remote migration. Repair forward or restore with your database provider; chirp cannot roll back remote data automatically.",
+	},
+	generation_store_incompatible: {
+		status: 409,
+		retriable: false,
+		hint: "This saved source does not declare support for the selected database engine. Update its APP_STORE implementation and comms.storage_engines in package.json, then rehearse a new generation; old snapshots remain SQLite-only.",
+	},
 	health_failed: source,
 	incompatible_schema: {
 		status: 409,

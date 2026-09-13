@@ -29,6 +29,10 @@
         "@simplewebauthn/server": "14.0.1",
         "effect": "4.0.0-rc.113",
       },
+      "devDependencies": {
+        "@effect/sql-mysql2": "4.0.0-rc.113",
+        "@effect/sql-pg": "4.0.0-rc.113",
+      },
     },
     "packages/protocol": {
       "name": "@comms/protocol",
@@ -53,6 +57,9 @@
         "marked": "18.0.12",
         "mermaid": "12.0.0",
       },
+      "devDependencies": {
+        "@effect/sql-pglite": "4.0.0-rc.113",
+      },
     },
     "packages/storage": {
       "name": "@comms/storage",
@@ -62,6 +69,9 @@
         "@effect/sql-pg": "4.0.0-rc.113",
         "@effect/sql-sqlite-bun": "4.0.0-rc.113",
         "effect": "4.0.0-rc.113",
+      },
+      "devDependencies": {
+        "@effect/platform-bun": "4.0.0-rc.113",
       },
     },
     "packages/ui": {
@@ -94,8 +104,10 @@
     },
   },
   "patchedDependencies": {
-    "@effect/platform-bun@4.0.0-rc.113": "patches/@effect%2Fplatform-bun@4.0.0-rc.113.patch",
+    "effect@4.0.0-rc.113": "patches/effect@4.0.0-rc.113.patch",
+    "@effect/sql-pg@4.0.0-rc.113": "patches/@effect%2Fsql-pg@4.0.0-rc.113.patch",
     "@effect/sql-mysql2@4.0.0-rc.113": "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch",
+    "@effect/platform-bun@4.0.0-rc.113": "patches/@effect%2Fplatform-bun@4.0.0-rc.113.patch",
   },
   "packages": {
     "@antfu/install-pkg": ["@antfu/install-pkg@2.0.1", "", { "dependencies": { "package-manager-detector": "^1.7.0", "tinyexec": "^1.2.4" } }, "sha512-iCKVQcIC0e3oDxEfs3SHQGW+ovhBMZmS1TE+bTk50rVyMCBmCfClv7Qi3HQKlumYwvjb/iIMeWCW2i67q6kFfQ=="],
@@ -172,6 +184,8 @@
 
     "@effect/sql-pg": ["@effect/sql-pg@4.0.0-rc.113", "", { "peerDependencies": { "effect": "^4.0.0-rc.113" } }, "sha512-xsAbmxsR5sC6Pc/38nB4/rBi1co4aCC7e4T95sVy8EhWA9NRheimtiN05EyhTKZwX1C0T2gquainQwCuQYuKuA=="],
 
+    "@effect/sql-pglite": ["@effect/sql-pglite@4.0.0-rc.113", "", { "dependencies": { "@electric-sql/pglite": "^0.5.8" }, "peerDependencies": { "effect": "^4.0.0-rc.113" } }, "sha512-1vHbBFKJjRakiRAupemaZn2UvH5TnWHdIdIF8wnPmpXMe0pPevmiKbswVvvMc4INsQQrqe41NUMcmURfG94hhQ=="],
+
     "@effect/sql-sqlite-bun": ["@effect/sql-sqlite-bun@4.0.0-rc.113", "", { "peerDependencies": { "effect": "^4.0.0-rc.113" } }, "sha512-gh3k27MMq/MDqPqpQYoNw1BgXgPIxZtQQsF9W321Ml20lbIzEBdOA6LgEEbA1sX7wy8/710bDBgXvDcm27ioAA=="],
 
     "@effect/tsgo": ["@effect/tsgo@0.44.0", "", { "optionalDependencies": { "@effect/tsgo-darwin-arm64": "0.44.0", "@effect/tsgo-darwin-x64": "0.44.0", "@effect/tsgo-linux-arm": "0.44.0", "@effect/tsgo-linux-arm64": "0.44.0", "@effect/tsgo-linux-x64": "0.44.0", "@effect/tsgo-win32-arm64": "0.44.0", "@effect/tsgo-win32-x64": "0.44.0" }, "bin": { "effect-tsgo": "dist/effect-tsgo.cjs" } }, "sha512-zgrk2hLqx3vX7pZObBOBAFfvJN0bEVncEKyY2cie07KUeG3rB9IPUm4+4eTh7o0eXLQuB5rzh+ZjEJSpoLKe9A=="],
@@ -191,6 +205,8 @@
     "@effect/tsgo-win32-x64": ["@effect/tsgo-win32-x64@0.44.0", "", { "os": "win32", "cpu": "x64" }, "sha512-1z77IQzujL/GxobzshnbBxjywXmwqwAT+6+TUFB06idFI1V7828YoNiJgA3Meu9QLqBp+5cWm+KlrDVB5H5cHQ=="],
 
     "@effect/vitest": ["@effect/vitest@4.0.0-rc.113", "", { "peerDependencies": { "effect": "^4.0.0-rc.113", "vitest": ">=5.0.0 <6.0.0" } }, "sha512-ebuPhtZmumq1967n0vgF0sgAx/8tRHMmNGOdH1Oya1jKzV2Yoqhlv8WCGT0N//PuaV/Pc/zky3mmDvxmW81FiQ=="],
+
+    "@electric-sql/pglite": ["@electric-sql/pglite@0.5.8", "", {}, "sha512-n9tsbUOhwx2epK1V0ZG9Ar4SHWUju04dhmzZXiSBXwBoleOvIfals33NAaWgagQVAL4Rbvx/Ptsu3P+pA09f6Q=="],
 
     "@hexagon/base64": ["@hexagon/base64@1.1.28", "", {}, "sha512-lhqDEAvWixy3bZ+UOYbPwUbBkwBq5C1LAJ/xPC8Oi+lL54oyakv/npbA0aU2hgCsx/1NUd4IBvV03+aUBWxerw=="],
 

@@ -1,14 +1,15 @@
 // Native crypto builds genuine WebAuthn test responses for the production verifier.
 /* oxlint-disable effecttsgo/node-builtin-import, effecttsgo/prefer-schema-over-json */
-import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { isoCBOR } from "@simplewebauthn/server/helpers";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 
-export const authenticator = () => {
-	const key = generateKeyPairSync("ed25519");
+export const authenticator = (saved?: { readonly id: string; readonly privateKey: string }) => {
+	const privateKey = saved ? createPrivateKey(saved.privateKey) : generateKeyPairSync("ed25519").privateKey;
+	const key = { privateKey, publicKey: createPublicKey(privateKey) };
 	const jwk = key.publicKey.export({ format: "jwk" });
 	if (!jwk.x) throw new Error("Missing public key");
-	const id = randomBytes(24).toString("base64url");
+	const id = saved?.id ?? randomBytes(24).toString("base64url");
 	const publicKey = isoCBOR.encode(
 		new Map<number, number | Uint8Array>([
 			[1, 1],
@@ -83,5 +84,10 @@ export const authenticator = () => {
 			},
 		};
 	};
-	return { id, registration, assertion };
+	return {
+		id,
+		registration,
+		assertion,
+		state: { id, privateKey: privateKey.export({ format: "pem", type: "pkcs8" }).toString() },
+	};
 };

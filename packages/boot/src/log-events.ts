@@ -1,8 +1,9 @@
 import { Cause, Console, Effect, Logger, Queue } from "effect";
 import type { Events, EventRecord } from "./events.ts";
+import { logRedactor } from "./log-redaction.ts";
 
 /** The synchronous logger only offers into a scoped dropping queue, never SQL. */
-export const logEvents = (events: Pick<Events["Service"], "writeBoot">) =>
+export const logEvents = (events: Pick<Events["Service"], "writeBoot">, redact = logRedactor([])) =>
 	Effect.gen(function* () {
 		const output = yield* Console.Console;
 		const pending = yield* Queue.dropping<Omit<typeof EventRecord.Type, "seq">>(256);
@@ -24,15 +25,17 @@ export const logEvents = (events: Pick<Events["Service"], "writeBoot">) =>
 						: options.logLevel === "Debug" || options.logLevel === "Trace"
 							? "debug"
 							: "info";
-			const message = (Array.isArray(options.message) ? options.message : [options.message])
-				.filter((value): value is string => typeof value === "string")
-				.slice(0, 4)
-				.join(" ")
-				.slice(0, 2048)
+			const message = redact(
+				(Array.isArray(options.message) ? options.message : [options.message])
+					.filter((value): value is string => typeof value === "string")
+					.slice(0, 4)
+					.join(" "),
+			)
 				.replace(
 					/Bearer\s+\S+|(?:cookie|authorization|secret|token|password)\s*[:=]\s*\S+|[a-f0-9]{64}/gi,
 					"[redacted]",
-				);
+				)
+				.slice(0, 2048);
 			const payload = { message, failure: options.cause.reasons.length > 0 };
 			Queue.offerUnsafe(pending, {
 				at: options.date.getTime(),

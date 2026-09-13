@@ -1,4 +1,7 @@
-import { isDescendant, jsonArrayHas, nullable } from "@comms/storage/dialect";
+import { mysqlSearchConfig, type MysqlSearchConfig } from "./mysql-search-config.ts";
+import { postgresSearchMode } from "./core-search-schema.ts";
+import { searchMessages } from "./search.ts";
+import { isDescendant, jsonArrayHas, nullable, on } from "@comms/storage/dialect";
 import { Message, MessageInput } from "@comms/protocol/messages";
 import type { ErrorDetail } from "@comms/protocol/errors";
 import { Publication } from "../../kernel/publication.ts";
@@ -37,6 +40,7 @@ export const makeMessages = (
 	publication: Pick<Publication["Service"], "mutate" | "read">,
 	boot: Pick<BootChannel["Service"], "generation">,
 	crypto: Crypto.Crypto,
+	mysql: MysqlSearchConfig | null = null,
 ) => {
 	const { mutate, read } = publication;
 	const create = (identity: Identity, input: typeof MessageInput.Type, key?: string) =>
@@ -193,29 +197,16 @@ export const makeMessages = (
 					targets.length === 0
 						? sql`1=0`
 						: sql`EXISTS (SELECT 1 FROM messages mention_source WHERE mention_source.id=visible_messages.id AND ${sql.or(targets.map((target) => jsonArrayHas(sql, mentions, target)))})`;
-				let bodyMatch = sql`1=1`;
-				if (input.q !== undefined) {
-					// Quote every term: caller text must never become SQL or FTS syntax.
-					const parts = input.q.trim().match(/"[^"]*"|[^\s"]+/gu) ?? [];
-					if (
-						input.q.length > 512 ||
-						input.q.includes("\0") ||
-						parts.length === 0 ||
-						parts.length > 16 ||
-						input.q.replace(/"[^"]*"|[^\s"]+|\s+/gu, "") !== "" ||
-						parts.some((part) => !/[\p{L}\p{N}]/u.test(part))
-					)
-						return yield* new KernelError({ code: "query_invalid" });
-					const expression = parts.map((part) => `"${part.replaceAll('"', "")}"`).join(" AND ");
-					// Both index columns share this SQL snapshot; select the published image's column.
-					bodyMatch = sql`id IN (
-     SELECT message_id FROM messages_fts JOIN messages ON messages.id=messages_fts.message_id
-      WHERE messages_fts MATCH ${`body : (${expression})`} AND messages.updated_seq<=${ceiling}
-     UNION
-     SELECT message_id FROM messages_fts JOIN messages ON messages.id=messages_fts.message_id
-      WHERE messages_fts MATCH ${`previous_body : (${expression})`} AND messages.updated_seq>${ceiling}
-    )`;
-				}
+				const folding =
+					input.q === undefined
+						? false
+						: yield* on(sql, {
+								sqlite: () => Effect.succeed(false),
+								mysql: () => Effect.succeed(false),
+								pg: () => postgresSearchMode(sql).pipe(Effect.map((mode) => mode === "folded")),
+							});
+				const bodyMatch =
+					input.q === undefined ? sql`1=1` : yield* searchMessages(sql, input.q, ceiling, folding, mysql);
 				const items =
 					yield* sql`WITH visible_messages AS (${publishedMessages(sql, ceiling)}) SELECT * FROM visible_messages WHERE deleted_at IS NULL AND seq>${since} AND seq<=${ceiling}
    AND ((${input.topic === undefined && targets.length === 0 ? 1 : 0}=1) OR ${topicMatch} OR ${mentionMatch})
@@ -267,7 +258,7 @@ const make = Effect.gen(function* () {
 	const boot = yield* BootChannel;
 	const crypto = yield* Crypto.Crypto;
 	const publication = yield* Publication;
-	return { ...publication, ...makeMessages(sql, publication, boot, crypto) };
+	return { ...publication, ...makeMessages(sql, publication, boot, crypto, yield* mysqlSearchConfig(sql)) };
 });
 export class Messages extends Context.Service<Messages, Effect.Success<typeof make>>()("comms/server/Messages") {}
 export const layer = Layer.effect(Messages, make);

@@ -1,4 +1,4 @@
-import { childStore } from "@comms/storage/store";
+import { childStore, parseDescriptor, StoreError } from "@comms/storage/store";
 import { EventRecord, EventPage } from "@comms/protocol/events";
 import { KernelErrorCode } from "@comms/protocol/error-code";
 import { ErrorDetail } from "@comms/protocol/errors";
@@ -37,8 +37,16 @@ const make = Effect.gen(function* () {
 	const epoch = yield* Config.String("WRITER_EPOCH");
 	const descriptor = yield* Config.Redacted("APP_STORE").pipe(Config.withDefault(undefined));
 	const legacy = yield* Config.String("APP_DATABASE").pipe(Config.withDefault(undefined));
-	const store = yield* childStore(descriptor === undefined ? undefined : Redacted.value(descriptor), legacy);
-	const filename = store.filename;
+	const store = yield* descriptor === undefined
+		? childStore(undefined, legacy)
+		: parseDescriptor(Redacted.value(descriptor)).pipe(
+				Effect.mapError((error) => new StoreError({ code: error.code, variable: "APP_STORE" })),
+			);
+	if (store._tag === "file") {
+		if (descriptor !== undefined) yield* childStore(Redacted.value(descriptor), legacy);
+	} else if (legacy !== undefined)
+		return yield* new StoreError({ code: "store_descriptor_mismatch", variable: "APP_DATABASE" });
+	const filename = store._tag === "file" ? store.filename : null;
 	const generation = yield* Config.Int("GENERATION");
 	const state = yield* Config.String("STATE").pipe(Config.withDefault("candidate"));
 	if (state === "rehearsal") {
@@ -47,6 +55,7 @@ const make = Effect.gen(function* () {
 		const next = yield* Ref.make(initial);
 		return {
 			epoch,
+			store,
 			filename,
 			generation,
 			backup: Effect.fail(new KernelError({ code: "generation_not_live" })),
@@ -78,7 +87,9 @@ const make = Effect.gen(function* () {
 	const url = yield* Config.String("BOOT_URL");
 	const secret = yield* Config.Redacted("BOOT_SECRET");
 	const client = yield* HttpClient.HttpClient;
-	const copyBudget = yield* Config.Duration("REHEARSAL_COPY_BUDGET").pipe(Config.withDefault(Duration.seconds(30)));
+	const copyBudget = yield* Config.Duration("REHEARSAL_COPY_BUDGET").pipe(
+		Config.withDefault(Duration.seconds(store._tag === "file" ? 30 : 120)),
+	);
 	// Copy ownership has its own deadline. Allow drain, closure and response framing after it.
 	const backupRequestBudget = Duration.toMillis(copyBudget) + 30_000;
 	const request = <S extends Schema.Constraint>(path: string, schema: S, payload?: Schema.Json, timeout = 1500) =>
@@ -214,6 +225,7 @@ const make = Effect.gen(function* () {
 		});
 	return {
 		epoch,
+		store,
 		filename,
 		generation,
 		backup: request("/_boot/db/backup", Schema.Struct({ id: Schema.String }), {}, backupRequestBudget).pipe(

@@ -1,3 +1,4 @@
+import type { RemoteConnection } from "./remote-session.ts";
 import { Effect, Redacted, Schema } from "effect";
 
 /** A selected SQLite file, not a database identity or permission to create it. */
@@ -48,6 +49,36 @@ export const parse = (raw: string) =>
 		)
 			return yield* new StoreError({ code: "store_descriptor_invalid" });
 		return { _tag: "file", filename } satisfies FileStore;
+	});
+
+/** Rendering cannot produce a descriptor the parser rejects, including malformed Unicode. */
+export const render = (store: Store) =>
+	store._tag !== "file"
+		? parseDescriptor(Redacted.value(store.url)).pipe(Effect.as(store.url))
+		: Effect.try({
+				try: () => `file:${store.filename.split("/").map(encodeURIComponent).join("/")}`,
+				catch: () => new StoreError({ code: "store_descriptor_invalid" }),
+			}).pipe(Effect.flatMap((raw) => parse(raw).pipe(Effect.as(Redacted.make(raw)))));
+
+/** Old images provide only APP_DATABASE; current images provide both. Validate either selection. */
+export const childStore = (raw: string | undefined, legacy?: string) =>
+	Effect.gen(function* () {
+		const variable =
+			raw === undefined ? (legacy === undefined ? "APP_STORE or APP_DATABASE" : "APP_DATABASE") : "APP_STORE";
+		const selected =
+			raw === undefined
+				? legacy === undefined
+					? Effect.fail(new StoreError({ code: "store_descriptor_invalid" }))
+					: render({ _tag: "file", filename: legacy }).pipe(Effect.map(Redacted.value))
+				: Effect.succeed(raw);
+		return yield* selected.pipe(
+			Effect.flatMap(parse),
+			Effect.filterOrFail(
+				(store) => legacy === undefined || legacy === store.filename,
+				() => new StoreError({ code: "store_descriptor_mismatch" }),
+			),
+			Effect.mapError((error) => new StoreError({ code: error.code, variable })),
+		);
 	});
 
 const validDatabase = (database: string) =>
@@ -108,32 +139,23 @@ export const asBoot = (app: RemoteStore, boot: RemoteStore): Effect.Effect<Remot
 		return yield* withDatabase(boot, app.database);
 	});
 
-/** Rendering cannot produce a descriptor the parser rejects, including malformed Unicode. */
-export const render = (store: Store) =>
-	store._tag !== "file"
-		? parseDescriptor(Redacted.value(store.url)).pipe(Effect.as(store.url))
-		: Effect.try({
-				try: () => `file:${store.filename.split("/").map(encodeURIComponent).join("/")}`,
-				catch: () => new StoreError({ code: "store_descriptor_invalid" }),
-			}).pipe(Effect.flatMap((raw) => parse(raw).pipe(Effect.as(Redacted.make(raw)))));
-
-/** Old images provide only APP_DATABASE; current images provide both. Validate either selection. */
-export const childStore = (raw: string | undefined, legacy?: string) =>
-	Effect.gen(function* () {
-		const variable =
-			raw === undefined ? (legacy === undefined ? "APP_STORE or APP_DATABASE" : "APP_DATABASE") : "APP_STORE";
-		const selected =
-			raw === undefined
-				? legacy === undefined
-					? Effect.fail(new StoreError({ code: "store_descriptor_invalid" }))
-					: render({ _tag: "file", filename: legacy }).pipe(Effect.map(Redacted.value))
-				: Effect.succeed(raw);
-		return yield* selected.pipe(
-			Effect.flatMap(parse),
-			Effect.filterOrFail(
-				(store) => legacy === undefined || legacy === store.filename,
-				() => new StoreError({ code: "store_descriptor_mismatch" }),
-			),
-			Effect.mapError((error) => new StoreError({ code: error.code, variable })),
-		);
+/** Explicit driver fields; URL query options cannot override credentials, database or TLS. */
+export const connectionOf = (store: RemoteStore, tls: boolean) =>
+	Effect.try({
+		try: (): RemoteConnection => {
+			const url = new URL(Redacted.value(store.url));
+			const username = decodeURIComponent(url.username);
+			const password = decodeURIComponent(url.password);
+			if (!username || !password) throw new Error();
+			return {
+				engine: store._tag === "postgres" ? "pg" : "mysql",
+				host: url.hostname.replace(/^\[|\]$/g, ""),
+				port: Number(url.port || (store._tag === "postgres" ? 5432 : 3306)),
+				database: store.database,
+				username,
+				password: Redacted.make(password),
+				tls,
+			};
+		},
+		catch: () => new StoreError({ code: "store_descriptor_invalid" }),
 	});

@@ -11,17 +11,20 @@ it("restores a retained generation's whole source and manifest through cutover w
 	const fixture = await conversation(test);
 	const seed = join(fixture.root, "seed");
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
-	const manifest = await readFile(join(import.meta.dirname, "../runtime/package.json"), "utf8");
-	const lockfile = await readFile(join(import.meta.dirname, "../runtime/bun.lock"), "utf8");
+	const manifest = await readFile(join(import.meta.dirname, "fixtures/no-ui-runtime/package.json"), "utf8");
+	const lockfile = await readFile(join(import.meta.dirname, "fixtures/no-ui-runtime/bun.lock"), "utf8");
 	await writeFile(join(seed, "package.json"), manifest);
 	await writeFile(join(seed, "bun.lock"), lockfile);
 	// Keep the frozen manifest and its required installer patch together.
 	await mkdir(join(seed, "patches"));
-	await cp(
-		join(import.meta.dirname, "../../../patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
-		join(seed, "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
-	);
-	// Match the runtime manifest's editable workspaces, just like stage-runtime.
+	for (const patch of [
+		"@effect%2Fsql-mysql2@4.0.0-rc.113.patch",
+		"@effect%2Fsql-pg@4.0.0-rc.113.patch",
+		"effect@4.0.0-rc.113.patch",
+	]) {
+		await cp(join(import.meta.dirname, "../../../patches", patch), join(seed, "patches", patch));
+	}
+	// Keep real editable workspaces; this no-UI fixture installs only its actual server imports.
 	for (const workspace of ["protocol", "storage"]) {
 		await mkdir(join(seed, workspace));
 		for (const file of ["src", "docs", "package.json"])
@@ -259,7 +262,9 @@ it("restores file-directory replacements and exact empty directories from a reta
 	expect(await fixture.sql("SELECT * FROM cutover", "boot.db")).toEqual([]);
 	await app.ready(cookie);
 	phase("assertions_complete");
-}, 60000);
+	// Linux measured each revert at 10.0–10.3s; the sixth response arrived at 63.646s elapsed.
+	// Budget the complete chain, retaining each cutover's production deadlines and all assertions.
+}, 90000);
 
 it("recreates a missing editable app tree while its saved generation continues serving", async (test) => {
 	const fixture = await conversation(test),
@@ -292,17 +297,20 @@ it("keeps source and live writes intact when generation dependency preparation f
 	const fixture = await conversation(test);
 	const seed = join(fixture.root, "preparation-seed");
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
-	const manifest = await readFile(join(import.meta.dirname, "../runtime/package.json"), "utf8");
-	const lockfile = await readFile(join(import.meta.dirname, "../runtime/bun.lock"), "utf8");
+	const manifest = await readFile(join(import.meta.dirname, "fixtures/no-ui-runtime/package.json"), "utf8");
+	const lockfile = await readFile(join(import.meta.dirname, "fixtures/no-ui-runtime/bun.lock"), "utf8");
 	await writeFile(join(seed, "package.json"), manifest);
 	await writeFile(join(seed, "bun.lock"), lockfile);
 	// Keep the frozen manifest and its required installer patch together.
 	await mkdir(join(seed, "patches"));
-	await cp(
-		join(import.meta.dirname, "../../../patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
-		join(seed, "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
-	);
-	// Match the runtime manifest's editable workspaces, just like stage-runtime.
+	for (const patch of [
+		"@effect%2Fsql-mysql2@4.0.0-rc.113.patch",
+		"@effect%2Fsql-pg@4.0.0-rc.113.patch",
+		"effect@4.0.0-rc.113.patch",
+	]) {
+		await cp(join(import.meta.dirname, "../../../patches", patch), join(seed, "patches", patch));
+	}
+	// Keep real editable workspaces; this no-UI fixture installs only its actual server imports.
 	for (const workspace of ["protocol", "storage"]) {
 		await mkdir(join(seed, workspace));
 		for (const file of ["src", "docs", "package.json"])

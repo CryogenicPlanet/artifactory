@@ -4,8 +4,10 @@ import {
 	kernelProtocolHeader,
 	readinessHeader,
 	rehearsalReportHeader,
+	requestIdHeader,
 	writerEpochHeader,
 } from "@comms/protocol/headers";
+import { MigrationWarnings, layer as migrationWarningsLayer } from "./kernel/migration-portability.ts";
 import { logEvents } from "./kernel/log-events.ts";
 import { requestSpan } from "./kernel/request-span.ts";
 import { Publication, layer as publicationLayer } from "./kernel/publication.ts";
@@ -13,7 +15,8 @@ import { extensionCapabilities } from "./ext/core/capabilities.ts";
 // oxlint-disable-next-line effecttsgo/node-builtin-import -- Effect Crypto has no constant-time comparison.
 import { timingSafeEqual } from "node:crypto";
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
-import { clientLayer } from "@comms/storage/client";
+import { databaseLayer } from "./kernel/remote-database.ts";
+import { initializeRemoteKernelSchema } from "./kernel/schema.ts";
 import {
 	Config,
 	Context,
@@ -45,9 +48,10 @@ import { migrate } from "./kernel/migrations.ts";
 import { type Topics, layer as topicsLayer } from "./ext/core/topics.ts";
 import { type Messages, layer as messagesLayer } from "./ext/core/messages.ts";
 import { probeHealth, readinessRoute } from "./kernel/health.ts";
+import { healthFailure } from "./kernel/health-failure.ts";
 import { Lifecycle, RequestMutation, layer as lifecycleLayer } from "./kernel/lifecycle.ts";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
-import type { SqlClient } from "effect/unstable/sql/SqlClient";
+import { SqlClient } from "effect/unstable/sql/SqlClient";
 import { type Pages, layer as pagesLayer } from "./ext/core/pages.ts";
 import { routes as boardRoutes } from "./board-http.ts";
 import { routes as pageRoutes } from "./pages-http.ts";
@@ -77,6 +81,7 @@ const server = Effect.gen(function* () {
 			Config.withDefault(`${import.meta.dirname}/board`),
 		);
 		const lifecycle = yield* Lifecycle;
+		const migrationWarnings = yield* MigrationWarnings;
 		const http = yield* HttpServer.HttpServer;
 		if (http.address._tag === "UnixPathAddress") return yield* Effect.die("Expected TCP listener");
 		const host = `127.0.0.1:${http.address.port}`;
@@ -106,6 +111,7 @@ const server = Effect.gen(function* () {
 		const application = Effect.gen(function* () {
 			yield* Deferred.await(go);
 			return yield* Effect.gen(function* () {
+				yield* initializeRemoteKernelSchema(yield* SqlClient, boot.epoch);
 				yield* initialize;
 				yield* migrate(`${import.meta.dirname}/migrations`, boot.epoch);
 				return yield* Effect.gen(function* () {
@@ -165,7 +171,11 @@ const server = Effect.gen(function* () {
 									yield* Ref.set(lifecycle.healthy, true);
 								}
 								return HttpServerResponse.jsonUnsafe(
-									{ status: "ok", ...(yield* extensions.rehearsalReport) },
+									{
+										status: "ok",
+										...(yield* extensions.rehearsalReport),
+										...(yield* migrationWarnings.report),
+									},
 									{
 										headers: {
 											[writerEpochHeader]: boot.epoch,
@@ -177,11 +187,13 @@ const server = Effect.gen(function* () {
 							}),
 						)
 						.pipe(
-							Effect.catchCause(() =>
-								Effect.succeed(
-									HttpServerResponse.jsonUnsafe(
-										{ status: "failed" },
-										{ status: 503, headers: { [healthReadyHeader]: "1" } },
+							Effect.catchCause((cause) =>
+								Console.error(healthFailure("probe", cause)).pipe(
+									Effect.as(
+										HttpServerResponse.jsonUnsafe(
+											{ status: "failed" },
+											{ status: 503, headers: { [healthReadyHeader]: "1" } },
+										),
 									),
 								),
 							),
@@ -194,17 +206,24 @@ const server = Effect.gen(function* () {
 							const state = yield* Ref.get(lifecycle.state);
 
 							const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method);
+							// Boot strips caller metadata and forwards this identifier only after admission.
+							// A frozen control can overtake that already-admitted request on the loopback connection.
+							const forwarded = /^[a-f0-9]{32}$/.test(request.headers[requestIdHeader] ?? "");
 							if (
 								!(yield* Ref.get(lifecycle.healthy)) ||
 								!["accepted", "live", "frozen"].includes(state) ||
-								(mutation && state !== "accepted" && state !== "live")
+								(mutation && state !== "accepted" && state !== "live" && !(state === "frozen" && forwarded))
 							)
 								return HttpServerResponse.empty({ status: 503 });
 							const admitted = yield* Effect.acquireRelease(
 								lifecycle.gate.withPermit(
 									Effect.gen(function* () {
 										const latest = yield* Ref.get(lifecycle.state);
-										if (latest === "draining" || (mutation && latest !== "accepted" && latest !== "live")) return false;
+										if (
+											latest === "draining" ||
+											(mutation && latest !== "accepted" && latest !== "live" && !(latest === "frozen" && forwarded))
+										)
+											return false;
 										yield* Ref.update(lifecycle.requests, (count) => count + 1);
 										if (mutation) yield* Ref.update(lifecycle.mutations, (count) => count + 1);
 										return true;
@@ -253,7 +272,7 @@ const server = Effect.gen(function* () {
 						),
 					),
 				);
-			}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: boot.filename })));
+			}).pipe(Effect.provide(databaseLayer(boot.store)));
 		});
 		yield* application.pipe(
 			Effect.catchCause((cause) =>
@@ -271,7 +290,7 @@ const server = Effect.gen(function* () {
 								: HttpServerResponse.empty({ status: 503 });
 						}),
 					);
-					yield* Effect.logError(cause);
+					yield* Console.error(healthFailure("initialize", cause));
 				}),
 			),
 			Effect.forkScoped,
@@ -344,6 +363,7 @@ const server = Effect.gen(function* () {
 			Layer.mergeAll(
 				channelLayer,
 				lifecycleLayer,
+				migrationWarningsLayer.pipe(Layer.provide(lifecycleLayer)),
 				BunHttpServer.layer({ hostname: "127.0.0.1", port, idleTimeout: 0, gracefulShutdownTimeout: "1500 millis" }),
 			),
 		),

@@ -1,8 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
-import { remoteClientLayer } from "../src/remote-client.ts";
-import { remoteInspectorLayer } from "../src/remote-inspector.ts";
-import { Effect, Layer, Redacted, Schema, Stream } from "effect";
+import { advisoryClientLayer } from "../src/remote-client.ts";
+import { Effect, Redacted, Schema, Stream } from "effect";
 import { expect, it } from "vitest";
 
 it.skipIf(!process.env.COMMS_PG_JSON_TEST_CONFIG)(
@@ -29,11 +28,8 @@ it.skipIf(!process.env.COMMS_PG_JSON_TEST_CONFIG)(
 			});
 		const options = {
 			connection: { ...config, engine: "pg" as const, password: Redacted.make(config.password), tls: false },
-			attempt: "a8".repeat(32),
 		};
-		const layer = remoteClientLayer({ ...options, register: () => Effect.void }).pipe(
-			Layer.provide(remoteInspectorLayer(options)),
-		);
+		const layer = advisoryClientLayer(options);
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient;
@@ -52,8 +48,12 @@ it.skipIf(!process.env.COMMS_PG_JSON_TEST_CONFIG)(
 				const values = yield* sql.unsafe(query, [source]).values;
 				expect(values).toEqual([[source, row?.expected, row?.expected, null, "null"]]);
 				expect(yield* sql.unsafe(query, [source]).stream.pipe(Stream.runCollect)).toEqual(rows);
-				const connection = yield* sql.reserve;
-				expect(yield* connection.executeUnprepared(query, [source], undefined)).toEqual(rows);
+				yield* Effect.scoped(
+					Effect.gen(function* () {
+						const connection = yield* sql.reserve;
+						expect(yield* connection.executeUnprepared(query, [source], undefined)).toEqual(rows);
+					}),
+				);
 				const arrays = yield* sql`SELECT ARRAY[${source}::json,NULL::json] AS items`;
 				expect(arrays).toEqual([{ items: [source, null] }]);
 			}).pipe(Effect.scoped, Effect.provide(layer)),

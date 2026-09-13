@@ -1,4 +1,4 @@
-import { redactHex } from "./auth-primitives.ts";
+import { logRedactor } from "./log-redaction.ts";
 import { logEvents } from "./log-events.ts";
 import { migrateAppStore } from "./app-store-layout.ts";
 import { sourceReverts } from "./source-revert.ts";
@@ -16,6 +16,7 @@ import {
 	Layer,
 	Logger,
 	Path,
+	Redacted,
 	Ref,
 	Schema,
 	Semaphore,
@@ -30,7 +31,7 @@ import { EditAuthority, editAuthorityActive, EditLock, EditRejected, layer as ed
 import { Generations, layer as generationsLayer } from "./generations.ts";
 import { SourceFiles, layer as sourceLayer } from "./source-files.ts";
 import { Events, layer as eventsLayer } from "./events.ts";
-import { AppRecovery, layer as recoveryLayer } from "./app-recovery.ts";
+import { AppRecovery, layer as recoveryLayer, remoteRecovery } from "./app-recovery.ts";
 import { layer as attemptsLayer, ChildAttempts } from "./child-attempts.ts";
 import { cutover } from "./cutover.ts";
 import { DbOps, layer as backupLayer } from "./db-ops.ts";
@@ -49,6 +50,13 @@ import { sampleStorageVolume } from "./storage-volume.ts";
 import { makeEventStorage } from "./event-storage.ts";
 import { databaseRestore } from "./database-restore.ts";
 import { supervise } from "./supervisor.ts";
+import { databaseConfiguration } from "./database-configuration.ts";
+import { remoteRuntime } from "./remote-runtime.ts";
+import { remoteDbOps } from "./remote-db-ops.ts";
+import { makeRemoteAppInitializer } from "./app-kernel-initialize.ts";
+
+export { remoteRuntime } from "./remote-runtime.ts";
+export { databaseConfiguration } from "./database-configuration.ts";
 
 type Handler = Effect.Effect<
 	Effect.Success<typeof proxy>,
@@ -61,30 +69,46 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
-	const appFilename = path.resolve(options.dataDirectory, isolated ? "store/comms.db" : "comms.db");
+	const configured = yield* databaseConfiguration(
+		path.resolve(options.dataDirectory, "boot.db"),
+		path.resolve(options.dataDirectory, isolated ? "store/comms.db" : "comms.db"),
+	);
+	yield* validateAuthConfig(options.auth);
+	yield* fs.makeDirectory(options.dataDirectory, { recursive: true, mode: 0o700 });
+	const configuration =
+		configured._tag === "file"
+			? configured
+			: { ...configured, runtime: yield* remoteRuntime(configured, options.dataDirectory) };
+	const remote = configuration._tag === "remote" ? configuration.runtime : undefined;
+	const redact = logRedactor(
+		configuration._tag === "remote"
+			? [
+					Redacted.value(configuration.app.url),
+					Redacted.value(configuration.boot.url),
+					Redacted.value(configuration.appConnection.password),
+					Redacted.value(configuration.bootConnection.password),
+				]
+			: [],
+	);
 	const phase = yield* Ref.make<RecoveryPhase>({ _tag: "Recovering" });
 	const restart = yield* Deferred.make<void>();
 	const installed = yield* Ref.make<{ readonly handle: Handler; readonly shutdown: Effect.Effect<void> }>({
 		handle: publicRoute.pipe(Effect.map((response) => response ?? authErrorResponse("boot_unavailable"))),
 		shutdown: Effect.void,
 	});
-	const supervisor = yield* supervise(options);
+	const supervisor = yield* supervise(options, remote, redact);
 	const { child, run, fail } = supervisor;
 	const initialized = Layer.effectDiscard(
 		initializeBootSchema.pipe(
-			Effect.andThen(isolated ? fs.chmod(path.join(options.dataDirectory, "boot.db"), 0o600) : Effect.void),
+			Effect.andThen(
+				isolated && configuration._tag === "file" ? fs.chmod(configuration.boot.filename, 0o600) : Effect.void,
+			),
 		),
 	).pipe(
 		Layer.provideMerge(
-			clientLayer({ _tag: "file", filename: path.join(options.dataDirectory, "boot.db") }).pipe(
-				Layer.provide(
-					Layer.effectDiscard(
-						validateAuthConfig(options.auth).pipe(
-							Effect.andThen(fs.makeDirectory(options.dataDirectory, { recursive: true, mode: 0o700 })),
-						),
-					),
-				),
-			),
+			configuration._tag === "file"
+				? clientLayer(configuration.boot)
+				: Layer.succeed(SqlClient.SqlClient, configuration.runtime.bootSql),
 		),
 	);
 	const storageServices = headroomPolicyLayer.pipe(Layer.provideMerge(initialized));
@@ -102,20 +126,48 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 					Effect.flatMap((sample) => headroom.reserve(sample)),
 					Effect.andThen(storage.admit),
 				),
+				redact,
 			);
 		}),
 	).pipe(Layer.provideMerge(storageServices));
 	const sourceServices = sourceLayer(options.dataDirectory).pipe(
 		Layer.provideMerge(editLockLayer.pipe(Layer.provideMerge(eventServices))),
 	);
+	const databaseServices =
+		configuration._tag === "file"
+			? Layer.mergeAll(
+					backupLayer(configuration.app, options.dataDirectory),
+					recoveryLayer(configuration.app.filename, options.dataDirectory),
+				)
+			: Layer.unwrap(
+					Effect.gen(function* () {
+						const runtime = configuration.runtime;
+						const initialize = yield* makeRemoteAppInitializer({
+							appStore: configuration.app,
+							bootStore: configuration.boot,
+						});
+						const recovery = yield* remoteRecovery({
+							appStore: configuration.app,
+							bootStore: configuration.boot,
+							dataDirectory: options.dataDirectory,
+							withStore: runtime.withStore,
+							withWriter: runtime.withWriter,
+							initialize,
+						});
+						const backups = yield* remoteDbOps({
+							store: recovery.store,
+							withStore: runtime.withStore,
+						});
+						return Layer.mergeAll(Layer.succeed(AppRecovery, recovery), Layer.succeed(DbOps, backups));
+					}),
+				);
 	const graph = Layer.mergeAll(
 		authLayer(options.auth),
 		generationsLayer,
 		publicPagesLayer(options.dataDirectory),
 		preparationLayer(options).pipe(Layer.provide(preparationProcessLayer)),
-		attemptsLayer(options.dataDirectory).pipe(Layer.provide(kernelBootLayer)),
-		backupLayer({ _tag: "file", filename: appFilename }, options.dataDirectory),
-		recoveryLayer(appFilename, options.dataDirectory),
+		attemptsLayer(options.dataDirectory, configuration._tag === "remote").pipe(Layer.provide(kernelBootLayer)),
+		databaseServices,
 	).pipe(Layer.provideMerge(sourceServices));
 
 	yield* Effect.gen(function* () {
@@ -124,7 +176,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		const restore = yield* databaseRestore(supervisor);
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* Events;
-		const loggers = yield* logEvents(events);
+		const loggers = yield* logEvents(events, redact);
 		const lifetime = yield* Effect.scope;
 		const recoveryGate = yield* Semaphore.make(1);
 		const supervised = yield* Ref.make(false);
@@ -159,12 +211,14 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 									return yield* new RecoveryRejected({ code: "topic_move_recovery_required" });
 								yield* (yield* Generations).recover;
 								yield* (yield* DbOps).recoverCopy;
-								if (isolated)
+								if (isolated && configuration._tag === "file")
 									yield* migrateAppStore({
 										dataDirectory: options.dataDirectory,
-										filename: appFilename,
-										allowMissingReady: yield* (yield* AppRecovery).identityStatus.pipe(
-											Effect.map((status) => status.adoption_phase === "ready"),
+										filename: configuration.app.filename,
+										allowMissingReady: yield* Effect.gen(function* () {
+											const status = yield* (yield* AppRecovery).identityStatus;
+											return status.adoption_phase === "ready";
+										}).pipe(
 											// A diagnostic cannot disarm repair; authoritative reservation still validates after journal recovery.
 											Effect.catchTag("EventError", (error) =>
 												error.code === "app_store_identity_invalid" ? Effect.succeed(false) : Effect.fail(error),
@@ -178,14 +232,18 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 					const source = owners._tag === "Failure" ? owners : yield* (yield* SourceFiles).recover.pipe(Effect.exit);
 					yield* Ref.set(
 						child.sourceError,
-						source._tag === "Failure" ? redactHex(Cause.pretty<unknown>(source.cause)) : null,
+						source._tag === "Failure" ? redact(Cause.pretty<unknown>(source.cause)) : null,
 					);
 					const recovered =
 						owners._tag === "Failure"
 							? owners
 							: yield* coordinator.recover.pipe(
 									Effect.andThen(restore.recover),
-									Effect.andThen((yield* AppRecovery).reserveIdentity),
+									Effect.andThen(
+										Effect.gen(function* () {
+											yield* (yield* AppRecovery).reserveIdentity;
+										}),
+									),
 									Effect.andThen(reverts.recover),
 									Effect.andThen(source._tag === "Success" ? (yield* EditLock).recover : Effect.void),
 									Effect.exit,
@@ -194,7 +252,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 						yield* Ref.update(phase, (current): RecoveryPhase =>
 							current._tag === "Stopping" ? current : { _tag: "Failed", cause: recovered.cause },
 						);
-						yield* Ref.set(child.sourceError, redactHex(Cause.pretty<unknown>(recovered.cause)));
+						yield* Ref.set(child.sourceError, redact(Cause.pretty<unknown>(recovered.cause)));
 						yield* fail(recovered.cause);
 						return yield* Effect.failCause<unknown>(recovered.cause);
 					}
@@ -325,7 +383,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 						),
 					}));
 				}
-				yield* Effect.logError(cause);
+				yield* Effect.logError(redact(Cause.pretty(cause)));
 				yield* fail(cause);
 			}),
 		),

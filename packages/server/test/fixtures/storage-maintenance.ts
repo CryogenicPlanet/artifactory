@@ -16,12 +16,17 @@ const backupRows = Schema.Array(
 	}),
 );
 const statusSchema = Schema.Struct({
-	child: Schema.Struct({ pid: Schema.NullOr(Schema.Int), generation: Schema.NullOr(Schema.Int), state: Schema.String }),
+	child: Schema.Struct({
+		pid: Schema.NullOr(Schema.Int),
+		port: Schema.NullOr(Schema.Int),
+		generation: Schema.NullOr(Schema.Int),
+		state: Schema.String,
+	}),
 	traffic: Schema.Struct({ frozen: Schema.Boolean, admitted: Schema.Int, queued: Schema.Int }),
 });
 
 /** Accelerates the app cron in a disposable source copy; channel/capture/process behavior stays real. */
-export async function storageFixture(test: TestContext) {
+export async function storageFixture(test: TestContext, holdForwarding = false) {
 	const fixture = await conversation(test);
 	const execute = promisify(execFile);
 	const sql = async (statement: string, store = "comms.db") => {
@@ -84,6 +89,47 @@ const runCron = <E, R>(_schedule: unknown, run: (at: number) => Effect.Effect<vo
 			`fs.writeFileString(${JSON.stringify(reloadWaiting)}, "waiting").pipe(Effect.andThen(${acquire}))`,
 		),
 	);
+	const forwarding = join(fixture.root, "forwarding-admitted");
+	const releaseForwarding = join(fixture.root, "forwarding-release");
+	const childFrozen = join(fixture.root, "child-frozen");
+	if (holdForwarding) {
+		const backupPath = join(boot, "src/database-backup.ts");
+		const backup = await readFile(backupPath, "utf8");
+		const frozen = 'const frozen = yield* active.process.control("frozen").pipe(Effect.exit);';
+		expect(backup.split(frozen)).toHaveLength(2);
+		await writeFile(
+			backupPath,
+			backup.replace(
+				frozen,
+				`${frozen}
+ yield* fs.writeFileString(${JSON.stringify(childFrozen)}, frozen._tag);`,
+			),
+		);
+
+		const proxyPath = join(boot, "src/proxy.ts");
+		const proxy = await readFile(proxyPath, "utf8");
+		const forward = "return yield* client.execute(outgoing).pipe(";
+		expect(proxy.split("import { Clock, Crypto, Effect, Ref, Stream }")).toHaveLength(2);
+		expect(proxy.split(forward)).toHaveLength(2);
+		await writeFile(
+			proxyPath,
+			proxy
+				.replace(
+					"import { Clock, Crypto, Effect, Ref, Stream }",
+					"import { Clock, Crypto, Effect, FileSystem, Ref, Stream }",
+				)
+				.replace(
+					forward,
+					`
+ if (path === "/api/messages" && request.method === "POST") {
+  const fixtureFs = yield* FileSystem.FileSystem;
+  yield* fixtureFs.writeFileString(${JSON.stringify(forwarding)}, "admitted");
+  while (!(yield* fixtureFs.exists(${JSON.stringify(releaseForwarding)}))) yield* Effect.sleep("10 millis");
+ }
+ ${forward}`,
+				),
+		);
+	}
 	const launch = () => fixture.launch(join(server, "server.ts"), join(boot, "test/fixtures/launcher.ts"));
 	const force = (_kind: "hourly") => writeFile(requested, "due");
 	const backups = async () =>
@@ -96,5 +142,17 @@ const runCron = <E, R>(_schedule: unknown, run: (at: number) => Effect.Effect<vo
 		const before = Number(await readFile(tick, "utf8").catch(() => "0"));
 		await expect.poll(async () => Number(await readFile(tick, "utf8").catch(() => "0"))).toBeGreaterThan(before);
 	};
-	return { ...fixture, sql, launch, force, backups, status, cycle, reloadWaiting };
+	return {
+		...fixture,
+		sql,
+		launch,
+		force,
+		backups,
+		status,
+		cycle,
+		reloadWaiting,
+		forwarding,
+		childFrozen,
+		releaseForwarding: () => writeFile(releaseForwarding, "release"),
+	};
 }

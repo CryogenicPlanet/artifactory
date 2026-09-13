@@ -1,4 +1,5 @@
 import { decodeRows } from "./decode-rows.ts";
+import { on } from "@comms/storage/dialect";
 import { Clock, Crypto, Effect, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AuthError } from "./auth.ts";
@@ -42,7 +43,8 @@ export const resolveRestoreTarget = (params: RestoreSelection) =>
 			),
 		))[0];
 		if (!backup) return yield* new AuthError({ code: "backup_not_found" });
-		if (backup.engine !== "sqlite") return yield* new AuthError({ code: "backup_engine_mismatch" });
+		const engine = on(sql, { sqlite: () => "sqlite", pg: () => "pg", mysql: () => "mysql" });
+		if (backup.engine !== engine) return yield* new AuthError({ code: "backup_engine_mismatch" });
 		if (
 			backup.published_through === null ||
 			!Number.isSafeInteger(backup.published_through) ||

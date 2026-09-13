@@ -25,10 +25,11 @@ const program = Effect.gen(function* () {
 			const events = yield* Events;
 			let blocked = false;
 			const error = () => new KernelError({ code: "boot_unavailable" });
-			const boot: BootChannel["Service"] = {
+			const boot: BootChannel["Service"] & { readonly filename: string } = {
 				backup: Effect.void,
 				changed: (after) => events.changed(after).pipe(Effect.mapError(error)),
 				epoch: "writer",
+				store: { _tag: "file", filename: `${root}/app.db` },
 				filename: `${root}/app.db`,
 				generation: 1,
 				fence: events.state.pipe(

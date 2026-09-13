@@ -22,8 +22,9 @@ const program = Effect.gen(function* () {
 			yield* (yield* AppRecovery).prepare(epoch);
 			let failAppend = false;
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
-			const channel: BootChannel["Service"] = {
+			const channel: BootChannel["Service"] & { readonly filename: string } = {
 				epoch,
+				store: { _tag: "file", filename: `${root}/comms.db` },
 				filename: `${root}/comms.db`,
 				generation: 1,
 				backup: Effect.void,
@@ -83,6 +84,8 @@ const program = Effect.gen(function* () {
 					yield* sql`DROP TABLE idempotency`;
 					yield* sql`CREATE TABLE idempotency(instance TEXT NOT NULL,key TEXT NOT NULL,input TEXT NOT NULL,message_id TEXT NOT NULL,transaction_id TEXT NOT NULL,outcome TEXT,PRIMARY KEY(instance,key))`;
 					yield* sql`CREATE TABLE read_idempotency(instance TEXT NOT NULL,key TEXT NOT NULL,topic TEXT NOT NULL,requested_seq INTEGER NOT NULL,effective_seq INTEGER NOT NULL,PRIMARY KEY(instance,key))`;
+					yield* sql`ALTER TABLE protected_sql_tables DROP COLUMN extension`;
+					yield* sql`ALTER TABLE protected_sql_tables DROP COLUMN migration`;
 					yield* sql`DROP TABLE IF EXISTS core_migrations`;
 					yield* sql`PRAGMA user_version = 3`;
 					yield* initialize;

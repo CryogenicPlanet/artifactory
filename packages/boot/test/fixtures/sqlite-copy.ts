@@ -31,9 +31,13 @@ const main = Effect.gen(function* () {
 		original.exec("INSERT INTO records VALUES('acknowledged WAL write')");
 	const ops = yield* DbOps.pipe(Effect.provide(layer({ _tag: "file", filename: source }, root)));
 	const copying = ops.clone({ _tag: "file", filename: `${root}/copy.db` });
-	const result = yield* (
-		mode === "copy" ? copying : mode === "interrupt" ? copying.pipe(Effect.timeout("1 second")) : ops.recoverCopy
-	).pipe(Effect.result);
+	const result = yield* Effect.gen(function* () {
+		return yield* mode === "copy"
+			? copying
+			: mode === "interrupt"
+				? copying.pipe(Effect.timeout("1 second"))
+				: ops.recoverCopy;
+	}).pipe(Effect.result);
 	const journal = yield* sql`SELECT value FROM settings WHERE key='sqlite_copy'`;
 	let copied: unknown = null;
 	if (result._tag === "Success" && mode === "copy") {

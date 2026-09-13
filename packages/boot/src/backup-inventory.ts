@@ -21,8 +21,7 @@ export const makeBackupInventory = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const rows =
 				yield* sql`SELECT id,engine,reason,bytes,taken_at,published_through,generation,legacy_store_id FROM backups
-   WHERE (${page.before?.taken_at ?? null} IS NULL OR taken_at < ${page.before?.taken_at ?? null}
-    OR taken_at = ${page.before?.taken_at ?? null} AND id < ${page.before?.id ?? null})
+   WHERE ${page.before === null ? sql`1=1` : sql`(taken_at < ${page.before.taken_at} OR taken_at = ${page.before.taken_at} AND id < ${page.before.id})`}
    ORDER BY taken_at DESC,id DESC LIMIT ${page.limit + 1}`.pipe(
 					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Summary))),
 				);
@@ -41,7 +40,7 @@ export const makeBackupInventory = Effect.gen(function* () {
 							yield* Schema.encodeEffect(Schema.fromJsonString(BackupCursor))({ taken_at: last.taken_at, id: last.id }),
 						).toString("base64url")
 					: null;
-			const expected = yield* sql`SELECT value FROM settings WHERE key='app_store_id'`.pipe(
+			const expected = yield* sql`SELECT value FROM settings WHERE ${sql("key")}='app_store_id'`.pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ value: Schema.String })))),
 			);
 			return { items, next, expected_store_id: safeStoreId(expected[0]?.value) };

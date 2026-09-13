@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { readStoragePolicy } from "./settings-schema.ts";
-import { BackupRecord, backupPath } from "./backup-metadata.ts";
+import { BackupRecord, backupRelativePath } from "./backup-metadata.ts";
 import { StorageRejected } from "./storage-headroom.ts";
 import type { StorageVolume } from "./storage-volume.ts";
 
@@ -89,7 +89,7 @@ export const artifactRetention = (directory: string, engine: BackupRecord["engin
 								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Generation))),
 							);
 							const protectedGenerations = yield* sql`
-							SELECT n FROM (SELECT n FROM generations WHERE good=1 ORDER BY n DESC LIMIT 5)
+							SELECT n FROM (SELECT n FROM generations WHERE good=1 ORDER BY n DESC LIMIT 5) AS recent_good
 							-- Attempt closure, not a historical live label, identifies current filesystem owners.
 							UNION SELECT generation AS n FROM child_attempts WHERE closed=0
 							UNION SELECT candidate AS n FROM cutover
@@ -170,9 +170,8 @@ export const artifactRetention = (directory: string, engine: BackupRecord["engin
 								protectedGenerations.has(backup.generation))
 						)
 							continue;
-						if (!/^[A-Za-z0-9_-]+$/.test(backup.id)) continue;
-						const relative = path.relative(root, backupPath(path, root, backup.id, backup.engine));
-						if (backup.path !== path.join(directory, relative) && backup.path !== path.join(root, relative)) continue;
+						const relative = backupRelativePath(path, directory, root, backup);
+						if (relative === null) continue;
 						yield* remove(root, relative, false);
 						yield* sql`DELETE FROM backups WHERE id=${backup.id}`;
 						backupBytes -= backup.bytes;

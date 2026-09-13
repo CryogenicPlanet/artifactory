@@ -31,8 +31,9 @@ const program = Effect.gen(function* () {
 			let appendFailed = false;
 			let appends = 0;
 			const unavailable = () => new KernelError({ code: "boot_unavailable" });
-			const boot: BootChannel["Service"] = {
+			const boot: BootChannel["Service"] & { readonly filename: string } = {
 				epoch,
+				store: { _tag: "file", filename: `${root}/app.db` },
 				filename: `${root}/app.db`,
 				generation: 1,
 				backup: Effect.void,

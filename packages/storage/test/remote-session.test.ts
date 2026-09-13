@@ -1,26 +1,7 @@
 import { SqlError, UniqueViolation, DeadlockError, SerializationError } from "effect/unstable/sql/SqlError";
-import { Cause, Effect, Exit, Redacted } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { expect, it } from "vitest";
-import { attemptTag, sanitized, failure } from "../src/remote-session.ts";
-
-it("encodes the full attempt below the PostgreSQL handshake limit", async () => {
-	const connection = {
-		engine: "pg",
-		host: "localhost",
-		port: 5432,
-		database: "app",
-		username: "app",
-		password: Redacted.make("secret"),
-		tls: false,
-	} as const;
-	const first = await Effect.runPromise(attemptTag({ connection, attempt: "01".repeat(32) }));
-	const second = await Effect.runPromise(attemptTag({ connection, attempt: "02".repeat(32) }));
-	expect(first).toMatch(/^comms:[A-Za-z0-9_-]{43}$/);
-	expect(second).not.toBe(first);
-	const invalid = await Effect.runPromiseExit(attemptTag({ connection, attempt: "secret" }));
-	expect(Exit.isFailure(invalid)).toBe(true);
-	expect(JSON.stringify(invalid)).not.toContain("secret");
-});
+import { sanitized, failure } from "../src/remote-session.ts";
 
 it("drops credential-bearing errors and defects while retaining interruption", async () => {
 	for (const effect of [Effect.fail(new Error("private-password")), Effect.die(new Error("private-password"))]) {
@@ -46,11 +27,11 @@ it("keeps safe conflict categories but removes secret-bearing SQL metadata", asy
 	}
 });
 
-it("retains only the static unsupported-isolation refusal through admission sanitization", async () => {
+it("retains only the static unsupported-isolation refusal through connection sanitization", async () => {
 	const denied = await Effect.runPromiseExit(
 		sanitized(
-			sanitized(Effect.fail(failure("remote_isolation_unsupported")), "remote_inspection_failed"),
-			"remote_registration_failed",
+			sanitized(Effect.fail(failure("remote_isolation_unsupported")), "remote_connection_failed"),
+			"remote_connection_failed",
 		),
 	);
 	expect(Exit.isFailure(denied)).toBe(true);

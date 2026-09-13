@@ -22,7 +22,13 @@ it.effect("requests only on live UTC hours, skips startup catchup, and survives 
 		yield* backupSchedule.pipe(
 			Effect.provide(
 				Layer.merge(
-					Layer.mock(BootChannel, { epoch: "test", filename: "unused.db", generation: 1, backup }),
+					Layer.mock(BootChannel, {
+						epoch: "test",
+						store: { _tag: "file", filename: "unused.db" },
+						filename: "unused.db",
+						generation: 1,
+						backup,
+					}),
 					Layer.succeed(Lifecycle, lifecycle),
 				),
 			),
@@ -62,7 +68,13 @@ it.effect("permits freeze during a pending request and interrupts it when the ap
 		yield* backupSchedule.pipe(
 			Effect.provide(
 				Layer.merge(
-					Layer.mock(BootChannel, { epoch: "test", filename: "unused.db", generation: 1, backup }),
+					Layer.mock(BootChannel, {
+						epoch: "test",
+						store: { _tag: "file", filename: "unused.db" },
+						filename: "unused.db",
+						generation: 1,
+						backup,
+					}),
 					Layer.succeed(Lifecycle, lifecycle),
 				),
 			),
@@ -77,11 +89,14 @@ it.effect("permits freeze during a pending request and interrupts it when the ap
 	}).pipe(Effect.provide(lifecycleLayer)),
 );
 
-for (const [budget, responseDelay] of [
-	["30 seconds", "25 seconds"],
-	["90 seconds", "95 seconds"],
+for (const [store, budget, responseDelay] of [
+	["file:/unused.db", "30 seconds", "25 seconds"],
+	["file:/unused.db", "90 seconds", "95 seconds"],
+	["postgres://app:secret@localhost/app", undefined, "125 seconds"],
+	["mysql://app:secret@localhost/app", undefined, "125 seconds"],
+	["postgres://app:secret@localhost/app", "180 seconds", "185 seconds"],
 ] as const)
-	it.effect(`allows the configured ${budget} copy budget and response framing`, () =>
+	it.effect(`allows ${store.split(":")[0]} ${budget ?? "default"} copy budget and response framing`, () =>
 		Effect.gen(function* () {
 			const entered = yield* Deferred.make<void>();
 			const client = HttpClient.make((request, url) =>
@@ -106,9 +121,9 @@ for (const [budget, responseDelay] of [
 					ConfigProvider.layer(
 						ConfigProvider.fromUnknown({
 							WRITER_EPOCH: "epoch",
-							REHEARSAL_COPY_BUDGET: budget,
-							APP_STORE: "file:/unused.db",
-							APP_DATABASE: "/unused.db",
+							...(budget === undefined ? {} : { REHEARSAL_COPY_BUDGET: budget }),
+							APP_STORE: store,
+							...(store.startsWith("file:") ? { APP_DATABASE: "/unused.db" } : {}),
 							GENERATION: "1",
 							STATE: "live",
 							BOOT_URL: "http://localhost",

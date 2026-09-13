@@ -1,0 +1,32 @@
+{
+	"name": "comms-generation-test-runtime",
+	"version": "0.0.0",
+	"private": true,
+	"workspaces": [
+		"protocol",
+		"storage"
+	],
+	"type": "module",
+	"dependencies": {
+		"@comms/protocol": "workspace:*",
+		"@comms/storage": "workspace:*",
+		"@effect/platform-bun": "4.0.0-rc.113",
+		"@effect/sql-sqlite-bun": "4.0.0-rc.113",
+		"effect": "4.0.0-rc.113",
+		"highlight.js": "11.12.0",
+		"marked": "18.0.12"
+	},
+	"comms": {
+		"board_directory": "environment-v1",
+		"storage_engines": [
+			"sqlite",
+			"pg",
+			"mysql"
+		]
+	},
+	"patchedDependencies": {
+		"@effect/sql-mysql2@4.0.0-rc.113": "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch",
+		"@effect/sql-pg@4.0.0-rc.113": "patches/@effect%2Fsql-pg@4.0.0-rc.113.patch",
+		"effect@4.0.0-rc.113": "patches/effect@4.0.0-rc.113.patch"
+	}
+}
