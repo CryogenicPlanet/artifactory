@@ -175,7 +175,7 @@ it(
 		const acquired = await authenticated(`${restarted.url}/api/lock`, { method: "POST", body: "{}" });
 		const acquiredBody: unknown = await acquired.json();
 		expect({ status: acquired.status, body: acquiredBody }).toMatchObject({
-			status: 200,
+			status: 503,
 			body: { lock_committed: true, recovery: { status: "failed", error: { code: "recovery_failed" } } },
 		});
 		const newLock = Schema.decodeUnknownSync(Schema.Struct({ lock: Schema.Struct({ id: Schema.String }) }))(
@@ -197,14 +197,14 @@ it(
 		expect(await sql("boot.db", "SELECT * FROM edit_lock")).toEqual(held);
 		const released = await authenticated(`${restarted.url}/api/lock`, { method: "DELETE" });
 		expect({ status: released.status, body: await released.json() }).toMatchObject({
-			status: 200,
+			status: 503,
 			body: { lock: null, lock_committed: true, recovery: { status: "failed", error: { code: "recovery_failed" } } },
 		});
 		for (const [path, method, body, status, code, retriable] of [
 			["fs/app/server.ts?reload=0", "PUT", "refused source mutation", 503, "editing_unavailable", true],
 			["fs/pages/diagnostic.md", "PUT", "refused page mutation", 503, "editing_unavailable", true],
 			["reload", "POST", "{}", 503, "editing_unavailable", true],
-			["revert", "POST", "{}", 409, "child_closure_unproven", false],
+			["revert", "POST", "{}", 409, "cutover_recovery_required", false],
 		] as const) {
 			const response = await authenticated(`${restarted.url}/api/${path}`, { method, body });
 			const actual: unknown = await response.json();
