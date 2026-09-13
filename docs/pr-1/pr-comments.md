@@ -482,6 +482,26 @@ So the defect is unchanged and is now duplicated rather than shared. The consequ
 
 Codex's own follow-up assigns the dialect-aware helper to PR #8 and says the portability coverage must be retained when that layer is composed. That is the right home, so this is tracked as a **PR #8 blocker**, not a PR #4 one, and #4 merged with it outstanding on that basis.
 
+### 64. Size reduction pass, after the database stack merges (decided 2026-09-13)
+
+**Decided by the owner.** Once #9, #10 and #12 are in, do a deep audit of bloat and a substantial size reduction. Recording the measurements that prompted it so the audit starts from facts rather than impressions.
+
+Master at `1156548`, production source only, tests excluded: boot 13,536 lines in 101 files, server 7,315 in 92, ui 3,340 in 39, protocol 761 in 20, storage 810 in 9. Total about 25,800 across 261 files, with 40,544 further lines of tests. PRs #9 and #10 add roughly 19,000 more production lines, which would put the tree past 45,000 and boot alone near 24,000.
+
+The sharpest single fact: SPEC §7.1 line 401 budgets the immutable core at "about 6,000 to 7,000 lines, of which roughly 2,300 are durability machinery, with five runtime dependencies; a real bootloader's scope and nothing else". Boot is 13,536, about double, and `boot-audit.md` already found 7,250 achievable and named the cuts. Boot has grown through every review round rather than shrinking.
+
+Four causes worth carrying into the audit, because they suggest where to look.
+
+**Duplicate answers to one question.** Much of the machinery exists to establish *is the previous owner really dead*, and there are now several parallel mechanisms for it: keeper receipts, the kernel boot-id check, process-group closure proof, the owner inventory, the copy keeper's own receipt, the writer epoch CAS, the publication fence, intent journals and the adoption record. Each was justified on its own; nobody has asked whether three of them could answer for all.
+
+**Review-driven accretion, substantially my fault.** Sixty-six findings across the stack, and almost every one was closed by adding a mechanism rather than removing a case. Asking for typed errors produced a code-to-status-to-hint record in every module; asking for a way back in produced a five-condition repair admission; asking for closure proof produced a keeper plus a receipt plus a fallback. A reviewer who only says "this case is unhandled" produces a codebase where every case has its own handler.
+
+**File-per-concept.** #10 alone adds `transfer-sentinel.ts`, `transfer-target.ts`, `transfer-file-digest.ts`, `transfer-app-authority.ts`, `transfer-dump-authority.ts` and sixteen more.
+
+**The dominant line item is the optional one.** Engine portability is roughly 20,000 lines once #9 and #10 land, for a board that runs on SQLite, on one machine, for one human and their agents. The product itself is not big: eleven core operations, thirty-five boot routes, and the whole board in 11,400 lines. That part is about the right size.
+
+**Sequencing note, raised once and not pressed.** The largest line item is the part still unmerged, and deleting unmerged code is free while deleting merged code is a migration with a schema ladder attached. The owner's call is to merge first and cut after; this records that the cheaper moment was before.
+
 ## Moot after the deletions
 
 Findings that no longer need a comment because items 3 and 4 remove what they were about.
