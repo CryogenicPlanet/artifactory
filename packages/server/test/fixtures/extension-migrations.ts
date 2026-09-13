@@ -34,7 +34,7 @@ const run = Effect.gen(function* () {
 		});
 		assert.deepEqual(yield* sql`SELECT * FROM extension_migrations ORDER BY name`, receipts);
 
-		yield* migrate("legacy", unprotected, { protect: true });
+		assert.equal((yield* migrate("legacy", unprotected, { protect: true }).pipe(Effect.exit))._tag, "Failure");
 		assert.deepEqual(yield* sql`SELECT * FROM extension_migrations ORDER BY name`, receipts);
 		assert.deepEqual(yield* sql`SELECT name FROM protected_sql_tables WHERE name='legacy_data'`, []);
 		yield* sql`INSERT INTO legacy_data VALUES('still writable')`;
@@ -64,8 +64,8 @@ const run = Effect.gen(function* () {
 			"extension_migration_conflict",
 		);
 		const second = yield* makeExtensionMigrate(sql, "current", "second");
-		yield* second("002-insert", insert);
-		assert.deepEqual(yield* sql`SELECT value FROM example_data`, [{ value: "once" }, { value: "once" }]);
+		assert.equal((yield* second("002-insert", insert).pipe(Effect.exit))._tag, "Failure");
+		assert.deepEqual(yield* sql`SELECT value FROM example_data`, [{ value: "once" }]);
 
 		// A failed receipt insert must roll back even DDL that has already executed.
 		yield* sql`CREATE TRIGGER reject_migration BEFORE INSERT ON extension_migrations WHEN NEW.name='003-atomic' BEGIN SELECT RAISE(ABORT,'test receipt failure'); END`;
@@ -112,11 +112,7 @@ const run = Effect.gen(function* () {
 			"stale_writer",
 		);
 		assert.deepEqual(yield* sql`SELECT name FROM sqlite_master WHERE name IN ('forbidden','partial')`, []);
-		assert.deepEqual(yield* sql`SELECT value FROM example_data`, [
-			{ value: "once" },
-			{ value: "once" },
-			{ value: "repaired" },
-		]);
+		assert.deepEqual(yield* sql`SELECT value FROM example_data`, [{ value: "once" }, { value: "repaired" }]);
 		yield* Console.log("EXTENSION_MIGRATIONS_ATOMIC");
 	}).pipe(Effect.provide(SqliteClient.layer({ filename: `${root}/app.db` })));
 }).pipe(Effect.scoped, Effect.provide(BunServices.layer));

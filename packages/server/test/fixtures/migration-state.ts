@@ -80,6 +80,16 @@ await Effect.runPromise(
 			);
 			assert.equal((yield* migrate(swallowed, "current").pipe(Effect.exit))._tag, "Failure");
 			assert.deepEqual(yield* sql`SELECT * FROM store_identity`, identity);
+			const identical = `${root}/identical-recreation`;
+			yield* fs.makeDirectory(identical);
+			yield* write(
+				identical,
+				"002_recreate.ts",
+				"yield*sql`DROP TABLE outbox`;yield*sql`CREATE TABLE outbox(seq INTEGER PRIMARY KEY,event TEXT)`;yield*sql`INSERT INTO outbox VALUES(42,'retained-event')`;",
+			);
+			assert.equal((yield* migrate(identical, "current").pipe(Effect.exit))._tag, "Failure");
+			assert.deepEqual(yield* sql`SELECT * FROM outbox`, [{ seq: 42, event: "retained-event" }]);
+			assert.deepEqual(yield* sql`SELECT * FROM migrations`, ledger);
 			const good = `${root}/good`;
 			yield* fs.makeDirectory(good);
 			yield* write(

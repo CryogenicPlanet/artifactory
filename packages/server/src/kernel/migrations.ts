@@ -1,3 +1,4 @@
+import { migrationProtection } from "./migration-protection.ts";
 import { migrationWarnings, observeMigrationDialect } from "./migration-portability.ts";
 import { on } from "@comms/storage/dialect";
 import { assertNoPendingMigration, mysqlMigration } from "./migration-intent.ts";
@@ -46,25 +47,30 @@ export const migrate = (directory: string, epoch: string) =>
 				id,
 				name,
 				load.pipe(
-					Effect.map((loaded: unknown) => {
-						const first = exported(loaded) ? loaded.default : loaded;
-						const effect = exported(first) ? first.default : first;
-						return Effect.isEffect(effect)
-							? on<ReturnType<typeof writerGate> | typeof Effect.void>(sql, {
-									sqlite: () => Effect.void,
-									pg: () => Effect.void,
-									// DDL releases MySQL's batch fence; reject stale ownership before capturing the next baseline.
-									mysql: () => writerGate(sql, epoch),
-								}).pipe(
-									Effect.andThen(
-										preserveMigrationState(
-											sql,
-											warnings ? observeMigrationDialect(sql, effect, () => unbranched.push(`${id}_${name}`)) : effect,
+					Effect.flatMap((loaded: unknown) =>
+						Effect.gen(function* () {
+							const releaseProtection = yield* migrationProtection(sql, loaded);
+							const first = exported(loaded) ? loaded.default : loaded;
+							const effect = exported(first) ? first.default : first;
+							return Effect.isEffect(effect)
+								? on<ReturnType<typeof writerGate> | typeof Effect.void>(sql, {
+										sqlite: () => Effect.void,
+										pg: () => Effect.void,
+										// DDL releases MySQL's batch fence; reject stale ownership before capturing the next baseline.
+										mysql: () => writerGate(sql, epoch),
+									}).pipe(
+										Effect.andThen(
+											preserveMigrationState(
+												sql,
+												warnings
+													? observeMigrationDialect(sql, effect, () => unbranched.push(`${id}_${name}`))
+													: effect,
+											).pipe(Effect.tap(() => releaseProtection)),
 										),
-									),
-								)
-							: loaded;
-					}),
+									)
+								: loaded;
+						}),
+					),
 				),
 			]);
 		}).pipe(

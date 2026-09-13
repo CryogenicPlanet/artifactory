@@ -46,7 +46,10 @@ await Effect.runPromise(
 			assert.deepEqual(yield* sql`SELECT name FROM core_migrations WHERE migration_id=13`, [
 				{ name: "mention_symbol_boundaries" },
 			]);
-			yield* sql`DELETE FROM core_migrations WHERE migration_id=13`;
+			// Reconstruct the historical core12 fixture, including its pre-provenance registry shape.
+			yield* sql`ALTER TABLE protected_sql_tables DROP COLUMN extension`;
+			yield* sql`ALTER TABLE protected_sql_tables DROP COLUMN migration`;
+			yield* sql`DELETE FROM core_migrations WHERE migration_id>=13`;
 			if (engine === "sqlite") yield* sql`PRAGMA user_version=12`;
 			const prefix = yield* sql`SELECT * FROM core_migrations ORDER BY migration_id`;
 			for (let index = 0; index < 257; index++) {
@@ -97,7 +100,10 @@ await Effect.runPromise(
 			assert.deepEqual(yield* sql`SELECT * FROM idempotency`, receipts);
 			assert.deepEqual(yield* sql`SELECT * FROM outbox`, events);
 			// Replaying the data migration with an already-correct populated board is safe too.
-			yield* sql`DELETE FROM core_migrations WHERE migration_id=13`;
+			// Reconstruct the historical core12 fixture, including its pre-provenance registry shape.
+			yield* sql`ALTER TABLE protected_sql_tables DROP COLUMN extension`;
+			yield* sql`ALTER TABLE protected_sql_tables DROP COLUMN migration`;
+			yield* sql`DELETE FROM core_migrations WHERE migration_id>=13`;
 			if (engine === "sqlite") yield* sql`PRAGMA user_version=12`;
 			yield* initialize;
 			yield* initialize;
