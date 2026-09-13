@@ -9,7 +9,7 @@ export const deliver = (effects: Pick<Api["effects"], "fetch">, row: Stored, eve
 	Effect.gen(function* () {
 		const request = HttpClientRequest.post(row.input.deliver.url).pipe(
 			HttpClientRequest.bodyJsonUnsafe({ subscription_id: row.id, event }),
-			HttpClientRequest.setHeader("x-comms-delivery-id", `${row.id}:${event.seq}`),
+			HttpClientRequest.setHeader("x-chirp-delivery-id", `${row.id}:${event.seq}`),
 		);
 		return yield* effects.fetch(request, (response) =>
 			Effect.gen(function* () {

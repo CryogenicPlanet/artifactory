@@ -21,7 +21,7 @@ export function serve(mode: string) {
 			if (url.pathname === "/health" || url.pathname === "/_kernel/ping")
 				return new Response("ok", {
 					status: mode === "unhealthy" ? 500 : 200,
-					headers: { "x-comms-writer-epoch": process.env.WRITER_EPOCH ?? "", "x-comms-kernel-protocol": "2" },
+					headers: { "x-chirp-writer-epoch": process.env.WRITER_EPOCH ?? "", "x-chirp-kernel-protocol": "2" },
 				});
 			if (url.pathname === "/cancelled") return new Response(String(cancelled));
 			if (url.pathname === "/hold-stream")
@@ -53,15 +53,15 @@ export function serve(mode: string) {
 						body: await request.text(),
 						authorization: request.headers.get("authorization"),
 						cookie: request.headers.get("cookie"),
-						assertion: request.headers.get("x-comms-assertion"),
-						kind: request.headers.get("x-comms-auth-kind"),
-						expires: request.headers.get("x-comms-token-expires"),
-						agent: request.headers.get("x-comms-agent"),
-						instance: request.headers.get("x-comms-instance"),
-						scopes: request.headers.get("x-comms-scopes"),
-						label: request.headers.get("x-comms-label"),
-						requestId: request.headers.get("x-comms-request-id"),
-						trace: request.headers.get("x-comms-traceparent"),
+						assertion: request.headers.get("x-chirp-assertion"),
+						kind: request.headers.get("x-chirp-auth-kind"),
+						expires: request.headers.get("x-chirp-token-expires"),
+						agent: request.headers.get("x-chirp-agent"),
+						instance: request.headers.get("x-chirp-instance"),
+						scopes: request.headers.get("x-chirp-scopes"),
+						label: request.headers.get("x-chirp-label"),
+						requestId: request.headers.get("x-chirp-request-id"),
+						trace: request.headers.get("x-chirp-traceparent"),
 						publicTrace: request.headers.get("traceparent"),
 						traceState: request.headers.get("tracestate"),
 						baggage: request.headers.get("baggage"),
@@ -72,7 +72,7 @@ export function serve(mode: string) {
 					},
 					{
 						headers: {
-							"x-comms-span": encodeURIComponent(
+							"x-chirp-span": encodeURIComponent(
 								JSON.stringify({ topic: "private/topic", message_id: "m_private", extension: "private.ts" }),
 							),
 						},

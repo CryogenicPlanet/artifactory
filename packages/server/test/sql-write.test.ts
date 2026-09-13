@@ -75,7 +75,7 @@ it("repairs app rows/schema with fs authority and preserves first SQL outcomes a
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": proof },
+				headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": proof },
 				body: JSON.stringify({ decision: "approve", scopes: ["fs"], long_lived: false }),
 			})
 		).status,

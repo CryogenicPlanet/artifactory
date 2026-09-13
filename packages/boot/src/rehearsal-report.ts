@@ -31,7 +31,7 @@ export type RehearsalReport = typeof RehearsalReport.Type | { readonly report_un
 /** Historical snapshots did not report suppression. Never pretend their absent report was empty. */
 export const readRehearsalReport = (response: HttpClientResponse.HttpClientResponse) =>
 	Effect.gen(function* () {
-		const version = response.headers["x-comms-rehearsal-report"];
+		const version = response.headers["x-chirp-rehearsal-report"];
 		if (version === undefined || version === "") return { report_unavailable: true } as const;
 		if (version !== "1") return yield* Effect.fail(new Error("Unsupported rehearsal report version"));
 		let bytes = 0;

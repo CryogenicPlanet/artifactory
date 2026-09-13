@@ -111,7 +111,7 @@ for (const fails of [false, true]) {
 		const headers = { "x-boot-secret": "candidate-test-secret" };
 		const starting = await fetch(healthUrl, { headers });
 		expect(starting.status).toBe(503);
-		expect(starting.headers.get("x-comms-health-ready")).toBeNull();
+		expect(starting.headers.get("x-chirp-health-ready")).toBeNull();
 		expect(await starting.text()).toBe("");
 		await delay(100);
 		expect(await fixture.sql("SELECT name FROM sqlite_master WHERE name='migrations'")).toEqual([]);
@@ -123,7 +123,7 @@ for (const fails of [false, true]) {
 		expect(response.status).toBe(200);
 		if (fails) {
 			await expect
-				.poll(async () => (await fetch(healthUrl, { headers })).headers.get("x-comms-health-ready"), { timeout: 5000 })
+				.poll(async () => (await fetch(healthUrl, { headers })).headers.get("x-chirp-health-ready"), { timeout: 5000 })
 				.toBe("1");
 			const failed = await fetch(healthUrl, { headers });
 			expect(failed.status).toBe(503);
@@ -131,12 +131,12 @@ for (const fails of [false, true]) {
 			for (const rejectedHeaders of [{}, { ...headers, "x-forwarded-host": "comms.test" }]) {
 				const rejected = await fetch(healthUrl, { headers: rejectedHeaders });
 				expect(rejected.status, Object.keys(rejectedHeaders).join(",")).toBe(403);
-				expect(rejected.headers.get("x-comms-health-ready")).toBeNull();
+				expect(rejected.headers.get("x-chirp-health-ready")).toBeNull();
 				expect(await rejected.text()).toBe("");
 			}
 			const unavailable = await fetch(`http://127.0.0.1:${port}/api/messages`, { headers });
 			expect(unavailable.status).toBe(503);
-			expect(unavailable.headers.get("x-comms-health-ready")).toBeNull();
+			expect(unavailable.headers.get("x-chirp-health-ready")).toBeNull();
 			expect(await unavailable.text()).toBe("");
 			expect(await fixture.sql("SELECT name FROM sqlite_master WHERE name='migrations'")).toEqual([]);
 		} else {

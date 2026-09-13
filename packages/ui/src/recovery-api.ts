@@ -12,7 +12,7 @@ export const breakEditLock = (id: string) =>
 		yield* accountRequest(
 			HttpClientRequest.delete(new URL("/_boot/lock?break=1", window.location.origin).href).pipe(
 				HttpClientRequest.bodyJsonUnsafe(body),
-				HttpClientRequest.setHeader("x-comms-assertion", proof),
+				HttpClientRequest.setHeader("x-chirp-assertion", proof),
 			),
 		);
 	});

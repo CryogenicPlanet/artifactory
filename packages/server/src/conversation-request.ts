@@ -20,19 +20,19 @@ export const identity = (scope: string) =>
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const h = request.headers;
 		if (
-			(h["x-comms-auth-kind"] !== "human" && h["x-comms-auth-kind"] !== "agent") ||
-			!h["x-comms-agent"] ||
-			!h["x-comms-instance"] ||
-			!h["x-comms-request-id"] ||
-			!h["x-comms-scopes"]?.split(",").includes(scope)
+			(h["x-chirp-auth-kind"] !== "human" && h["x-chirp-auth-kind"] !== "agent") ||
+			!h["x-chirp-agent"] ||
+			!h["x-chirp-instance"] ||
+			!h["x-chirp-request-id"] ||
+			!h["x-chirp-scopes"]?.split(",").includes(scope)
 		)
 			return yield* new KernelError({ code: "scope_required" });
 		return {
-			agent: h["x-comms-agent"],
-			instance: h["x-comms-instance"],
-			request: h["x-comms-request-id"],
-			label: h["x-comms-label"] ?? "",
-			kind: h["x-comms-auth-kind"],
+			agent: h["x-chirp-agent"],
+			instance: h["x-chirp-instance"],
+			request: h["x-chirp-request-id"],
+			label: h["x-chirp-label"] ?? "",
+			kind: h["x-chirp-auth-kind"],
 		} satisfies Identity;
 	});
 const normalize = <E>(cause: Cause.Cause<E>) =>

@@ -32,7 +32,7 @@ it("enrolls two agents with signed approval, isolates scopes and attribution, ke
 		const assertion = await app.assertion(params);
 		const decision = await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 			method: "POST",
-			headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": assertion },
+			headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": assertion },
 			body: JSON.stringify({ decision: params.decision, scopes, long_lived }),
 		});
 		expect(decision.status).toBe(200);
@@ -63,9 +63,9 @@ it("enrolls two agents with signed approval, isolates scopes and attribution, ke
 			headers: {
 				authorization: `Bearer ${access}`,
 				"content-type": "application/json",
-				"x-comms-agent": "rahul",
-				"x-comms-auth-kind": "human",
-				"x-comms-scopes": "admin",
+				"x-chirp-agent": "rahul",
+				"x-chirp-auth-kind": "human",
+				"x-chirp-scopes": "admin",
 			},
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),
 		});
@@ -165,7 +165,7 @@ it("rejects unknown action fields, binds grants, requires exact Origin, and appr
 	const decide = (input: unknown, origin = "https://comms.test", assertion = proof) =>
 		fetch(`${down.url}/_boot/enroll/${enrollment.id}/approve`, {
 			method: "POST",
-			headers: { origin, "content-type": "application/json", "x-comms-assertion": assertion },
+			headers: { origin, "content-type": "application/json", "x-chirp-assertion": assertion },
 			body: JSON.stringify(input),
 		});
 	const input = { decision: params.decision, scopes: params.scopes, long_lived: false };
@@ -189,7 +189,7 @@ it("rejects unknown action fields, binds grants, requires exact Origin, and appr
 		(
 			await fetch(`${down.url}/_boot/enroll/${denial.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": denyProof },
+				headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": denyProof },
 				body: JSON.stringify({ decision: "deny", scopes: [], long_lived: false }),
 			})
 		).status,

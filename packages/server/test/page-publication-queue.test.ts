@@ -19,7 +19,7 @@ it.for(["append", "crash", "logout", "cancel"] as const)(
 		const history = await fixture.sql("SELECT * FROM source_batches ORDER BY id", "boot.db");
 		const current = await fetch(target, { headers });
 		expect(current.status).toBe(200);
-		const baseVersion = current.headers.get("x-comms-base-version");
+		const baseVersion = current.headers.get("x-chirp-base-version");
 		if (!baseVersion) throw Error("Missing source base version");
 		await current.arrayBuffer();
 		await fixture.hold();

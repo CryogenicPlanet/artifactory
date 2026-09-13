@@ -47,7 +47,7 @@ it("never proxies public or authenticated kernel namespace aliases to a live chi
 		for (const headers of [
 			{},
 			{ cookie: app.cookie, origin: "https://comms.test" },
-			{ authorization: "Bearer invalid", "x-comms-agent": "rahul" },
+			{ authorization: "Bearer invalid", "x-chirp-agent": "rahul" },
 		]) {
 			expect(await post(app.url, path, headers), path).toBe(403);
 		}
@@ -97,11 +97,11 @@ it("rejects caller metadata even with the correct secret on direct child control
 	await expect.poll(() => /COMMS_CHILD_PORT=(\d+)/.exec(output)?.[1]).toBeTruthy();
 	const url = `http://127.0.0.1:${/COMMS_CHILD_PORT=(\d+)/.exec(output)?.[1]}`;
 	for (const name of [
-		"x-comms-request-id",
-		"x-comms-agent",
-		"x-comms-auth-kind",
-		"x-comms-instance",
-		"x-comms-public-page",
+		"x-chirp-request-id",
+		"x-chirp-agent",
+		"x-chirp-auth-kind",
+		"x-chirp-instance",
+		"x-chirp-public-page",
 	]) {
 		expect(await post(url, "/_kernel/control", { "x-boot-secret": secret, [name]: "injected" })).toBe(403);
 	}

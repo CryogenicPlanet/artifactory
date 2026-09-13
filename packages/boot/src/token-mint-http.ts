@@ -21,7 +21,7 @@ export const tokenMintRoute = (auth: Auth["Service"], config: AuthConfig) =>
 				const params = key === undefined ? input : { ...input, idempotency_key: key };
 				const pair = yield* auth.mintTokens(params, yield* assertionProof(request), session.id, secret);
 				return HttpServerResponse.jsonUnsafe(pair, {
-					headers: { "cache-control": "no-store", "x-comms-token-expires": String(session.expiresAt) },
+					headers: { "cache-control": "no-store", "x-chirp-token-expires": String(session.expiresAt) },
 				});
 			}),
 		);

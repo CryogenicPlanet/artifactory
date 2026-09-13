@@ -26,8 +26,8 @@ function serve() {
 				}
 				return new Response("ok", {
 					headers: {
-						"x-comms-writer-epoch": process.env.WRITER_EPOCH ?? "",
-						"x-comms-kernel-protocol": "2",
+						"x-chirp-writer-epoch": process.env.WRITER_EPOCH ?? "",
+						"x-chirp-kernel-protocol": "2",
 					},
 				});
 			}

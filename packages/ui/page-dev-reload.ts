@@ -3,7 +3,7 @@ import { Crypto, Effect, Stream } from "effect";
 import type { Plugin, ProxyOptions } from "vite";
 
 const scriptPath = "/__comms/page-reload.js";
-const revisionHeader = "x-comms-page-revision";
+const revisionHeader = "x-chirp-page-revision";
 // Served only by Vite's development middleware. The expected revision belongs to
 // this document, not a shared cache, so an edit between load and first poll is seen.
 const script = `(() => {

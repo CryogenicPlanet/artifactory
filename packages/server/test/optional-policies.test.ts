@@ -31,7 +31,7 @@ it("loads optional profile, roster and deletion policies through public capabili
 			(
 				await fetch(`${app.url}/_boot/enroll/${enrolled.id}/approve`, {
 					method: "POST",
-					headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": proof },
+					headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": proof },
 					body: JSON.stringify({ decision: "approve", scopes, long_lived: false }),
 				})
 			).status,

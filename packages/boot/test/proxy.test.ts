@@ -64,8 +64,8 @@ describe("real Bun boot proxy", () => {
 			{
 				cookie: `${app.cookie}; other=private`,
 				origin: "https://comms.test",
-				"x-comms-agent": "forged",
-				"x-comms-assertion": "fresh-proof",
+				"x-chirp-agent": "forged",
+				"x-chirp-assertion": "fresh-proof",
 				"x-forwarded-for": "remote",
 				"x-boot-secret": "forged",
 				connection: "x-hop",

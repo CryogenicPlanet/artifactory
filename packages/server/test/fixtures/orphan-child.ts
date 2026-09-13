@@ -59,7 +59,7 @@ export const run = () =>
 					"GET",
 					"/health",
 					HttpServerResponse.text("ok", {
-						headers: { "x-comms-writer-epoch": boot.epoch, "x-comms-kernel-protocol": "2" },
+						headers: { "x-chirp-writer-epoch": boot.epoch, "x-chirp-kernel-protocol": "2" },
 					}),
 				),
 				HttpRouter.add(
@@ -67,7 +67,7 @@ export const run = () =>
 					"/_kernel/ping",
 					HttpServerResponse.empty({
 						status: 200,
-						headers: { "x-comms-writer-epoch": boot.epoch, "x-comms-kernel-protocol": "2" },
+						headers: { "x-chirp-writer-epoch": boot.epoch, "x-chirp-kernel-protocol": "2" },
 					}),
 				),
 				HttpRouter.add("POST", "/_kernel/control", initialize.pipe(Effect.as(HttpServerResponse.text("ok")))),

@@ -87,7 +87,7 @@ it("manages passkeys with the child down and refuses bearer, forged identity, re
 	expect((await list()).can_delete).toBe(false);
 	for (const headers of [
 		{},
-		{ "x-comms-auth-kind": "human", "x-comms-instance": "forged" },
+		{ "x-chirp-auth-kind": "human", "x-chirp-instance": "forged" },
 		{ authorization: `Bearer ${"a".repeat(43)}` },
 		{ ...human, authorization: `Bearer ${"a".repeat(43)}` },
 	]) {
@@ -118,7 +118,7 @@ it("manages passkeys with the child down and refuses bearer, forged identity, re
 		).toString("base64url");
 	};
 	const addProof = await proof("passkey.add", { registration: start.id, label: add.label, response: registration });
-	const signed = { ...human, "x-comms-assertion": addProof };
+	const signed = { ...human, "x-chirp-assertion": addProof };
 	expect((await send("/_boot/auth/passkeys/verify", add, human)).status).toBe(401);
 	expect(
 		(
@@ -132,9 +132,9 @@ it("manages passkeys with the child down and refuses bearer, forged identity, re
 	expect(
 		(
 			await send("/_boot/auth/passkeys/verify", add, {
-				"x-comms-assertion": addProof,
+				"x-chirp-assertion": addProof,
 				"x-boot-secret": "forged",
-				"x-comms-auth-kind": "human",
+				"x-chirp-auth-kind": "human",
 			})
 		).status,
 	).not.toBe(200);
@@ -148,7 +148,7 @@ it("manages passkeys with the child down and refuses bearer, forged identity, re
 	expect(keys.items).toHaveLength(2);
 	expect(keys.items.find((row) => row.id === second.id)?.label).toBe("Hardware key");
 	const removeProof = await proof("passkey.delete", { id: second.id });
-	const deleteHeaders = { ...human, "x-comms-assertion": removeProof };
+	const deleteHeaders = { ...human, "x-chirp-assertion": removeProof };
 	expect((await send(`/_boot/auth/passkeys/${first.id}`, {}, deleteHeaders, "DELETE")).status).toBe(401);
 	// Send half the body, revoke its session, then allow the signed request to finish.
 	let finishBody: (() => void) | undefined;
@@ -197,7 +197,7 @@ it("manages passkeys with the child down and refuses bearer, forged identity, re
 		const deleted = await send(
 			`/_boot/auth/passkeys/${id}`,
 			{},
-			{ cookie: newCookie, "x-comms-assertion": signedDelete },
+			{ cookie: newCookie, "x-chirp-assertion": signedDelete },
 			"DELETE",
 		);
 		expect(deleted.status).toBe(status);

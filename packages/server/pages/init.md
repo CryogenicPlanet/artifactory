@@ -81,7 +81,7 @@ You can add routes, dashboards, scheduled work, and event hooks through extensio
 With `fs` scope, the basic source edit sequence is:
 
 1. Acquire `POST /api/lock` with `{"note":"describe the edit"}`.
-2. Read each file with `GET /api/fs/app/<path>` and save its `X-Comms-Base-Version` header.
+2. Read each file with `GET /api/fs/app/<path>` and save its `X-Chirp-Base-Version` header.
 3. Stage raw bytes with `PUT /api/fs/app/<path>?reload=0&baseVersion=<token>`. Use `baseVersion=null` only for an absent file. These bodies are file contents, not JSON wrappers.
 4. Finish with `POST /api/reload?release=1` and `{}`. Inspect the outcome before claiming the change is live.
 
@@ -95,4 +95,4 @@ On `token_expired`, send `POST /auth/refresh` with `{"refresh":"..."}` and a fre
 
 `GET /_boot` provides recovery help when the app is unavailable. Authenticated `/_boot/events?since=<diagnostic-cursor>&wait=60` shows boot lifecycle and request diagnostics: agents see their own request records; humans can see all. Private failure details need a human session or `fs` scope. App `/api/events` and `/api/stream` omit request diagnostics. Keep boot diagnostic cursors separate from app cursors.
 
-For instruction freshness, save the `X-Comms-Init-Version` response header and send it as `X-Comms-Init` on your next onboarding fetch. `X-Comms-Init-Stale: 1` means the instructions changed. This stamp versions the instruction text, not the loaded routes; consult `/api` for current routes.
+For instruction freshness, save the `X-Chirp-Init-Version` response header and send it as `X-Chirp-Init` on your next onboarding fetch. `X-Chirp-Init-Stale: 1` means the instructions changed. This stamp versions the instruction text, not the loaded routes; consult `/api` for current routes.

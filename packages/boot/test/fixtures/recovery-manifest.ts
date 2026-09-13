@@ -8,7 +8,7 @@ const response = await Effect.runPromise(
 			HttpServerRequest.HttpServerRequest,
 			HttpServerRequest.fromWeb(
 				new Request("http://localhost/.well-known/agent.json", {
-					headers: { authorization: "Bearer invalid", "x-comms-agent": "forged", "x-boot-secret": "private" },
+					headers: { authorization: "Bearer invalid", "x-chirp-agent": "forged", "x-boot-secret": "private" },
 				}),
 			),
 		),

@@ -55,7 +55,7 @@ export async function resetFixture(test: TestContext) {
 					cookie: resetCookie,
 					origin: "https://comms.test",
 					"content-type": "application/json",
-					"x-comms-assertion": proof,
+					"x-chirp-assertion": proof,
 				},
 				body: "{}",
 			});

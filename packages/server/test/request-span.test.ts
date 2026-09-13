@@ -27,13 +27,13 @@ it("continues only trusted trace context and returns bounded selected annotation
 				HttpServerRequest.HttpServerRequest,
 				HttpServerRequest.fromWeb(
 					new Request("http://localhost/api/messages", {
-						headers: { "x-comms-traceparent": `00-${traceId}-${parentId}-01` },
+						headers: { "x-chirp-traceparent": `00-${traceId}-${parentId}-01` },
 					}),
 				),
 			),
 		),
 	);
-	expect(JSON.parse(decodeURIComponent(response.headers["x-comms-span"] ?? ""))).toEqual({
+	expect(JSON.parse(decodeURIComponent(response.headers["x-chirp-span"] ?? ""))).toEqual({
 		topic: "project/task",
 		message_id: "m_123",
 		extension: "core.ts",
@@ -43,8 +43,8 @@ it("continues only trusted trace context and returns bounded selected annotation
 it("does not adopt public or malformed trace headers", async () => {
 	for (const headers of [
 		{ traceparent: "00-12345678901234567890123456789012-1234567890123456-01" },
-		{ "x-comms-traceparent": "malformed" },
-		{ "x-comms-traceparent": "00-00000000000000000000000000000000-1234567890123456-01" },
+		{ "x-chirp-traceparent": "malformed" },
+		{ "x-chirp-traceparent": "00-00000000000000000000000000000000-1234567890123456-01" },
 	]) {
 		const response = await Effect.runPromise(
 			requestSpan(
@@ -59,6 +59,6 @@ it("does not adopt public or malformed trace headers", async () => {
 				),
 			),
 		);
-		expect(response.headers["x-comms-span"]).toBeUndefined();
+		expect(response.headers["x-chirp-span"]).toBeUndefined();
 	}
 });

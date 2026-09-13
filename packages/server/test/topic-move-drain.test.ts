@@ -52,11 +52,11 @@ export default function(api) {
 		});
 	const identity = {
 		...secret,
-		"x-comms-agent": "codex",
-		"x-comms-instance": "family",
-		"x-comms-auth-kind": "agent",
-		"x-comms-scopes": "read",
-		"x-comms-request-id": "held",
+		"x-chirp-agent": "codex",
+		"x-chirp-instance": "family",
+		"x-chirp-auth-kind": "agent",
+		"x-chirp-scopes": "read",
+		"x-chirp-request-id": "held",
 	};
 	const aborted = new AbortController();
 	const pending = fetch(`${url}/api/late-write`, { headers: identity, signal: aborted.signal }).catch(() => null);

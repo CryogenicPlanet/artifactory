@@ -26,7 +26,7 @@ async function fixture(test: TestContext) {
 const server = Bun.serve({hostname:'127.0.0.1',port:0,fetch(request) {
 if (request.headers.get('x-boot-secret') !== process.env.BOOT_SECRET) return new Response(null,{status:403});
 if (new URL(request.url).pathname === '/_kernel/pages/check') return new Response(null,{status:500});
-return new Response(process.env.PAGES_DIRECTORY,{headers:{'x-comms-writer-epoch':process.env.WRITER_EPOCH??'','x-comms-kernel-protocol':'2'}});
+return new Response(process.env.PAGES_DIRECTORY,{headers:{'x-chirp-writer-epoch':process.env.WRITER_EPOCH??'','x-chirp-kernel-protocol':'2'}});
 }}); console.log('COMMS_CHILD_PORT='+server.port);`,
 	);
 	const sql = async (statement: string) =>
@@ -215,7 +215,7 @@ it("discards a prepared page when its session is revoked before journal admissio
 		app = await env.start();
 	await writeFile(join(env.root, "data/pages/held.md"), "original");
 	const batchesBefore = await env.sql("SELECT * FROM source_batches ORDER BY id");
-	const baseVersion = (await app.call(`${app.url}/api/fs/pages/held.md`)).headers.get("x-comms-base-version");
+	const baseVersion = (await app.call(`${app.url}/api/fs/pages/held.md`)).headers.get("x-chirp-base-version");
 	expect(baseVersion).toBeTruthy();
 	await writeFile(join(env.root, "pause-page"), "hold");
 	const pending = app.call(`${app.url}/api/fs/pages/held.md?baseVersion=${baseVersion}`, {
@@ -378,7 +378,7 @@ const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
   await channel('/_boot/seq/abort',{transaction:'fixture-page-move'});
   return new Response('moved');
  }
- return new Response('ready',{headers:{'x-comms-writer-epoch':process.env.WRITER_EPOCH??'','x-comms-kernel-protocol':'2'}});
+ return new Response('ready',{headers:{'x-chirp-writer-epoch':process.env.WRITER_EPOCH??'','x-chirp-kernel-protocol':'2'}});
 }});console.log('COMMS_CHILD_PORT='+server.port);
 `,
 		);
@@ -614,7 +614,7 @@ it("conditionally writes raw bytes on both aliases without lost updates or retir
 		const etag = read.headers.get("etag");
 		expect(etag).toBe(`"${createHash("sha256").update(bytes).digest("hex")}"`);
 		if (etag === null) throw new Error("Missing source ETag");
-		expect(read.headers.get("x-comms-base-version")).toBe(etag.slice(1, -1));
+		expect(read.headers.get("x-chirp-base-version")).toBe(etag.slice(1, -1));
 		expect(new Uint8Array(await read.arrayBuffer())).toEqual(bytes);
 		for (const headers of [
 			{ "if-match": "*" },

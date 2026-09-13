@@ -93,7 +93,7 @@ console.log('HOT'); setInterval(()=>{},1000);`,
 					cookie,
 					origin: "https://comms.test",
 					"content-type": "application/json",
-					"X-Comms-Assertion": proof,
+					"X-Chirp-Assertion": proof,
 				},
 				body: JSON.stringify({ backup: saved.id }),
 			});

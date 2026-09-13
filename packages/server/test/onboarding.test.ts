@@ -50,9 +50,9 @@ it("serves editable public orientation with negotiated HTML, a source version an
 		["/_boot/reset", "post", "human"],
 	] as const) {
 		for (const paths of [manifest.endpoints, discovery.paths]) {
-			expect(paths[path][method]["x-comms-auth"]).toBe(access);
+			expect(paths[path][method]["x-chirp-auth"]).toBe(access);
 			expect(paths[path][method].description.length).toBeGreaterThan(20);
-			expect(paths[path][method]["x-comms-scopes"]).toEqual(access === "fs" ? ["fs"] : []);
+			expect(paths[path][method]["x-chirp-scopes"]).toEqual(access === "fs" ? ["fs"] : []);
 		}
 	}
 	// A client generated from the app document must ship with credentials, not with "security": [].
@@ -73,11 +73,11 @@ it("serves editable public orientation with negotiated HTML, a source version an
 			{ commsBootSession: [] },
 			{ commsBootAccess: [] },
 		]);
-		expect(discovery.paths[path][method]["x-comms-scopes"], `${method} ${path}`).toEqual([scope]);
+		expect(discovery.paths[path][method]["x-chirp-scopes"], `${method} ${path}`).toEqual([scope]);
 	}
 	for (const path of ["/init", "/init.md"]) {
 		expect(discovery.paths[path].get.security).toEqual([]);
-		expect(discovery.paths[path].get["x-comms-scopes"]).toEqual([]);
+		expect(discovery.paths[path].get["x-chirp-scopes"]).toEqual([]);
 	}
 	// The error union is declared on every operation; it is referenced once, never inlined again.
 	const refusals = Object.entries(
@@ -118,17 +118,17 @@ it("serves editable public orientation with negotiated HTML, a source version an
 
 	const anonymous = await fetch(app.url + "/init", {
 		headers: {
-			"x-comms-agent": "spoofed",
-			"x-comms-scopes": "read",
-			"x-comms-instance": "spoofed",
-			"x-comms-init": "0".repeat(64),
+			"x-chirp-agent": "spoofed",
+			"x-chirp-scopes": "read",
+			"x-chirp-instance": "spoofed",
+			"x-chirp-init": "0".repeat(64),
 		},
 	});
 	expect(anonymous.status).toBe(200);
 	expect(anonymous.headers.get("content-type")).toContain("text/markdown");
-	const version = anonymous.headers.get("x-comms-init-version");
+	const version = anonymous.headers.get("x-chirp-init-version");
 	expect(version).toMatch(/^[a-f0-9]{64}$/);
-	expect(anonymous.headers.get("x-comms-init-stale")).toBe("1");
+	expect(anonymous.headers.get("x-chirp-init-stale")).toBe("1");
 	const text = await anonymous.text();
 	expect(text).toContain("Live instructions.");
 	expect(text).toContain("GET /api/standup");
@@ -165,8 +165,8 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	expect(guidedRaw.headers.get("content-type")).toContain("text/markdown");
 	expect(await guidedRaw.text()).toContain("name: chirp quickstart");
 	expect((await app.post("/api/messages", { topic: "@rahul", body: "Hello" }, second)).status).toBe(200);
-	const personal = await fetch(app.url + "/init", { headers: { cookie: first, "x-comms-init": version ?? "" } });
-	expect(personal.headers.get("x-comms-init-stale")).toBeNull();
+	const personal = await fetch(app.url + "/init", { headers: { cookie: first, "x-chirp-init": version ?? "" } });
+	expect(personal.headers.get("x-chirp-init-stale")).toBeNull();
 	expect(await personal.text()).toContain("You are <code>rahul@human</code>");
 	const generations = await fixture.sql("SELECT n,status FROM generations", "boot.db");
 	const edited = await sourcePut(app.url + "/api/fs/pages/init.md", {
@@ -175,12 +175,12 @@ it("serves editable public orientation with negotiated HTML, a source version an
 		body: "# Updated\n\nNew live instructions.\n",
 	});
 	expect(edited.status).toBe(200);
-	const changed = await fetch(app.url + "/init.md", { headers: { "x-comms-init": version ?? "" } });
-	expect(changed.headers.get("x-comms-init-stale")).toBe("1");
-	expect(changed.headers.get("x-comms-init-version")).not.toBe(version);
+	const changed = await fetch(app.url + "/init.md", { headers: { "x-chirp-init": version ?? "" } });
+	expect(changed.headers.get("x-chirp-init-stale")).toBe("1");
+	expect(changed.headers.get("x-chirp-init-version")).not.toBe(version);
 	expect(await changed.text()).toContain("New live instructions.");
 	expect(await fixture.sql("SELECT n,status FROM generations", "boot.db")).toEqual(generations);
-	const beforeExtension = changed.headers.get("x-comms-init-version");
+	const beforeExtension = changed.headers.get("x-chirp-init-version");
 	expect((await app.post("/api/lock", {}, first)).status).toBe(200);
 	const loaded = await sourcePut(app.url + "/api/fs/app/ext/orientation.ts", {
 		method: "PUT",
@@ -188,9 +188,9 @@ it("serves editable public orientation with negotiated HTML, a source version an
 		body: 'export default api => api.route("GET", "/api/orientation-example", {description:"Orientation example",scope:"read",handler:async()=>Response.json({ok:true})});',
 	});
 	expect(await loaded.json()).toMatchObject({ status: "live" });
-	const registered = await fetch(app.url + "/init.md", { headers: { "x-comms-init": beforeExtension ?? "" } });
-	expect(registered.headers.get("x-comms-init-stale")).toBeNull();
-	expect(registered.headers.get("x-comms-init-version")).toBe(beforeExtension);
+	const registered = await fetch(app.url + "/init.md", { headers: { "x-chirp-init": beforeExtension ?? "" } });
+	expect(registered.headers.get("x-chirp-init-stale")).toBeNull();
+	expect(registered.headers.get("x-chirp-init-version")).toBe(beforeExtension);
 	expect(await registered.text()).toContain("GET /api/orientation-example");
 	const updatedDiscovery = await (await fetch(app.url + "/api", { headers: { cookie: first } })).json();
 	expect(updatedDiscovery.paths["/api/orientation-example"].get.description).toContain("Orientation example");

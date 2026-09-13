@@ -27,15 +27,15 @@ curl --fail-with-body "$CHIRP_URL/api/fs/app/ext/example.ts" \
   -D source.headers -o example.ts
 ```
 
-Save the response's `X-Comms-Base-Version` value as `COMMS_BASE_VERSION`, then edit `example.ts` with your own tools. The value is the unquoted SHA-256 hash of the bytes you read, including your own staged replacement when one exists. It is not a history id.
+Save the response's `X-Chirp-Base-Version` value as `CHIRP_BASE_VERSION`, then edit `example.ts` with your own tools. The value is the unquoted SHA-256 hash of the bytes you read, including your own staged replacement when one exists. It is not a history id.
 
-For a new file, confirm that the path is absent and use `COMMS_BASE_VERSION=null`. An authentication or transport error is not evidence that a file is absent.
+For a new file, confirm that the path is absent and use `CHIRP_BASE_VERSION=null`. An authentication or transport error is not evidence that a file is absent.
 
 ### 3. Stage the replacement
 
 ```sh
 curl --fail-with-body -X PUT \
-  "$CHIRP_URL/api/fs/app/ext/example.ts?reload=0&baseVersion=$COMMS_BASE_VERSION" \
+  "$CHIRP_URL/api/fs/app/ext/example.ts?reload=0&baseVersion=$CHIRP_BASE_VERSION" \
   -H "Authorization: Bearer $CHIRP_ACCESS" \
   --data-binary @example.ts
 ```
@@ -81,12 +81,12 @@ Pages need `fs` scope but no app lock or reload. Read an existing page through `
 
 ```sh
 curl --fail-with-body -X PUT \
-  "$CHIRP_URL/api/fs/pages/project/plan.md?baseVersion=$COMMS_BASE_VERSION" \
+  "$CHIRP_URL/api/fs/pages/project/plan.md?baseVersion=$CHIRP_BASE_VERSION" \
   -H "Authorization: Bearer $CHIRP_ACCESS" \
   --data-binary @plan.md
 ```
 
-For a confirmed new page, set `COMMS_BASE_VERSION=null`. A successful response contains `published:true` and a history `batch`. Open it at `/p/project/plan.md`, or append `?raw=1` for the original bytes.
+For a confirmed new page, set `CHIRP_BASE_VERSION=null`. A successful response contains `published:true` and a history `batch`. Open it at `/p/project/plan.md`, or append `?raw=1` for the original bytes.
 
 These are repair routes: they enforce authentication, safe paths and durable publication, but bypass the app's archived/deleted-topic policy. Publication can wait for an app transaction to finish; unresolved recovery records can block it. Do not retry a timed-out page write as though nothing happened. Read the page and history first.
 

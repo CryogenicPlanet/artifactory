@@ -149,7 +149,7 @@ const server = Effect.gen(function* () {
 													HttpServerRequest.fromWeb(new Request("http://kernel/_kernel/readiness")),
 												),
 											);
-											if (response.status !== 200 || response.headers["x-comms-readiness"] !== "kernel")
+											if (response.status !== 200 || response.headers["x-chirp-readiness"] !== "kernel")
 												return yield* new KernelError({ code: "health_failed" });
 										}),
 										state === "rehearsal",
@@ -160,9 +160,9 @@ const server = Effect.gen(function* () {
 									{ status: "ok", ...(yield* extensions.rehearsalReport) },
 									{
 										headers: {
-											"x-comms-writer-epoch": boot.epoch,
-											"x-comms-kernel-protocol": "2",
-											"x-comms-rehearsal-report": "1",
+											"x-chirp-writer-epoch": boot.epoch,
+											"x-chirp-kernel-protocol": "2",
+											"x-chirp-rehearsal-report": "1",
 										},
 									},
 								);
@@ -173,7 +173,7 @@ const server = Effect.gen(function* () {
 								Effect.succeed(
 									HttpServerResponse.jsonUnsafe(
 										{ status: "failed" },
-										{ status: 503, headers: { "x-comms-health-ready": "1" } },
+										{ status: 503, headers: { "x-chirp-health-ready": "1" } },
 									),
 								),
 							),
@@ -258,7 +258,7 @@ const server = Effect.gen(function* () {
 							return request.url === "/health" && request.method === "GET"
 								? HttpServerResponse.jsonUnsafe(
 										{ status: "failed" },
-										{ status: 503, headers: { "x-comms-health-ready": "1" } },
+										{ status: 503, headers: { "x-chirp-health-ready": "1" } },
 									)
 								: HttpServerResponse.empty({ status: 503 });
 						}),
@@ -280,19 +280,19 @@ const server = Effect.gen(function* () {
 				)
 					return HttpServerResponse.empty({ status: 403 });
 				if (request.url === "/_kernel/ping" && request.method === "GET") {
-					if (Object.keys(request.headers).some((name) => name.startsWith("x-comms-")))
+					if (Object.keys(request.headers).some((name) => name.startsWith("x-chirp-")))
 						return HttpServerResponse.empty({ status: 403 });
 					return HttpServerResponse.empty({
 						status: (yield* Ref.get(lifecycle.healthy)) ? 200 : 503,
 						headers: {
-							"x-comms-writer-epoch": boot.epoch,
-							"x-comms-kernel-protocol": "2",
+							"x-chirp-writer-epoch": boot.epoch,
+							"x-chirp-kernel-protocol": "2",
 						},
 					});
 				}
 				if (request.url === "/_kernel/control" && request.method === "POST") {
 					// Genuine boot control has the attempt secret only, never proxied caller metadata.
-					if (Object.keys(request.headers).some((name) => name.startsWith("x-comms-")))
+					if (Object.keys(request.headers).some((name) => name.startsWith("x-chirp-")))
 						return HttpServerResponse.empty({ status: 403 });
 					const body = yield* request.json.pipe(
 						Effect.flatMap(

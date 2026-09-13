@@ -65,7 +65,7 @@ for (const kind of ["write", "read", "completion", "handler", "dispatcher"])
 			kind === "dispatcher"
 				? "if (pathname === null || reserved(pathname)) return yield* fallback;"
 				: kind === "handler"
-					? '"x-comms-readiness": "kernel"'
+					? '"x-chirp-readiness": "kernel"'
 					: kind === "write"
 						? "INSERT INTO kv("
 						: kind === "read"
@@ -75,7 +75,7 @@ for (const kind of ["write", "read", "completion", "handler", "dispatcher"])
 			kind === "dispatcher"
 				? 'return yield* Effect.die("broken dispatch");'
 				: kind === "handler"
-					? '"x-comms-readiness": "broken"'
+					? '"x-chirp-readiness": "broken"'
 					: kind === "write"
 						? "INSERT INTO missing_health_table("
 						: kind === "read"

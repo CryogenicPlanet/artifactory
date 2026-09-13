@@ -45,11 +45,11 @@ const run = Effect.gen(function* () {
 				HttpServerRequest.fromWeb(
 					new Request("http://localhost/api/failure", {
 						headers: {
-							"x-comms-agent": "test",
-							"x-comms-instance": "instance",
-							"x-comms-request-id": "request",
-							"x-comms-auth-kind": "agent",
-							"x-comms-scopes": "read",
+							"x-chirp-agent": "test",
+							"x-chirp-instance": "instance",
+							"x-chirp-request-id": "request",
+							"x-chirp-auth-kind": "agent",
+							"x-chirp-scopes": "read",
 						},
 					}),
 				),

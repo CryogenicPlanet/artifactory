@@ -17,7 +17,7 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 			(
 				await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 					method: "POST",
-					headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": proof },
+					headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": proof },
 					body: JSON.stringify({ decision: "approve", scopes, long_lived: false }),
 				})
 			).status,
@@ -34,8 +34,8 @@ it("edits and soft-deletes by author instance or human, preserving attribution, 
 			headers: {
 				authorization: `Bearer ${access}`,
 				"content-type": "application/json",
-				"x-comms-auth-kind": "human",
-				"x-comms-agent": "rahul",
+				"x-chirp-auth-kind": "human",
+				"x-chirp-agent": "rahul",
 				...(key ? { "idempotency-key": key } : {}),
 			},
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),

@@ -122,7 +122,7 @@ export default (api: Api) => Effect.gen(function* () {
 					headers: {
 						...headers(restoreCookie),
 						"content-type": "application/json",
-						"X-Comms-Assertion": proof,
+						"X-Chirp-Assertion": proof,
 						...(key ? { "Idempotency-Key": key } : {}),
 					},
 					body: JSON.stringify({ generation: target, withDb: true }),

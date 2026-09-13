@@ -135,6 +135,6 @@ export const deletePasskey = (id: string) =>
 		yield* accountRequest(
 			HttpClientRequest.delete(
 				new URL(`/_boot/auth/passkeys/${encodeURIComponent(id)}`, window.location.origin).href,
-			).pipe(HttpClientRequest.bodyJsonUnsafe({}), HttpClientRequest.setHeader("x-comms-assertion", proof)),
+			).pipe(HttpClientRequest.bodyJsonUnsafe({}), HttpClientRequest.setHeader("x-chirp-assertion", proof)),
 		);
 	});

@@ -71,7 +71,7 @@ it("queues reads across real database restore and rechecks logged-out sessions a
 	const restoring = fetch(`${app.url}/_boot/db/restore`, {
 		method: "POST",
 		signal: controller.signal,
-		headers: { cookie, origin: "https://comms.test", "content-type": "application/json", "X-Comms-Assertion": proof },
+		headers: { cookie, origin: "https://comms.test", "content-type": "application/json", "X-Chirp-Assertion": proof },
 		body: JSON.stringify({ backup: saved.id }),
 	});
 	await expect.poll(() => readFile(frozen, "utf8").catch(() => ""), { timeout: 10000 }).toBe("ready");

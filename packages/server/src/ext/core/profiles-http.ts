@@ -12,7 +12,7 @@ export const profilesHandlers = (api: typeof Api, extension: ExtensionApi) =>
 			refusal(
 				Effect.gen(function* () {
 					const ctx = yield* extension.context("read");
-					const expires = Number(request.headers["x-comms-token-expires"]);
+					const expires = Number(request.headers["x-chirp-token-expires"]);
 					if (!Number.isSafeInteger(expires) || expires <= 0) return yield* new KernelError({ code: "scope_required" });
 					return HttpApiSchema.withHeaders({
 						body: {
@@ -20,7 +20,7 @@ export const profilesHandlers = (api: typeof Api, extension: ExtensionApi) =>
 							instance: ctx.instance,
 							kind: ctx.kind,
 							label: ctx.label ?? "",
-							scopes: request.headers["x-comms-scopes"]?.split(",") ?? [],
+							scopes: request.headers["x-chirp-scopes"]?.split(",") ?? [],
 							expires_at: expires,
 						},
 						headers: { "cache-control": "no-store" as const },

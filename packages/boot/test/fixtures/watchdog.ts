@@ -7,8 +7,8 @@ function serve() {
 	if (!filename) throw new Error("Missing disposable database");
 	let delayed = false;
 	const headers = {
-		"x-comms-writer-epoch": process.env.WRITER_EPOCH ?? "",
-		"x-comms-kernel-protocol": "2",
+		"x-chirp-writer-epoch": process.env.WRITER_EPOCH ?? "",
+		"x-chirp-kernel-protocol": "2",
 	};
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
