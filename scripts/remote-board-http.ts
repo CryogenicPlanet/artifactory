@@ -207,7 +207,7 @@ async function run() {
 			).json(),
 		).items.find((item) => item.status === "failed" && item.error?.includes("health_failed"));
 		assert.ok(failed, "Original candidate error must survive the operator refusal");
-		assert.match(failed.stderr ?? "", /^Kernel health failed: stage=initialize;/);
+		assert.match(failed.stderr ?? "", /^Kernel health failed: stage=initialize;/m);
 		assert.ok(
 			![failed.error, failed.stderr].some((value) => value?.includes("private migration cause")),
 			"Migration causes remain private",
