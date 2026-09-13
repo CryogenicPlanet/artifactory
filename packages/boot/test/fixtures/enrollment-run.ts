@@ -89,7 +89,7 @@ const run = Effect.gen(function* () {
 		assert.deepEqual(yield* sql`SELECT before_directory,desired_directory FROM source_changes`, [
 			{ before_directory: 0, desired_directory: 0 },
 		]);
-		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 17 }]);
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
 		assert.equal((yield* sql`SELECT * FROM tokens`).length, 0);
 		assert.equal((yield* sql`SELECT * FROM enrollments`).length, 0);
 		return;

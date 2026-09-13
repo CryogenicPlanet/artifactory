@@ -1,3 +1,5 @@
+import { sqliteCopyProcess } from "./sqlite-copy-process.ts";
+import { ChildError } from "./child-process.ts";
 import { appStoreIdentity, isAppStoreIdentityError, verifyAppIdentity } from "./app-store-identity.ts";
 import type { BackupRecord } from "./backup-metadata.ts";
 import { clientLayer } from "@comms/storage/client";
@@ -9,14 +11,15 @@ import { EventError } from "./events.ts";
 import { storageHeadroom } from "./storage-headroom.ts";
 
 /** SQLite online copies include committed WAL pages. Call restore only after proving all owners closed. */
-const make = (filename: string) =>
+const make = (store: FileStore, dataDirectory: string) =>
 	Effect.gen(function* () {
 		const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
 		const fs = yield* FileSystem.FileSystem;
-		const identity = yield* appStoreIdentity(filename);
-		const store: FileStore = { _tag: "file", filename };
+		const filename = store.filename;
+		const identity = yield* appStoreIdentity(filename, dataDirectory);
 		const path = yield* Path.Path;
-		const headroom = yield* storageHeadroom(path.dirname(filename));
+		const headroom = yield* storageHeadroom(dataDirectory);
+		const copying = yield* sqliteCopyProcess(filename, dataDirectory);
 		const estimatedBytes = Effect.scoped(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -79,34 +82,36 @@ const make = (filename: string) =>
 					if (yield* fs.exists(`${filename}${suffix}`)) bytes += Number((yield* fs.stat(`${filename}${suffix}`)).size);
 				return { needed: checked._tag === "Failure", storeId: adoption.store_id, bytes };
 			}),
-			recoverStaging: Effect.forEach(
-				[".identity-probe", ".restore-staging", ".restore", ".restore-wal", ".restore-shm", ".restore-journal"],
-				(suffix) => fs.remove(`${filename}${suffix}`, { recursive: true, force: true }),
-				{ discard: true },
+			dialect: "sqlite" as const,
+			recoverStaging: copying.recover.pipe(
+				Effect.andThen(
+					Effect.forEach(
+						[".identity-probe", ".restore-staging", ".restore", ".restore-wal", ".restore-shm", ".restore-journal"],
+						(suffix) => fs.remove(`${filename}${suffix}`, { recursive: true, force: true }),
+						{ discard: true },
+					),
+				),
 			),
 			estimatedBytes,
-			clone: (destination: string) =>
-				Effect.scoped(
-					Effect.gen(function* () {
-						yield* headroom.check(yield* estimatedBytes);
-						const sql = yield* SqlClient.SqlClient;
-						yield* sql`PRAGMA busy_timeout = 2000`;
-						yield* sql`VACUUM INTO ${destination}`;
-						yield* sync(destination);
-						yield* sync(path.dirname(destination));
-						return (yield* fs.stat(destination)).size;
-					}).pipe(Effect.provide(clientLayer(store))),
+			recoverCopy: copying.recover,
+			clone: (destination: FileStore) =>
+				copying.recover.pipe(
+					Effect.andThen(estimatedBytes),
+					Effect.flatMap((bytes) => headroom.check(bytes)),
+					Effect.andThen(copying.copy(destination.filename)),
 				),
-			prepareClone: (clone: string, epoch: string) =>
+			prepareClone: (clone: FileStore, epoch: string) =>
 				Effect.scoped(
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
 						yield* sql`UPDATE kernel_writer SET epoch=${epoch} WHERE singleton=1`;
-					}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: clone }))),
+					}).pipe(Effect.provide(clientLayer(clone))),
 				),
-			restore: (backup: Pick<BackupRecord, "path" | "legacy_store_id">) =>
+			restoreInto: (backup: Pick<BackupRecord, "path" | "legacy_store_id" | "engine">) =>
 				Effect.scoped(
 					Effect.gen(function* () {
+						if (backup.engine !== "sqlite") return yield* new ChildError({ code: "backup_engine_mismatch" });
+						yield* copying.recover;
 						// Serialized restore owns this disposable path after positive owner closure.
 						// Remove the entire prior copy, including a killed SQLite transaction's sidecars.
 						const directory = `${filename}.restore-staging`;
@@ -130,11 +135,10 @@ const make = (filename: string) =>
 							yield* fs.remove(`${filename}${suffix}`, { force: true });
 						yield* fs.rename(temporary, filename);
 						yield* sync(path.dirname(filename));
+						return store;
 					}),
 				),
 		};
 	});
-export class AppBackup extends Context.Service<AppBackup, Effect.Success<ReturnType<typeof make>>>()(
-	"comms/boot/AppBackup",
-) {}
-export const layer = (filename: string) => Layer.effect(AppBackup, make(filename));
+export class DbOps extends Context.Service<DbOps, Effect.Success<ReturnType<typeof make>>>()("comms/boot/DbOps") {}
+export const layer = (store: FileStore, dataDirectory: string) => Layer.effect(DbOps, make(store, dataDirectory));

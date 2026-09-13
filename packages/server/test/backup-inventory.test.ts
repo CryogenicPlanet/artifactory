@@ -66,6 +66,7 @@ it("lists backup metadata with a human session and rejects every Authorization h
 		items: [
 			{
 				id: "new",
+				engine: "sqlite",
 				reason: "hourly",
 				bytes: 4096,
 				taken_at: 20,
@@ -75,6 +76,7 @@ it("lists backup metadata with a human session and rejects every Authorization h
 			},
 			{
 				id: "legacy",
+				engine: "sqlite",
 				reason: "pre-flip",
 				bytes: 2048,
 				taken_at: 10,

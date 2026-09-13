@@ -5,7 +5,7 @@ import { Cause, Console, Deferred, Effect, Fiber, FileSystem, Layer, Ref, Schema
 import { FetchHttpClient } from "effect/unstable/http";
 import { SqlClient } from "effect/unstable/sql";
 import { ArtifactRetentionRejected } from "../../src/artifact-retention.ts";
-import { AppBackup, layer as backupLayer } from "../../src/app-backup.ts";
+import { DbOps, layer as backupLayer } from "../../src/db-ops.ts";
 import { AppRecovery, layer as recoveryLayer } from "../../src/app-recovery.ts";
 import { layer as ownersLayer } from "../../src/child-attempts.ts";
 import { AuthError } from "../../src/auth.ts";
@@ -14,6 +14,7 @@ import { type EventRecord, Events, layer as eventsLayer } from "../../src/events
 import { layer as generationsLayer } from "../../src/generations.ts";
 import { layer as kernelBootLayer } from "../../src/kernel-boot.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
+import { BackupRecord } from "../../src/backup-metadata.ts";
 import { databaseBackup } from "../../src/database-backup.ts";
 import type { ActiveChild, ChildStatus, Supervisor } from "../../src/supervisor.ts";
 import { traffic } from "../../src/traffic.ts";
@@ -157,13 +158,13 @@ const main = Effect.gen(function* () {
 			yield* sql`INSERT INTO db_restore_requests(proof_id,proof_hash,session_id,backup,phase,restored_to_seq) VALUES('fixture','hash','session','backup','restoring',0)`;
 		if (mode === "registration-failure")
 			yield* sql`CREATE TRIGGER reject_event BEFORE INSERT ON events WHEN json_extract(NEW.event,'$.type')='backup.taken' BEGIN SELECT RAISE(ABORT,'fixture'); END`;
-		const originalBackup = yield* AppBackup;
+		const originalBackup = yield* DbOps;
 		let cloneCalls = 0;
 		const backup = {
 			...originalBackup,
 			estimatedBytes:
 				mode === "quota-refusal" ? Effect.succeed(Number.MAX_SAFE_INTEGER) : originalBackup.estimatedBytes,
-			clone: (destination: string) =>
+			clone: (destination: Parameters<typeof originalBackup.clone>[0]) =>
 				Effect.suspend(() => {
 					cloneCalls++;
 					return originalBackup.clone(destination);
@@ -172,7 +173,7 @@ const main = Effect.gen(function* () {
 		const authorized = yield* Ref.make(true);
 		const capture = (yield* databaseBackup(supervisor).pipe(
 			Effect.provideService(
-				AppBackup,
+				DbOps,
 				mode === "clone-failure" || mode === "interrupt"
 					? {
 							...backup,
@@ -259,6 +260,7 @@ const main = Effect.gen(function* () {
 		const recordedEvents = yield* sql`SELECT event FROM events`;
 		let saved: unknown = null;
 		if (result._tag === "Success") {
+			yield* Schema.decodeUnknownEffect(BackupRecord)(result.value);
 			const copy = new Database(`${root}/backups/${result.value.id}.db`, { readonly: true });
 			try {
 				saved = {
@@ -295,7 +297,7 @@ const main = Effect.gen(function* () {
 		Effect.provide(
 			Layer.mergeAll(
 				recoveryLayer(filename),
-				backupLayer(filename),
+				backupLayer({ _tag: "file", filename }, root),
 				ownersLayer(root).pipe(Layer.provide(kernelBootLayer)),
 				generationsLayer,
 			).pipe(Layer.provideMerge(eventsLayer(Effect.void)), Layer.provideMerge(boot)),

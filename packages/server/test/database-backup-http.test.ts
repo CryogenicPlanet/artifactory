@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { basename, join } from "node:path";
+import { Schema } from "effect";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
@@ -44,9 +45,21 @@ it(
 			const response = await post(headers);
 			expect(response.status).toBe(200);
 			expect(response.headers.get("cache-control")).toBe("no-store");
-			const record = await response.json();
-			expect(Object.keys(record).sort()).toEqual([
+			const payload = await response.json();
+			const record = Schema.decodeUnknownSync(
+				Schema.Struct({
+					id: Schema.String,
+					engine: Schema.Literal("sqlite"),
+					reason: Schema.Literal("manual"),
+					bytes: Schema.Int,
+					taken_at: Schema.Int,
+					published_through: Schema.Int,
+					generation: Schema.Int,
+				}),
+			)(payload);
+			expect(Object.keys(payload).sort()).toEqual([
 				"bytes",
+				"engine",
 				"generation",
 				"id",
 				"published_through",
@@ -61,9 +74,12 @@ it(
 					join("backups", basename(`${record.id}.db`)),
 				),
 			).toEqual([{ body: "preserved" }]);
-			expect(await fixture.sql(`SELECT id FROM backups WHERE id='${record.id}'`, "boot.db")).toEqual([
-				{ id: record.id },
-			]);
+			expect(
+				await fixture.sql(
+					`SELECT id,engine,reason,bytes,taken_at,published_through,generation FROM backups WHERE id='${record.id}'`,
+					"boot.db",
+				),
+			).toEqual([record]);
 		}
 		expect(await fixture.sql("SELECT * FROM kernel_writer")).toEqual(writer);
 		expect((await app.post("/api/messages", { topic: "backup", body: "after copies" }, cookie)).status).toBe(200);

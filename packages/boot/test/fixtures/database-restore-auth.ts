@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { BunServices } from "@effect/platform-bun";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { Cause, Clock, Console, Effect, Exit, Layer, Schema, Semaphore } from "effect";
-import { HttpServerRequest } from "effect/unstable/http";
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { AuthError } from "../../src/auth.ts";
-import { authentication, sessionCookie } from "../../src/auth-http.ts";
+import { authFailure, authentication, sessionCookie } from "../../src/auth-http.ts";
 import { makeDatabaseRestoreAuth } from "../../src/database-restore-auth.ts";
 import { DatabaseRestoreRequest } from "../../src/database-restore-schema.ts";
 import { enrollmentRoute } from "../../src/enrollment-http.ts";
@@ -37,6 +37,21 @@ const run = Effect.gen(function* () {
 		});
 	const authorize = (proof: typeof authentication.Type, id = backup, owner = session.id, key?: string) =>
 		auth.authorizeDatabaseRestore({ backup: id, ...(key === undefined ? {} : { idempotency_key: key }) }, proof, owner);
+
+	if (scenario === "foreign-engine") {
+		for (const engine of ["pg", "mysql"]) {
+			yield* sql`UPDATE backups SET engine=${engine}`;
+			const proof = yield* proofFor();
+			const response = yield* authFailure(authorize(proof).pipe(Effect.map(() => HttpServerResponse.empty())));
+			assert.equal(response.status, 409);
+			assert.equal(response.body._tag, "Uint8Array");
+			if (response.body._tag === "Uint8Array")
+				assert.equal(JSON.parse(new TextDecoder().decode(response.body.body)).error.code, "backup_engine_mismatch");
+			assert.equal((yield* sql`SELECT * FROM db_restore_requests`).length, 0);
+			assert.equal((yield* sql`SELECT * FROM auth_challenges WHERE id=${proof.id}`).length, 0);
+		}
+		return;
+	}
 
 	if (scenario === "mixed-refusal") {
 		const mutex = yield* Semaphore.make(1);

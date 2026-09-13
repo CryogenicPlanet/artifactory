@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -323,3 +323,35 @@ it("keeps invalid copy sizes, capacity and persisted backup sizes distinct from 
 	expect(await readFile(join(app.root, "backups/invalid.db"), "utf8")).toBe("retained-data");
 	expect(await app.sql("SELECT bytes FROM backups WHERE id='invalid'")).toEqual([{ bytes: -1 }]);
 });
+
+for (const engine of ["pg", "mysql"]) {
+	it(`retains ${engine} artifacts and catalog provenance under SQLite budget pressure`, async (test) => {
+		const app = await store(test);
+		await app.backup("foreign");
+		await app.sql(`UPDATE backups SET engine='${engine}' WHERE id='foreign'`);
+		const before = await app.sql("SELECT * FROM backups");
+		expect(await app.prune({ capacity: 100, required: 10 })).toMatchObject({
+			success: { backup_bytes: 0, removed_backups: 0 },
+		});
+		expect(await app.sql("SELECT * FROM backups")).toEqual(before);
+		expect(await readFile(join(app.root, "backups/foreign.db"), "utf8")).toBe("retained-data");
+	});
+}
+
+for (const engine of ["pg", "mysql"]) {
+	it(`prunes only current ${engine} canonical artifacts while retaining SQLite copies`, async (test) => {
+		const app = await store(test);
+		await app.backup("foreign");
+		await app.backup("current");
+		const suffix = engine === "pg" ? "dump" : "sql";
+		const target = join(app.root, `backups/current.${suffix}`);
+		await rename(join(app.root, "backups/current.db"), target);
+		await app.sql(`UPDATE backups SET engine='${engine}',path='${target}' WHERE id='current'`);
+		expect(await app.prune({ engine, capacity: 100 })).toMatchObject({
+			success: { backup_bytes: 0, removed_backups: 1 },
+		});
+		expect(await app.exists(`backups/current.${suffix}`)).toBe(false);
+		expect(await readFile(join(app.root, "backups/foreign.db"), "utf8")).toBe("retained-data");
+		expect(await app.sql("SELECT id,engine FROM backups")).toEqual([{ id: "foreign", engine: "sqlite" }]);
+	});
+}

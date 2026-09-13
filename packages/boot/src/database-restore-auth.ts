@@ -33,10 +33,16 @@ export const resolveRestoreTarget = (params: RestoreSelection) =>
 			if (generation.backup_id === null) return yield* new AuthError({ code: "backup_not_restorable" });
 			id = generation.backup_id;
 		}
-		const backup = (yield* sql`SELECT published_through FROM backups WHERE id=${id}`.pipe(
-			decodeRows(Schema.Struct({ published_through: Schema.NullOr(Schema.Int) })),
+		const backup = (yield* sql`SELECT published_through,engine FROM backups WHERE id=${id}`.pipe(
+			decodeRows(
+				Schema.Struct({
+					published_through: Schema.NullOr(Schema.Int),
+					engine: Schema.Literals(["sqlite", "pg", "mysql"]),
+				}),
+			),
 		))[0];
 		if (!backup) return yield* new AuthError({ code: "backup_not_found" });
+		if (backup.engine !== "sqlite") return yield* new AuthError({ code: "backup_engine_mismatch" });
 		if (
 			backup.published_through === null ||
 			!Number.isSafeInteger(backup.published_through) ||

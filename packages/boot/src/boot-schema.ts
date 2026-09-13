@@ -28,6 +28,9 @@ export class BootIdentityUpgradePending extends Schema.TaggedError<BootIdentityU
 	}
 }
 
+// Version 19 marks the copy-owner recovery protocol even though it adds no table.
+const supported = 19;
+
 /** Run once before constructing boot stores; opening the adapter must use disableWAL. */
 export const initializeBootSchema = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -36,9 +39,9 @@ export const initializeBootSchema = Effect.gen(function* () {
 	);
 	const version = versions[0]?.user_version;
 	if (version === undefined) return yield* Effect.die("Missing boot schema version");
-	if (version > 17) return yield* new BootSchemaTooNew({ found: version, supported: 17 });
+	if (version > supported) return yield* new BootSchemaTooNew({ found: version, supported });
 	// Refuse before schema or journal-mode changes so the previous image can finish recovery.
-	if (version >= 9 && version < 17) {
+	if (version >= 9 && version < supported) {
 		const cutovers = yield* sql`SELECT singleton FROM cutover WHERE phase!='accepted' LIMIT 1`;
 		const restores =
 			version >= 13
@@ -53,7 +56,7 @@ export const initializeBootSchema = Effect.gen(function* () {
 	if (version === 0) yield* sql`PRAGMA auto_vacuum = INCREMENTAL`;
 	yield* sql`PRAGMA journal_mode = WAL`;
 	yield* sql`PRAGMA synchronous = FULL`;
-	if (version === 17) return;
+	if (version === supported) return;
 	yield* sql.withTransaction(
 		Effect.gen(function* () {
 			if (version === 0)
@@ -140,7 +143,9 @@ export const initializeBootSchema = Effect.gen(function* () {
 			if (version < 16)
 				yield* sql`ALTER TABLE edit_lock ADD COLUMN reset_pin INTEGER NOT NULL DEFAULT 0 CHECK(reset_pin IN (0,1,2))`;
 			if (version < 17) yield* sql`ALTER TABLE backups ADD COLUMN legacy_store_id TEXT`;
-			yield* sql`PRAGMA user_version = 17`;
+			if (version < 18)
+				yield* sql`ALTER TABLE backups ADD COLUMN engine TEXT NOT NULL DEFAULT 'sqlite' CHECK(engine IN ('sqlite','pg','mysql'))`;
+			yield* sql`PRAGMA user_version = 19`;
 		}),
 	);
 });

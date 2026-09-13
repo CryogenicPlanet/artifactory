@@ -351,7 +351,7 @@ await helper.exited;
 			)
 			.toMatchObject({ state: "live" });
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 17 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 19 }]);
 		expect(await sql(env.data, "SELECT value FROM settings WHERE key = 'app_seeded'")).toEqual([{ value: "1" }]);
 	}, 15000);
 
@@ -371,7 +371,7 @@ await helper.exited;
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 17 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 19 }]);
 		expect(await sql(env.data, "SELECT value FROM settings WHERE key = 'app_seeded'")).toEqual([{ value: "1" }]);
 		expect(await sql(env.data, "SELECT * FROM edit_lock")).toEqual([]);
 	}, 15000);
@@ -399,7 +399,7 @@ await helper.exited;
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
 		expect((await migrated.state()).child.generation).toBe(1);
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 17 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 19 }]);
 		expect(await sql(env.data, "SELECT id, holder_family FROM edit_lock")).toEqual([
 			{ id: "saved-lock", holder_family: "family-one" },
 		]);
@@ -430,7 +430,7 @@ await helper.exited;
 		await sql(env.data, "PRAGMA user_version = 4");
 		const migrated = await launch(test, env);
 		await expect.poll(async () => (await migrated.state()).child, { timeout: 5000 }).toMatchObject({ state: "live" });
-		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 17 }]);
+		expect(await sql(env.data, "PRAGMA user_version")).toEqual([{ user_version: 19 }]);
 		expect(await sql(env.data, "SELECT id,counter,label FROM passkeys")).toEqual([
 			{ id: "saved-key", counter: 4, label: "laptop" },
 		]);

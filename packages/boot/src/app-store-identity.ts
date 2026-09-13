@@ -1,3 +1,4 @@
+import { backupPath } from "./backup-metadata.ts";
 import { Clock, Crypto, Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { EventError } from "./events.ts";
@@ -36,18 +37,31 @@ export const appStoreIdentity = (filename: string, dataDirectory?: string) =>
 		});
 		// A journal-selected backup may replace an absent file before identity reservation resumes.
 		const selectedBackup = Effect.gen(function* () {
-			const rows = yield* boot`SELECT b.id,b.path FROM backups b WHERE b.id IN (
+			const rows = yield* boot`SELECT b.id,b.path,b.engine FROM backups b WHERE b.id IN (
 		 SELECT backup FROM cutover WHERE phase='restoring'
 		 UNION SELECT CASE WHEN phase='rollback' THEN safety_backup ELSE backup END FROM db_restore_requests WHERE phase IN ('restoring','rollback')
 		)`.pipe(
 				Effect.flatMap(
-					Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: Schema.String, path: Schema.String }))),
+					Schema.decodeUnknownEffect(
+						Schema.Array(
+							Schema.Struct({
+								id: Schema.String,
+								path: Schema.String,
+								engine: Schema.Literals(["sqlite", "pg", "mysql"]),
+							}),
+						),
+					),
 				),
 			);
 			if (rows.length !== 1 || !rows[0]) return false;
 			const row = rows[0];
 			const directory = path.join(dataDirectory ?? path.dirname(filename), "backups");
-			if (row.path !== path.join(directory, `${row.id}.db`) || !(yield* fs.exists(row.path))) return false;
+			if (
+				row.engine !== "sqlite" ||
+				row.path !== backupPath(path, dataDirectory ?? path.dirname(filename), row.id, "sqlite") ||
+				!(yield* fs.exists(row.path))
+			)
+				return false;
 			return (
 				(yield* fs.stat(row.path)).type === "File" &&
 				(yield* fs.realPath(row.path)) === path.join(yield* fs.realPath(directory), `${row.id}.db`)
@@ -116,7 +130,7 @@ export const appStoreIdentity = (filename: string, dataDirectory?: string) =>
 					const saved = yield* current;
 					if (saved.store_id !== adoption.store_id) return yield* invalid();
 					if (saved.phase === "pending" && saved.mode === "legacy")
-						yield* boot`UPDATE backups SET legacy_store_id=${adoption.store_id} WHERE legacy_store_id IS NULL`;
+						yield* boot`UPDATE backups SET legacy_store_id=${adoption.store_id} WHERE legacy_store_id IS NULL AND engine='sqlite'`;
 					yield* boot`INSERT INTO settings(key,value) VALUES('app_store_id',${adoption.store_id}) ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
 					yield* boot`INSERT OR IGNORE INTO settings(key,value) VALUES('app_store_initialized','1')`;
 					yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(Adoption))({ ...saved, phase: "ready" })} WHERE key='app_store_adoption'`;

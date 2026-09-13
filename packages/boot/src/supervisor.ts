@@ -3,7 +3,20 @@ import { recoveryIntents } from "./recovery-intents.ts";
 import { SqlClient } from "effect/unstable/sql";
 import { render, type FileStore } from "@comms/storage/store";
 import { redactHex } from "./auth-primitives.ts";
-import { Cause, Config, Crypto, Effect, FileSystem, Path, Queue, Ref, Schema, Scope, Semaphore } from "effect";
+import {
+	Cause,
+	Config,
+	Crypto,
+	Duration,
+	Effect,
+	FileSystem,
+	Path,
+	Queue,
+	Ref,
+	Schema,
+	Scope,
+	Semaphore,
+} from "effect";
 import { HttpServer } from "effect/unstable/http";
 import { prepareGeneration, snapshotEntry, type ApplicationSource } from "./application.ts";
 import { AppRecovery } from "./app-recovery.ts";
@@ -44,6 +57,7 @@ export interface SupervisedChild {
 /** Supervisor owns process recovery; the cutover coordinator shares its one operation gate. */
 export const supervise = Effect.fn("supervise")(function* (options: ApplicationSource) {
 	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
+	const copyBudget = yield* Config.Duration("REHEARSAL_COPY_BUDGET").pipe(Config.withDefault(Duration.seconds(30)));
 	const crypto = yield* Crypto.Crypto;
 	const path = yield* Path.Path;
 	const fs = yield* FileSystem.FileSystem;
@@ -152,6 +166,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 					receipt: owner.receipt,
 					env: {
 						PORT: "0",
+						REHEARSAL_COPY_BUDGET: `${Duration.toMillis(copyBudget)} millis`,
 						BOOT_SECRET: secret,
 						WRITER_EPOCH: epoch,
 						GENERATION: String(generation.n),
