@@ -240,7 +240,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					const generation = { ...reserved, snapshot_dir: snapshot.directory };
 					rollback.generation = generation;
 					if (!(yield* fs.exists(recovery.filename))) yield* recovery.prepare(yield* freshEpoch);
-					const clone = path.join(materialized, "rehearsal.db");
+					const clone = path.resolve(materialized, "rehearsal.db");
 					yield* backup.clone({ _tag: "file", filename: clone });
 					const epoch = yield* freshEpoch;
 					yield* backup.prepareClone({ _tag: "file", filename: clone }, epoch);

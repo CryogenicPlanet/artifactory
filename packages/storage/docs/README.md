@@ -9,3 +9,13 @@ Boot and the standalone editable server consume this package. It imports neither
 Use `file:/absolute/path.db` with percent-encoded path segments. Authority-style `file://host/path` and triple-slash `file:///path` forms are rejected. Rendering is an Effect that validates the same strict path grammar and returns a `Redacted` value; unwrap it only at the child environment boundary. Invalid paths fail with a typed `StoreError`, and child configuration errors name the variable without exposing its value.
 
 SQLite boot and core migration ledgers record complete named prefixes independently of editable and extension migration receipts. The validated, contiguous named ledger is authoritative. The shared migrator writes its derived `user_version` mirror in the same transaction as adoption, schema changes and receipts, and repairs a lagging mirror without replaying recorded steps. A mirror ahead of the ledger, corrupt IDs or names, and newer histories refuse startup with distinct bounded diagnostics. Initial adoption uses the mirror only when no ledger exists.
+
+## Credential boundaries deferred to remote runtime
+
+This SQLite-only layer does not secure remote credentials at these later process boundaries:
+
+- Launcher to child: `APP_DATABASE` is plaintext in the child environment and is read with `Config.String`.
+- Server to SQL read worker: `BootChannel` exposes a filename, rebuilt as a store selection and JSON-encoded into the worker’s stdin. A remote URL must remain protected through that transport.
+- Supervisor to privileged keeper: the environment map is JSON-encoded in `COMMS_CHILD_CONFIG`. Decode failures can reach keeper stderr and the retained generation stderr tail; the existing hexadecimal redactor does not scrub connection URLs.
+
+Remote runtime must address each boundary before accepting credential-bearing descriptors. Parser errors naming variables without values do not establish transport or stderr redaction.

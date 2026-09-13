@@ -7,7 +7,7 @@ export interface FileStore {
 }
 export class StoreError extends Schema.TaggedError<StoreError>()("StoreError", {
 	code: Schema.Literals(["store_descriptor_invalid", "store_engine_unsupported", "store_descriptor_mismatch"]),
-	variable: Schema.optionalKey(Schema.Literals(["APP_STORE", "APP_DATABASE"])),
+	variable: Schema.optionalKey(Schema.Literals(["APP_STORE", "APP_DATABASE", "APP_STORE or APP_DATABASE"])),
 }) {
 	override get message() {
 		return this.variable ? `${this.variable}: ${this.code}` : this.code;
@@ -47,7 +47,8 @@ export const render = (store: FileStore) =>
 /** Old images provide only APP_DATABASE; current images provide both. Validate either selection. */
 export const childStore = (raw: string | undefined, legacy?: string) =>
 	Effect.gen(function* () {
-		const variable = raw === undefined && legacy !== undefined ? "APP_DATABASE" : "APP_STORE";
+		const variable =
+			raw === undefined ? (legacy === undefined ? "APP_STORE or APP_DATABASE" : "APP_DATABASE") : "APP_STORE";
 		const selected =
 			raw === undefined
 				? legacy === undefined
