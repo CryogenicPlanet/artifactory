@@ -1,5 +1,5 @@
 import { sourcePut } from "./fixtures/source-put.ts";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
@@ -8,6 +8,10 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	const fixture = await conversation(test);
 	await mkdir(join(fixture.root, "pages"));
 	await writeFile(join(fixture.root, "pages/init.md"), "---\nname: comms\n---\n# Welcome\n\nLive instructions.\n");
+	await writeFile(
+		join(fixture.root, "pages/quickstart.md"),
+		"---\nname: chirp quickstart\n---\n# Quickstart\n\nNext steps after enrolling.\n",
+	);
 	const app = await fixture.launch();
 	await app.setup();
 	const first = await app.login(),
@@ -86,6 +90,22 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	expect(raw.headers.get("content-type")).toContain("text/markdown");
 	expect(await raw.text()).toContain("name: comms");
 	expect((await fetch(app.url + "/p/init.md")).status).toBe(401);
+	// The guides it links need a token, so the page that links them is authenticated too.
+	expect((await fetch(app.url + "/quickstart")).status).toBe(401);
+	const guided = await fetch(app.url + "/quickstart", { headers: { cookie: first } });
+	expect(guided.status).toBe(200);
+	expect(guided.headers.get("content-type")).toContain("text/markdown");
+	const guide = await guided.text();
+	expect(guide).toContain("Next steps after enrolling.");
+	expect(guide).toContain("You are <code>rahul@human</code>");
+	const guidedHtml = await fetch(app.url + "/quickstart", { headers: { cookie: first, accept: "text/html" } });
+	expect(guidedHtml.headers.get("content-type")).toContain("text/html");
+	const guidedDocument = await guidedHtml.text();
+	expect(guidedDocument).toContain("<h1>Quickstart</h1>");
+	expect(guidedDocument).not.toContain("name: chirp quickstart");
+	const guidedRaw = await fetch(app.url + "/quickstart.md", { headers: { cookie: first, accept: "text/html" } });
+	expect(guidedRaw.headers.get("content-type")).toContain("text/markdown");
+	expect(await guidedRaw.text()).toContain("name: chirp quickstart");
 	expect((await app.post("/api/messages", { topic: "@rahul", body: "Hello" }, second)).status).toBe(200);
 	const personal = await fetch(app.url + "/init", { headers: { cookie: first, "x-comms-init": version ?? "" } });
 	expect(personal.headers.get("x-comms-init-stale")).toBeNull();
@@ -121,3 +141,17 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	expect(head.status).toBe(200);
 	expect(await head.text()).toBe("");
 }, 30000);
+
+it("ships onboarding text that matches the live mention, mark and page-access rules", async () => {
+	const pages = join(import.meta.dirname, "../pages");
+	const init = await readFile(join(pages, "init.md"), "utf8");
+	// mentions=@codex alone never matches @codex/job-17, so the first example must name both.
+	expect(init).toContain("mentions=@codex,@codex/job-17,@here");
+	expect(init).not.toContain("mentions=@codex,@here");
+	expect(init).toContain("never advances a read mark");
+	expect(init).toContain("/quickstart");
+	expect(init).toMatch(/`\/p\/docs\/\.\.\.` link below needs your access token/);
+	const quickstart = await readFile(join(pages, "quickstart.md"), "utf8");
+	for (const guide of ["recipes.md", "stream.md", "subscriptions.md", "extensions.md", "editing.md"])
+		expect(quickstart).toContain(`/p/docs/${guide}`);
+});
