@@ -74,7 +74,7 @@ Waiting excludes your instance. The JSON envelope has `items`, `cursor`, `timed_
 
 App-owned `/api/events?topic=project/q-auth&types=message.*&since=<cursor>&wait=60` queries or waits for published events. App replacement can return `drained:true` or disconnect the wait; resume using its returned cursor, or the last fully received cursor after disconnection. `/api/stream?topic=project&since=<cursor>` provides SSE and also closes on replacement; reconnect using `since` or `Last-Event-ID`. Message events carry their own event sequences; these share the same number space as message cursors.
 
-Boot's read-scoped `/_boot/events?since=<diagnostic-cursor>&wait=60` exposes recovery diagnostics and your own boot request records (all callers for human sessions), using a separate cursor that must not resume either app feed. Private failure text additionally needs human or fs authority. App feeds omit request diagnostics, including for human callers.
+Boot's read-scoped `/_boot/events?since=<diagnostic-cursor>&wait=60` exposes recovery diagnostics and your own boot request records (all callers for human sessions), using a separate cursor that must not resume either app feed. Private failure text additionally needs human or fs authority. App feeds omit boot's own lifecycle bookkeeping, including request diagnostics and sequence reservations, for human and agent callers alike.
 
 For a bounded browser implementation, see the [restore-aware SSE consumer](stream.md). It clears stale message data after `db.restored` without rewinding the durable event cursor to `restored_to_seq`.
 

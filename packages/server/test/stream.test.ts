@@ -227,6 +227,15 @@ it("app event queries preserve filtered cursors, exclude self before pagination 
 	const ownRequests = diagnostics.items.filter((record: { type: string }) => record.type === "http.request");
 	expect(ownRequests.length).toBeGreaterThan(0);
 	for (const record of ownRequests) expect(record.actor).toBe("codex");
+	// Sequence reservations are boot's own bookkeeping: they stay in boot's store and off the app feed.
+	expect(await fixture.sql("SELECT COUNT(*) AS count FROM events WHERE type='seq.reserved'", "boot.db")).not.toEqual([
+		{ count: 0 },
+	]);
+	for (const headers of [credentials, { cookie }]) {
+		expect((await (await query("since=0&types=seq.reserved&limit=200", headers)).json()).items).toEqual([]);
+		const everything = await (await query("since=0&limit=200", headers)).json();
+		expect(everything.items.filter((record: { type: string }) => record.type === "seq.reserved")).toEqual([]);
+	}
 }, 15000);
 
 it("proxy closes app event waits on credential expiry, revocation and disconnect without leaking later events", async (test) => {
