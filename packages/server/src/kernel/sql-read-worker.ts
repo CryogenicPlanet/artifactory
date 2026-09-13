@@ -1,10 +1,9 @@
-import { parseDescriptor } from "@comms/storage/store";
-import { FetchHttpClient } from "effect/unstable/http";
+import { connectionOf, parseDescriptor } from "@comms/storage/store";
 import { remoteRead } from "./sql-read-remote.ts";
-import { databaseLayer } from "./remote-database.ts";
+import { directClientLayer } from "@comms/storage/remote-client";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { clientLayer } from "@comms/storage/client";
-import { Console, Effect, Logger, Schema, Stdio, Stream } from "effect";
+import { Config, Console, Effect, Logger, Schema, Stdio, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { ErrorEnvelope } from "@comms/protocol/errors";
 import { refusal } from "../conversation-request.ts";
@@ -29,11 +28,12 @@ const run = Effect.gen(function* () {
 	const request = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ReadRequest))(encoded);
 	yield* sqlInput(request.input);
 	const store = yield* parseDescriptor(request.store);
-	if (store._tag !== "file")
+	if (store._tag !== "file") {
+		const tls = yield* Config.Boolean("DATABASE_TLS").pipe(Config.withDefault(false));
 		return yield* remoteRead(request.input, request.allowRead, store._tag === "postgres" ? "pg" : "mysql").pipe(
-			Effect.provide(databaseLayer(store)),
-			Effect.provide(FetchHttpClient.layer),
+			Effect.provide(directClientLayer({ connection: yield* connectionOf(store, tls) })),
 		);
+	}
 	return yield* Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		return yield* sql.withTransaction(

@@ -4,7 +4,7 @@ import { KernelError } from "./boot-channel.ts";
 import { sqlInput, type SqlInput } from "./sql-input.ts";
 import { sqlRows } from "./sql-result.ts";
 
-/** One registered physical lease owns the read-only transaction through rollback and scope closure. */
+/** One physical connection owns the read-only transaction through rollback and scope closure. */
 export const remoteRead = (input: typeof SqlInput.Type, allowRead: boolean, dialect: "pg" | "mysql") =>
 	Effect.gen(function* () {
 		yield* sqlInput(input);

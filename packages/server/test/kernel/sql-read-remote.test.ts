@@ -1,6 +1,5 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -16,7 +15,7 @@ const Settings = Schema.Struct({
 	password: Schema.String,
 });
 it.skipIf(!process.env.COMMS_REMOTE_SQL_READ_TEST_CONFIG)(
-	"runs remote SQL in a registered read-only worker and refuses invalid queries",
+	"runs remote SQL in a read-only worker while an advisory writer is active and refuses invalid queries",
 	async () => {
 		const filename = process.env.COMMS_REMOTE_SQL_READ_TEST_CONFIG;
 		if (!filename) throw new Error("Missing remote reader fixture configuration");
@@ -35,30 +34,10 @@ it.skipIf(!process.env.COMMS_REMOTE_SQL_READ_TEST_CONFIG)(
 				timeout: 10000,
 			});
 		await setup("prepare");
-		let registrations = 0;
-		let admit = true;
-		// This fixture exercises registration acknowledgement; durable owner proof has separate boot tests.
-		const guardian = createServer((request, response) => {
-			request.resume();
-			request.on("end", () => {
-				if (request.url !== "/register" || request.headers["x-comms-guardian-secret"] !== "b1".repeat(32)) {
-					response.writeHead(403).end();
-					return;
-				}
-				registrations += 1;
-				response.writeHead(admit ? 204 : 409).end();
-			});
-		});
-		await new Promise<void>((resolve) => guardian.listen(0, "127.0.0.1", resolve));
-		const address = guardian.address();
-		if (!address || typeof address === "string") throw new Error("Missing guardian address");
 		const query = (sql: string, params: ReadonlyArray<string | number | null> = [], allowRead = true) =>
 			new Promise<typeof ReadResponse.Type>((resolve, reject) => {
-				const child = spawn(bun, [join(import.meta.dirname, "../../src/kernel/sql-read-worker.ts")], {
+				const child = spawn(bun, [join(import.meta.dirname, "../fixtures/remote-sql-reader.ts")], {
 					env: {
-						REMOTE_ATTEMPT: "a1".repeat(32),
-						REMOTE_GUARDIAN_URL: `http://127.0.0.1:${address.port}`,
-						REMOTE_GUARDIAN_SECRET: "b1".repeat(32),
 						DATABASE_TLS: "false",
 					},
 					stdio: ["pipe", "pipe", "pipe"],
@@ -89,7 +68,6 @@ it.skipIf(!process.env.COMMS_REMOTE_SQL_READ_TEST_CONFIG)(
 				kind: "read",
 				result: { rows: [{ value: "remote" }], truncated: false, dialect: settings.engine },
 			});
-			expect(registrations).toBeGreaterThan(0);
 			const capped = await query(
 				"WITH RECURSIVE numbers AS (SELECT 1 AS value UNION ALL SELECT value + 1 FROM numbers WHERE value < 205) SELECT value FROM numbers",
 			);
@@ -124,14 +102,8 @@ it.skipIf(!process.env.COMMS_REMOTE_SQL_READ_TEST_CONFIG)(
 				kind: "read",
 				result: { rows: [{ value: 0 }] },
 			});
-			admit = false;
-			expect(await query("SELECT 1 AS value")).toMatchObject({ error: { code: "handler_failed" } });
 		} finally {
-			try {
-				await setup("cleanup");
-			} finally {
-				await new Promise<void>((resolve, reject) => guardian.close((error) => (error ? reject(error) : resolve())));
-			}
+			await setup("cleanup");
 		}
 	},
 	30000,

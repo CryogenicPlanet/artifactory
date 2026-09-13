@@ -6,7 +6,7 @@ import { BootChannel, KernelError } from "./boot-channel.ts";
 import { sqlInput, type SqlInput } from "./sql-input.ts";
 import { ReadRequest, ReadResponse } from "./sql-read-wire.ts";
 
-/** A disposable readonly process owns each query and its registered remote leases. */
+/** A disposable readonly process owns each query and its read-only remote connection. */
 const inspectSql = (input: typeof SqlInput.Type, allowRead: boolean) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -16,10 +16,7 @@ const inspectSql = (input: typeof SqlInput.Type, allowRead: boolean) =>
 				boot.store._tag === "file"
 					? {}
 					: {
-							REMOTE_ATTEMPT: yield* Config.String("REMOTE_ATTEMPT"),
-							REMOTE_GUARDIAN_URL: yield* Config.String("REMOTE_GUARDIAN_URL"),
-							REMOTE_GUARDIAN_SECRET: Redacted.value(yield* Config.Redacted("REMOTE_GUARDIAN_SECRET")),
-							DATABASE_TLS: yield* Config.String("DATABASE_TLS"),
+							DATABASE_TLS: String(yield* Config.Boolean("DATABASE_TLS").pipe(Config.withDefault(false))),
 						};
 			const path = yield* Path.Path;
 			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
