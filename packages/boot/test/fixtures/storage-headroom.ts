@@ -32,15 +32,16 @@ const main = Effect.gen(function* () {
 	);
 	if (process.argv[3] === "backup") {
 		const filename = `${root}/app.db`;
+		yield* initializeBootSchema;
+		const identity = yield* appStoreIdentity(filename);
+		// Reserve fresh ownership before creating the app file, as real boot does.
+		const adoption = yield* identity.reserve;
 		const original = new Database(filename);
 		try {
 			original.exec("CREATE TABLE records(value TEXT); INSERT INTO records VALUES('before backup')");
 		} finally {
 			original.close();
 		}
-		yield* initializeBootSchema;
-		const identity = yield* appStoreIdentity(filename);
-		const adoption = yield* identity.reserve;
 		yield* Effect.scoped(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
