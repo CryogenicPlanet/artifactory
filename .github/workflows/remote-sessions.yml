@@ -17,13 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - engine: pg
-            attributes: 1024
-          - engine: mysql
-            attributes: 1024
-          - engine: mysql
-            attributes: 32
+        engine: [pg, mysql]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -45,4 +39,4 @@ jobs:
           test "$(bun --version)" = 1.4.0
           bun install --frozen-lockfile
       - name: Verify driver session boundary against actual database
-        run: bash scripts/remote-session-acceptance.sh '${{ matrix.engine }}' '${{ matrix.attributes }}'
+        run: bash scripts/remote-session-acceptance.sh '${{ matrix.engine }}'

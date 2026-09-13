@@ -27,9 +27,6 @@ CREATE DATABASE comms_app CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
 GRANT ALL PRIVILEGES ON `comms\_boot`.* TO 'comms_boot'@'%';
 GRANT ALL PRIVILEGES ON `comms\_app`.* TO 'comms_app'@'%';
 GRANT CREATE, DROP, ALTER, INDEX, SELECT, INSERT, UPDATE, DELETE, REFERENCES,
-      CREATE VIEW, SHOW VIEW, TRIGGER, LOCK TABLES
+      CREATE VIEW, SHOW VIEW, TRIGGER
   ON `comms\_app`.* TO 'comms_boot'@'%';
-GRANT SELECT ON performance_schema.session_account_connect_attrs TO 'comms_app'@'%';
-GRANT SELECT ON performance_schema.session_account_connect_attrs TO 'comms_boot'@'%';
-GRANT XA_RECOVER_ADMIN ON *.* TO 'comms_boot'@'%';
 -- No PROCESS, SUPER, GRANT OPTION, CREATE USER, or persistent-app scratch grants.

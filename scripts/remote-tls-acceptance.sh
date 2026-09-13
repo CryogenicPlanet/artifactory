@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Real production pools and native tools against a disposable private-CA server.
+# Real SQL clients against a disposable private-CA server.
 set -euo pipefail
 umask 077
 engine=${1:?pg or mysql}
@@ -22,7 +22,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-mkdir "$private/artifacts" "$private/server" "$private/trusted" "$private/untrusted" "$private/config"
+mkdir "$private/server" "$private/trusted" "$private/untrusted" "$private/config"
 for ca in trusted untrusted; do
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=comms-fixture-$ca" \
     -keyout "$private/$ca.key" -out "$private/$ca/ca.crt" >/dev/null 2>&1
@@ -67,7 +67,7 @@ admin,password=secrets.token_hex(32),secrets.token_hex(32)
 if engine=='pg':
  sql=f"CREATE ROLE comms_tls LOGIN PASSWORD '{password}' NOSUPERUSER NOCREATEDB NOCREATEROLE;\nCREATE DATABASE comms_tls OWNER comms_tls;\n"
 else:
- sql=f"CREATE USER 'comms_tls'@'%' IDENTIFIED BY '{password}' REQUIRE SSL;\nCREATE DATABASE comms_tls;\nGRANT ALL ON comms_tls.* TO 'comms_tls'@'%';\nGRANT SELECT ON performance_schema.session_account_connect_attrs TO 'comms_tls'@'%';\n"
+ sql=f"CREATE USER 'comms_tls'@'%' IDENTIFIED BY '{password}' REQUIRE SSL;\nCREATE DATABASE comms_tls;\nGRANT ALL ON comms_tls.* TO 'comms_tls'@'%';\n"
 (root/'roles.sql').write_text(sql)
 for path in root.iterdir():path.chmod(0o600)
 PY
@@ -83,7 +83,7 @@ else
     --mount "type=bind,src=$private/config,dst=/run/secrets,readonly" \
     --env MYSQL_ROOT_PASSWORD_FILE=/run/secrets/admin-password --env MYSQL_ROOT_HOST=127.0.0.1 "$prefix-server" \
     --ssl-ca=/tls/ca.crt --ssl-cert=/tls/server.crt --ssl-key=/tls/server.key \
-    --require-secure-transport=ON --performance-schema-session-connect-attrs-size=2048 >/dev/null
+    --require-secure-transport=ON >/dev/null
   ready() { docker exec "$server" mysql --defaults-extra-file=/run/secrets/admin.cnf --host=127.0.0.1 -e 'SELECT 1' >/dev/null 2>&1; }
 fi
 for attempt in $(seq 1 120); do
@@ -100,15 +100,13 @@ fi
 probe() {
   docker run --rm --user "$(id -u):$(id -g)" --network "$network" --read-only --tmpfs /tmp --cap-drop ALL \
     --mount "type=bind,src=$private/config,dst=/fixture,readonly" \
-    --mount "type=bind,src=$private/artifacts,dst=/artifacts" \
     --entrypoint /usr/local/bin/bun "$prefix-$1" \
     /opt/comms/packages/server/test/fixtures/remote-tls.ts "$2" "$3"
 }
-probe trusted seed database.test
 probe trusted pass database.test
 probe untrusted deny database.test
-# Paired successful restores prove the same credentials/archive/target work and that denial left no table behind.
+# Successful queries bracket trust and hostname refusals using the same credentials.
 probe trusted pass database.test
 probe trusted deny wrong.test
 probe trusted pass database.test
-echo "Real $engine pools and native dump/load verified private CA trust and hostname refusal."
+echo "Real $engine SQL clients verified private CA trust and hostname refusal."

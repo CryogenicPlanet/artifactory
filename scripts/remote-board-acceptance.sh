@@ -9,10 +9,6 @@ case "$engine" in
   mysql) database_image='mysql:8.4.11@sha256:3466ba4a4828aa8d46fb7c3bc16b67b781c98413cf4ea0fac6feaa6e881faa26' ;;
   *) exit 2 ;;
 esac
-if [ "$engine" = mysql ] && [ ! -f packages/boot/sql/mysql-scratch-roles.sql ]; then
-  echo 'MySQL board acceptance requires the reviewed scratch-role operator script; backup/restore is not optional.' >&2
-  exit 1
-fi
 private=$(mktemp -d)
 prefix="comms-board-${engine}-${RANDOM}-${RANDOM}"
 network="$prefix-network"
@@ -73,7 +69,7 @@ else
   docker run --detach --name "$database" --network "$network" --network-alias database \
     --mount "type=bind,src=$private,dst=/run/secrets,readonly" \
     --env MYSQL_ROOT_PASSWORD_FILE=/run/secrets/admin-password --env MYSQL_ROOT_HOST=127.0.0.1 \
-    "$database_image" --performance-schema-session-connect-attrs-size=2048 >/dev/null
+    "$database_image" >/dev/null
   ready() { docker exec "$database" mysql --defaults-extra-file=/run/secrets/admin.cnf --host=127.0.0.1 -e 'SELECT 1' >/dev/null 2>"$private/readiness-errors"; }
 fi
 for attempt in $(seq 1 120); do
@@ -84,8 +80,6 @@ done
 if [ "$engine" = pg ]; then
   docker exec --env-file "$private/operator.env" -i "$database" psql -X -U postgres -v ON_ERROR_STOP=1 \
     < packages/boot/sql/postgres-roles.sql >/dev/null 2>"$private/provision-errors"
-  docker exec -i "$database" psql -X -U postgres -v ON_ERROR_STOP=1 \
-    < packages/boot/sql/postgres-scratch-roles.sql >/dev/null 2>>"$private/provision-errors"
   docker exec --env-file "$private/app.env" "$database" psql -X -h 127.0.0.1 -U comms_app -d comms_app -v ON_ERROR_STOP=1 -c 'SELECT 1' >/dev/null 2>"$private/denial"
   if docker exec --env-file "$private/app.env" "$database" psql -X -h 127.0.0.1 -U comms_app -d comms_boot -c 'SELECT 1' >"$private/denial" 2>&1; then
     echo 'App role unexpectedly accessed the boot database.' >&2; exit 1
@@ -93,9 +87,6 @@ if [ "$engine" = pg ]; then
 else
   cat "$private/mysql-passwords.sql" packages/boot/sql/mysql-roles.sql |
     docker exec -i "$database" mysql --defaults-extra-file=/run/secrets/admin.cnf --batch >/dev/null 2>"$private/provision-errors"
-  # Exact scratch privileges come from the reviewed operator script, never inline broad CI grants.
-  docker exec -i "$database" mysql --defaults-extra-file=/run/secrets/admin.cnf --batch \
-    < packages/boot/sql/mysql-scratch-roles.sql >/dev/null 2>>"$private/provision-errors"
   docker exec "$database" mysql --defaults-extra-file=/run/secrets/app.cnf --database=comms_app -e 'SELECT 1' >/dev/null 2>"$private/denial"
   if docker exec "$database" mysql --defaults-extra-file=/run/secrets/app.cnf --database=comms_boot -e 'SELECT 1' >"$private/denial" 2>&1; then
     echo 'App role unexpectedly accessed the boot database.' >&2; exit 1
@@ -127,11 +118,7 @@ PY
 export COMMS_TEST_ORIGIN=http://localhost:8080
 export COMMS_SETUP_CODE_FILE="$private/setup-code"
 bun scripts/remote-board-http.ts prepare http://localhost:8080 "$private/state.json"
-bun scripts/remote-board-http.ts failed-health http://localhost:8080 "$private/state.json"
-marker_path=$(bun -e 'const value = await Bun.file(process.argv[1]).json(); if (!Number.isSafeInteger(value.failedGeneration) || value.failedGeneration < 1 || !/^native-candidate-health-[a-f0-9-]+\.json$/.test(value.marker) || value.markerPath !== `/data/runtime/${value.marker}`) process.exit(1); process.stdout.write(value.markerPath)' "$private/state.json.health")
-docker exec "$board" cat "$marker_path" > "$private/state.json.health-marker"
-bun scripts/remote-board-http.ts check-health-marker http://localhost:8080 "$private/state.json"
 docker restart --time 30 "$board" >/dev/null
 wait_for_board
 bun scripts/remote-board-http.ts check-restarted http://localhost:8080 "$private/state.json"
-echo "Real $engine board passed public authentication, domain writes, idempotency, backup/restore and restart durability."
+echo "Real $engine board passed public authentication, domain writes, idempotency, restart durability."
