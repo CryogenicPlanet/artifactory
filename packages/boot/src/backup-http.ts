@@ -1,4 +1,5 @@
 import { bootRoute, checkBootOrigin } from "./boot-route.ts";
+import { isAppStoreIdentityError, appIdentityPolicy } from "./app-store-identity.ts";
 import { childErrorPolicy } from "./child-error-policy.ts";
 import { PlatformError } from "effect/PlatformError";
 import { isSqlError } from "effect/unstable/sql/SqlError";
@@ -46,6 +47,7 @@ export const backupRoute = (
 									(reason) =>
 										reason._tag !== "Fail" ||
 										!(
+											isAppStoreIdentityError(reason.error) ||
 											Schema.is(AuthError)(reason.error) ||
 											Schema.is(StorageRejected)(reason.error) ||
 											Schema.is(ArtifactRetentionRejected)(reason.error) ||
@@ -59,6 +61,20 @@ export const backupRoute = (
 							if (unexpected)
 								return Effect.succeed(authErrorResponse("handler_failed", 500, `${request.method} ${url.pathname}`));
 							const error = Cause.findError(cause);
+							if (error._tag === "Success" && isAppStoreIdentityError(error.success))
+								return Effect.succeed(
+									HttpServerResponse.jsonUnsafe(
+										{
+											error: {
+												code: error.success.code,
+												message: "App store identity could not be verified.",
+												hint: appIdentityPolicy.hint,
+												retriable: false,
+											},
+										},
+										{ status: 409, headers: { "cache-control": "no-store" } },
+									),
+								);
 							if (error._tag === "Success" && Schema.is(AuthError)(error.success)) return Effect.fail(error.success);
 							if (error._tag === "Success" && Schema.is(ChildError)(error.success)) {
 								const policy = childErrorPolicy[error.success.code];

@@ -86,7 +86,8 @@ const hopHeaders: readonly string[] = Object.freeze([
 ]);
 
 export const proxy = Effect.gen(function* () {
-	const { child, authConfig, editing, requests, backups, restores, captures, phase, restart } = yield* BootHttp;
+	const { child, authConfig, editing, requests, backups, restores, captures, phase, restart, storeIdentity } =
+		yield* BootHttp;
 	const auth = yield* Auth;
 	const events = yield* Events;
 	const publicPages = yield* PublicPages;
@@ -146,11 +147,7 @@ export const proxy = Effect.gen(function* () {
 		if (passkeyResponse) return passkeyResponse;
 		const enrollmentResponse = yield* enrollmentRoute(auth, authConfig, editing);
 		if (enrollmentResponse) return enrollmentResponse;
-		if (
-			(yield* Ref.get(phase))._tag !== "Ready" &&
-			request.method === "POST" &&
-			["/_boot/db/backup", "/_boot/db/restore"].includes(path)
-		)
+		if ((yield* Ref.get(phase))._tag !== "Ready" && request.method === "POST" && path === "/_boot/db/backup")
 			return authErrorResponse("boot_unavailable", 503);
 		const backupResponse = yield* backupRoute(auth, backups, captures, authConfig);
 		if (backupResponse) return backupResponse;
@@ -248,6 +245,7 @@ export const proxy = Effect.gen(function* () {
 							authenticated: true,
 							child: safeState,
 							source_recovery_error: yield* Ref.get(child.sourceError),
+							store_identity: storeIdentity ? yield* storeIdentity.pipe(Effect.orElseSucceed(() => null)) : null,
 							traffic: yield* child.traffic.state,
 							last_good: lastGood,
 						}),

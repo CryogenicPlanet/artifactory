@@ -3,10 +3,11 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { storageFixture } from "./fixtures/storage-maintenance.ts";
 
-it.for(["restoring", "working", "restored"] as const)(
+it.for(["restoring", "working", "restored", "legacy-restoring"] as const)(
 	"recovers the %s store selection after SIGKILL and never reapplies it over later acknowledged writes",
 	{ timeout: 45000 },
-	async (phase, test) => {
+	async (checkpoint, test) => {
+		const phase = checkpoint === "legacy-restoring" ? "restoring" : checkpoint;
 		const fixture = await storageFixture(test);
 		const coordinator = join(fixture.root, "packages/boot/src/database-restore.ts");
 		const source = await readFile(coordinator, "utf8");
@@ -14,7 +15,7 @@ it.for(["restoring", "working", "restored"] as const)(
 		const reached = join(fixture.root, "restore-crash-reached");
 		const needle =
 			phase === "restoring"
-				? "yield* backup.restore(target.path);"
+				? "yield* backup.restore(target);"
 				: phase === "working"
 					? 'yield* candidate.process.health.pipe(Effect.timeout("5 seconds"));'
 					: 'yield* supervisor.activate(candidate, "live").pipe(Effect.provideContext(context));';
@@ -66,9 +67,21 @@ it.for(["restoring", "working", "restored"] as const)(
 		).toEqual([{ count: phase === "restoring" ? 0 : 1 }]);
 		await app.stop("SIGKILL");
 		await pending;
+		let legacyArtifact: Buffer | undefined;
+		if (checkpoint === "legacy-restoring") {
+			// Reconstruct a catalog authorized at successful legacy adoption; preserve the finalized live identity.
+			await fixture.sql(
+				"UPDATE backups SET legacy_store_id=(SELECT value FROM settings WHERE key='app_store_id')",
+				"boot.db",
+			);
+			for (const item of await fixture.backups())
+				await fixture.sql("DROP TABLE store_identity", `backups/${item.id}.db`);
+			legacyArtifact = await readFile(saved.path);
+		}
 		await rm(armed);
 		const resumed = await fixture.launch();
 		await resumed.ready(cookie);
+		if (legacyArtifact) expect(await readFile(saved.path)).toEqual(legacyArtifact);
 		const expected =
 			phase === "working" ? [{ body: "A before backup" }, { body: "B before restore" }] : [{ body: "A before backup" }];
 		expect(await fixture.sql("SELECT body FROM messages WHERE topic!='system' ORDER BY seq")).toEqual(expected);

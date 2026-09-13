@@ -5,6 +5,7 @@ import { SqlClient, type Statement } from "effect/unstable/sql";
 import type { EventStorageRejected } from "./event-storage.ts";
 import type { StorageRejected } from "./storage-headroom.ts";
 import { movePublicPaths, projectPublicPath } from "./public-paths.ts";
+import { StoreIdentityDiagnostic } from "./store-identity-diagnostics.ts";
 
 export const EventRecord = Schema.Struct({
 	seq: Schema.Int,
@@ -31,6 +32,8 @@ export class EventError extends Schema.TaggedError<EventError>()("EventError", {
 		"app_evidence_invalid",
 		"app_fence_invalid",
 		"app_store_missing",
+		"app_store_identity_invalid",
+		"app_store_mismatch",
 		"batch_conflict",
 		"batch_invalid",
 		"body_invalid",
@@ -52,6 +55,7 @@ export class EventError extends Schema.TaggedError<EventError>()("EventError", {
 		"topic_move_recovery_required",
 		"topic_move_unprepared",
 	]),
+	identity: Schema.optionalKey(StoreIdentityDiagnostic),
 }) {
 	get message() {
 		return this.code;

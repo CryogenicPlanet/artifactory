@@ -51,7 +51,7 @@ export const prepareRestoreGeneration = Effect.fn("prepareRestoreGeneration")(fu
 		Effect.gen(function* () {
 			const temporary = yield* fs.makeTempDirectoryScoped({ directory: root, prefix: ".restore-rehearsal-" });
 			yield* (yield* storageHeadroom(root)).check(Number((yield* fs.stat(backupPath)).size));
-			const clone = path.join(temporary, "app.db");
+			const clone = path.resolve(temporary, "app.db");
 			yield* fs.copyFile(backupPath, clone);
 			// Rehearsal never publishes its private sequence space into boot.
 			const epoch = `restore-rehearsal-${record.proof_id}`;

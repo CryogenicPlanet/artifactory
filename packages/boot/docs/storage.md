@@ -88,3 +88,25 @@ Conversion requires an explicit offline database rewrite:
 5. Verify database integrity and the resulting auto-vacuum mode before restarting.
 
 Never run this rewrite automatically on a nearly full volume. There is no automated low-space conversion path.
+
+## SQLite board identity and upgrades
+
+Boot reserves one board UUID before writing the app store and finalizes it only after the app transaction is durable. Restart resumes that UUID. A missing initialized store or foreign identity refuses startup; it never creates an empty replacement board.
+
+Backups catalogued before successful legacy adoption receive provenance once, without overwriting an existing stamp. Restoration adds missing identity only to an authorized disposable copy, preserving the original backup. Later identity-free backups are refused.
+
+Finish any interrupted cutover or database restore with the previous compatible image before upgrading an installation that has never adopted an identity. A first upgrade cannot authorize an old identity-free backup before adoption completes, even if a recovery journal selects it. Boot preserves the journal, backup and current store for recovery; do not delete identity markers to bypass this refusal.
+
+Restore uses one disposable `<app-store>.restore-staging` directory. After proving prior owners closed, startup removes an abandoned copy; each restore also replaces it before copying. A killed restore therefore cannot accumulate a new full-board directory on every attempt. Catalogued backup bytes are never modified by this cleanup.
+
+After adoption is ready, moving the data directory or switching to the isolated store layout keeps the UUID authoritative. The original adoption filename is diagnostic history; only a pending adoption remains bound to its original path. Authenticated `/_boot/status` reports the expected UUID, adoption phase, selected filename and recorded filename. A foreign UUID returns `app_store_mismatch`; a missing initialized store remains `app_store_missing`. Authorized status includes `child.identity_error` with the expected and observed UUID after a mismatch; malformed identifiers become `null`. It does not open the refused store again to render diagnostics.
+
+Human-only `GET /_boot/db/backups` reports the expected board UUID and each catalog row’s `provenance`: `legacy_adoption` identifies an existing legacy adoption association; `not_recorded` means no catalog identity stamp exists. This does not inspect artifact contents or prove that a backup belongs to the board.
+
+Identity proves which board a copy belongs to, not how recent that copy is. A stale copy carrying the same UUID may pass identity verification. Use the explicit backup/restore procedure rather than swapping a matching-UUID file into place. Boot refuses app publication evidence ahead of its sequence allocator, but that check does not establish freshness of a stale same-board copy.
+
+A signed-in human can restore a matching-board backup while the selected app store is missing or has a foreign identity. Boot requires completed identity adoption, positive closure of prior owners and no pending publication reservation. It verifies the target in disposable staging, then preserves the original file and SQLite sidecars byte for byte without opening them. Missing files are recorded as absent. The signed restore receipt reports `safety_backup: null` for this path; these opaque before-images are not valid board backups.
+
+Before-images live under protected `restore-before/` directories, with hashes and selection metadata committed alongside the restore journal. A failed candidate restores the original bytes or absence and keeps the app unavailable; it never authorizes the foreign store to run. Restart replays an interrupted selection or rollback. Recorded before-images remain retained; startup reclaims only validated artifacts that were never recorded, after owner closure. Expand storage if these retained copies consume capacity. Do not bypass identity checks or discard a pending reservation to enable restore.
+
+The startup cleanup also removes the former fixed `.restore` staging file and its SQLite sidecars after positive owner closure. A preidentity upgrade blocked by an unfinished journal returns `boot_identity_upgrade_pending` with HTTP 409, while keeping schema and journal evidence compatible with the previous image.

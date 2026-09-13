@@ -72,11 +72,21 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 	const restore = (record: typeof Record.Type) =>
 		Effect.gen(function* () {
 			if (!record.backup) return yield* new ChildError({ code: "cutover_backup_missing" });
-			const rows = yield* sql`SELECT path FROM backups WHERE id=${record.backup}`.pipe(
-				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ path: Schema.String })))),
+			const rows = yield* sql`SELECT path,legacy_store_id FROM backups WHERE id=${record.backup}`.pipe(
+				Effect.flatMap(
+					Schema.decodeUnknownEffect(
+						Schema.Array(Schema.Struct({ path: Schema.String, legacy_store_id: Schema.NullOr(Schema.String) })),
+					),
+				),
 			);
 			const saved = rows[0]?.path;
-			if (!saved || saved !== path.join(options.dataDirectory, "backups", `${record.backup}.db`))
+			if (
+				!saved ||
+				saved !== path.join(options.dataDirectory, "backups", `${record.backup}.db`) ||
+				(yield* fs.stat(saved)).type !== "File" ||
+				(yield* fs.realPath(saved)) !==
+					path.join(yield* fs.realPath(options.dataDirectory), "backups", `${record.backup}.db`)
+			)
 				return yield* new ChildError({ code: "cutover_backup_invalid" });
 			if (record.phase !== "restoring") {
 				yield* recovery.prepare(yield* freshEpoch, record.candidate_epoch ?? undefined);
@@ -84,7 +94,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			}
 			// The replacement app must republish its grants before activation can expose its pages.
 			yield* sql`DELETE FROM public_paths`;
-			yield* backup.restore(saved);
+			yield* backup.restore({ path: saved, legacy_store_id: rows[0]?.legacy_store_id ?? null });
 			yield* recovery.prepare(yield* freshEpoch);
 			yield* sql`UPDATE cutover SET phase='restored' WHERE singleton=1`;
 		});
@@ -228,7 +238,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 					const generation = { ...reserved, snapshot_dir: snapshot.directory };
 					rollback.generation = generation;
 					if (!(yield* fs.exists(recovery.filename))) yield* recovery.prepare(yield* freshEpoch);
-					const clone = path.join(materialized, "rehearsal.db");
+					const clone = path.resolve(materialized, "rehearsal.db");
 					yield* backup.clone(clone);
 					const epoch = yield* freshEpoch;
 					yield* backup.prepareClone(clone, epoch);

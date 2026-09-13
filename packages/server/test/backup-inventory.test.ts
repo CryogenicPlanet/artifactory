@@ -62,12 +62,47 @@ it("lists backup metadata with a human session and rejects every Authorization h
 	expect(response.headers.get("x-content-type-options")).toBe("nosniff");
 	expect(response.headers.get("x-comms-token-expires")).toMatch(/^\d+$/);
 	expect(await response.json()).toEqual({
+		expected_store_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
 		items: [
-			{ id: "new", reason: "hourly", bytes: 4096, taken_at: 20, published_through: 123, generation: 7 },
-			{ id: "legacy", reason: "pre-flip", bytes: 2048, taken_at: 10, published_through: null, generation: null },
+			{
+				id: "new",
+				reason: "hourly",
+				bytes: 4096,
+				taken_at: 20,
+				published_through: 123,
+				generation: 7,
+				provenance: { kind: "not_recorded", store_id: null },
+			},
+			{
+				id: "legacy",
+				reason: "pre-flip",
+				bytes: 2048,
+				taken_at: 10,
+				published_through: null,
+				generation: null,
+				provenance: { kind: "not_recorded", store_id: null },
+			},
 		],
 		next: null,
 	});
+
+	const expected = "12345678-1234-4234-8234-123456789abc";
+	await fixture.sql(`UPDATE backups SET legacy_store_id='${expected}' WHERE id='legacy'`, "boot.db");
+	expect(await (await fetch(url, { headers: { cookie } })).json()).toMatchObject({
+		items: [
+			{ id: "new", provenance: { kind: "not_recorded", store_id: null } },
+			{ id: "legacy", provenance: { kind: "legacy_adoption", store_id: expected } },
+		],
+	});
+	await fixture.sql(
+		"UPDATE backups SET legacy_store_id='postgres://user:secret@host/private' WHERE id='legacy'",
+		"boot.db",
+	);
+	const malformed = await (await fetch(url, { headers: { cookie } })).json();
+	expect(malformed).toMatchObject({
+		items: [{ id: "new" }, { id: "legacy", provenance: { kind: "legacy_adoption", store_id: null } }],
+	});
+	expect(JSON.stringify(malformed)).not.toContain("secret");
 	for (const method of ["POST", "PUT", "PATCH", "DELETE"])
 		expect((await fetch(url, { method, headers: { cookie, origin: "https://comms.test" } })).status).toBe(501);
 }, 20000);
@@ -150,18 +185,20 @@ it("keeps inventory available while the app is down without creating files or ch
 	await app.stop();
 	await rm(join(fixture.root, "comms.db"));
 	const down = await fixture.launch();
-	// Three failing app/keeper startups must finish before checking inventory side effects (Linux was starting attempt 3 at 5s).
+	// Identity preflight refuses the missing initialized store before launching any child.
 	await expect
 		.poll(
 			async () => {
 				const response = await fetch(`${down.url}/_boot/status`, { headers: { cookie } });
 				return Schema.decodeUnknownSync(
-					Schema.Struct({ child: Schema.Struct({ state: Schema.String, attempt: Schema.Int }) }),
+					Schema.Struct({
+						child: Schema.Struct({ state: Schema.String, attempt: Schema.Int, error: Schema.NullOr(Schema.String) }),
+					}),
 				)(await response.json()).child;
 			},
 			{ timeout: 20000 },
 		)
-		.toMatchObject({ state: "failed", attempt: 3 });
+		.toMatchObject({ state: "failed", attempt: 0, error: expect.stringContaining("app_store_missing") });
 	await fixture.sql(
 		"INSERT INTO backups(id,path,reason,bytes,taken_at) VALUES ('missing','/private/unavailable.db','pre-flip',999,1)",
 		"boot.db",

@@ -17,22 +17,23 @@ import {
 	Logger,
 	Path,
 	Ref,
+	Schema,
 	Semaphore,
 } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { HttpRouter } from "effect/unstable/http";
+import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { Auth, layer as authLayer, type AuthConfig } from "./auth.ts";
 import { authErrorResponse, validateAuthConfig } from "./auth-http.ts";
 import type { ApplicationSource } from "./application.ts";
-import { initializeBootSchema } from "./boot-schema.ts";
+import { initializeBootSchema, BootIdentityUpgradePending } from "./boot-schema.ts";
 import { EditAuthority, editAuthorityActive, EditLock, EditRejected, layer as editLockLayer } from "./edit-lock.ts";
 import { Generations, layer as generationsLayer } from "./generations.ts";
 import { SourceFiles, layer as sourceLayer } from "./source-files.ts";
 import { Events, layer as eventsLayer } from "./events.ts";
-import { layer as recoveryLayer } from "./app-recovery.ts";
+import { AppRecovery, layer as recoveryLayer } from "./app-recovery.ts";
 import { layer as attemptsLayer, ChildAttempts } from "./child-attempts.ts";
 import { cutover } from "./cutover.ts";
-import { layer as backupLayer } from "./app-backup.ts";
+import { AppBackup, layer as backupLayer } from "./app-backup.ts";
 import { BootHttp, type RecoveryPhase } from "./boot-http.ts";
 import { PublicPages, layer as publicPagesLayer } from "./public-pages.ts";
 import { layer as preparationLayer } from "./generation-preparation.ts";
@@ -157,7 +158,19 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 								if (yield* hasLegacyTopicMoves(sql))
 									return yield* new RecoveryRejected({ code: "topic_move_recovery_required" });
 								yield* (yield* Generations).recover;
-								if (isolated) yield* migrateAppStore({ dataDirectory: options.dataDirectory, filename: appFilename });
+								if (isolated)
+									yield* migrateAppStore({
+										dataDirectory: options.dataDirectory,
+										filename: appFilename,
+										allowMissingReady: yield* (yield* AppRecovery).identityStatus.pipe(
+											Effect.map((status) => status.adoption_phase === "ready"),
+											// A diagnostic cannot disarm repair; authoritative reservation still validates after journal recovery.
+											Effect.catchTag("EventError", (error) =>
+												error.code === "app_store_identity_invalid" ? Effect.succeed(false) : Effect.fail(error),
+											),
+										),
+									});
+								yield* (yield* AppBackup).recoverStaging;
 							}),
 						)
 						.pipe(Effect.exit);
@@ -171,6 +184,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 							? owners
 							: yield* coordinator.recover.pipe(
 									Effect.andThen(restore.recover),
+									Effect.andThen((yield* AppRecovery).reserveIdentity),
 									Effect.andThen(reverts.recover),
 									Effect.andThen(source._tag === "Success" ? (yield* EditLock).recover : Effect.void),
 									Effect.exit,
@@ -208,12 +222,23 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			{
 				child,
 				authConfig: options.auth,
+				storeIdentity: (yield* AppRecovery).identityStatus,
 				phase,
 				restart: Deferred.succeed(restart, undefined).pipe(Effect.asVoid),
 				requests: yield* requestEvents(events),
 				backups: yield* makeBackupInventory,
 				captures: yield* databaseBackup(supervisor),
-				restores: restore,
+				restores: {
+					...restore,
+					restore: (...args: Parameters<typeof restore.restore>) =>
+						restore
+							.restore(...args)
+							.pipe(
+								Effect.tap((result) =>
+									result.status === "restored" ? retryRecovery(Effect.void, true).pipe(Effect.ignore) : Effect.void,
+								),
+							),
+				},
 				editing: {
 					retryRecovery,
 					reverts,
@@ -280,6 +305,25 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		Effect.catchCause((cause) =>
 			Effect.gen(function* () {
 				if (Cause.hasInterruptsOnly(cause)) return;
+				const failure = Cause.findError(cause);
+				if (failure._tag === "Success" && Schema.is(BootIdentityUpgradePending)(failure.success)) {
+					const hint = failure.success.message;
+					yield* Ref.update(installed, (current) => ({
+						...current,
+						handle: publicRoute.pipe(
+							Effect.map(
+								(response) =>
+									response ??
+									HttpServerResponse.jsonUnsafe(
+										{
+											error: { code: "boot_identity_upgrade_pending", message: hint, hint, retriable: false },
+										},
+										{ status: 409, headers: { "cache-control": "no-store" } },
+									),
+							),
+						),
+					}));
+				}
 				yield* Effect.logError(cause);
 				yield* fail(cause);
 			}),

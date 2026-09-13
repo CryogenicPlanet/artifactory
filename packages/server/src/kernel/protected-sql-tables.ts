@@ -4,6 +4,7 @@ import { KernelError } from "./boot-channel.ts";
 
 export const kernelSqlTables = Object.freeze([
 	"kernel_writer",
+	"store_identity",
 	"mutation_batches",
 	"outbox",
 	"idempotency",

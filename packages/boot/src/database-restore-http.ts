@@ -1,4 +1,5 @@
 import { bootRoute, checkBootOrigin } from "./boot-route.ts";
+import { isAppStoreIdentityError, appIdentityPolicy } from "./app-store-identity.ts";
 import { Effect, Schema } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { AuthError, type Auth, type AuthConfig } from "./auth.ts";
@@ -49,6 +50,20 @@ export const databaseRestoreResponse = (
 				const reason = cause.reasons.length === 1 ? cause.reasons[0] : undefined;
 				if (reason?._tag !== "Fail") return Effect.failCause(cause);
 				const error = reason.error;
+				if (isAppStoreIdentityError(error))
+					return Effect.succeed(
+						HttpServerResponse.jsonUnsafe(
+							{
+								error: {
+									code: error.code,
+									message: "App store identity could not be verified.",
+									hint: appIdentityPolicy.hint,
+									retriable: false,
+								},
+							},
+							{ status: 409, headers: { "cache-control": "no-store" } },
+						),
+					);
 				if (Schema.is(SourceRejected)(error) && error.code === "external_conflict")
 					return Effect.succeed(
 						HttpServerResponse.jsonUnsafe(
