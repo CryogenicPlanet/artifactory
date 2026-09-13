@@ -135,6 +135,7 @@ const make = (store: FileStore, dataDirectory: string) =>
 							yield* fs.remove(`${filename}${suffix}`, { force: true });
 						yield* fs.rename(temporary, filename);
 						yield* sync(path.dirname(filename));
+						return store;
 					}),
 				),
 		};
