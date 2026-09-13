@@ -36,6 +36,10 @@ export const streamHandlers = (api: typeof Api, extension: ExtensionApi) =>
 						...(query.agent === undefined ? {} : { agent: query.agent }),
 						...(query.instance === undefined ? {} : { instance: query.instance }),
 						...(query.level === undefined ? {} : { level: query.level }),
+						// A stream is one continuous wait, and a wait excludes the caller's own instance.
+						// Without this an agent that moves from the long-poll to SSE for latency inherits a
+						// feedback loop on its own writes.
+						excludeMessageInstance: ctx.instance,
 					};
 					const first = yield* ctx.events.query(input);
 					const pages = Stream.unfold(first, (page) =>

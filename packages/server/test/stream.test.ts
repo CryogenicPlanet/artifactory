@@ -167,8 +167,9 @@ it("replacement drains app event waits and closes SSE so clients resume on the n
 		})
 	).json();
 	expect(resumedPage).toMatchObject({ items: [{ seq: next.seq }], drained: false });
+	// A stream never echoes its own instance, so resume as the reader rather than the author.
 	const resumed = await tail(test, `${app.url}/api/stream?types=message.*&topic=reload-stream`, {
-		cookie,
+		...credentials,
 		"last-event-id": String(posted.seq),
 	});
 	await expect.poll(resumed.text).toContain("new app");
@@ -263,3 +264,30 @@ it("proxy closes app event waits on credential expiry, revocation and disconnect
 	expect(next.status).toBe(200);
 	expect((await next.json()).items).toHaveLength(1);
 }, 15000);
+
+it("keeps the caller's own message events off SSE, matching the message and event waits", async (test) => {
+	const fixture = await conversation(test),
+		app = await fixture.launch();
+	await app.setup();
+	const cookie = await app.login();
+	await app.ready(cookie);
+	const credentials = await token(fixture, "echo", 60000, '["read","write"]');
+	const stream = await tail(test, `${app.url}/api/stream?topic=echo&types=message.*`, credentials);
+	await expect.poll(stream.text).toContain(": heartbeat");
+	const own = await fetch(`${app.url}/api/messages`, {
+		method: "POST",
+		headers: { ...credentials, "content-type": "application/json" },
+		body: JSON.stringify({ topic: "echo", body: "my own write" }),
+	});
+	expect(own.status).toBe(200);
+	expect((await app.post("/api/messages", { topic: "echo", body: "another instance" }, cookie)).status).toBe(200);
+	await expect.poll(stream.text).toContain("another instance");
+	expect(stream.text()).not.toContain("my own write");
+	// The event long-poll already behaved this way; the two surfaces now agree.
+	const waited = await (
+		await fetch(`${app.url}/api/events?topic=echo&types=message.*&since=0&limit=50&wait=1`, { headers: credentials })
+	).json();
+	expect(waited.items.map((record: { payload: { body?: string } }) => record.payload.body)).not.toContain(
+		"my own write",
+	);
+}, 20000);
