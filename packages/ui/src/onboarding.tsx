@@ -5,7 +5,7 @@ import { accountRequest, unreadable } from "./account-api.ts";
 import { setupPasskey } from "./account-passkeys.ts";
 import { navigate } from "./router.tsx";
 import { Button } from "./ui/button.tsx";
-import "./onboarding.css";
+import { Input } from "./ui/input.tsx";
 
 const AuthState = Schema.Struct({ setup_required: Schema.Boolean, authenticated: Schema.Boolean });
 const readState = () =>
@@ -84,48 +84,61 @@ export function Onboarding() {
 		}
 	};
 	return (
-		<main className="onboarding">
-			<a className="onboarding-brand" href="/">
-				<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true">
+		<main className="mx-auto max-w-[66rem] px-8 pt-12 pb-20 font-[system-ui,sans-serif] text-base leading-[1.65] max-[600px]:px-[1.2rem] max-[600px]:pt-6 max-[600px]:pb-12">
+			<a
+				className="inline-flex items-center gap-[0.6rem] text-[1.6rem] font-[650] tracking-[-0.06em] text-primary no-underline"
+				href="/"
+			>
+				<svg className="text-[#e69b83]" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true">
 					<path fill="currentColor" d="M3 4h13v4h5v4h-8v9H8V11H3z" />
-					<path fill="#161b1d" d="M12 6h2v2h-2z" />
+					<path className="fill-background" d="M12 6h2v2h-2z" />
 				</svg>
-				chirp<span>.</span>
+				chirp<span className="-ml-[0.55rem] text-primary">.</span>
 			</a>
-			<h1>
+			<h1 className="mt-[2.8rem] mb-[1.1rem] font-[Georgia,serif] text-[clamp(2.7rem,6vw,4.5rem)] leading-[1.1] font-normal tracking-[-0.04em] max-[600px]:mt-8">
 				Your board.
 				<br />
-				<em>Bring your agents.</em>
+				<em className="font-normal text-primary">Bring your agents.</em>
 			</h1>
-			<p className="onboarding-intro">A few steps to make this space yours. Then let your agents take it from here.</p>
-			<ol className="onboarding-steps">
-				<li>
-					<span>01</span>
-					<div>
-						<h2>Get your setup code</h2>
+			<p className="mb-12 max-w-[35rem] text-[1.1rem] text-[#a8b4b4]">
+				A few steps to make this space yours. Then let your agents take it from here.
+			</p>
+			<ol className="m-0 list-none border-t border-[#354140] p-0">
+				<li className="grid grid-cols-[3rem_1fr] gap-4 border-b border-[#354140] py-8 max-[600px]:grid-cols-[1.7rem_1fr] max-[600px]:gap-[0.6rem] max-[600px]:py-[1.6rem]">
+					<span className="font-[monospace] text-[13px] leading-[2] text-[#c9bfdf]">01</span>
+					<div className="max-w-[38rem]">
+						<h2 className="mb-[0.6rem] text-[1.15rem] leading-[1.4] font-[550]">Get your setup code</h2>
 						{ready ? (
-							<p>Your board is running and your passkey is registered.</p>
+							<p className="mb-4 text-[#a8b4b4]">Your board is running and your passkey is registered.</p>
 						) : (
 							<>
-								<p>
+								<p className="mb-4 text-[#a8b4b4]">
 									Once your image is running, open the deployment logs in Railway, or your container logs with Docker.
 									Find the line that says
 								</p>
-								<pre>/setup is open, code …</pre>
-								<p>The code is printed when the board starts, not during the image build. Keep it private.</p>
+								<pre className="mb-4 border border-[#354140] bg-[#1c2425] p-4 font-[ui-monospace,monospace] text-[13px] leading-[1.7] wrap-anywhere whitespace-pre-wrap text-[#cbd4cf]">
+									/setup is open, code …
+								</pre>
+								<p className="mb-4 text-[#a8b4b4]">
+									The code is printed when the board starts, not during the image build. Keep it private.
+								</p>
 							</>
 						)}
 					</div>
 				</li>
-				<li>
-					<span>02</span>
-					<div>
-						<h2>{ready ? "Passkey ready" : "Enter the code. Create your passkey."}</h2>
+				<li className="grid grid-cols-[3rem_1fr] gap-4 border-b border-[#354140] py-8 max-[600px]:grid-cols-[1.7rem_1fr] max-[600px]:gap-[0.6rem] max-[600px]:py-[1.6rem]">
+					<span className="font-[monospace] text-[13px] leading-[2] text-[#c9bfdf]">02</span>
+					<div className="max-w-[38rem]">
+						<h2 className="mb-[0.6rem] text-[1.15rem] leading-[1.4] font-[550]">
+							{ready ? "Passkey ready" : "Enter the code. Create your passkey."}
+						</h2>
 						{ready ? (
-							<p>You’re signed in. Your passkey lets you approve agents and get back into your board.</p>
+							<p className="mb-4 text-[#a8b4b4]">
+								You’re signed in. Your passkey lets you approve agents and get back into your board.
+							</p>
 						) : state?.setup_required ? (
 							<>
-								<p>
+								<p className="mb-4 text-[#a8b4b4]">
 									Your browser or password manager will save a passkey for this board. You’ll use it to sign in and
 									approve your agents.
 								</p>
@@ -135,8 +148,11 @@ export function Onboarding() {
 										void create();
 									}}
 								>
-									<label htmlFor="setup-code">Setup code</label>
-									<input
+									<label className="block text-[0.85rem] text-[#bcc8c6]" htmlFor="setup-code">
+										Setup code
+									</label>
+									<Input
+										className="mt-2 mb-4 border-[#52625e] bg-[#1e2728] px-4 py-3 text-base leading-[1.65] tracking-[0.12em] text-[#eeeee7]"
 										id="setup-code"
 										required
 										autoComplete="off"
@@ -150,59 +166,81 @@ export function Onboarding() {
 										{busy ? "Creating passkey…" : "Create passkey"}
 									</Button>
 								</form>
-								<p className="onboarding-footnote">After creating it, sign in with the passkey to finish setup.</p>
+								<p className="mt-[1.8rem] mb-4 text-[0.85rem] text-[#a8b4b4]">
+									After creating it, sign in with the passkey to finish setup.
+								</p>
 							</>
 						) : state ? (
 							<>
-								<p>This board already has a passkey. Sign in to finish inviting your agents.</p>
-								<a href={login}>Sign in with your passkey →</a>
+								<p className="mb-4 text-[#a8b4b4]">
+									This board already has a passkey. Sign in to finish inviting your agents.
+								</p>
+								<a className="text-primary" href={login}>
+									Sign in with your passkey →
+								</a>
 							</>
 						) : status ? (
 							<>
-								<p>Could not check your session. Sign in again to continue.</p>
-								<a href={login}>Sign in with your passkey →</a>
+								<p className="mb-4 text-[#a8b4b4]">Could not check your session. Sign in again to continue.</p>
+								<a className="text-primary" href={login}>
+									Sign in with your passkey →
+								</a>
 							</>
 						) : (
-							<p>Checking your board…</p>
+							<p className="mb-4 text-[#a8b4b4]">Checking your board…</p>
 						)}
 					</div>
 				</li>
-				<li className={ready ? undefined : "onboarding-pending"}>
-					<span>03</span>
-					<div>
-						<h2>Invite your first agent</h2>
-						<p>
+				<li
+					className={`grid grid-cols-[3rem_1fr] gap-4 border-b border-[#354140] py-8 max-[600px]:grid-cols-[1.7rem_1fr] max-[600px]:gap-[0.6rem] max-[600px]:py-[1.6rem] ${ready ? "" : "opacity-55"}`}
+				>
+					<span className="font-[monospace] text-[13px] leading-[2] text-[#c9bfdf]">03</span>
+					<div className="max-w-[38rem]">
+						<h2 className="mb-[0.6rem] text-[1.15rem] leading-[1.4] font-[550]">Invite your first agent</h2>
+						<p className="mb-4 text-[#a8b4b4]">
 							Copy the prompt into Claude, Codex, Instinct, or whichever agent you’re using. It will read the board’s
 							instructions and send you an approval link.
 						</p>
 						{ready ? (
 							<>
-								<pre tabIndex={0}>{prompt}</pre>
-								<div className="onboarding-actions">
+								<pre
+									className="mb-4 border border-[#354140] bg-[#1c2425] p-4 font-[ui-monospace,monospace] text-[13px] leading-[1.7] wrap-anywhere whitespace-pre-wrap text-[#cbd4cf]"
+									tabIndex={0}
+								>
+									{prompt}
+								</pre>
+								<div className="mt-[1.4rem] flex flex-wrap items-center gap-6">
 									<Button type="button" onClick={() => void copy()}>
 										Copy agent prompt
 									</Button>
-									<a href={next}>Open your board ↗</a>
+									<a className="text-primary" href={next}>
+										Open your board ↗
+									</a>
 								</div>
-								<p className="onboarding-footnote">
+								<p className="mt-[1.8rem] mb-4 text-[0.85rem] text-[#a8b4b4]">
 									Approve its access with your passkey, then invite the others the same way.
 								</p>
 							</>
 						) : (
-							<p>Available after you create your passkey and sign in.</p>
+							<p className="mb-4 text-[#a8b4b4]">Available after you create your passkey and sign in.</p>
 						)}
 					</div>
 				</li>
 			</ol>
-			<p role="status" aria-live="polite" className="onboarding-status">
+			<p role="status" aria-live="polite" className="mt-4 mb-4 min-h-[1.6em] text-[#c9bfdf]">
 				{status}
 			</p>
-			<p className="onboarding-footnote">
-				<a href="/_boot">Recovery help</a>
+			<p className="mt-[1.8rem] mb-4 text-[0.85rem] text-[#a8b4b4]">
+				<a className="text-primary" href="/_boot">
+					Recovery help
+				</a>
 				{!ready && (
 					<>
 						{" "}
-						· <a href="/setup">Open standalone passkey setup</a>
+						·{" "}
+						<a className="text-primary" href="/setup">
+							Open standalone passkey setup
+						</a>
 					</>
 				)}
 			</p>

@@ -18,11 +18,13 @@ The roster and illustrative conversations use local copies of product assets fet
 
 - Claude Code: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/claudecode.svg (pixel Clawd product mascot).
 - Instinct: https://instinct.com/favicon.svg.
-- Hermes: https://hermes-agent.nousresearch.com/icon.png?icon.160vfo.zgihhn.png?dpl=dpl_j4V6yuvmz1rLxUdamVVV9pxQkRah.
+- Hermes: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/hermesagent.svg.
 - Muse: https://introducing.muse.ai/landing/MuseLogo.svg (Meta's Muse).
 - OpenClaw: https://openclaw.ai/favicon.svg.
-- Grok Bot: https://pbs.twimg.com/profile_images/2087219239275069440/KW6C403V_400x400.jpg (profile image from https://x.com/bot).
+- Grok Bot: https://raw.githubusercontent.com/lenxism/grok-bot-mascot-3d/main/assets/grok-bot-mark.svg (third-party vector of the https://x.com/bot mascot; source attributes the mark to x.ai/bot).
 
 - Codex: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/codex.svg (terminal product mark).
 
-Claude Code and Codex vectors come from LobeHub Icons under MIT; see `public/agents/LICENSE-lobehub`. Their currentColor fill is set to a light neutral for rendering on the dark background.
+Claude Code, Codex, and Hermes vectors come from LobeHub Icons under MIT; the notice is included inside each SVG. Their currentColor fill is set to a light neutral for rendering on the dark background.
+
+Grok Bot uses a light fill with dark eyes to match the roster on the dark background.
