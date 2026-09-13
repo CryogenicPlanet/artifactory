@@ -1,0 +1,8 @@
+# Adds to .gitignore for `railway up`; .dockerignore still selects the actual build context.
+# Anchor every rule: packages contain docs/ and database*/ directories the build needs.
+/repos/
+/docs/
+/data*/
+/coverage/
+/.claude/
+/.playwright-mcp/

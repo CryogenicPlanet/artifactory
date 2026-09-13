@@ -1,0 +1,13 @@
+"$schema" = "https://railway.com/railway.schema.json"
+
+# One chirp instance. Railway cannot declare volumes or variables here:
+# the /data volume, database URLs, RP_ID and PUBLIC_ORIGIN are set through the CLI (docs/deploy.md#railway).
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# No healthcheckPath: chirp exposes no unauthenticated health route, and the image's entrypoint must stay in charge.
+# ON_FAILURE retries startup refusals such as remote_writer_busy without looping a clean exit.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

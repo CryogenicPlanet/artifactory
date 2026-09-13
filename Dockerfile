@@ -56,6 +56,6 @@ RUN chmod 0755 /opt/comms/deployment/entrypoint /opt/comms/deployment/child-keep
     && visudo --check
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 DATA_DIR=/data COMMS_ISOLATED=true
 USER 0:0
-VOLUME ["/data"]
+# No VOLUME instruction: mount /data explicitly (docker run --volume, Railway volume). Railway rejects VOLUME.
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/comms/deployment/entrypoint"]

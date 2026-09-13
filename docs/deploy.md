@@ -125,7 +125,7 @@ checks catch unsupported changes; this is not a database-enforced sandbox. Use I
 | --- | --- |
 | `DATABASE_URL` | App login and database, `postgres://` or `mysql://` |
 | `BOOT_DATABASE_URL` | Boot login and database, same engine, host and port |
-| `DATABASE_TLS` | `true` by default. `false` only for a deliberately private test connection |
+| `DATABASE_TLS` | `true` by default. `false` only for a deliberately private connection, such as [Railway's private network](#railway) |
 
 Percent-encode credentials and names. Query parameters and fragments are unsupported. Both
 URLs must be set together. Verified TLS needs a trusted certificate and a matching
@@ -197,3 +197,80 @@ is yours; chirp does not coordinate provider snapshots.
 
 Take a snapshot before a risky migration, and accept the downtime that repairing one
 costs.
+
+## Railway
+
+The repository's `railway.toml` builds this Dockerfile and restarts it on failure. That
+file cannot declare volumes or variables, so create those with the Railway CLI. The image
+has no `VOLUME` instruction because Railway refuses to build one. Railway has deprecated
+`railway.toml` in favour of `.railway/railway.ts`; the file keeps working until 2026-12-01.
+
+```sh
+railway init --name chirp
+railway add --database postgres
+railway add --service chirp
+railway service link chirp
+railway volume add --mount-path /data
+railway domain --service chirp --port 8080
+```
+
+Decide the domain before the first setup. The passkey is bound to `RP_ID`, so moving from
+the generated `*.up.railway.app` address to a custom domain later means creating passkeys
+again.
+
+### Creating the databases
+
+Railway's Postgres comes with one superuser, one database and no public endpoint. Open a
+temporary TCP proxy, run the [PostgreSQL statements](#postgresql-17) as that superuser with
+`sslmode=require`, then remove the proxy:
+
+```sh
+railway tcp-proxy create --port 5432 --service Postgres
+railway tcp-proxy delete <proxy-id> --service Postgres --yes
+```
+
+The superuser's credentials are the `PGUSER` and `PGPASSWORD` variables on the Postgres
+service. `railway connect Postgres` works instead of the proxy if you have an SSH key
+registered with Railway. Generate passwords with `openssl rand -hex 32` so the URLs need no
+percent-encoding.
+
+### Variables
+
+Set every variable before the first deploy. A deploy without the database URLs initializes
+SQLite on the volume, and setting the URLs afterwards does not move that board.
+
+```sh
+railway variable set PORT=8080 --service chirp --skip-deploys
+railway variable set RP_ID=<domain> --service chirp --skip-deploys
+railway variable set PUBLIC_ORIGIN=https://<domain> --service chirp --skip-deploys
+railway variable set DATABASE_TLS=false --service chirp --skip-deploys
+printf 'postgres://chirp_app:%s@postgres.railway.internal:5432/chirp_app' "$APP_PASSWORD" |
+  railway variable set DATABASE_URL --stdin --service chirp --skip-deploys
+printf 'postgres://chirp_boot:%s@postgres.railway.internal:5432/chirp_boot' "$BOOT_PASSWORD" |
+  railway variable set BOOT_DATABASE_URL --stdin --service chirp --skip-deploys
+```
+
+Piping the URLs through stdin keeps the passwords out of shell history and process lists.
+
+`DATABASE_TLS=false` is deliberate here, and acceptable only because the connection stays
+on Railway's private network. Railway's Postgres signs its certificate with a certificate
+authority generated per instance, which no image trust store holds, and the keepers start
+editable code with an empty environment, so no extra-CA setting would reach the app. For
+verified TLS, use a provider whose certificate is publicly trusted.
+
+### Deploying
+
+```sh
+railway up --service chirp
+railway logs --service chirp
+```
+
+The logs print the setup code. `.railwayignore` keeps reference repositories and local data
+out of the upload. Anchor any rule you add to the repository root, as in `/docs/`: an
+unanchored `docs/` also strips `packages/*/docs`, which the image build copies.
+
+Keep one replica. Railway forbids replicas on a service with a volume, and chirp supports
+one writer. A redeploy stops the old deployment before starting the new one, so expect a
+short outage while the old writer's connection closes and releases its lock. Railway's
+Postgres backups are your backups, with the limits described in
+[what recovery promises](#what-recovery-promises-on-a-remote-engine).

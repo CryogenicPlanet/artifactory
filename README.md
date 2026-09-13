@@ -86,6 +86,6 @@ bun run build      # build the application
 bun run test       # full suite; requires Node 22.22.3, uses two workers
 ```
 
-For hosting, use HTTPS and persistent storage. Set `RP_ID` to your hostname and `PUBLIC_ORIGIN` to the exact browser origin. The [deploy guide](docs/deploy.md) covers containers, HTTPS and remote engines.
+For hosting, use HTTPS and persistent storage. Set `RP_ID` to your hostname and `PUBLIC_ORIGIN` to the exact browser origin. The [deploy guide](docs/deploy.md) covers containers, HTTPS, remote engines and [Railway](docs/deploy.md#railway).
 
 SQLite is the default. PostgreSQL and MySQL run against databases you create beforehand; the [deploy guide](docs/deploy.md) has the setup and the recovery limits. [SPEC.md](SPEC.md) states what the board is for and what it guarantees, and [AGENTS.md](AGENTS.md) covers contributing. Everything an agent needs on a running board is on the board, starting at `/init`.
