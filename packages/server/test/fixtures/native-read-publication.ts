@@ -2,9 +2,10 @@ import { strict as assert } from "node:assert";
 import { BunServices } from "@effect/platform-bun";
 import { readTransaction, on } from "@comms/storage/dialect";
 import { parseDescriptor } from "@comms/storage/store";
-import { Context, Crypto, Deferred, Effect, Fiber, FileSystem, Layer, Ref, Schema } from "effect";
+import { Context, Crypto, Deferred, Effect, Fiber, FileSystem, Layer, Redacted, Ref, Schema } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
 import { SqlClient } from "effect/unstable/sql";
+import { directClientLayer } from "@comms/storage/remote-client";
 import { testStore } from "./test-store.ts";
 import { initializeBootSchema } from "../../../boot/src/boot-schema.ts";
 import { Events, layer as eventsLayer } from "../../../boot/src/events.ts";
@@ -55,6 +56,20 @@ async function main() {
 		url.username = config.username;
 		url.password = config.password;
 		const store = yield* parseDescriptor(url.href);
+		const readerSql = Context.get(
+			yield* Layer.build(
+				directClientLayer({
+					connection: {
+						...config,
+						engine,
+						database: "comms_snapshot_app",
+						password: Redacted.make(config.password),
+						tls: false,
+					},
+				}),
+			),
+			SqlClient.SqlClient,
+		);
 		const epoch = "a".repeat(64);
 		phase = "boot schema";
 		yield* initializeBootSchema.pipe(Effect.provideService(SqlClient.SqlClient, bootSql));
@@ -122,37 +137,41 @@ async function main() {
 				Effect.forkScoped,
 			);
 			phase = "snapshot";
-			const readImage = (ceiling: number) =>
-				sql`SELECT body FROM (${publishedMessages(sql, ceiling)}) visible WHERE id=${initial.id}`.pipe(
+			const readImage = (ceiling: number, reader = sql) =>
+				reader`SELECT body FROM (${publishedMessages(reader, ceiling)}) visible WHERE id=${initial.id}`.pipe(
 					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ body: Schema.String })))),
 				);
-			// First prove the storage snapshot directly while append is pending. The following
+			// An independent reader proves the engine snapshot while the writing session publishes. The following
 			// phase exercises ordinary Publication.read admission and cleanup separately.
 			yield* readTransaction(
-				sql,
+				readerSql,
 				Effect.gen(function* () {
-					yield* sql`SELECT epoch FROM kernel_writer`;
+					yield* readerSql`SELECT epoch FROM kernel_writer`;
 					const ceiling = (yield* channel.fence).published_through;
 					assert.equal(ceiling, firstFence);
-					assert.deepEqual(yield* sql`SELECT body FROM messages WHERE id=${initial.id}`, [{ body: "published-one" }]);
-					assert.deepEqual(yield* readImage(ceiling), [{ body: "published-zero" }]);
-					const session = yield* on(sql, {
-						sqlite: () => sql`SELECT 0 AS id`,
-						pg: () => sql`SELECT pg_backend_pid() AS id`,
-						mysql: () => sql`SELECT CONNECTION_ID() AS id`,
+					assert.deepEqual(yield* readerSql`SELECT body FROM messages WHERE id=${initial.id}`, [
+						{ body: "published-one" },
+					]);
+					assert.deepEqual(yield* readImage(ceiling, readerSql), [{ body: "published-zero" }]);
+					const session = yield* on(readerSql, {
+						sqlite: () => readerSql`SELECT 0 AS id`,
+						pg: () => readerSql`SELECT pg_backend_pid() AS id`,
+						mysql: () => readerSql`SELECT CONNECTION_ID() AS id`,
 					});
 					yield* Deferred.succeed(release, undefined);
 					yield* Fiber.join(first);
 					yield* Deferred.succeed(startSecond, undefined);
 					yield* Fiber.join(second);
 					assert((yield* channel.fence).published_through > ceiling);
-					assert.deepEqual(yield* readImage(ceiling), [{ body: "published-zero" }]);
-					assert.deepEqual(yield* sql`SELECT body FROM messages WHERE id=${initial.id}`, [{ body: "published-one" }]);
+					assert.deepEqual(yield* readImage(ceiling, readerSql), [{ body: "published-zero" }]);
+					assert.deepEqual(yield* readerSql`SELECT body FROM messages WHERE id=${initial.id}`, [
+						{ body: "published-one" },
+					]);
 					assert.deepEqual(
-						yield* on(sql, {
-							sqlite: () => sql`SELECT 0 AS id`,
-							pg: () => sql`SELECT pg_backend_pid() AS id`,
-							mysql: () => sql`SELECT CONNECTION_ID() AS id`,
+						yield* on(readerSql, {
+							sqlite: () => readerSql`SELECT 0 AS id`,
+							pg: () => readerSql`SELECT pg_backend_pid() AS id`,
+							mysql: () => readerSql`SELECT CONNECTION_ID() AS id`,
 						}),
 						session,
 					);
@@ -170,8 +189,6 @@ async function main() {
 			);
 			phase = "ordinary remote read concurrency";
 			const reading = yield* Deferred.make<void>();
-			const written = yield* Deferred.make<void>();
-			const checked = yield* Deferred.make<void>();
 			const finishRead = yield* Deferred.make<void>();
 			const cleaningRead = yield* Deferred.make<void>();
 			const finishCleanup = yield* Deferred.make<void>();
@@ -182,7 +199,6 @@ async function main() {
 						assert.equal(ceiling, visibleBefore);
 						assert.deepEqual(yield* readImage(ceiling), [{ body: "published-two" }]);
 						yield* Deferred.succeed(reading, undefined);
-						yield* Deferred.await(written);
 						assert.deepEqual(
 							yield* publication.read((nested) => {
 								assert.equal(nested, ceiling);
@@ -190,7 +206,6 @@ async function main() {
 							}),
 							[{ body: "published-two" }],
 						);
-						yield* Deferred.succeed(checked, undefined);
 						yield* Deferred.await(finishRead);
 					}).pipe(
 						Effect.onExit((exit) =>
@@ -203,10 +218,15 @@ async function main() {
 				.pipe(Effect.forkScoped);
 			yield* Effect.gen(function* () {
 				yield* Deferred.await(reading).pipe(Effect.raceFirst(Fiber.join(reader)));
-				yield* messages.update(who, initial.id, { body: "published-three" });
-				yield* messages.update(who, initial.id, { body: "published-four" });
-				yield* Deferred.succeed(written, undefined);
-				yield* Deferred.await(checked).pipe(Effect.raceFirst(Fiber.join(reader)));
+				const writerStarted = yield* Deferred.make<void>();
+				const writer = yield* Deferred.succeed(writerStarted, undefined).pipe(
+					Effect.andThen(messages.update(who, initial.id, { body: "published-three" })),
+					Effect.andThen(messages.update(who, initial.id, { body: "published-four" })),
+					Effect.forkScoped,
+				);
+				yield* Deferred.await(writerStarted);
+				yield* Effect.yieldNow;
+				assert.equal(writer.pollUnsafe(), undefined, "Writer must wait for the pinned reader session");
 				const waiting = yield* Deferred.make<void>();
 				const quiescing = yield* Deferred.succeed(waiting, undefined).pipe(
 					Effect.andThen(publication.quiesce),
@@ -218,11 +238,12 @@ async function main() {
 				yield* Deferred.succeed(finishRead, undefined);
 				yield* Deferred.await(cleaningRead);
 				assert.equal(quiescing.pollUnsafe(), undefined);
+				assert.equal(writer.pollUnsafe(), undefined, "Read cleanup still owns the writing session");
 				yield* Deferred.succeed(finishCleanup, undefined);
 				yield* Fiber.join(reader);
 				yield* Fiber.join(quiescing);
+				yield* Fiber.join(writer);
 			}).pipe(
-				Effect.ensuring(Deferred.succeed(written, undefined)),
 				Effect.ensuring(Deferred.succeed(finishRead, undefined)),
 				Effect.ensuring(Deferred.succeed(finishCleanup, undefined)),
 			);
