@@ -366,7 +366,7 @@ export const editRoute = (
 				return HttpServerResponse.uint8Array(image.content, {
 					headers: {
 						"content-type": "application/octet-stream",
-						"x-comms-base-version": image.sha ?? "",
+						"x-chirp-base-version": image.sha ?? "",
 						etag: `"${image.sha}"`,
 						"cache-control": "no-store",
 					},

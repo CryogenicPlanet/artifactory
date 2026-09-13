@@ -122,7 +122,7 @@ it.skipIf(!mysqlBin).for(["dump", "parent-eof", "late-backend", "prepared-xa", "
 			request.on("end", () => {
 				admitted =
 					request.url === "/root" &&
-					request.headers["x-comms-guardian-secret"] === "c".repeat(64) &&
+					request.headers["x-chirp-guardian-secret"] === "c".repeat(64) &&
 					body === JSON.stringify({ action: "admit-owner", attempt: id });
 				response.writeHead(admitted ? 204 : 403).end();
 			});

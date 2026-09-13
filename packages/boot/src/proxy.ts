@@ -50,7 +50,7 @@ POST /_boot/tokens mints a pair with a human session and fresh token.mint assert
 GET /_boot/auth/passkeys lists keys; passkey.add and passkey.delete assertions authorize key changes.
 POST /_boot/tokens/:family/revoke requires a human session and fresh token.revoke passkey assertion.
 POST /api/lock acquires the editor; GET/PUT/DELETE /api/fs/app/<path> reads or stages source.
-Save X-Comms-Base-Version from GET; PUT ?reload=0&baseVersion=<token> stages raw bytes.
+Save X-Chirp-Base-Version from GET; PUT ?reload=0&baseVersion=<token> stages raw bytes.
 Use baseVersion=null only for an absent file. POST /api/reload rehearses and cuts over. Failed edits retain the repair lock.
 POST /api/reload?release=1 releases the lock after a successful edit.
 POST /api/revert {} undoes the latest app batch; {path}, {batch}, or {version} selects retained source history.
@@ -202,7 +202,7 @@ export const proxy = Effect.gen(function* () {
 					return yield* new AuthError({ code: "origin_invalid" });
 				const expires = (response: HttpServerResponse.HttpServerResponse) =>
 					identity
-						? HttpServerResponse.setHeader(response, "x-comms-token-expires", String(identity.expiresAt))
+						? HttpServerResponse.setHeader(response, "x-chirp-token-expires", String(identity.expiresAt))
 						: response;
 				if (identity) {
 					const edited = yield* editRoute(
@@ -337,7 +337,7 @@ export const proxy = Effect.gen(function* () {
 						([name]) =>
 							!hopHeaders.includes(name) &&
 							!connectionHeaders.has(name) &&
-							!name.startsWith("x-comms-") &&
+							!name.startsWith("x-chirp-") &&
 							!name.startsWith("x-forwarded-") &&
 							![
 								"host",
@@ -358,21 +358,21 @@ export const proxy = Effect.gen(function* () {
 					{
 						headers: {
 							...headers,
-							...(request.headers["x-comms-init"] && /^[a-f0-9]{64}$/.test(request.headers["x-comms-init"])
-								? { "x-comms-init": request.headers["x-comms-init"] }
+							...(request.headers["x-chirp-init"] && /^[a-f0-9]{64}$/.test(request.headers["x-chirp-init"])
+								? { "x-chirp-init": request.headers["x-chirp-init"] }
 								: {}),
-							...(publicPage !== null && !identity ? { "x-comms-public-page": publicPage } : {}),
+							...(publicPage !== null && !identity ? { "x-chirp-public-page": publicPage } : {}),
 							"x-boot-secret": destination.secret,
-							"x-comms-request-id": requestId,
-							...(observed ? { "x-comms-traceparent": observed.trace } : {}),
+							"x-chirp-request-id": requestId,
+							...(observed ? { "x-chirp-traceparent": observed.trace } : {}),
 							...(identity
 								? {
-										"x-comms-agent": identity.agent,
-										"x-comms-auth-kind": identity.kind,
-										"x-comms-instance": identity.id,
-										"x-comms-scopes": identity.scopes.join(","),
-										"x-comms-label": identity.label,
-										"x-comms-token-expires": String(identity.expiresAt),
+										"x-chirp-agent": identity.agent,
+										"x-chirp-auth-kind": identity.kind,
+										"x-chirp-instance": identity.id,
+										"x-chirp-scopes": identity.scopes.join(","),
+										"x-chirp-label": identity.label,
+										"x-chirp-token-expires": String(identity.expiresAt),
 									}
 								: {}),
 						},
@@ -405,7 +405,7 @@ export const proxy = Effect.gen(function* () {
 										!hopHeaders.includes(name) &&
 										!connection.has(name) &&
 										name !== "x-boot-secret" &&
-										(!name.startsWith("x-comms-") || ["x-comms-init-version", "x-comms-init-stale"].includes(name)) &&
+										(!name.startsWith("x-chirp-") || ["x-chirp-init-version", "x-chirp-init-stale"].includes(name)) &&
 										name !== "set-cookie",
 								),
 							);

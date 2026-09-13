@@ -40,7 +40,7 @@ it("keeps isolated restore admission armed after an invalid adoption diagnostic 
 		const proof = await isolated.signedAssertion("db.restore", { backup: backup.id }, cookie);
 		const response = await fetch(`${isolated.url}/_boot/db/restore`, {
 			method: "POST",
-			headers: { cookie, origin: "https://comms.test", "content-type": "application/json", "X-Comms-Assertion": proof },
+			headers: { cookie, origin: "https://comms.test", "content-type": "application/json", "X-Chirp-Assertion": proof },
 			body: JSON.stringify({ backup: backup.id }),
 		});
 		const body = await response.text();

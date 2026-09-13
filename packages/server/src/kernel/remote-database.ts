@@ -31,7 +31,7 @@ export const remoteOptions = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const response = yield* client.execute(
 						HttpClientRequest.post(`${url}/register`).pipe(
-							HttpClientRequest.setHeader("x-comms-guardian-secret", Redacted.value(secret)),
+							HttpClientRequest.setHeader("x-chirp-guardian-secret", Redacted.value(secret)),
 							HttpClientRequest.bodyJsonUnsafe(session),
 						),
 					);

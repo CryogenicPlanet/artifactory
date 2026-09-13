@@ -167,7 +167,7 @@ const run = Effect.gen(function* () {
 				{
 					cookie,
 					origin: "https://comms.test",
-					"x-comms-assertion": Buffer.from(JSON.stringify(proof)).toString("base64url"),
+					"x-chirp-assertion": Buffer.from(JSON.stringify(proof)).toString("base64url"),
 				},
 				params,
 			))?.status,
@@ -196,7 +196,7 @@ const run = Effect.gen(function* () {
 			headers: {
 				cookie: `${sessionCookie}=${session.token}`,
 				origin: "https://comms.test",
-				"x-comms-assertion": Buffer.from(JSON.stringify(proof)).toString("base64url"),
+				"x-chirp-assertion": Buffer.from(JSON.stringify(proof)).toString("base64url"),
 			},
 			body: stream,
 		});

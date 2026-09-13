@@ -54,7 +54,7 @@ export const admitRemoteOwner = (config: { readonly guardian: typeof RemoteRootC
 		const client = yield* HttpClient.HttpClient;
 		const response = yield* client.execute(
 			HttpClientRequest.post(`${config.guardian.url}/root`).pipe(
-				HttpClientRequest.setHeader("x-comms-guardian-secret", config.guardian.secret),
+				HttpClientRequest.setHeader("x-chirp-guardian-secret", config.guardian.secret),
 				HttpClientRequest.bodyJsonUnsafe({ action: "admit-owner", attempt }),
 			),
 		);

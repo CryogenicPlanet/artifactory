@@ -38,7 +38,7 @@ it("lists backup metadata with a human session and rejects every Authorization h
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": proof },
+				headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": proof },
 				body: JSON.stringify({ decision: params.decision, scopes: params.scopes, long_lived: false }),
 			})
 		).status,
@@ -68,7 +68,7 @@ it("lists backup metadata with a human session and rejects every Authorization h
 	expect(response.status).toBe(200);
 	expect(response.headers.get("cache-control")).toBe("no-store");
 	expect(response.headers.get("x-content-type-options")).toBe("nosniff");
-	expect(response.headers.get("x-comms-token-expires")).toMatch(/^\d+$/);
+	expect(response.headers.get("x-chirp-token-expires")).toMatch(/^\d+$/);
 	expect(await response.json()).toEqual({
 		items: [
 			{

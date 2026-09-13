@@ -154,7 +154,7 @@ const make = (directory: string, capabilities: CapabilityFactory, onWork: Effect
 						const request = yield* HttpServerRequest.HttpServerRequest;
 						const writable =
 							!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
-							(request.headers["x-comms-scopes"] ?? "").split(",").includes("write");
+							(request.headers["x-chirp-scopes"] ?? "").split(",").includes("write");
 						return {
 							...who,
 							...data(name, who, writable),
@@ -518,13 +518,13 @@ const make = (directory: string, capabilities: CapabilityFactory, onWork: Effect
 									route.extension,
 									who,
 									!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
-										(request.headers["x-comms-scopes"] ?? "").split(",").includes("write"),
+										(request.headers["x-chirp-scopes"] ?? "").split(",").includes("write"),
 								),
 								...capabilities(
 									route.extension,
 									who,
 									!["GET", "HEAD", "OPTIONS"].includes(request.method) &&
-										(request.headers["x-comms-scopes"] ?? "").split(",").includes("write"),
+										(request.headers["x-chirp-scopes"] ?? "").split(",").includes("write"),
 								),
 								db: sql,
 								publicationFence: publication.fence.pipe(Effect.provideService(Lifecycle, lifecycle)),

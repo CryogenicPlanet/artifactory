@@ -41,7 +41,7 @@ it.skipIf(!process.env.COMMS_REMOTE_SQL_READ_TEST_CONFIG)(
 		const guardian = createServer((request, response) => {
 			request.resume();
 			request.on("end", () => {
-				if (request.url !== "/register" || request.headers["x-comms-guardian-secret"] !== "b1".repeat(32)) {
+				if (request.url !== "/register" || request.headers["x-chirp-guardian-secret"] !== "b1".repeat(32)) {
 					response.writeHead(403).end();
 					return;
 				}

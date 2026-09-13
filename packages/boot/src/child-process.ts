@@ -39,8 +39,8 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch, 
 				);
 				if (
 					response.status === 200 &&
-					response.headers["x-comms-writer-epoch"] === options.env.WRITER_EPOCH &&
-					response.headers["x-comms-kernel-protocol"] === "2"
+					response.headers["x-chirp-writer-epoch"] === options.env.WRITER_EPOCH &&
+					response.headers["x-chirp-kernel-protocol"] === "2"
 				)
 					return yield* readRehearsalReport(response).pipe(
 						Effect.catchCause((cause) =>
@@ -49,7 +49,7 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch, 
 								: Effect.fail(new ChildError({ code: "health_failed" })),
 						),
 					);
-				if (response.headers["x-comms-health-ready"] === "1") return yield* new ChildError({ code: "health_failed" });
+				if (response.headers["x-chirp-health-ready"] === "1") return yield* new ChildError({ code: "health_failed" });
 				yield* Effect.sleep("20 millis");
 			}
 		});
@@ -58,8 +58,8 @@ export const launchChild = Effect.fn("launchChild")(function* (options: Launch, 
 			.pipe(
 				Effect.flatMap((response) =>
 					response.status === 200 &&
-					response.headers["x-comms-writer-epoch"] === options.env.WRITER_EPOCH &&
-					response.headers["x-comms-kernel-protocol"] === "2"
+					response.headers["x-chirp-writer-epoch"] === options.env.WRITER_EPOCH &&
+					response.headers["x-chirp-kernel-protocol"] === "2"
 						? Effect.void
 						: Effect.fail(new ChildError({ code: "child_unresponsive" })),
 				),

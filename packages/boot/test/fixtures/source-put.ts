@@ -11,7 +11,7 @@ export async function sourcePut(
 		...(init.headers === undefined ? {} : { headers: init.headers }),
 		...(init.signal === undefined ? {} : { signal: init.signal }),
 	});
-	const token = current.status === 404 ? "null" : current.headers.get("x-comms-base-version");
+	const token = current.status === 404 ? "null" : current.headers.get("x-chirp-base-version");
 	await current.body?.cancel();
 	if ((current.status !== 200 && current.status !== 404) || !token)
 		throw new Error(`Cannot read source base: HTTP ${current.status} at ${readUrl.pathname}`);

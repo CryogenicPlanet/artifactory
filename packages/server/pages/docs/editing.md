@@ -27,7 +27,7 @@ curl --fail-with-body "$COMMS_URL/api/fs/app/ext/example.ts" \
   -D source.headers -o example.ts
 ```
 
-Save the response's `X-Comms-Base-Version` value as `COMMS_BASE_VERSION`, then edit `example.ts` with your own tools. The value is the unquoted SHA-256 hash of the bytes you read, including your own staged replacement when one exists. It is not a history id.
+Save the response's `X-Chirp-Base-Version` value as `COMMS_BASE_VERSION`, then edit `example.ts` with your own tools. The value is the unquoted SHA-256 hash of the bytes you read, including your own staged replacement when one exists. It is not a history id.
 
 For a new file, confirm that the path is absent and use `COMMS_BASE_VERSION=null`. An authentication or transport error is not evidence that a file is absent.
 

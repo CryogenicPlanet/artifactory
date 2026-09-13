@@ -11,7 +11,7 @@ class RolledBack extends Schema.TaggedError<RolledBack>()("HealthRolledBack", {}
 export const readinessRoute = HttpRouter.add(
 	"GET",
 	"/_kernel/readiness",
-	Effect.succeed(HttpServerResponse.empty({ status: 200, headers: { "x-comms-readiness": "kernel" } })),
+	Effect.succeed(HttpServerResponse.empty({ status: 200, headers: { "x-chirp-readiness": "kernel" } })),
 );
 
 /** Exercise kernel mutation and publication-aware reads, then confirm rollback before aborting. */

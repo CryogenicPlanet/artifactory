@@ -369,7 +369,7 @@ async function run() {
 	)(
 		await (
 			await ok(
-				await request("/_boot/db/restore", { id: backup.id }, cookie, { "X-Comms-Assertion": proof }),
+				await request("/_boot/db/restore", { id: backup.id }, cookie, { "X-Chirp-Assertion": proof }),
 				"Native restore",
 			)
 		).json(),

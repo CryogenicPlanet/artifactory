@@ -75,7 +75,7 @@ export default Effect.gen(function* () {
 		JSON.stringify({ id: challenge.id, response: fixture.assertion(challenge.options.challenge) }),
 	).toString("base64url");
 	const response = await running.post("/_boot/db/restore", { id: fixture.backup }, cookie, {
-		"X-Comms-Assertion": proof,
+		"X-Chirp-Assertion": proof,
 	});
 	await writeFile(join(fixture.root, "restore-forward-response.json"), await response.clone().text(), { mode: 0o600 });
 	expect(response.status).toBe(409);

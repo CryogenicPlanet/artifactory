@@ -53,7 +53,7 @@ export const accountPost = (path: string, body: unknown, proof?: string, key?: s
 		HttpClientRequest.post(new URL(path, window.location.origin).href).pipe(
 			HttpClientRequest.bodyJsonUnsafe(body),
 			HttpClientRequest.setHeaders({
-				...(proof ? { "x-comms-assertion": proof } : {}),
+				...(proof ? { "x-chirp-assertion": proof } : {}),
 				...(key ? { "Idempotency-Key": key } : {}),
 			}),
 		),

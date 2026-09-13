@@ -44,11 +44,11 @@ const page = Effect.gen(function* () {
 		try: () => decodeURIComponent(url.pathname.slice("/p".length).replace(/^\//, "").replace(/\/$/, "")),
 		catch: () => new PageRejected({ code: "page_path_invalid" }),
 	});
-	const publicPage = yield* Effect.try(() => decodeURIComponent(request.headers["x-comms-public-page"] ?? "")).pipe(
+	const publicPage = yield* Effect.try(() => decodeURIComponent(request.headers["x-chirp-public-page"] ?? "")).pipe(
 		Effect.orElseSucceed(() => null),
 	);
 	const anonymous =
-		request.headers["x-comms-public-page"] !== undefined &&
+		request.headers["x-chirp-public-page"] !== undefined &&
 		publicPage === name &&
 		(request.method === "GET" || request.method === "HEAD");
 	if (!anonymous) yield* identity("read");

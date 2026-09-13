@@ -35,7 +35,7 @@ export const remoteRuntime = (
 				Effect.gen(function* () {
 					const response = yield* client.execute(
 						HttpClientRequest.post(`${guardian.url}/root`).pipe(
-							HttpClientRequest.setHeader("x-comms-guardian-secret", guardian.secret),
+							HttpClientRequest.setHeader("x-chirp-guardian-secret", guardian.secret),
 							HttpClientRequest.bodyJsonUnsafe(body),
 						),
 					);

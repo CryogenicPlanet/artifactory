@@ -122,7 +122,7 @@ it.for([insertCutover, insertRestore, insertSource] as const)(
 					cookie,
 					origin: "https://comms.test",
 					"content-type": "application/json",
-					"x-comms-assertion": proof,
+					"x-chirp-assertion": proof,
 				},
 				body: JSON.stringify({ backup }),
 			});

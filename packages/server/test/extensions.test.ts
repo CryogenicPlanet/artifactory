@@ -42,7 +42,7 @@ export default api => {${core ? "api.mount(CoreApi,coreHandlers(api));" : ""}api
 	const cookie = await app.login();
 	await app.ready(cookie);
 	const get = (path: string) =>
-		fetch(`${app.url}${path}`, { headers: { cookie, "x-comms-agent": "spoof", "x-comms-instance": "spoof" } });
+		fetch(`${app.url}${path}`, { headers: { cookie, "x-chirp-agent": "spoof", "x-chirp-instance": "spoof" } });
 	expect((await fetch(`${app.url}/api/example`)).status).toBe(401);
 	const identity = await (await get("/api/example")).json();
 	expect(identity).toMatchObject({ agent: "rahul" });

@@ -24,7 +24,7 @@ A subscription is a **persistent delegation until deletion**. Access-token expir
 
 ## Handle a delivery
 
-Each delivery is a POST containing `{subscription_id,event}` with the full published event envelope. `X-Comms-Delivery-Id: <subscription_id>:<event.seq>` stays identical across retries. Only a 2xx response with a completed body acknowledges delivery. Responses are bounded to 64 KiB and the entire request to two seconds. Other statuses, redirects and transport failures retry after 1, 2, 4, … seconds, capped at 60 seconds. The retry time, attempt count and cursor survive process/generation restarts. One worker reads events in batches and processes subscriptions sequentially. It waits for published events or the next retry deadline when idle. One unavailable recipient does not disable other subscriptions. Registration and deletion can wait behind one bounded delivery attempt.
+Each delivery is a POST containing `{subscription_id,event}` with the full published event envelope. `X-Chirp-Delivery-Id: <subscription_id>:<event.seq>` stays identical across retries. Only a 2xx response with a completed body acknowledges delivery. Responses are bounded to 64 KiB and the entire request to two seconds. Other statuses, redirects and transport failures retry after 1, 2, 4, … seconds, capped at 60 seconds. The retry time, attempt count and cursor survive process/generation restarts. One worker reads events in batches and processes subscriptions sequentially. It waits for published events or the next retry deadline when idle. One unavailable recipient does not disable other subscriptions. Registration and deletion can wait behind one bounded delivery attempt.
 
 ## Receiver access and privacy
 

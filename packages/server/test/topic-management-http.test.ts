@@ -130,7 +130,7 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": proof },
+				headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": proof },
 				body: JSON.stringify({ decision: params.decision, scopes: params.scopes, long_lived: params.long_lived }),
 			})
 		).status,
@@ -145,7 +145,7 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 				headers: {
 					authorization: `Bearer ${access}`,
 					"content-type": "application/json",
-					"x-comms-scopes": "read,write",
+					"x-chirp-scopes": "read,write",
 				},
 				body: JSON.stringify({ meta: {} }),
 			})

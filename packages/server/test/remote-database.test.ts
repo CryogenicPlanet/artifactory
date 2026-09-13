@@ -48,7 +48,7 @@ it.effect("accepts only a guardian 204 acknowledgement and sanitizes refusals", 
 		for (const status of [204, 200, 302, 403, 500]) {
 			const client = HttpClient.make((request, url) => {
 				expect(url.href).toBe("http://127.0.0.1:12345/register");
-				expect(request.headers["x-comms-guardian-secret"]).toBe("b".repeat(64));
+				expect(request.headers["x-chirp-guardian-secret"]).toBe("b".repeat(64));
 				expect(request.method).toBe("POST");
 				return Effect.succeed(
 					HttpClientResponse.fromWeb(request, new Response(status === 204 ? null : "private-response", { status })),

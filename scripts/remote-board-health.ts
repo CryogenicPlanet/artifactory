@@ -24,7 +24,7 @@ export const failedHealth = async (address: URL, origin: string, cookie: string,
 	const prior = await status();
 	assert.equal(prior.child.state, "live");
 	const sourceRead = await request("/api/fs/app/server.ts");
-	const baseVersion = sourceRead.headers.get("x-comms-base-version");
+	const baseVersion = sourceRead.headers.get("x-chirp-base-version");
 	assert.ok(baseVersion);
 	const source = await sourceRead.text();
 	const anchor = 'if (request.url === "/health" && request.method === "GET") return yield* health;';
@@ -40,7 +40,7 @@ const after = yield* sql\`SELECT id FROM messages WHERE topic = \${${JSON.string
 const fs = yield* FileSystem.FileSystem;
 const receiptDirectory = yield* Config.String("TMPDIR");
 yield* Effect.scoped(Effect.gen(function* () { const receipt = yield* fs.open(receiptDirectory + "/" + ${JSON.stringify(marker)}, {flag:"wx",mode:0o600}); yield* receipt.writeAll(new TextEncoder().encode(JSON.stringify({marker:${JSON.stringify(marker)},before:before.length,after:after.length}))); yield* receipt.sync; }));
-return HttpServerResponse.jsonUnsafe({status:"failed"},{status:503,headers:{"x-comms-health-ready":"1"}});
+return HttpServerResponse.jsonUnsafe({status:"failed"},{status:503,headers:{"x-chirp-health-ready":"1"}});
 } ${anchor}`,
 	);
 	await request("/api/lock", "POST", JSON.stringify({ note: "native candidate health failure acceptance" }));

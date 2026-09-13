@@ -43,7 +43,7 @@ it("serves human-only extension pages and preserves isolated scratch data and at
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrollment.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": assertion },
+				headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": assertion },
 				body: JSON.stringify({ decision: params.decision, scopes: params.scopes, long_lived: params.long_lived }),
 			})
 		).status,

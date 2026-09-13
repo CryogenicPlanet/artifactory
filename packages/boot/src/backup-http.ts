@@ -180,7 +180,7 @@ export const backupRoute = (
 					headers: {
 						"cache-control": "no-store",
 						"x-content-type-options": "nosniff",
-						"x-comms-token-expires": String(session.expiresAt),
+						"x-chirp-token-expires": String(session.expiresAt),
 					},
 				});
 			}),

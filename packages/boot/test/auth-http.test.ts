@@ -127,7 +127,7 @@ it("creates a passkey and a protected session, forwards verified identity, and l
 	const body = await session.response.text();
 	expect(body).not.toContain(token);
 	expect(body).not.toContain('"token"');
-	expect(session.response.headers.get("x-comms-token-expires")).toMatch(/^\d+$/);
+	expect(session.response.headers.get("x-chirp-token-expires")).toMatch(/^\d+$/);
 	expect((await app.post("/_boot/auth/login/verify", session.payload)).status).toBe(401);
 	const headers = { cookie: session.cookie };
 	await expect
@@ -140,11 +140,11 @@ it("creates a passkey and a protected session, forwards verified identity, and l
 	const response = await fetch(`${app.url}/echo`, {
 		headers: {
 			...headers,
-			"x-comms-agent": "forged",
-			"x-comms-assertion": "signed-sensitive-proof",
-			"x-comms-instance": "forged",
-			"x-comms-scopes": "admin",
-			"x-comms-request-id": "forged",
+			"x-chirp-agent": "forged",
+			"x-chirp-assertion": "signed-sensitive-proof",
+			"x-chirp-instance": "forged",
+			"x-chirp-scopes": "admin",
+			"x-chirp-request-id": "forged",
 		},
 	});
 	const echoed = await response.json();
@@ -160,7 +160,7 @@ it("creates a passkey and a protected session, forwards verified identity, and l
 	expect(echoed.instance).toBeTruthy();
 	expect(echoed.instance).not.toBe("forged");
 	expect(echoed.requestId).toMatch(/^[a-f0-9]{32}$/);
-	expect(response.headers.get("x-comms-token-expires")).toBe(session.response.headers.get("x-comms-token-expires"));
+	expect(response.headers.get("x-chirp-token-expires")).toBe(session.response.headers.get("x-chirp-token-expires"));
 	const again = await (await fetch(`${app.url}/echo`, { headers })).json();
 	expect(again.instance).toBe(echoed.instance);
 	expect(again.requestId).not.toBe(echoed.requestId);
@@ -170,7 +170,7 @@ it("creates a passkey and a protected session, forwards verified identity, and l
 	expect(
 		(
 			await fetch(`${app.url}/api/reload`, { method: "POST", headers: { ...headers, origin: "https://comms.test" } })
-		).headers.get("x-comms-token-expires"),
+		).headers.get("x-chirp-token-expires"),
 	).toBeTruthy();
 	const loggedOut = await app.post("/_boot/auth/logout", {}, session.cookie);
 	expect(loggedOut.status).toBe(204);
@@ -337,13 +337,13 @@ it("correlates auth request and response diagnostics without recording submitted
 		headers: {
 			origin: "https://comms.test",
 			"content-type": "application/json",
-			"x-comms-request-id": secret,
+			"x-chirp-request-id": secret,
 			cookie: secret,
 		},
 		body: JSON.stringify({ code: secret }),
 	});
 	expect(response.status).toBe(401);
-	const requestId = response.headers.get("x-comms-request-id");
+	const requestId = response.headers.get("x-chirp-request-id");
 	expect(requestId).toMatch(/^[a-f0-9]{32}$/);
 	expect(await response.json()).toMatchObject({ error: { code: "setup_code_invalid" } });
 	const diagnostics = () =>

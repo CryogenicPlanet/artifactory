@@ -243,7 +243,7 @@ it("hides deleted page ancestry at the published fence while retaining raw files
 	test.onTestFinished(() => controller.abort());
 	const current = await get("/api/fs/pages/gone/deep/readme.md");
 	expect(current.status).toBe(200);
-	const baseVersion = current.headers.get("x-comms-base-version");
+	const baseVersion = current.headers.get("x-chirp-base-version");
 	if (!baseVersion) throw Error("Missing source base version");
 	await current.arrayBuffer();
 	await fixture.hold();

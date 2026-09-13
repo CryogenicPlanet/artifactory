@@ -351,11 +351,11 @@ for (const scenario of scenarios)
 			).toString("base64url");
 			expect((await resumed.post("/_boot/db/restore", { id: backup.id }, cookie)).status).toBe(401);
 			const request = () =>
-				resumed.post("/_boot/db/restore", { id: backup.id }, cookie, { "X-Comms-Assertion": proof });
+				resumed.post("/_boot/db/restore", { id: backup.id }, cookie, { "X-Chirp-Assertion": proof });
 			const verifyRestored = async (running: typeof resumed, result?: unknown) => {
 				await running.state(cookie, "live");
 				const replay = await running.post("/_boot/db/restore", { id: backup.id }, cookie, {
-					"X-Comms-Assertion": proof,
+					"X-Chirp-Assertion": proof,
 				});
 				expect(replay.status).toBe(200);
 				const receipt: unknown = await replay.json();

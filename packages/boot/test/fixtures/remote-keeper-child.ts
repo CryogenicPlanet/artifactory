@@ -29,7 +29,7 @@ const program = Effect.gen(function* () {
 					method: "POST",
 					headers: {
 						"content-type": "application/json",
-						"x-comms-guardian-secret":
+						"x-chirp-guardian-secret":
 							process.env.MODE === "reject" ? "incorrect" : (process.env.REMOTE_GUARDIAN_SECRET ?? ""),
 					},
 					body: JSON.stringify(session),

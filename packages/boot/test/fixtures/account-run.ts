@@ -124,7 +124,7 @@ const run = Effect.gen(function* () {
 		for (const path of ["/_boot/enrollments", "/_boot/tokens"]) {
 			for (const headers of [
 				{},
-				{ "x-comms-auth-kind": "human", "x-comms-agent": "rahul" },
+				{ "x-chirp-auth-kind": "human", "x-chirp-agent": "rahul" },
 				{ authorization: `Bearer ${"a".repeat(43)}` },
 				{ cookie, authorization: `Bearer ${"a".repeat(43)}` },
 				{ cookie: `${cookie}; ${cookie}` },

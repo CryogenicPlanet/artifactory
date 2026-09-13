@@ -153,7 +153,7 @@ export const remoteRootGuardian = (configuration: Configuration, dataDirectory: 
 			);
 		const request = Effect.gen(function* () {
 			const req = yield* HttpServerRequest.HttpServerRequest;
-			const supplied = Buffer.from(req.headers["x-comms-guardian-secret"] ?? "");
+			const supplied = Buffer.from(req.headers["x-chirp-guardian-secret"] ?? "");
 			const expected = Buffer.from(secret);
 			if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected))
 				return HttpServerResponse.empty({ status: 403 });

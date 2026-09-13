@@ -7,7 +7,7 @@ const decode = (value: unknown, version = "1") =>
 	Effect.runPromise(
 		readRehearsalReport(
 			HttpServerResponse.toClientResponse(
-				HttpServerResponse.jsonUnsafe(value, { headers: { "x-comms-rehearsal-report": version } }),
+				HttpServerResponse.jsonUnsafe(value, { headers: { "x-chirp-rehearsal-report": version } }),
 			),
 		),
 	);

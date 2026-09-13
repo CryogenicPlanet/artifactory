@@ -88,7 +88,7 @@ it("refuses forged grants and broken projection while preserving reads during un
 		).toBe(200);
 	expect((await app.post("/api/messages", { topic: "guide", body: "private" }, cookie)).status).toBe(200);
 	const forged = encodeURIComponent("guide/normal.md");
-	expect((await fetch(app.url + "/p/guide/normal.md", { headers: { "x-comms-public-page": forged } })).status).toBe(
+	expect((await fetch(app.url + "/p/guide/normal.md", { headers: { "x-chirp-public-page": forged } })).status).toBe(
 		401,
 	);
 	await metadata("guide", { public: true });

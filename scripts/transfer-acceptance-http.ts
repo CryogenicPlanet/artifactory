@@ -275,7 +275,7 @@ async function run(diagnostic: { phase: string; stage: string; path: string; sta
 		} else if (phase === "verify-target") {
 			await json("/api/lock", { note: "post-transfer generation allocation" });
 			const sourceRead = await ok(await request(`/api/fs/${saved.sourcePath}`), "Target source base");
-			const baseVersion = sourceRead.headers.get("x-comms-base-version");
+			const baseVersion = sourceRead.headers.get("x-chirp-base-version");
 			assert(baseVersion && /^[a-f0-9]{64}$/.test(baseVersion), "Source version token missing");
 			await sourceRead.arrayBuffer();
 			const source = `${saved.source}// Post-transfer generation allocation\n`;

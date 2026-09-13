@@ -49,9 +49,9 @@ export const orientation = (markdownOnly: boolean, endpoints: OpenAPISpec["paths
 		const crypto = yield* Crypto.Crypto;
 		const version = Buffer.from(yield* crypto.digest("SHA-256", new TextEncoder().encode(source))).toString("hex");
 		let text = `${stable}\n\nVersion ${version}.\n`;
-		if (request.headers["x-comms-scopes"]?.split(",").includes("read")) {
+		if (request.headers["x-chirp-scopes"]?.split(",").includes("read")) {
 			const who = yield* identity("read");
-			text += `\nYou are <code>${escapeHtml(`${who.agent}@${who.label ?? ""}`)}</code>. Scopes: ${escapeHtml(request.headers["x-comms-scopes"] ?? "")}.\n`;
+			text += `\nYou are <code>${escapeHtml(`${who.agent}@${who.label ?? ""}`)}</code>. Scopes: ${escapeHtml(request.headers["x-chirp-scopes"] ?? "")}.\n`;
 		}
 		const html = !markdownOnly && (request.headers.accept ?? "").includes("text/html");
 		return HttpServerResponse.text(html ? pages.render(text, "init.md", { rawHref: "/init.md" }) : text, {
@@ -59,9 +59,9 @@ export const orientation = (markdownOnly: boolean, endpoints: OpenAPISpec["paths
 			headers: {
 				"cache-control": "no-store",
 				vary: "Accept, Authorization, Cookie",
-				"x-comms-init-version": version,
-				...(request.headers["x-comms-init"] && request.headers["x-comms-init"] !== version
-					? { "x-comms-init-stale": "1" }
+				"x-chirp-init-version": version,
+				...(request.headers["x-chirp-init"] && request.headers["x-chirp-init"] !== version
+					? { "x-chirp-init-stale": "1" }
 					: {}),
 			},
 		});

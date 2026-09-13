@@ -62,7 +62,7 @@ it("inspects physical committed rows with scoped read authority and documents th
 		(
 			await fetch(`${app.url}/_boot/enroll/${enrolled.id}/approve`, {
 				method: "POST",
-				headers: { origin: "https://comms.test", "content-type": "application/json", "x-comms-assertion": proof },
+				headers: { origin: "https://comms.test", "content-type": "application/json", "x-chirp-assertion": proof },
 				body: JSON.stringify({ decision: params.decision, scopes: params.scopes, long_lived: false }),
 			})
 		).status,
@@ -74,8 +74,8 @@ it("inspects physical committed rows with scoped read authority and documents th
 			headers: {
 				authorization: `Bearer ${pair.access}`,
 				"content-type": "application/json",
-				"x-comms-auth-kind": "human",
-				"x-comms-scopes": "read,write,fs",
+				"x-chirp-auth-kind": "human",
+				"x-chirp-scopes": "read,write,fs",
 			},
 			body: JSON.stringify({ sql }),
 		});

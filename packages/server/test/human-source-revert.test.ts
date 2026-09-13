@@ -163,7 +163,7 @@ it("refuses a foreign agent and wrong Origin without changing borrowed staging",
 			cookie: state.cookie,
 			origin: "https://comms.test",
 			"content-type": "application/json",
-			"x-comms-assertion": proof,
+			"x-chirp-assertion": proof,
 		},
 		body: JSON.stringify(params),
 	});

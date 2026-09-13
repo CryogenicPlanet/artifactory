@@ -80,7 +80,7 @@ export const remoteChildGuardian = (
 		const secret = Buffer.from(yield* (yield* Crypto.Crypto).randomBytes(32)).toString("hex");
 		const register = Effect.gen(function* () {
 			const request = yield* HttpServerRequest.HttpServerRequest;
-			const supplied = Buffer.from(request.headers["x-comms-guardian-secret"] ?? "");
+			const supplied = Buffer.from(request.headers["x-chirp-guardian-secret"] ?? "");
 			const expected = Buffer.from(secret);
 			if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected))
 				return HttpServerResponse.empty({ status: 403 });

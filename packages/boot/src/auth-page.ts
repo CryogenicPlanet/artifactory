@@ -27,7 +27,7 @@ export const authClient = `(() => {
   let response;
   try { response = await fetch(path, {method:"POST", redirect:"manual", headers:{"content-type":"application/json"}, body:JSON.stringify(body)}); }
   catch { throw new Error("The authentication request could not reach the board. Check your connection and sharing-service sign-in."); }
-  const id = response.headers.get("x-comms-request-id");
+  const id = response.headers.get("x-chirp-request-id");
   requestId = /^[a-f0-9]{32}$/.test(id || "") ? id : "";
   progress(step + " response", "Reading the authentication response…");
   if (response.type === "opaqueredirect" || response.redirected || (response.status >= 300 && response.status < 400))

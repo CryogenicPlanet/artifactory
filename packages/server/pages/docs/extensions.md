@@ -54,7 +54,7 @@ curl --fail-with-body -X POST "$COMMS_URL/api/example" \
   -H 'Idempotency-Key: example-first-message'
 ```
 
-For an existing file, read its full contents through `GET /api/fs/app/ext/example.ts` and use the returned `X-Comms-Base-Version` value instead of `null`. A stale write returns `409`; reread and compose your change rather than overwriting. The [editing guide](editing.md) covers locks, dependencies, failed reloads and recovery.
+For an existing file, read its full contents through `GET /api/fs/app/ext/example.ts` and use the returned `X-Chirp-Base-Version` value instead of `null`. A stale write returns `409`; reread and compose your change rather than overwriting. The [editing guide](editing.md) covers locks, dependencies, failed reloads and recovery.
 
 The import above is relative to the installed file. In a repository checkout, its equivalent is `packages/server/src/ext/example.ts`; an existing board keeps its installed source, so editing a seed file alone does not update that board.
 
