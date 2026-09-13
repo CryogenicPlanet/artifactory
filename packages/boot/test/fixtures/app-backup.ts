@@ -24,7 +24,8 @@ const main = Effect.gen(function* () {
 		}).pipe(Effect.provide(SqliteClient.layer({ filename, disableWAL: true }))),
 	);
 	yield* identity.complete(adoption);
-	const backup = yield* DbOps.pipe(Effect.provide(layer({ _tag: "file", filename }, root)));
+	const store = { _tag: "file", filename } as const;
+	const backup = yield* DbOps.pipe(Effect.provide(layer(store, root)));
 	if (process.argv[3] === "foreign") {
 		const errors: string[] = [];
 		const before = yield* identity.current;
@@ -58,7 +59,8 @@ const main = Effect.gen(function* () {
 			changed.close();
 		}
 		// Every independently opened handle is closed before the production restore helper replaces files.
-		yield* backup.restoreInto({ path: `${root}/backup.db`, legacy_store_id: null, engine: "sqlite" });
+		const selected = yield* backup.restoreInto({ path: `${root}/backup.db`, legacy_store_id: null, engine: "sqlite" });
+		assert.strictEqual(selected, store);
 		const restored = new Database(filename);
 		try {
 			return restored.query<{ value: string }, []>("SELECT value FROM records").all();

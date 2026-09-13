@@ -62,7 +62,7 @@ export const projectPublicPath = (sql: SqlClient, event: typeof EventRecord.Type
 			const value = yield* Schema.decodeUnknownEffect(Deletion)(event.payload);
 			if (value.path !== event.topic) return false;
 			yield* sql`DELETE FROM public_paths WHERE path=${value.path}
-				OR ${isDescendant(sql, sql`path`, sql`${value.path}`)}`;
+				OR substr(path,1,length(${value.path})+1)=${value.path}||'/'`;
 		}
 		return true;
 	});

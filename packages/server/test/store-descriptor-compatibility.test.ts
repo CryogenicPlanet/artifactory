@@ -1,5 +1,5 @@
 import { sourcePut } from "./fixtures/source-put.ts";
-import { cp, readFile, writeFile } from "node:fs/promises";
+import { cp, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
@@ -9,18 +9,9 @@ it("restarts a retained APP_DATABASE-only generation after a candidate corrupts 
 	const seed = join(fixture.root, "legacy-seed");
 	await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
 	const channelPath = join(seed, "kernel/boot-channel.ts");
-	const channel = await readFile(channelPath, "utf8");
-	// This saved generation has the pre-descriptor environment contract and opens
-	// real SQLite through the complete server, including migrations and writes.
-	const legacy = channel
-		.replace('import { childStore, parseDescriptor, StoreError } from "@comms/storage/store";\n', "")
-		.replace(
-			/\tconst descriptor = yield\* Config.Redacted\("APP_STORE"\)\.pipe\(Config.withDefault\(undefined\)\);[\s\S]*?\tconst filename = store._tag === "file" \? store.filename : null;/,
-			'\tconst filename = yield* Config.String("APP_DATABASE");\n\tconst store = { _tag: "file" as const, filename };',
-		);
-	expect(legacy).not.toContain("APP_STORE");
-	expect(legacy).not.toBe(channel);
-	await writeFile(channelPath, legacy);
+	// Frozen from the last pre-descriptor base (dd733fe), so current channel edits
+	// cannot silently change the historical APP_DATABASE-only launch contract.
+	await cp(join(import.meta.dirname, "fixtures/legacy-boot-channel.ts.txt"), channelPath);
 	const app = await fixture.launch(join(seed, "server.ts"));
 	await app.setup();
 	const cookie = await app.login();

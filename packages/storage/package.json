@@ -6,7 +6,6 @@
 	"exports": {
 		"./store": "./src/store.ts",
 		"./client": "./src/client.ts",
-		"./descendant": "./src/descendant.ts",
 		"./dialect": "./src/dialect.ts",
 		"./remote-client": "./src/remote-client.ts",
 		"./remote-inspector": "./src/remote-inspector.ts",
