@@ -7,8 +7,8 @@ const run = async (scenario: string) => {
 	const { stdout } = await execute("bun", [`${import.meta.dirname}/fixtures/remote-app-recovery.ts`, scenario]);
 	return Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(stdout);
 };
-it("resumes its reserved UUID and follows an atomically journaled restore instead of the environment name", async () => {
-	expect(await run("fresh")).toEqual({ same: true, selected: "restored", phase: "ready" });
+it("resumes its reserved UUID and keeps the configured store after adoption", async () => {
+	expect(await run("fresh")).toEqual({ same: true, selected: "configured", phase: "ready" });
 });
 for (const dialect of ["pg", "mysql"])
 	it(`${dialect} rolls damaged receipt reads back to a savepoint, commits the fence, then closes before boot finalization`, async () => {

@@ -138,7 +138,6 @@ const case4 = Effect.scoped(
 			prepare: () => Ref.update(prepared, (n) => n + 1).pipe(Effect.as(undefined)),
 			reserveIdentity: Effect.die("unexpected identity reservation"),
 			identityStatus: Effect.die("unexpected identity status"),
-			selectRestored: () => Effect.die("unexpected store selection"),
 		});
 		const spawner = ChildProcessSpawner.make((command) =>
 			Effect.gen(function* () {

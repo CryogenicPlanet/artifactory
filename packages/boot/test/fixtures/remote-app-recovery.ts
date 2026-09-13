@@ -1,5 +1,4 @@
 import { failure } from "@comms/storage/remote-session";
-import { withDatabase } from "@comms/storage/store";
 import { Reactivity } from "effect/unstable/reactivity";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
@@ -29,14 +28,10 @@ const main = Effect.gen(function* () {
 	const resumed = yield* identity.reserve;
 	if (scenario === "fresh") {
 		yield* identity.complete(adoption);
-		const target = yield* withDatabase(configured, "restored");
-		const outside = yield* identity.selectRestored(target).pipe(Effect.result);
-		if (outside._tag !== "Failure") return yield* Effect.die("Selection escaped boot transaction");
-		yield* boot.withTransaction(identity.selectRestored(target));
 		return {
 			same: adoption.store_id === resumed.store_id,
 			selected: (yield* identity.store).database,
-			phase: "ready",
+			phase: (yield* identity.status).adoption_phase,
 		};
 	}
 	const commands: string[] = [];

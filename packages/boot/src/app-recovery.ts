@@ -134,7 +134,6 @@ const make = (filename: string, dataDirectory?: string) =>
 		return {
 			reserveIdentity: identity.reserve,
 			checkSchema: Effect.void,
-			selectRestored: (_target: RemoteStore) => Effect.fail(new EventError({ code: "app_store_identity_invalid" })),
 			store: Effect.succeed(store),
 			identityStatus: identity.status.pipe(Effect.provideContext(context)),
 			filename,
@@ -229,7 +228,6 @@ export const remoteRecovery = (options: RemoteRecoveryOptions) =>
 			store: remoteIdentity.store,
 			reserveIdentity: remoteIdentity.reserve,
 			identityStatus: remoteIdentity.status,
-			selectRestored: remoteIdentity.selectRestored,
 			filename: undefined,
 			dataDirectory: options.dataDirectory,
 			prepare,

@@ -98,15 +98,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 			}
 			// The replacement app must republish its grants before activation can expose its pages.
 			yield* sql`DELETE FROM public_paths`;
-			const restored = yield* backup.restoreInto(artifact);
-			if (restored._tag !== "file")
-				yield* sql.withTransaction(
-					Effect.gen(function* () {
-						yield* lockBootWrite(sql);
-						yield* recovery.selectRestored(restored);
-						yield* sql`UPDATE cutover SET phase='restored' WHERE singleton=1`;
-					}),
-				);
+			yield* backup.restoreInto(artifact);
 			yield* recovery.prepare(yield* freshEpoch);
 			yield* sql`UPDATE cutover SET phase='restored' WHERE singleton=1`;
 		});

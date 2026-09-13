@@ -3,7 +3,7 @@ import { withDatabase, type RemoteStore } from "@comms/storage/store";
 import { lockBootWrite } from "./boot-write-lock.ts";
 import { decodeRows } from "./decode-rows.ts";
 import { backupPath } from "./backup-metadata.ts";
-import { Clock, Crypto, Effect, FileSystem, Option, Path, Redacted, Schema } from "effect";
+import { Clock, Crypto, Effect, FileSystem, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { EventError } from "./events.ts";
 import { storeIdentityDiagnostic } from "./store-identity-diagnostics.ts";
@@ -198,7 +198,7 @@ export const isAppStoreIdentityError = (
 export const appIdentityPolicy = {
 	status: 409,
 	retriable: false,
-	hint: "Preserve both stores and recovery journals. Inspect /_boot/status and the backup catalog. For SQLite, a human can restore a matching-board backup after prior owners close and pending publication is resolved; boot preserves the original files. Remote stores retain their native restore protocol. Do not initialize or replace the selected store identity.",
+	hint: "Preserve both stores and recovery journals. Inspect /_boot/status and the backup catalog. For SQLite, a human can restore a matching-board backup after prior owners close and pending publication is resolved; boot preserves the original files. For remote stores, restore a matching-board snapshot through the database provider, then restart chirp to verify its identity. Do not initialize or replace the selected store identity.",
 } as const;
 
 export const transferPolicy = {
@@ -295,19 +295,6 @@ export const remoteAppStoreIdentity = (configured: RemoteStore) =>
 					yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(RemoteAdoption))({ ...saved, phase: "ready" })} WHERE ${boot("key")}='app_store_adoption'`;
 				}),
 			);
-		/** Caller already verified target identity and closure. Call first inside the same boot transaction as restore phase. */
-		const selectRestored = (target: RemoteStore) =>
-			Effect.gen(function* () {
-				if (Option.isNone(yield* Effect.serviceOption(boot.transactionService))) return yield* invalid();
-				yield* lockBootWrite(boot);
-				const { adoption } = yield* read;
-				if (!adoption || adoption.phase !== "ready") return yield* invalid();
-				const selected = yield* withDatabase(configured, target.database);
-				if (target._tag !== selected._tag || Redacted.value(target.url) !== Redacted.value(selected.url))
-					return yield* invalid();
-				yield* boot`UPDATE settings SET value=${target.database} WHERE ${boot("key")}='app_store_database'`;
-				yield* boot`UPDATE settings SET value=${Schema.encodeSync(Schema.fromJsonString(RemoteAdoption))({ ...adoption, database: target.database })} WHERE ${boot("key")}='app_store_adoption'`;
-			});
 		const status = read.pipe(
 			Effect.map(({ adoption, store }) => ({
 				app_store_id: adoption?.store_id ?? null,
@@ -316,7 +303,7 @@ export const remoteAppStoreIdentity = (configured: RemoteStore) =>
 				recorded_database: adoption?.database ?? null,
 			})),
 		);
-		return { store, reserve, complete, selectRestored, status };
+		return { store, reserve, complete, status };
 	});
 
 /** Remote DDL has already completed outside this transaction. Only pending adoption may seed the row. */
