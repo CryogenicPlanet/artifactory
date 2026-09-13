@@ -81,6 +81,10 @@ export const appStoreIdentity = (filename: string, dataDirectory?: string) =>
 			Effect.gen(function* () {
 				const { selected, exists } = yield* canonical;
 				const state = yield* read;
+				// Prunable app evidence cannot establish ownership after the boot store was replaced.
+				// Existing legacy boards have the initialized marker; reserved fresh adoption can resume.
+				if (exists && !state.initialized && state.adoption?.mode !== "fresh")
+					return yield* new EventError({ code: "app_evidence_invalid" });
 				if (
 					(state.initialized || state.adoption?.mode === "legacy" || state.adoption?.phase === "ready") &&
 					!exists &&
