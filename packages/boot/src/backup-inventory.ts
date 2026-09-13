@@ -19,12 +19,13 @@ export const makeBackupInventory = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	return (page: { readonly limit: number; readonly before: typeof BackupCursor.Type | null }) =>
 		Effect.gen(function* () {
-			const rows = yield* sql`SELECT id,engine,reason,bytes,taken_at,published_through,generation,legacy_store_id FROM backups
+			const rows =
+				yield* sql`SELECT id,engine,reason,bytes,taken_at,published_through,generation,legacy_store_id FROM backups
    WHERE (${page.before?.taken_at ?? null} IS NULL OR taken_at < ${page.before?.taken_at ?? null}
     OR taken_at = ${page.before?.taken_at ?? null} AND id < ${page.before?.id ?? null})
    ORDER BY taken_at DESC,id DESC LIMIT ${page.limit + 1}`.pipe(
-				Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Summary))),
-			);
+					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Summary))),
+				);
 			const items = rows.slice(0, page.limit).map(({ legacy_store_id, ...record }) => ({
 				...record,
 				// This association authorizes legacy adoption; it is not a freshly inspected artifact identity.
