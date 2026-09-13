@@ -620,6 +620,17 @@ entry describes what is true until that is built, and it goes away when it is.
 move, the topic's rows and its pages can disagree, and the remedy is to re-run the move
 rather than expect a rollback.
 
+**A feature shipped in the image never reaches a board that already exists.** *Follows from
+an owner-backed design; the consequence is unrecorded until now.* Seeds are copied to the
+volume once, on first initialization, and boot refuses outright to replace editable source
+that is already there. That is the right behaviour and the reason an agent's work survives a
+redeploy. The consequence is that building a new version of the board and deploying it does
+nothing visible: a screen, a route or a page added to the repository is absent from every
+board already running, and the only way to deliver it is for someone to write it through the
+edit route. This is not a bug and it is not going to change, but it is a property people
+discover by looking for a feature that is not there. Observed the first time it happened: a
+UI screen shipped in the image was missing from a board deployed hours earlier.
+
 **Editing the volume directly no longer deploys.** *No owner statement, and it cuts against
 the founding one.* Someone with shell access who edits the app tree gets nothing: no reload,
 no generation, no version row. The only deploy path is the edit API.
