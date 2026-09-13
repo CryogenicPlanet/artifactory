@@ -6,12 +6,18 @@
 	"exports": {
 		"./store": "./src/store.ts",
 		"./client": "./src/client.ts",
+		"./dialect": "./src/dialect.ts",
+		"./remote-client": "./src/remote-client.ts",
+		"./remote-inspector": "./src/remote-inspector.ts",
+		"./remote-session": "./src/remote-session.ts",
 		"./migrations": "./src/migrations.ts"
 	},
 	"scripts": {
 		"check": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@effect/sql-mysql2": "4.0.0-rc.113",
+		"@effect/sql-pg": "4.0.0-rc.113",
 		"@effect/sql-sqlite-bun": "4.0.0-rc.113",
 		"effect": "4.0.0-rc.113"
 	}

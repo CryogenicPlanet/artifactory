@@ -15,6 +15,12 @@ it("restores a retained generation's whole source and manifest through cutover w
 	const lockfile = await readFile(join(import.meta.dirname, "../runtime/bun.lock"), "utf8");
 	await writeFile(join(seed, "package.json"), manifest);
 	await writeFile(join(seed, "bun.lock"), lockfile);
+	// Keep the frozen manifest and its required installer patch together.
+	await mkdir(join(seed, "patches"));
+	await cp(
+		join(import.meta.dirname, "../../../patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
+		join(seed, "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
+	);
 	// Match the runtime manifest's editable workspaces, just like stage-runtime.
 	for (const workspace of ["protocol", "storage"]) {
 		await mkdir(join(seed, workspace));
@@ -290,6 +296,12 @@ it("keeps source and live writes intact when generation dependency preparation f
 	const lockfile = await readFile(join(import.meta.dirname, "../runtime/bun.lock"), "utf8");
 	await writeFile(join(seed, "package.json"), manifest);
 	await writeFile(join(seed, "bun.lock"), lockfile);
+	// Keep the frozen manifest and its required installer patch together.
+	await mkdir(join(seed, "patches"));
+	await cp(
+		join(import.meta.dirname, "../../../patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
+		join(seed, "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
+	);
 	// Match the runtime manifest's editable workspaces, just like stage-runtime.
 	for (const workspace of ["protocol", "storage"]) {
 		await mkdir(join(seed, workspace));

@@ -1,3 +1,4 @@
+import { isDescendant, on } from "@comms/storage/dialect";
 import { DateTime, Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { type EventRecord } from "@comms/protocol/events";
@@ -42,9 +43,9 @@ export const reconstructPublicPages = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const ceiling = (yield* boot.fence).published_through;
 				const rows = yield* sql`WITH current_topics AS (${publishedTopics(sql, ceiling)})
-			 SELECT path FROM current_topics topic WHERE deleted_at IS NULL AND json_type(meta,'$.public')='true'
+			 SELECT path FROM current_topics topic WHERE deleted_at IS NULL AND ${on(sql, { sqlite: () => sql`json_type(meta,'$.public')='true'`, pg: () => sql`meta::jsonb -> 'public' = 'true'::jsonb`, mysql: () => sql`JSON_TYPE(JSON_EXTRACT(meta,'$.public'))='BOOLEAN' AND JSON_UNQUOTE(JSON_EXTRACT(meta,'$.public'))='true'` })}
 			 AND NOT EXISTS (SELECT 1 FROM current_topics ancestor WHERE ancestor.deleted_at IS NOT NULL
-			 AND (ancestor.path=topic.path OR substr(topic.path,1,length(ancestor.path)+1)=ancestor.path||'/'))
+			 AND (ancestor.path=topic.path OR ${isDescendant(sql, sql("topic.path"), sql("ancestor.path"))}))
 			 ORDER BY path LIMIT 4097`.pipe(
 					Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ path: Schema.String })))),
 				);

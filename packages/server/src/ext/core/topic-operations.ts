@@ -1,3 +1,4 @@
+import { isDescendant } from "@comms/storage/dialect";
 import type { TopicMetaInput, TopicArchiveInput } from "@comms/protocol/topic-operations";
 import { TopicMutation } from "@comms/protocol/topic-operations";
 import { DateTime, Effect, Schema } from "effect";
@@ -56,7 +57,7 @@ export const mutateTopic = (
 			body: (reserve) =>
 				Effect.gen(function* () {
 					const deleted =
-						yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${path} OR substr(${path},1,length(path)+1)=path||'/') LIMIT 1`;
+						yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${path} OR ${isDescendant(sql, path, sql("path"))}) LIMIT 1`;
 					if (deleted.length) return yield* new KernelError({ code: "topic_not_found" });
 					const rows =
 						yield* sql`SELECT path,meta,archived_at,deleted_at,updated_seq FROM topics WHERE path=${path}`.pipe(
@@ -65,7 +66,7 @@ export const mutateTopic = (
 					const previous = rows[0];
 					if (archive && !previous) return yield* new KernelError({ code: "topic_not_found" });
 					const archived =
-						yield* sql`SELECT path FROM topics WHERE archived_at IS NOT NULL AND (path=${path} OR substr(${path},1,length(path)+1)=path||'/') AND (${archive ? 1 : 0}=0 OR path<>${path}) LIMIT 1`;
+						yield* sql`SELECT path FROM topics WHERE archived_at IS NOT NULL AND (path=${path} OR ${isDescendant(sql, path, sql("path"))}) AND (${archive ? 1 : 0}=0 OR path<>${path}) LIMIT 1`;
 					if (archived.length) return yield* new KernelError({ code: "topic_archived" });
 					const parts = path.split("/");
 					const missing: Array<{ path: string; parent: string | null; name: string }> = [];

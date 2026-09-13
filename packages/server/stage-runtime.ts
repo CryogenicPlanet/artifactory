@@ -18,6 +18,12 @@ Effect.gen(function* () {
 		for (const file of ["src", "docs", "package.json"])
 			yield* fs.copy(path.join(source, file), path.join(target, workspace, file));
 	}
+	// The standalone installer must apply the same remote pool-ownership fix.
+	yield* fs.makeDirectory(path.join(target, "patches"));
+	yield* fs.copyFile(
+		path.resolve(server, "../../patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
+		path.join(target, "patches/@effect%2Fsql-mysql2@4.0.0-rc.113.patch"),
+	);
 	const ui = path.resolve(server, "../ui");
 	yield* fs.makeDirectory(path.join(target, "ui"));
 	for (const file of ["src", "public", "index.html", "vite.config.ts"])

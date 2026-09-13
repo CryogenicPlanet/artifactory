@@ -1,3 +1,4 @@
+import { jsonText } from "@comms/storage/dialect";
 import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import { KernelError } from "./boot-channel.ts";
@@ -14,7 +15,7 @@ export const assertSqlPublished = (sql: SqlClient, epoch: string, ceiling: numbe
 		if (rows[0]?.epoch !== epoch) return yield* new KernelError({ code: "stale_writer" });
 		// Local append advances the cached fence before deleting outbox evidence.
 		if (
-			(yield* sql`SELECT seq FROM outbox WHERE seq>${ceiling} AND json_extract(event,'$.type')='sql.write' LIMIT 1`)
+			(yield* sql`SELECT seq FROM outbox WHERE seq>${ceiling} AND ${jsonText(sql, sql("event"), "type")}='sql.write' LIMIT 1`)
 				.length
 		)
 			return yield* new KernelError({ code: "sql_publication_pending" });

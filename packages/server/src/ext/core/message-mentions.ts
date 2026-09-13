@@ -1,3 +1,4 @@
+import { jsonText, nullable } from "@comms/storage/dialect";
 import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 
@@ -18,7 +19,7 @@ export const reindexMentions = (sql: SqlClient) =>
 		let after: string | null = null;
 		while (true) {
 			const rows: ReadonlyArray<{ readonly id: string; readonly body: string; readonly previous_body: string | null }> =
-				yield* sql`SELECT id,body,json_extract(previous,'$.body') AS previous_body FROM messages WHERE ${after} IS NULL OR id > ${after} ORDER BY id LIMIT 256`.pipe(
+				yield* sql`SELECT id,body,${jsonText(sql, sql("previous"), "body")} AS previous_body FROM messages WHERE ${nullable(sql, after)} IS NULL OR id > ${after} ORDER BY id LIMIT 256`.pipe(
 					Effect.flatMap(
 						Schema.decodeUnknownEffect(
 							Schema.Array(
