@@ -502,6 +502,18 @@ Four causes worth carrying into the audit, because they suggest where to look.
 
 **Sequencing note, raised once and not pressed.** The largest line item is the part still unmerged, and deleting unmerged code is free while deleting merged code is a migration with a schema ladder attached. The owner's call is to merge first and cut after; this records that the cheaper moment was before.
 
+### 65. Four decisions after the bloat audit (2026-09-13)
+
+**1. Postgres and MySQL are a real requirement. PR #9 merges.** The audit's largest cut, 3,598 lines, is therefore off the table, and `docs/database.md` and the interoperability draft stay because they describe something we are building. Everything downstream of "is a second engine required" resolves the same way: the remote client stack stays, the CI matrix stays, the dialect layer stays.
+
+**2. The boot line budget is not the measure; ownership is.** The owner's words: "idc about a specific line budget but i really care if the bootloader is doing more than it should be like if we are applying max scrutiny to does this need to be in the bootloader". So SPEC §7.1's "about 6,000 to 7,000 lines" stops being a target and the six-jobs rule becomes the only test, applied at maximum scrutiny file by file: not *is this small* but *does this have to be in the immutable image at all, given that a line in boot is a line an agent cannot repair*. The audit measured boot against a number and found only 262 defensible lines; it never asked the ownership question with real severity, and its own verdict table hands out "J4" to 5,275 lines without interrogating whether each belongs there. That audit is the next piece of work, and it replaces the line-count framing entirely.
+
+**3. The review corpus is not bloat and will be deleted when it is spent.** `docs/pr-1/` is 8,757 lines and does not count against the codebase. It goes once its live decisions are folded into the spec, which decision 4 subsumes.
+
+**4. The spec itself gets audited and largely rewritten, at a higher level.** The owner's words: "i think we need to audit the spec more deeply and probably delete a lot and probably move to a higher level product spec than such a detailed spec where the intent is lost in the semantics". This is the response to the audit's sharpest finding, the document loop with no owner in it: a reviewer writes a finding, it becomes a spec sentence, the sentence becomes an implementation, and the next reviewer reads the spec rather than the ledger and defends the code because "the spec promises it". A spec that states intent cannot be mined for requirements nobody wanted, because intent is checkable against what the owner actually said. A spec that specifies mechanism can, and was: the 4,771-line transfer tool came from one such sentence, and the ledger contains the refusal to delete it in plain text.
+
+Two factual checks still outstanding against the running board, each gating a small cut: whether `/data/comms.db` exists at the pre-migration path (45 lines of legacy adoption), and what `SELECT count(*) FROM outbox WHERE shipped_at IS NOT NULL` returns (22 lines of dead column and a second drain loop).
+
 ## Moot after the deletions
 
 Findings that no longer need a comment because items 3 and 4 remove what they were about.
