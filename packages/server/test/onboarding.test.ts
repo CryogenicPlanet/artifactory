@@ -55,6 +55,35 @@ it("serves editable public orientation with negotiated HTML, a source version an
 			expect(paths[path][method]["x-comms-scopes"]).toEqual(access === "fs" ? ["fs"] : []);
 		}
 	}
+	// A client generated from the app document must ship with credentials, not with "security": [].
+	for (const [path, method, scope] of [
+		["/api", "get", "read"],
+		["/api/ext", "get", "read"],
+		["/api/sql", "post", "read"],
+		["/api/messages", "get", "read"],
+		["/api/messages", "post", "write"],
+		["/api/topics/{*}", "put", "write"],
+		["/api/topics/{*}", "get", "read"],
+		["/api/fs/{path}", "put", "fs"],
+		["/api/lock", "post", "fs"],
+		["/api/stream", "get", "read"],
+		["/quickstart", "get", "read"],
+	] as const) {
+		expect(discovery.paths[path][method].security, `${method} ${path}`).toEqual([
+			{ commsBootSession: [] },
+			{ commsBootAccess: [] },
+		]);
+		expect(discovery.paths[path][method]["x-comms-scopes"], `${method} ${path}`).toEqual([scope]);
+	}
+	for (const path of ["/init", "/init.md"]) {
+		expect(discovery.paths[path].get.security).toEqual([]);
+		expect(discovery.paths[path].get["x-comms-scopes"]).toEqual([]);
+	}
+	const schemes = Object.keys(discovery.components.securitySchemes);
+	for (const item of Object.values(discovery.paths))
+		for (const operation of Object.values(item as Record<string, { readonly security?: ReadonlyArray<object> }>))
+			for (const requirement of operation.security ?? [])
+				for (const name of Object.keys(requirement)) expect(schemes).toContain(name);
 	expect(discovery.paths["/_boot/seq"]).toBeUndefined();
 	expect(discovery.paths["/_boot/revert"].post.description).toContain("generation.restore");
 	expect(discovery.paths["/_boot/auth/challenge"].post.description).toContain("boot.restart");

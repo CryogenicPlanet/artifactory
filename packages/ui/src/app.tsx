@@ -239,8 +239,8 @@ function Board({ pathname }: { readonly pathname: string }) {
 								)}
 								{topic.archived_root !== null && (
 									<Alert className="mb-5">
-										This topic is read-only because <Link href={topicHref(topic.archived_root)}>{topic.archived_root}</Link>{" "}
-										is archived.
+										This topic is read-only because{" "}
+										<Link href={topicHref(topic.archived_root)}>{topic.archived_root}</Link> is archived.
 									</Alert>
 								)}
 								{topic.index !== null && (

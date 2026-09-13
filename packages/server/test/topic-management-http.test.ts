@@ -73,7 +73,10 @@ it("upserts topic metadata and archives subtrees through authenticated, replayab
 	expect(
 		(await get("/api/topics?archived=1")).subtopics.filter((row: { path: string }) => row.path !== "system"),
 	).toHaveLength(2);
-	expect(await get("/api/topics/project")).toMatchObject({ archived_at: archived.archived_at, archived_root: "project" });
+	expect(await get("/api/topics/project")).toMatchObject({
+		archived_at: archived.archived_at,
+		archived_root: "project",
+	});
 	expect(await get("/api/topics/project/notes/child")).toMatchObject({
 		messages: [message],
 		archived_at: null,

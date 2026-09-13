@@ -1,3 +1,4 @@
+import { applySecurity, type RouteScope } from "./api-security.ts";
 import { liveDiscovery } from "./discovery.ts";
 import { extGroup } from "@comms/protocol/extensions";
 import { Effect, Layer } from "effect";
@@ -8,8 +9,21 @@ import type { Extensions } from "./kernel/ext.ts";
 import { description as onboardingDescription, routes as onboardingRoutes } from "./onboarding.ts";
 import { identity, failure, refusal } from "./conversation-request.ts";
 export const SystemApi = HttpApi.make("chirp-system").add(sqlGroup).add(extGroup);
+/** The manually mounted routes; every extension route carries its own scope through api.mount. */
+const systemScopes: Readonly<Record<string, RouteScope | "public">> = {
+	"/api": "read",
+	"/api/ext": "read",
+	// A SELECT needs read; a write needs fs, which the operation description states.
+	"/api/sql": "read",
+	"/init": "public",
+	"/init.md": "public",
+	"/quickstart": "read",
+	"/quickstart.md": "read",
+};
+
 export const routes = (extensions: Extensions["Service"]) => {
 	const system = OpenApi.fromApi(SystemApi.add(onboardingDescription));
+	applySecurity(system.paths, (path) => systemScopes[path]);
 	const specification = {
 		...system,
 		paths: Object.fromEntries(
