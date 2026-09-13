@@ -220,7 +220,50 @@ async function run() {
 	const state = { cookie, message: first, key };
 	await verify(state);
 	await writeFile(stateFile, JSON.stringify(state), { mode: 0o600, flag: "wx" });
-	console.log("Remote board prepare: passkey, authenticated writes and idempotency passed");
+	await ok(await request("/api/lock", {}, cookie), "Acquire edit lock");
+	const child = Schema.Struct({
+		state: Schema.String,
+		generation: Schema.Int,
+		pid: Schema.Int,
+	});
+	const status = async () =>
+		Schema.decodeUnknownSync(Schema.Struct({ child }))(
+			await (await ok(await request("/_boot/status", undefined, cookie), "Live child status")).json(),
+		);
+	const beforeReload = await status();
+	const checked = Schema.decodeUnknownSync(
+		Schema.Struct({
+			status: Schema.Literal("schema_checked"),
+			schema_check_only: Schema.Literal(true),
+			report_unavailable: Schema.Literal(true),
+		}),
+	)(await (await ok(await request("/api/reload?check=1", {}, cookie), "Remote schema check")).json());
+	assert.equal(checked.schema_check_only, true);
+	assert.deepEqual((await status()).child, beforeReload.child, "Schema check must preserve the live writer");
+	const reloaded = Schema.decodeUnknownSync(Schema.Struct({ status: Schema.Literal("live") }))(
+		await (await ok(await request("/api/reload?release=1", {}, cookie), "Remote source reload")).json(),
+	);
+	assert.equal(reloaded.status, "live");
+	const beforeBackup = await status();
+	assert.equal(beforeBackup.child.state, "live");
+	assert.ok(
+		beforeBackup.child.generation > beforeReload.child.generation,
+		"Source reload must activate a new generation",
+	);
+	const refused = await request("/_boot/db/backup", {}, cookie);
+	assert.equal(refused.status, 409, "Remote backup must refuse before disturbing the live writer");
+	assert.equal(
+		Schema.decodeUnknownSync(Schema.Struct({ error: Schema.Struct({ code: Schema.String }) }))(await refused.json())
+			.error.code,
+		"provider_backup_required",
+	);
+	assert.deepEqual(
+		(await status()).child,
+		beforeBackup.child,
+		"Backup refusal must preserve the live generation and process",
+	);
+	await verify(state);
+	console.log("Remote board prepare: auth, writes, schema check, reload and provider backup refusal passed");
 }
 
 await run();
