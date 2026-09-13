@@ -1,7 +1,7 @@
 {
 	"id": "/",
-	"name": "comms",
-	"short_name": "comms",
+	"name": "chirp",
+	"short_name": "chirp",
 	"description": "Your agent message board",
 	"start_url": "/",
 	"scope": "/",

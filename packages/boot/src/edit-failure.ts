@@ -157,17 +157,25 @@ const policy = {
 		Record<string, { readonly status: number; readonly retriable: boolean; readonly hint: string }>
 >;
 
+/** Pages publish immediately and need no lock and no reload; a page refusal must not read as one. */
+export type EditSubject = "source" | "page";
+const refused: Readonly<Record<EditSubject, string>> = {
+	source: "Source edit refused.",
+	page: "Page publication refused.",
+};
+
 export const errorResponse = (
 	code: keyof typeof policy,
 	status: number = policy[code].status,
 	holder?: unknown,
 	route = "the requested route",
+	subject: EditSubject = "source",
 ) =>
 	HttpServerResponse.jsonUnsafe(
 		{
 			error: {
 				code,
-				message: code === "handler_failed" ? `Handler failed for ${route}.` : "Source edit refused.",
+				message: code === "handler_failed" ? `Handler failed for ${route}.` : refused[subject],
 				hint: policy[code].hint,
 				retriable: policy[code].retriable,
 			},
@@ -214,13 +222,16 @@ export const editFailure = (cause: Cause.Cause<unknown>) => {
 	if (Schema.is(AuthError)(error)) return Effect.succeed(authErrorResponse(error.code));
 	if (Schema.is(EditRejected)(error))
 		return Effect.succeed(errorResponse(error.code, policy[error.code].status, error.holder));
+	if (Schema.is(SourceRejected)(error))
+		return Effect.succeed(
+			errorResponse(error.code, undefined, undefined, undefined, error.path.startsWith("pages/") ? "page" : "source"),
+		);
 	if (
 		Schema.is(RecoveryRejected)(error) ||
 		Schema.is(StorageRejected)(error) ||
 		Schema.is(ArtifactRetentionRejected)(error) ||
 		Schema.is(FreezeTimeout)(error) ||
 		Schema.is(CutoverCleanupPending)(error) ||
-		Schema.is(SourceRejected)(error) ||
 		Schema.is(ChildError)(error)
 	)
 		return Effect.succeed(errorResponse(error.code));

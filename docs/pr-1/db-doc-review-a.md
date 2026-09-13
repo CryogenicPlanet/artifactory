@@ -101,7 +101,7 @@ and for line 118:
 
 ---
 
-## 2. BREAK — nesting `Migrator` inside comms' outer transaction aborts that transaction on Postgres
+## 2. BREAK — nesting `Migrator` inside chirp's outer transaction aborts that transaction on Postgres
 
 **Doc line 537:**
 
@@ -109,7 +109,7 @@ and for line 118:
 
 **What is actually true.** The nesting is fine on SQLite and breaks on Postgres, for a reason the
 doc does not mention. `Migrator` runs `ensureMigrationsTable` at `Migrator.ts:305`, *outside* its
-own `withTransaction` at `:308` but inside comms' outer transaction. On Postgres that function is
+own `withTransaction` at `:308` but inside chirp's outer transaction. On Postgres that function is
 (`Migrator.ts:135-144`):
 
 ```ts
@@ -141,10 +141,10 @@ inserting the ledger rows before `:276` runs the effects) and missed the Postgre
 > `migrations.ts:47` atomic with the migrations it guards on SQLite and Postgres.
 >
 > One Postgres hazard comes with that nesting. `ensureMigrationsTable` runs at `Migrator.ts:305`,
-> outside the migrator's own transaction but inside comms', and its pg branch probes
+> outside the migrator's own transaction but inside chirp's, and its pg branch probes
 > `select <table>::regclass` and creates the table in an `Effect.catch` (`Migrator.ts:135-144`).
 > On a fresh store that probe raises `42P01`, which aborts the enclosing Postgres transaction, and
-> the `CREATE TABLE` in the handler then fails with `25P02`. comms must therefore create the
+> the `CREATE TABLE` in the handler then fails with `25P02`. chirp must therefore create the
 > ledger itself before opening the outer transaction — `CREATE TABLE IF NOT EXISTS` with the same
 > column list as `Migrator.ts:139-143` — so that by the time the migrator runs,
 > `ensureMigrationsTable`'s probe succeeds and never raises. The adopt step in section 7.3 already
@@ -387,7 +387,7 @@ qualification, and they are not behind `DbOps`.
 > than the `DbOps` surface, which is the opposite of keeping the choice behind one interface.
 >
 > A deployment with one database gets two schemas only if it also gets a `searchPath` option
-> upstream in `@effect/sql-pg`, or a connection wrapper comms owns. Until then, R2's two databases
+> upstream in `@effect/sql-pg`, or a connection wrapper chirp owns. Until then, R2's two databases
 > are a hard requirement and `?schema=` is not part of the grammar in section 4.1.
 
 (§4.1's `?schema=` bullet at line 195 and the `schema` field on the `postgres` descriptor at
@@ -471,11 +471,11 @@ id, and `make`'s return value is the list of migrations *this run applied*
 (`Migrator.ts:112-113`, `:302`), which is empty on a store that is already up to date — precisely
 the case the too-new check has to detect.
 
-comms has to run the query itself.
+chirp has to run the query itself.
 
 **Replacement text** for the middle of line 599:
 
-> It becomes a max-applied-id comparison, which comms issues itself: `SELECT migration_id FROM
+> It becomes a max-applied-id comparison, which chirp issues itself: `SELECT migration_id FROM
 > <table> ORDER BY migration_id DESC LIMIT 1`, the same query `Migrator` runs internally at
 > `Migrator.ts:162-175`. `latestMigration` is a local binding inside `Migrator.make`'s generator
 > and is not exported, and `make`'s return value is only the migrations *this run* applied
@@ -488,10 +488,10 @@ comms has to run the query itself.
 
 **Doc line 386:**
 
-> `repos/effect/packages/sql/pg/src/PgMigrator.ts:48-64` shows Effect shelling out to `pg_dump` via `ChildProcess.make("pg_dump", args, { env })` … with credentials passed as `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE` and `PGSSLMODE` in the child environment. comms uses the same mechanism, which means:
+> `repos/effect/packages/sql/pg/src/PgMigrator.ts:48-64` shows Effect shelling out to `pg_dump` via `ChildProcess.make("pg_dump", args, { env })` … with credentials passed as `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE` and `PGSSLMODE` in the child environment. chirp uses the same mechanism, which means:
 
 **What is actually true.** The citation is exact, and the mechanism does not carry credentials
-under comms' own configuration. `PgMigrator.ts:55-62` reads `sql.config.host`,
+under chirp's own configuration. `PgMigrator.ts:55-62` reads `sql.config.host`,
 `sql.config.port`, `sql.config.username`, `sql.config.password`, `sql.config.database` and
 `sql.config.ssl`. `sql.config` is the options object exactly as it was passed
 (`PgClient.ts:152`, `config: options`), and §4.2 line 242 configures the client as
@@ -508,9 +508,9 @@ connect or — worse on a developer box — dumps the wrong database.
 > `repos/effect/packages/sql/pg/src/PgMigrator.ts:48-64` shows the shape Effect uses:
 > `ChildProcess.make("pg_dump", args, { env })` piped through
 > `ChildProcessSpawner.ChildProcessSpawner`'s `spawner.string`, with `PGHOST`, `PGPORT`, `PGUSER`,
-> `PGPASSWORD`, `PGDATABASE` and `PGSSLMODE` in the child environment. comms uses the same shape
+> `PGPASSWORD`, `PGDATABASE` and `PGSSLMODE` in the child environment. chirp uses the same shape
 > but **not** the same source for those values. `PgMigrator` reads them from `sql.config`
-> (`PgMigrator.ts:55-62`), which is the options object verbatim (`PgClient.ts:152`); comms
+> (`PgMigrator.ts:55-62`), which is the options object verbatim (`PgClient.ts:152`); chirp
 > configures the client with `url` alone (section 4.2), so every one of those fields is
 > `undefined` there and the URL is parsed privately inside `PgConnection`
 > (`PgConnection.ts:2138-2158`). `DbOps` builds the environment from the `StoreDescriptor` it
@@ -626,7 +626,7 @@ platform === "linux" ? ["-f", "-c", "%S %b %a", "--", directory] : ["-kP", "--",
 ```
 
 So `stat -f` is the **Linux** path and `df -kP` is the **darwin** path, which is the reverse of
-the reading "`df`/`stat -f`" invites given that comms deploys on Linux. §5.2's table at line 365
+the reading "`df`/`stat -f`" invites given that chirp deploys on Linux. §5.2's table at line 365
 cites a third range, `:18-43`, for the same thing.
 
 **Replacement text** for line 369:
@@ -956,7 +956,7 @@ reader to the wrong line.
 | 617 | `Schema.Uint8Array` at `source-schema.ts:28` | `:30`; `:28` is `export const Image = Schema.Struct({` |
 | 120 | boot creates the three tables at `app-recovery.ts:39-42` | `39-41`; `:42` is the `INSERT OR IGNORE` seed |
 | 499 | `Migrator.make` takes `{ dumpSchema }` at `Migrator.ts:100-106` | `100-107` |
-| 352 | the `Context.Service<Self, Shape>()` form at `pg/test/utils.ts:9` | that file uses the one-parameter `Context.Service<PgContainer>()("tag", { make })` form; the two-parameter form comms uses is at `mysql2/test/utils.ts:21-24` |
+| 352 | the `Context.Service<Self, Shape>()` form at `pg/test/utils.ts:9` | that file uses the one-parameter `Context.Service<PgContainer>()("tag", { make })` form; the two-parameter form chirp uses is at `mysql2/test/utils.ts:21-24` |
 | 553 | "64-hex epochs and attempts (`supervisor.ts:96-98`)" | `:97-98`; `:96` is `owners.reserve(generation.n)` |
 | 741 | "See sections 12.3 and 15" | section 16 since the renumbering; §15 is now the transfer procedure |
 
@@ -1103,7 +1103,7 @@ on a correctly-provisioned MySQL server, and the failure is a privilege error fr
 rather than a `SqlError`, so it surfaces as `DbOpsError { code: "backup_failed" }` with the real
 cause only in the captured stderr.
 
-Separately, `--routines` is dead weight: comms defines no stored routines (no `CREATE PROCEDURE`
+Separately, `--routines` is dead weight: chirp defines no stored routines (no `CREATE PROCEDURE`
 or `CREATE FUNCTION` anywhere in `packages/`), and on 8.0 dumping routines brings its own
 privilege requirements on `INFORMATION_SCHEMA.ROUTINES`.
 
@@ -1117,8 +1117,8 @@ privilege requirements on `INFORMATION_SCHEMA.ROUTINES`.
 > privilege. `PROCESS` is only grantable at `*.*`, so granting it would hand `comms_boot` the
 > right to see every statement every connection on the server is running — a much wider
 > permission than the two-database boundary allows. `--no-tablespaces` removes the requirement
-> and comms has no tablespace to preserve. `--routines` is dropped for the same reason and
-> because comms defines no stored routines.
+> and chirp has no tablespace to preserve. `--routines` is dropped for the same reason and
+> because chirp defines no stored routines.
 
 ---
 
@@ -1132,7 +1132,7 @@ privilege requirements on `INFORMATION_SCHEMA.ROUTINES`.
 
 **What is actually true.** In MySQL boolean mode a term with no operator prefix is *optional*: the
 default combinator is OR, and `+` is what makes a term required. The recipe at line 690 strips
-`+` from the caller's text and never says to add comms' own, so a two-term search returns every
+`+` from the caller's text and never says to add chirp's own, so a two-term search returns every
 message matching **either** term. That is not "fewer results"; it is a different and much larger
 result set, and it silently breaks the documented AND contract on one of three shipping engines.
 
@@ -1235,7 +1235,7 @@ build the `tsquery` from the already-parsed `parts` array at `messages.ts:258` w
 > and honours double-quoted phrases. It also implements the rest of the web-search syntax, which
 > the contract does not promise: a bare `or` becomes a disjunction and a leading `-` becomes
 > negation, where SQLite's `:268` re-quotes every part and so treats both as literal terms.
-> Building the `tsquery` from the parts array comms has already parsed at `:258` — one
+> Building the `tsquery` from the parts array chirp has already parsed at `:258` — one
 > `phraseto_tsquery('simple', part)` per quoted phrase, one `plainto_tsquery('simple', part)` per
 > bare term, joined with `&&` — keeps the contract exact on all three engines and keeps the
 > never-raises property, because both of those functions are total too. Prefer it;
@@ -1545,18 +1545,18 @@ serving, and `app-recovery.ts:39-41` does recreate them. The claim that `comms_a
 doc line 153.
 
 **§14.4 item 7.** `Statement.ts:473-491` carries the "Not supported in sqlite" note on
-`updateValues` at `:483`, and `grep -rn updateValues packages/` confirms comms does not use it.
+`updateValues` at `:483`, and `grep -rn updateValues packages/` confirms chirp does not use it.
 
 **§15's premise and most of its procedure.** `pg_dump` cannot read a SQLite file and `sqlite3
-.dump` emits SQL Postgres rejects, so the "comms' own transfer" conclusion stands.
+.dump` emits SQL Postgres rejects, so the "chirp's own transfer" conclusion stands.
 `packages/boot/src/recovery-intents.ts` exists and `packages/boot/src/database-restore.ts:208-210`
 is the refusal pattern step 1 cites, verbatim. `supervisor.assertClosure` is the right check for
 step 2 and is already used at five sites. `AppRecovery.prepare` for step 10 exists at
 `app-recovery.ts:26` and installs a fresh epoch at `:44`. `tokens.hash` exists for step 9's
-content hash (`enrollment-schema.ts:35`). Step 7's "foreign keys are not declared in comms'
+content hash (`enrollment-schema.ts:35`). Step 7's "foreign keys are not declared in chirp's
 schema" is nearly right — `source_changes.batch` and `versions.batch` do carry
 `REFERENCES source_batches(id)` (`source-schema.ts:71-72`) — but SQLite does not enforce them
-without `PRAGMA foreign_keys=ON`, which comms never sets, while Postgres and MySQL enforce them
+without `PRAGMA foreign_keys=ON`, which chirp never sets, while Postgres and MySQL enforce them
 always. So ordering is about constraint satisfaction on the target after all, at least for those
 two tables. Worth a clause; not large enough to number separately.
 

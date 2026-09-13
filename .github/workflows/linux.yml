@@ -71,10 +71,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Build isolated runtime image
-        run: docker build --tag comms:acceptance .
+        run: docker build --tag chirp:acceptance .
       - name: Linux lifetime ownership acceptance
-        run: sh scripts/lifetime-lock-acceptance.sh comms:acceptance
+        run: sh scripts/lifetime-lock-acceptance.sh chirp:acceptance
       - name: Linux privileged keeper closure acceptance
-        run: sh scripts/linux-keeper-acceptance.sh comms:acceptance
+        run: sh scripts/linux-keeper-acceptance.sh chirp:acceptance
       - name: Linux UID and persistence acceptance
-        run: sh scripts/smoke-image.sh comms:acceptance
+        run: sh scripts/smoke-image.sh chirp:acceptance

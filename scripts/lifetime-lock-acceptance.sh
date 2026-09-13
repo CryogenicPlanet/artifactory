@@ -1,7 +1,7 @@
 #!/bin/sh
 # Uses only a disposable image command, fixture, container and volume.
 set -eu
-image=${1:-comms:local}
+image=${1:-chirp:local}
 private=$(mktemp -d)
 container=
 volume=

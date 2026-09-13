@@ -4,7 +4,7 @@ import { Context, Effect, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { KernelError } from "../../kernel/boot-channel.ts";
 
-import { Messages, StoredMessage, validTopic } from "./messages.ts";
+import { Messages, StoredMessage, topicPathDetail, validTopic } from "./messages.ts";
 import type { Identity } from "../../kernel/identity.ts";
 import { publishedTopics } from "./published-topics.ts";
 import { publishedMessages } from "./published-messages.ts";
@@ -15,7 +15,8 @@ export const makeTopics = (sql: SqlClient.SqlClient, read: Messages["Service"]["
 	const detail = (identity: Identity, path: string, depth = 1, archived = false) =>
 		read((ceiling) =>
 			Effect.gen(function* () {
-				if (path !== "" && !validTopic(path)) return yield* new KernelError({ code: "input_invalid" });
+				if (path !== "" && !validTopic(path))
+					return yield* new KernelError({ code: "input_invalid", detail: topicPathDetail("path") });
 				const page = yield* pages.topic(path, depth);
 				return yield* sql.withTransaction(
 					Effect.gen(function* () {
@@ -73,7 +74,7 @@ export const makeTopics = (sql: SqlClient.SqlClient, read: Messages["Service"]["
 							path,
 							meta: own?.meta ?? {},
 							archived_at: own?.archived_at ?? null,
-							archived_by:
+							archived_root:
 								archivedTopics
 									.filter((row) => path === row.path || path.startsWith(`${row.path}/`))
 									.sort((left, right) => left.path.length - right.path.length)[0]?.path ?? null,

@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi";
 import { errorSchemas } from "./errors.ts";
 import { RequestValidation } from "./request-validation.ts";
-import { QueryCursor, QueryLimit, queryInteger } from "./query-number.ts";
+import { QueryCursor, QueryLimit, QueryWait } from "./query-number.ts";
 import { Message, MessageInput, Envelope } from "./messages.ts";
 const flag = Schema.optionalKey(Schema.Literals(["0", "1"]));
 const query = Schema.Struct({
@@ -17,7 +17,7 @@ const query = Schema.Struct({
 	newest: flag,
 	mark: flag,
 	limit: Schema.optionalKey(QueryLimit),
-	wait: Schema.optionalKey(queryInteger(0, 60)),
+	wait: Schema.optionalKey(QueryWait),
 }).annotate({ parseOptions: { onExcessProperty: "error" } });
 const conversationGroup = HttpApiGroup.make("conversation").add(
 	HttpApiEndpoint.post("create", "/api/messages", {

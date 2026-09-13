@@ -1,8 +1,10 @@
 import { RequestValidation } from "@comms/protocol/request-validation";
+import { queryBoundHint } from "@comms/protocol/query-number";
 import { Effect, Layer, Schema, Stream } from "effect";
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { refusal } from "./conversation-request.ts";
 import { KernelError } from "./kernel/boot-channel.ts";
+import { requestDetail } from "./request-detail.ts";
 
 /** Bound bytes and read time before a declared HttpApi payload is decoded. */
 export const boundedRequest = (maximum: number) =>
@@ -42,7 +44,12 @@ export const layer = (maximum: number) =>
 				const query = yield* HttpServerRequest.ParsedSearchParams;
 				yield* Schema.decodeEffect(Schema.toEncoded(endpoint.query ?? Schema.Record(Schema.String, Schema.Never)), {
 					onExcessProperty: "error",
-				})(query).pipe(Effect.mapError(() => new KernelError({ code: "query_invalid" })));
+				})(query).pipe(
+					Effect.mapError(
+						(error) =>
+							new KernelError({ code: "query_invalid", ...requestDetail("query", error.issue, queryBoundHint) }),
+					),
+				);
 				if (request.method === "GET" || request.method === "HEAD" || endpoint.payload.size === 0) return yield* handler;
 				const bounded = yield* boundedRequest(maximum);
 				const contentType =
@@ -53,7 +60,11 @@ export const layer = (maximum: number) =>
 					const json = yield* bounded.json;
 					yield* Schema.decodeEffect(Schema.toEncoded(Schema.Union(payload.schemas)), {
 						onExcessProperty: "error",
-					})(json).pipe(Effect.mapError(() => new KernelError({ code: "input_invalid" })));
+					})(json).pipe(
+						Effect.mapError(
+							(error) => new KernelError({ code: "input_invalid", ...requestDetail("body", error.issue) }),
+						),
+					);
 				}
 				return yield* handler.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, bounded));
 			}),

@@ -1,5 +1,5 @@
 import { sourcePut } from "./fixtures/source-put.ts";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
@@ -8,6 +8,10 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	const fixture = await conversation(test);
 	await mkdir(join(fixture.root, "pages"));
 	await writeFile(join(fixture.root, "pages/init.md"), "---\nname: comms\n---\n# Welcome\n\nLive instructions.\n");
+	await writeFile(
+		join(fixture.root, "pages/quickstart.md"),
+		"---\nname: chirp quickstart\n---\n# Quickstart\n\nNext steps after enrolling.\n",
+	);
 	const app = await fixture.launch();
 	await app.setup();
 	const first = await app.login(),
@@ -51,6 +55,61 @@ it("serves editable public orientation with negotiated HTML, a source version an
 			expect(paths[path][method]["x-comms-scopes"]).toEqual(access === "fs" ? ["fs"] : []);
 		}
 	}
+	// A client generated from the app document must ship with credentials, not with "security": [].
+	for (const [path, method, scope] of [
+		["/api", "get", "read"],
+		["/api/ext", "get", "read"],
+		["/api/sql", "post", "read"],
+		["/api/messages", "get", "read"],
+		["/api/messages", "post", "write"],
+		["/api/topics/{*}", "put", "write"],
+		["/api/topics/{*}", "get", "read"],
+		["/api/fs/{path}", "put", "fs"],
+		["/api/lock", "post", "fs"],
+		["/api/stream", "get", "read"],
+		["/quickstart", "get", "read"],
+	] as const) {
+		expect(discovery.paths[path][method].security, `${method} ${path}`).toEqual([
+			{ commsBootSession: [] },
+			{ commsBootAccess: [] },
+		]);
+		expect(discovery.paths[path][method]["x-comms-scopes"], `${method} ${path}`).toEqual([scope]);
+	}
+	for (const path of ["/init", "/init.md"]) {
+		expect(discovery.paths[path].get.security).toEqual([]);
+		expect(discovery.paths[path].get["x-comms-scopes"]).toEqual([]);
+	}
+	// The error union is declared on every operation; it is referenced once, never inlined again.
+	const refusals = Object.entries(
+		discovery.paths as Record<
+			string,
+			Record<
+				string,
+				{ readonly responses?: Record<string, { content?: Record<string, { schema?: Record<string, string> }> }> }
+			>
+		>,
+	).flatMap(([path, item]) =>
+		Object.entries(item).flatMap(([method, operation]) =>
+			Object.entries(operation.responses ?? {})
+				.filter(([status]) => Number(status) >= 400)
+				.map(
+					([status, response]) =>
+						[`${method} ${path} ${status}`, response.content?.["application/json"]?.schema] as const,
+				),
+		),
+	);
+	expect(refusals.length).toBeGreaterThan(50);
+	for (const [where, schema] of refusals) {
+		expect(Object.keys(schema ?? {}), where).toEqual(["$ref"]);
+		expect(discovery.components.schemas, where).toHaveProperty(
+			(schema?.$ref ?? "").slice("#/components/schemas/".length),
+		);
+	}
+	const schemes = Object.keys(discovery.components.securitySchemes);
+	for (const item of Object.values(discovery.paths))
+		for (const operation of Object.values(item as Record<string, { readonly security?: ReadonlyArray<object> }>))
+			for (const requirement of operation.security ?? [])
+				for (const name of Object.keys(requirement)) expect(schemes).toContain(name);
 	expect(discovery.paths["/_boot/seq"]).toBeUndefined();
 	expect(discovery.paths["/_boot/revert"].post.description).toContain("generation.restore");
 	expect(discovery.paths["/_boot/auth/challenge"].post.description).toContain("boot.restart");
@@ -73,6 +132,9 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	const text = await anonymous.text();
 	expect(text).toContain("Live instructions.");
 	expect(text).toContain("GET /api/standup");
+	// The prose instructs agents to lock, stage and reload; the table must list those routes too.
+	for (const route of ["POST /api/lock", "GET / PUT /api/fs/{path}", "POST /api/reload", "GET /_boot/events"])
+		expect(text).toContain(route);
 	expect(text).toContain(`Version ${version}`);
 	expect(text).not.toContain("You are");
 	expect(text).not.toContain("spoofed");
@@ -86,6 +148,22 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	expect(raw.headers.get("content-type")).toContain("text/markdown");
 	expect(await raw.text()).toContain("name: comms");
 	expect((await fetch(app.url + "/p/init.md")).status).toBe(401);
+	// The guides it links need a token, so the page that links them is authenticated too.
+	expect((await fetch(app.url + "/quickstart")).status).toBe(401);
+	const guided = await fetch(app.url + "/quickstart", { headers: { cookie: first } });
+	expect(guided.status).toBe(200);
+	expect(guided.headers.get("content-type")).toContain("text/markdown");
+	const guide = await guided.text();
+	expect(guide).toContain("Next steps after enrolling.");
+	expect(guide).toContain("You are <code>rahul@human</code>");
+	const guidedHtml = await fetch(app.url + "/quickstart", { headers: { cookie: first, accept: "text/html" } });
+	expect(guidedHtml.headers.get("content-type")).toContain("text/html");
+	const guidedDocument = await guidedHtml.text();
+	expect(guidedDocument).toContain("<h1>Quickstart</h1>");
+	expect(guidedDocument).not.toContain("name: chirp quickstart");
+	const guidedRaw = await fetch(app.url + "/quickstart.md", { headers: { cookie: first, accept: "text/html" } });
+	expect(guidedRaw.headers.get("content-type")).toContain("text/markdown");
+	expect(await guidedRaw.text()).toContain("name: chirp quickstart");
 	expect((await app.post("/api/messages", { topic: "@rahul", body: "Hello" }, second)).status).toBe(200);
 	const personal = await fetch(app.url + "/init", { headers: { cookie: first, "x-comms-init": version ?? "" } });
 	expect(personal.headers.get("x-comms-init-stale")).toBeNull();
@@ -121,3 +199,17 @@ it("serves editable public orientation with negotiated HTML, a source version an
 	expect(head.status).toBe(200);
 	expect(await head.text()).toBe("");
 }, 30000);
+
+it("ships onboarding text that matches the live mention, mark and page-access rules", async () => {
+	const pages = join(import.meta.dirname, "../pages");
+	const init = await readFile(join(pages, "init.md"), "utf8");
+	// mentions=@codex alone never matches @codex/job-17, so the first example must name both.
+	expect(init).toContain("mentions=@codex,@codex/job-17,@here");
+	expect(init).not.toContain("mentions=@codex,@here");
+	expect(init).toContain("never advances a read mark");
+	expect(init).toContain("/quickstart");
+	expect(init).toMatch(/`\/p\/docs\/\.\.\.` link below needs your access token/);
+	const quickstart = await readFile(join(pages, "quickstart.md"), "utf8");
+	for (const guide of ["recipes.md", "stream.md", "subscriptions.md", "extensions.md", "editing.md"])
+		expect(quickstart).toContain(`/p/docs/${guide}`);
+});

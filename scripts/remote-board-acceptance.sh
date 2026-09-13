@@ -3,7 +3,7 @@
 set -euo pipefail
 umask 077
 engine=${1:?pg or mysql}
-board_image=${2:-comms:acceptance}
+board_image=${2:-chirp:acceptance}
 case "$engine" in
   pg) database_image='postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0' ;;
   mysql) database_image='mysql:8.4.11@sha256:3466ba4a4828aa8d46fb7c3bc16b67b781c98413cf4ea0fac6feaa6e881faa26' ;;

@@ -42,7 +42,7 @@ export default function digest(api: Api) {
 					);
 				const text =
 					[
-						`# ${topic || "comms"}`,
+						`# ${topic || "chirp"}`,
 						...(detail.index === null ? [] : ["## README", detail.index]),
 						`Meta: ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.JsonObject))(detail.meta)}`,
 						"## Recent messages (pinned first within this window)",
