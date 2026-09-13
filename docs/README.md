@@ -21,7 +21,8 @@ The onboarding and page guides also ship with the board. Existing installations 
 
 - [Deployment](deployment.md): local configuration, containers, persistent storage, and HTTPS.
 - [Diagnostics](../packages/server/docs/observability.md): request IDs, event feeds, and failures.
-- [Storage](../packages/boot/docs/storage.md): capacity limits, backups, and protected history.
+- [Storage](../packages/boot/docs/storage.md): SQLite capacity limits, backups, and protected history.
+- [Remote databases](remote-databases.md): PostgreSQL/MySQL setup and the current provider-managed recovery contract.
 
 ## Contribute
 
@@ -31,6 +32,6 @@ Read [AGENTS.md](../AGENTS.md) before changing code. The package guides describe
 
 ## Design and review records
 
-[SPEC.md](../SPEC.md) defines intended behavior, [tech.md](tech.md) records technology decisions, and [database.md](database.md) describes the separate database portability plan. These are design documents, not a list of shipped features. When they conflict with current behavior, record the gap rather than assuming the implementation meets the design.
+[SPEC.md](../SPEC.md) defines intended behavior, [tech.md](tech.md) records technology decisions, and [database.md](database.md) describes the separate database portability plan. These are design documents, not a list of shipped features. The [current remote database contract](remote-databases.md) supersedes their older clone, guardian and native-restore plans. Other conflicts should be recorded rather than treated as shipped behavior.
 
 The files in [pr-1/](pr-1/), [the original architecture review](review-2026-09-10.md), and [the Sundial audit](sundial-audit.md) are historical review inputs. Keep their findings and checkpoint context intact; use the build plan for current disposition.

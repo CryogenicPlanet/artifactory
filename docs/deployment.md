@@ -39,31 +39,11 @@ The [Dockerfile](../Dockerfile) pins Bun 1.4.0 by image digest and installs froz
 
 ## Choose a database
 
-Leave `DATABASE_URL` and `BOOT_DATABASE_URL` unset for SQLite files in the data directory. For a new remote installation, follow the [operator provisioning guide](../packages/boot/sql/README.md), including its scratch-role supplement, before starting comms. Provisioning does not transfer an existing board; changing URLs is not a migration procedure.
+Leave `DATABASE_URL` and `BOOT_DATABASE_URL` unset for SQLite files in the data directory. For PostgreSQL or Oracle MySQL, follow the [remote database guide](remote-databases.md): the operator creates two databases and separate credentials once, then configures both URLs and verified TLS.
 
-Set both URLs through your deployment's protected environment configuration:
+Keep the data volume even with remote SQL: installed source, pages and generation artifacts remain there. Provider snapshots and restore replace boot's remote dump/clone machinery. Remote rehearsal checks the existing schema and identity; it does not test candidate migrations on a data clone. Read the guide's recovery limits before deploying editable migrations. Changing URLs does not transfer an existing board.
 
-| Variable | Meaning |
-| --- | --- |
-| `DATABASE_URL` | App login and app database: `postgres://user:password@host:5432/database` or `mysql://user:password@host:3306/database` |
-| `BOOT_DATABASE_URL` | Different boot login and database on the same engine, host and port |
-| `DATABASE_TLS` | Verified TLS by default (`true`); use `false` only for an intentionally private test connection |
-
-Percent-encode URL credentials and database names. URL query options and fragments are rejected; configure TLS with `DATABASE_TLS`. Keep URLs out of command arguments, logs and editable source. Both stores must use the same engine; setting only one URL or reusing the same login/database is refused. Retain the data volume even with a remote database: it holds source, pages, dumps and recovery evidence.
-
-The operator scripts establish separate persistent boot/app roles. Backup and rehearsal also require boot to create restricted temporary principals with grants on their exact target databases; these need explicitly approved server-level role-management privileges. PostgreSQL requires prepared transactions disabled. MySQL needs complete session-attribute instrumentation, boot-only XA inspection and the specified metadata grants. Follow the operator guide rather than substituting broad app privileges.
-
-Current MySQL copy/rehearsal preflight refuses views, routines, triggers and scheduled events with `mysql_clone_objects_unsupported`; it does not silently omit them or rewrite their definers. A broader stored-object policy and direct remote DDL workflow remain undecided. See the [server guide](../packages/server/docs/README.md#customize-it) for the bounded remote SQL repair surface.
-
-Remote restore loads a fresh database and journals the selected target before activation. Missing closure evidence is a recovery refusal, never permission to overwrite a live database. Engine-to-engine board transfer is not yet available.
-
-## Native database tools
-
-The image build targets `linux/amd64` and includes PostgreSQL 17.11 clients and Oracle MySQL 8.4.11 clients. The installer verifies signed repositories and checksums; it refuses unsupported architectures instead of substituting MariaDB. On another host architecture, build with `docker build --platform linux/amd64 --tag comms:local .` and use an amd64 runtime or emulation.
-
-These clients match the PostgreSQL 17.11 and MySQL 8.4.11 container acceptance targets. PostgreSQL 18 servers need matching client support; installing a newer `pg_dump` does not guarantee that its output restores into an older server. Native tooling alone does not establish that remote recovery acceptance has passed.
-
-The immutable image retains the system CA bundle at `/etc/ssl/certs/ca-certificates.crt` for verified database TLS. Private certificate authorities must be added to the image trust store. Dump credentials are supplied privately by boot; do not add passwords to command arguments or editable app files. SQLite needs no external database executable.
+The image retains the system CA bundle at `/etc/ssl/certs/ca-certificates.crt`. Add private certificate authorities to the image trust store when needed. No external database executable is required by boot.
 
 ## Put it behind HTTPS
 
@@ -104,9 +84,9 @@ Legacy flat-store migration runs only after process ownership recovery. It check
 
 SQLite rehearsals use disposable clones under `/data/rehearsals/<attempt>`. After any possible spawn, cleanup and receipt publication require positive closure of the whole ordinary process group. A missing PID alone is insufficient; an unresolved durable reservation can require operator recovery. Preparation workspaces are likewise reclaimed only after their process group closes. Ownership preparation has a separate 60-second bound; editable readiness has a five-second bound.
 
-Remote deployments run boot beneath an immutable guardian which retains database inspection continuity across a boot-worker crash. It waits for local process/keeper closure and remote account-session/XA absence before publishing a receipt. Losing the guardian or its pinned inspector refuses automatic recovery; keep the data directory and diagnostics intact. A new connection, database failover or a stale PID does not replace that proof.
+Remote writing sessions hold an engine advisory lock. This replaces remote guardian/receipt machinery, not the local keepers used to constrain editable processes. It coordinates cooperating writers only; database failover, arbitrary SQL clients and prepared transactions remain operator concerns. See the [remote recovery contract](remote-databases.md#what-reload-and-recovery-promise).
 
-These are ordinary-process-group guarantees. Deliberately escaped sessions or adversarial descendants are outside that guarantee. Rehearsal and live app processes share the app UID, so this is not a sandbox against rehearsal code deliberately opening the known live SQLite path. Remote rehearsals use a separate database principal with exact target grants.
+The local keepers provide ordinary-process-group guarantees. Deliberately escaped sessions or adversarial descendants are outside those guarantees. SQLite rehearsal and live app processes share the app UID, so rehearsal is not a sandbox against code deliberately opening the known live SQLite path.
 
 ## Validate a deployment
 

@@ -111,10 +111,10 @@ Before-images live under protected `restore-before/` directories, with hashes an
 
 The startup cleanup also removes the former fixed `.restore` staging file and its SQLite sidecars after positive owner closure. A preidentity upgrade blocked by an unfinished journal returns `boot_identity_upgrade_pending` with HTTP 409, while keeping schema and journal evidence compatible with the previous image.
 
-New backup filenames use `.db` for SQLite, `.dump` for PostgreSQL and `.sql` for MySQL. Previously catalogued remote `.db` artifacts remain restorable and eligible for pruning under the same engine, provenance and canonical-path checks; startup never renames them or infers their engine from a suffix. Remote identity diagnostics report selected and recorded database names, while the durable selected database remains authoritative after restore.
+Remote engines use [provider snapshots and restore](../../../docs/remote-databases.md), not boot-managed backup files or target-database selection. Existing catalogue rows keep their recorded engine and identity provenance; boot does not infer engine from a filename suffix. Remote identity checks do not establish snapshot freshness.
 
-Opaque offline repair is available for SQLite in the standard `DATA_DIR/comms.db` and `DATA_DIR/store/comms.db` layouts. Custom SQLite paths retain ordinary verified-backup restore; PostgreSQL and MySQL retain their native restore and database-selection protocol.
+Opaque offline repair is available for SQLite in the standard `DATA_DIR/comms.db` and `DATA_DIR/store/comms.db` layouts. Custom SQLite paths retain ordinary verified-backup restore.
 
 ## Power-loss recovery platform
 
-Automatic recovery of interrupted database ownership after machine power loss requires Linux with readable `/proc/sys/kernel/random/boot_id` at both recording and recovery. Other local platforms support normal keeper-receipted process restarts. Without a receipt or verifiable kernel change, startup refuses to reopen the store. Use the Linux image when unattended power-loss recovery is required; never clear the ownership journal or invent a closed receipt to bypass this refusal.
+For SQLite, automatic recovery of interrupted database ownership after machine power loss requires Linux with readable `/proc/sys/kernel/random/boot_id` at both recording and recovery. Other local platforms support normal keeper-receipted process restarts. Without a receipt or verifiable kernel change, startup refuses to reopen the store. Use the Linux image when unattended power-loss recovery is required; never clear the ownership journal or invent a closed receipt to bypass this refusal.
