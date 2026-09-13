@@ -8,7 +8,7 @@ import { expect, it, type TestContext } from "vitest";
 import { seedSession, sessionFetch } from "./fixtures/session.ts";
 
 const execute = promisify(execFile);
-async function fixture(test: TestContext) {
+async function fixture(test: TestContext, legacySchema = false) {
 	const root = await realpath(await mkdtemp(join(tmpdir(), "comms-legacy-refusal-")));
 	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
 	await mkdir(join(root, "pages/old"), { recursive: true });
@@ -26,7 +26,8 @@ async function fixture(test: TestContext) {
 		);
 		return value;
 	};
-	await inspect();
+	if (legacySchema) await execute("bun", [join(import.meta.dirname, "fixtures/boot-schema-v15.ts"), root]);
+	else await inspect();
 	return { root, inspect, sql };
 }
 
@@ -46,10 +47,12 @@ it.for(["topic_moves", "topic_page_moves", "TOPIC_MOVES"])(
 );
 
 it("refuses pre-cut legacy schemas before migration and still upgrades clean pre-cut stores", async (test) => {
+	const fresh = await fixture(test);
+	const supported = await fresh.sql("PRAGMA user_version");
 	for (const legacy of [true, false]) {
-		const app = await fixture(test);
-		await app.sql("ALTER TABLE edit_lock DROP COLUMN reset_pin");
-		await app.sql("PRAGMA user_version=15");
+		const app = await fixture(test, true);
+		expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 15 }]);
+		expect(await app.sql("SELECT name FROM sqlite_master WHERE name='boot_migrations'")).toEqual([]);
 		if (legacy) await app.sql("CREATE TABLE topic_moves(evidence TEXT)");
 		const before = await readFile(join(app.root, "boot.db"));
 		if (legacy) {
@@ -61,7 +64,7 @@ it("refuses pre-cut legacy schemas before migration and still upgrades clean pre
 			expect(await app.sql("SELECT name FROM pragma_table_info('edit_lock') WHERE name='reset_pin'")).toEqual([]);
 		} else {
 			expect(await app.inspect()).toBe(false);
-			expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 16 }]);
+			expect(await app.sql("PRAGMA user_version")).toEqual(supported);
 			expect(await app.sql("SELECT name FROM pragma_table_info('edit_lock') WHERE name='reset_pin'")).toEqual([
 				{ name: "reset_pin" },
 			]);
