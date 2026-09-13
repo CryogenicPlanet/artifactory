@@ -134,6 +134,7 @@ export const initialize = Effect.gen(function* () {
 		},
 		{ id: 11, name: "domain_json", run: Effect.void },
 		{ id: 12, name: "search_diacritics", run: Effect.void },
+		{ id: 13, name: "mention_symbol_boundaries", run: reindexMentions(sql) },
 	];
 	const supported = steps(0).length;
 	yield* sql`PRAGMA busy_timeout = 2000`;
