@@ -31,6 +31,8 @@ it("removes reaction routes while preserving historical rows across restart", as
 		"ALTER TABLE messages DROP COLUMN mentions",
 		"ALTER TABLE messages DROP COLUMN previous_mentions",
 		"DROP TABLE topic_page_continuations",
+		"ALTER TABLE protected_sql_tables DROP COLUMN extension",
+		"ALTER TABLE protected_sql_tables DROP COLUMN migration",
 		"DROP TABLE IF EXISTS core_migrations",
 		"PRAGMA user_version=6",
 	])
