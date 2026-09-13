@@ -3,7 +3,7 @@ import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Console, Context, Crypto, Effect, FileSystem, Layer, Redacted, Schema } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
 import { SqlClient } from "effect/unstable/sql";
-import { directClientLayer } from "@comms/storage/remote-client";
+import { advisoryClientLayer, directClientLayer } from "@comms/storage/remote-client";
 import { type RemoteConnection } from "@comms/storage/remote-session";
 import { parseDescriptor, type RemoteStore } from "@comms/storage/store";
 import { remoteRecovery } from "../../src/app-recovery.ts";
@@ -99,8 +99,18 @@ const main = Effect.gen(function* () {
 			appStore,
 			bootStore,
 			dataDirectory: "/unused",
-			authorizeStoreAccess: () => Effect.void,
 			withStore,
+			withWriter: (store, effect) =>
+				Effect.scoped(
+					Effect.gen(function* () {
+						assert.equal(store.database, appConfig.database);
+						const sql = Context.get(
+							yield* Layer.build(advisoryClientLayer({ connection: connection(appConfig) })),
+							SqlClient.SqlClient,
+						);
+						return yield* effect.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+					}).pipe(Effect.provideService(Reactivity.Reactivity, reactivity)),
+				),
 			initialize: () => initialize,
 		});
 		const identity = yield* remoteAppStoreIdentity(appStore);
@@ -111,8 +121,13 @@ const main = Effect.gen(function* () {
 		const adopted = yield* app`SELECT store_id FROM store_identity`;
 		assert.equal(adopted[0]?.store_id, reserved.store_id);
 		assert.equal((yield* identity.store).database, appConfig.database);
+		const before = yield* app`SELECT singleton,epoch FROM kernel_writer`;
+		yield* recovery.checkSchema;
+		assert.deepEqual(yield* app`SELECT singleton,epoch FROM kernel_writer`, before);
+		assert.deepEqual(yield* app`SELECT store_id FROM store_identity`, adopted);
 		// An actual missing table aborts PostgreSQL's savepoint; the outer writer fence must still commit.
 		yield* app`DROP TABLE mutation_batches`;
+		assert.equal((yield* recovery.checkSchema.pipe(Effect.result))._tag, "Failure");
 		yield* boot`UPDATE seq SET next=3,pending_id='tx',pending_attempt='initial',pending_from=1,pending_to=1`;
 		const damaged = yield* recovery.prepare("fenced-after-damage").pipe(Effect.result);
 		assert.equal(damaged._tag, "Failure");
@@ -125,6 +140,7 @@ const main = Effect.gen(function* () {
 			if (kind === "foreign") yield* app`UPDATE store_identity SET store_id='11111111-1111-4111-8111-111111111111'`;
 			if (kind === "transferred") yield* app`UPDATE store_identity SET transferred_to='target'`;
 			if (kind === "missing-table") yield* app`DROP TABLE store_identity`;
+			assert.equal((yield* recovery.checkSchema.pipe(Effect.result))._tag, "Failure");
 			const refused = yield* recovery.prepare("must-not-fence").pipe(Effect.result);
 			assert.equal(refused._tag, "Failure");
 			assert(refused._tag === "Failure" && Schema.is(EventError)(refused.failure));

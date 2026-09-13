@@ -1,3 +1,4 @@
+import { failure } from "@comms/storage/remote-session";
 import { withDatabase } from "@comms/storage/store";
 import { Reactivity } from "effect/unstable/reactivity";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
@@ -8,7 +9,7 @@ import { SqlError, SqlSyntaxError } from "effect/unstable/sql/SqlError";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { remoteRecovery } from "../../src/app-recovery.ts";
 import { remoteAppStoreIdentity } from "../../src/app-store-identity.ts";
-import { Events, EventError, layer as eventsLayer } from "../../src/events.ts";
+import { Events, layer as eventsLayer } from "../../src/events.ts";
 
 const scenario = process.argv[2] ?? "fresh";
 const dialect = scenario.startsWith("mysql") ? "mysql" : "pg";
@@ -62,7 +63,7 @@ const main = Effect.gen(function* () {
 			initialized_at: adoption.initialized_at,
 			transferred_to: null,
 		};
-	if (scenario.includes("missing")) appIdentity = undefined;
+	if (scenario.includes("missing") && !scenario.includes("schema")) appIdentity = undefined;
 	if (scenario.includes("transferred"))
 		appIdentity = {
 			singleton: 1,
@@ -100,6 +101,11 @@ const main = Effect.gen(function* () {
 				if (typeof params[0] !== "string") return yield* Effect.die("Unexpected epoch");
 				writer = params[0];
 			}
+			if (text.includes("LIMIT 0")) {
+				if (scenario.includes("schema-missing"))
+					return yield* new SqlError({ reason: new SqlSyntaxError({ cause: "missing kernel table" }) });
+				return [];
+			}
 			if (text.includes("FROM mutation_batches"))
 				return yield* new SqlError({ reason: new SqlSyntaxError({ cause: "missing receipt table" }) });
 			if (text === "COMMIT") committedWriter = writer;
@@ -127,17 +133,16 @@ const main = Effect.gen(function* () {
 		}),
 		spanAttributes: [],
 	});
+
 	const recovery = yield* remoteRecovery({
 		appStore: configured,
 		bootStore,
 		dataDirectory: "/unused",
-		authorizeStoreAccess: (store) =>
+		withStore: (_store, effect) => effect.pipe(Effect.provideService(SqlClient.SqlClient, app)),
+		withWriter: (store, effect) =>
 			Effect.gen(function* () {
-				commands.push(`authorize:${store.database}`);
-				if (scenario.includes("denied")) return yield* new EventError({ code: "app_store_missing" });
-			}),
-		withStore: (store, effect) =>
-			Effect.gen(function* () {
+				commands.push(`lock:${store.database}`);
+				if (scenario.includes("denied")) return yield* failure("remote_writer_busy");
 				commands.push(`open:${store.database}`);
 				const saved = yield* boot`SELECT value FROM settings WHERE key='app_store_adoption'`;
 				if (saved.length !== 1) return yield* Effect.die("Opened before UUID reservation");
@@ -151,10 +156,13 @@ const main = Effect.gen(function* () {
 				commands.push("initialize");
 			}),
 	});
-	const result = yield* recovery.prepare("new").pipe(Effect.result);
+	const result = yield* (scenario.includes("check") ? recovery.checkSchema : recovery.prepare("new")).pipe(
+		Effect.result,
+	);
 	return {
 		result,
 		commands,
+		writer,
 		committedWriter,
 		adoption: yield* boot`SELECT value FROM settings WHERE key='app_store_adoption'`,
 	};

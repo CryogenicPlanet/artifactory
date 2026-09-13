@@ -39,11 +39,18 @@ for (const scenario of [
 		const result = Schema.decodeUnknownSync(
 			Schema.Struct({
 				commands: Schema.Array(Schema.String),
-				result: Schema.Struct({ _tag: Schema.Literal("Failure"), failure: Schema.Struct({ code: Schema.String }) }),
+				result: Schema.Struct({
+					_tag: Schema.Literal("Failure"),
+					failure: Schema.Struct({
+						code: Schema.optionalKey(Schema.String),
+						reason: Schema.optionalKey(Schema.Struct({ message: Schema.String })),
+					}),
+				}),
 				committedWriter: Schema.optionalKey(Schema.String),
 			}),
 		)(await run(scenario));
 		expect(result.committedWriter).toBeUndefined();
+		if (scenario === "denied") expect(result.result.failure.reason?.message).toBe("remote_writer_busy");
 		if (scenario.endsWith("foreign") || scenario === "missing" || scenario === "mysql-missing") {
 			expect(result.result.failure.code).toBe(
 				scenario.endsWith("foreign") ? "app_store_mismatch" : "app_store_missing",
@@ -68,3 +75,25 @@ it("initializes only pending adoption and closes its guarded scope after the app
 	expect(result.commands.indexOf("initialize")).toBeLessThan(result.commands.indexOf("BEGIN"));
 	expect(result.commands.slice(-2)).toEqual(["COMMIT", "closed"]);
 });
+
+for (const dialect of ["pg", "mysql"]) {
+	for (const suffix of ["", "-foreign", "-missing", "-schema-missing", "-pending"]) {
+		it(`${dialect} read-only schema check ${suffix || "preserves writer and identity"}`, async () => {
+			const result = Schema.decodeUnknownSync(
+				Schema.Struct({
+					commands: Schema.Array(Schema.String),
+					writer: Schema.optionalKey(Schema.String),
+					result: Schema.Struct({ _tag: Schema.Literals(["Success", "Failure"]) }),
+				}),
+			)(await run(`${dialect}-check${suffix}`));
+			expect(result.result._tag).toBe(suffix ? "Failure" : "Success");
+			expect(
+				result.commands.some((command) => /^(?:INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|lock:|initialize)/.test(command)),
+			).toBe(false);
+			if (!suffix) {
+				expect(result.writer).toBe("old");
+				expect(result.commands.filter((command) => command.includes("LIMIT 0"))).toHaveLength(3);
+			}
+		});
+	}
+}
