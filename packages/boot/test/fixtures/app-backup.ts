@@ -1,11 +1,14 @@
+/* oxlint-disable effecttsgo/node-builtin-import */
+import assert from "node:assert/strict";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { SqlClient } from "effect/unstable/sql";
 import { appStoreIdentity, verifyAppIdentity } from "../../src/app-store-identity.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Database } from "bun:sqlite";
-import { Console, Effect } from "effect";
-import { AppBackup, layer } from "../../src/app-backup.ts";
+import { Console, Effect, FileSystem, Schema } from "effect";
+import { ChildError } from "../../src/child-process.ts";
+import { DbOps, layer } from "../../src/db-ops.ts";
 
 const main = Effect.gen(function* () {
 	const root = process.argv[2];
@@ -21,7 +24,26 @@ const main = Effect.gen(function* () {
 		}).pipe(Effect.provide(SqliteClient.layer({ filename, disableWAL: true }))),
 	);
 	yield* identity.complete(adoption);
-	const backup = yield* AppBackup.pipe(Effect.provide(layer(filename)));
+	const store = { _tag: "file", filename } as const;
+	const backup = yield* DbOps.pipe(Effect.provide(layer(store, root)));
+	if (process.argv[3] === "foreign") {
+		const errors: string[] = [];
+		const before = yield* identity.current;
+		const fs = yield* FileSystem.FileSystem;
+		const bytes = yield* fs.readFile(filename);
+		for (const engine of ["pg", "mysql"] as const) {
+			const result = yield* backup
+				.restoreInto({ path: `${root}/missing.db`, legacy_store_id: adoption.store_id, engine })
+				.pipe(Effect.result);
+			if (result._tag !== "Failure" || !Schema.is(ChildError)(result.failure))
+				return yield* Effect.die("Expected typed engine refusal");
+			errors.push(result.failure.code);
+			const current = yield* identity.current;
+			assert.deepEqual(current, before);
+			assert.deepEqual(yield* fs.readFile(filename), bytes);
+		}
+		return errors;
+	}
 	if (process.argv[3] === "restore") {
 		const original = new Database(filename);
 		try {
@@ -29,7 +51,7 @@ const main = Effect.gen(function* () {
 		} finally {
 			original.close();
 		}
-		yield* backup.clone(`${root}/backup.db`);
+		yield* backup.clone({ _tag: "file", filename: `${root}/backup.db` });
 		const changed = new Database(filename);
 		try {
 			changed.exec("PRAGMA journal_mode=WAL; INSERT INTO records VALUES('after backup')");
@@ -37,7 +59,8 @@ const main = Effect.gen(function* () {
 			changed.close();
 		}
 		// Every independently opened handle is closed before the production restore helper replaces files.
-		yield* backup.restore({ path: `${root}/backup.db`, legacy_store_id: null });
+		const selected = yield* backup.restoreInto({ path: `${root}/backup.db`, legacy_store_id: null, engine: "sqlite" });
+		assert.strictEqual(selected, store);
 		const restored = new Database(filename);
 		try {
 			return restored.query<{ value: string }, []>("SELECT value FROM records").all();
@@ -53,7 +76,7 @@ const main = Effect.gen(function* () {
 	} finally {
 		bootstrap.close();
 	}
-	yield* backup.prepareClone(filename, "rehearsal");
+	yield* backup.prepareClone({ _tag: "file", filename: filename }, "rehearsal");
 	const initialized = new Database(filename);
 	let epoch: unknown;
 	try {
@@ -63,7 +86,7 @@ const main = Effect.gen(function* () {
 		initialized.close();
 	}
 	// Clone preparation owns only the kernel fence; editable domain schema is validated by child health.
-	const prepared = yield* backup.prepareClone(filename, "second-probe").pipe(Effect.result);
+	const prepared = yield* backup.prepareClone({ _tag: "file", filename: filename }, "second-probe").pipe(Effect.result);
 	return { epoch, prepared: prepared._tag };
 }).pipe(
 	Effect.provide(SqliteClient.layer({ filename: `${process.argv[2]}/boot.db`, disableWAL: true })),

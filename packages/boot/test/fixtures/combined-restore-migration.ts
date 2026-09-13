@@ -13,6 +13,8 @@ const main = Effect.gen(function* () {
 		yield* sql.unsafe(`ALTER TABLE db_restore_requests DROP COLUMN ${column}`);
 	yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
 	yield* sql`ALTER TABLE backups DROP COLUMN legacy_store_id`;
+	yield* sql`DROP TABLE IF EXISTS boot_migrations`;
+	yield* sql`ALTER TABLE backups DROP COLUMN engine`;
 	yield* sql`PRAGMA user_version=14`;
 	for (const n of [1, 2, 3, 4])
 		yield* sql`INSERT INTO generations(n,entry_file,status,good,started_at) VALUES(${n},'server.ts','retired',1,1)`;
@@ -32,7 +34,7 @@ const main = Effect.gen(function* () {
 		yield* sql`SELECT proof_id,proof_hash,session_id,idempotency_key,backup,phase,generation,restored_to_seq,event_seq FROM db_restore_requests`;
 	const backups = yield* sql`SELECT * FROM backups ORDER BY id`;
 	yield* initializeBootSchema;
-	assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 17 }]);
+	assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
 	assert.deepEqual(yield* sql`SELECT n,backup_id FROM generations ORDER BY n`, [
 		{ n: 1, backup_id: "unique" },
 		{ n: 2, backup_id: null },
@@ -48,7 +50,7 @@ const main = Effect.gen(function* () {
 	);
 	assert.deepEqual(
 		yield* sql`SELECT * FROM backups ORDER BY id`,
-		backups.map((row) => ({ ...row, legacy_store_id: null })),
+		backups.map((row) => ({ ...row, legacy_store_id: null, engine: "sqlite" })),
 	);
 	// A later catalog change must not retroactively resolve an ambiguous migration or replace its exact association.
 	yield* sql`DELETE FROM backups WHERE id IN ('ambiguous-b','unique')`;

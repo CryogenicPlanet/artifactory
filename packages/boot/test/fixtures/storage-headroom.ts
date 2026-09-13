@@ -6,7 +6,7 @@ import { Database } from "bun:sqlite";
 import { Console, Effect, FileSystem, Layer, Ref, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { SqlClient } from "effect/unstable/sql";
-import { AppBackup, layer as backupLayer } from "../../src/app-backup.ts";
+import { DbOps, layer as backupLayer } from "../../src/db-ops.ts";
 import { initializeBootSchema } from "../../src/boot-schema.ts";
 import { EditLock, layer as rawEditLockLayer } from "../../src/edit-lock.ts";
 import { SourceFiles, layer as sourceLayer } from "../../src/source-files.ts";
@@ -18,8 +18,10 @@ const main = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem;
 	const real = yield* ChildProcessSpawner.ChildProcessSpawner;
 	const availableBlocks = yield* Ref.make(5);
-	const spawner = ChildProcessSpawner.make(() =>
+	const spawner = ChildProcessSpawner.make((command) =>
 		Effect.gen(function* () {
+			if (command._tag !== "StandardCommand" || !["/bin/df", "/usr/bin/stat"].includes(command.command))
+				return yield* real.spawn(command);
 			const available = yield* Ref.get(availableBlocks);
 			const output =
 				process.platform === "linux"
@@ -49,15 +51,15 @@ const main = Effect.gen(function* () {
 			}).pipe(Effect.provide(SqliteClient.layer({ filename, disableWAL: true }))),
 		);
 		yield* identity.complete(adoption);
-		const backup = yield* AppBackup.pipe(
-			Effect.provide(backupLayer(filename)),
+		const backup = yield* DbOps.pipe(
+			Effect.provide(backupLayer({ _tag: "file", filename }, root)),
 			Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
 		);
 		const estimatedBytes = yield* backup.estimatedBytes;
-		const refusal = yield* backup.clone(`${root}/refused.db`).pipe(Effect.result);
+		const refusal = yield* backup.clone({ _tag: "file", filename: `${root}/refused.db` }).pipe(Effect.result);
 		const destinationExists = yield* fs.exists(`${root}/refused.db`);
 		yield* Ref.set(availableBlocks, 100);
-		yield* backup.clone(`${root}/saved.db`);
+		yield* backup.clone({ _tag: "file", filename: `${root}/saved.db` });
 		const changed = new Database(filename);
 		try {
 			changed.exec("INSERT INTO records VALUES('after backup')");
@@ -65,7 +67,7 @@ const main = Effect.gen(function* () {
 			changed.close();
 		}
 		yield* Ref.set(availableBlocks, 0);
-		yield* backup.restore({ path: `${root}/saved.db`, legacy_store_id: null });
+		yield* backup.restoreInto({ path: `${root}/saved.db`, legacy_store_id: null, engine: "sqlite" });
 		const restored = new Database(filename);
 		try {
 			return {

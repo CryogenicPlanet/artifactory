@@ -10,6 +10,7 @@ for (const scenario of [
 	"http-challenge",
 	"binding",
 	"semantic",
+	"foreign-engine",
 	"transaction",
 	"mixed-refusal",
 	"replay",

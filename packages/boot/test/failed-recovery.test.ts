@@ -325,6 +325,7 @@ it("exposes adoption status only after authentication and surfaces preidentity u
 	expect((await fetch(`${first.url}/_boot/status`)).status).toBe(401);
 	await first.stop();
 	await env.sql("DELETE FROM settings WHERE key IN ('app_store_adoption','app_store_id')");
+	await env.sql("DROP TABLE boot_migrations");
 	await env.sql("ALTER TABLE backups DROP COLUMN legacy_store_id");
 	await env.sql("PRAGMA user_version=16");
 	await env.sql("INSERT INTO cutover VALUES(1,1,NULL,NULL,'held','family','working',NULL)");

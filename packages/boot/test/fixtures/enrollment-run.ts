@@ -48,6 +48,7 @@ const run = Effect.gen(function* () {
 		yield* sql`ALTER TABLE versions DROP COLUMN previous_directory`;
 		yield* sql`ALTER TABLE versions DROP COLUMN directory`;
 		yield* sql`ALTER TABLE edit_lock DROP COLUMN reset_pin`;
+		yield* sql`DROP TABLE IF EXISTS boot_migrations`;
 		yield* sql`PRAGMA user_version=6`;
 		yield* sql`INSERT INTO passkeys VALUES('saved','public-key',4,'[]','label',12)`;
 		yield* sql`INSERT INTO sessions(id,hash,created_at,expires_at) VALUES('session','hash',1,9999999999999)`;
@@ -89,7 +90,7 @@ const run = Effect.gen(function* () {
 		assert.deepEqual(yield* sql`SELECT before_directory,desired_directory FROM source_changes`, [
 			{ before_directory: 0, desired_directory: 0 },
 		]);
-		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 17 }]);
+		assert.deepEqual(yield* sql`PRAGMA user_version`, [{ user_version: 19 }]);
 		assert.equal((yield* sql`SELECT * FROM tokens`).length, 0);
 		assert.equal((yield* sql`SELECT * FROM enrollments`).length, 0);
 		return;

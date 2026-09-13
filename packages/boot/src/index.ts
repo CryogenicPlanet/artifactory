@@ -33,7 +33,7 @@ import { Events, layer as eventsLayer } from "./events.ts";
 import { AppRecovery, layer as recoveryLayer } from "./app-recovery.ts";
 import { layer as attemptsLayer, ChildAttempts } from "./child-attempts.ts";
 import { cutover } from "./cutover.ts";
-import { AppBackup, layer as backupLayer } from "./app-backup.ts";
+import { DbOps, layer as backupLayer } from "./db-ops.ts";
 import { BootHttp, type RecoveryPhase } from "./boot-http.ts";
 import { PublicPages, layer as publicPagesLayer } from "./public-pages.ts";
 import { layer as preparationLayer } from "./generation-preparation.ts";
@@ -114,7 +114,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		publicPagesLayer(options.dataDirectory),
 		preparationLayer(options).pipe(Layer.provide(preparationProcessLayer)),
 		attemptsLayer(options.dataDirectory).pipe(Layer.provide(kernelBootLayer)),
-		backupLayer(appFilename),
+		backupLayer({ _tag: "file", filename: appFilename }, options.dataDirectory),
 		recoveryLayer(appFilename, options.dataDirectory),
 	).pipe(Layer.provideMerge(sourceServices));
 
@@ -158,6 +158,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 								if (yield* hasLegacyTopicMoves(sql))
 									return yield* new RecoveryRejected({ code: "topic_move_recovery_required" });
 								yield* (yield* Generations).recover;
+								yield* (yield* DbOps).recoverCopy;
 								if (isolated)
 									yield* migrateAppStore({
 										dataDirectory: options.dataDirectory,
@@ -170,7 +171,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 											),
 										),
 									});
-								yield* (yield* AppBackup).recoverStaging;
+								yield* (yield* DbOps).recoverStaging;
 							}),
 						)
 						.pipe(Effect.exit);

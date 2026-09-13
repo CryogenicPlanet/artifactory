@@ -10,7 +10,7 @@ it("queues reads across real database restore and rechecks logged-out sessions a
 	const source = await readFile(coordinator, "utf8");
 	const frozen = join(fixture.root, "requests-frozen");
 	const release = join(fixture.root, "release-restore");
-	const needle = "yield* backup.restore(target);";
+	const needle = "yield* backup.restoreInto(target);";
 	expect(source.split(needle)).toHaveLength(2);
 	await writeFile(
 		coordinator,

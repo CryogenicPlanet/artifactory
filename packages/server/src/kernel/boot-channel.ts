@@ -2,7 +2,7 @@ import { childStore } from "@comms/storage/store";
 import { EventRecord, EventPage } from "@comms/protocol/events";
 import { KernelErrorCode } from "@comms/protocol/error-code";
 import { ErrorDetail } from "@comms/protocol/errors";
-import { Config, Context, Deferred, Effect, Layer, Redacted, Ref, Schema, Semaphore } from "effect";
+import { Config, Context, Deferred, Duration, Effect, Layer, Redacted, Ref, Schema, Semaphore } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 export class KernelError extends Schema.TaggedError<KernelError>()("KernelError", {
@@ -78,6 +78,9 @@ const make = Effect.gen(function* () {
 	const url = yield* Config.String("BOOT_URL");
 	const secret = yield* Config.Redacted("BOOT_SECRET");
 	const client = yield* HttpClient.HttpClient;
+	const copyBudget = yield* Config.Duration("REHEARSAL_COPY_BUDGET").pipe(Config.withDefault(Duration.seconds(30)));
+	// Copy ownership has its own deadline. Allow drain, closure and response framing after it.
+	const backupRequestBudget = Duration.toMillis(copyBudget) + 30_000;
 	const request = <S extends Schema.Constraint>(path: string, schema: S, payload?: Schema.Json, timeout = 1500) =>
 		Effect.gen(function* () {
 			let request =
@@ -213,7 +216,9 @@ const make = Effect.gen(function* () {
 		epoch,
 		filename,
 		generation,
-		backup: request("/_boot/db/backup", Schema.Struct({ id: Schema.String }), {}, 20_000).pipe(Effect.asVoid),
+		backup: request("/_boot/db/backup", Schema.Struct({ id: Schema.String }), {}, backupRequestBudget).pipe(
+			Effect.asVoid,
+		),
 		fence,
 		changed,
 		events: (input: EventQuery) => {
