@@ -3,11 +3,13 @@
 	"version": "0.0.0",
 	"private": true,
 	"workspaces": [
-		"protocol"
+		"protocol",
+		"storage"
 	],
 	"type": "module",
 	"dependencies": {
 		"@comms/protocol": "workspace:*",
+		"@comms/storage": "workspace:*",
 		"@effect/atom-react": "4.0.0-rc.113",
 		"@effect/platform-bun": "4.0.0-rc.113",
 		"@effect/sql-sqlite-bun": "4.0.0-rc.113",

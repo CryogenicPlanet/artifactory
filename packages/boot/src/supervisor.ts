@@ -1,5 +1,7 @@
+import { Redacted } from "effect";
 import { recoveryIntents } from "./recovery-intents.ts";
 import { SqlClient } from "effect/unstable/sql";
+import { render, type FileStore } from "@comms/storage/store";
 import { redactHex } from "./auth-primitives.ts";
 import { Cause, Config, Crypto, Effect, FileSystem, Path, Queue, Ref, Schema, Scope, Semaphore } from "effect";
 import { HttpServer } from "effect/unstable/http";
@@ -104,7 +106,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		}));
 	const launch = (
 		generation: Generation,
-		filename: string,
+		store: FileStore,
 		mode: "candidate" | "rehearsal",
 		rehearsalSequence?: number,
 		epochOverride?: string,
@@ -137,7 +139,8 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 						BOOT_SECRET: secret,
 						WRITER_EPOCH: epoch,
 						GENERATION: String(generation.n),
-						APP_DATABASE: filename,
+						APP_STORE: Redacted.value(yield* render(store)),
+						APP_DATABASE: store.filename,
 						PAGES_DIRECTORY: path.resolve(options.dataDirectory, "pages"),
 						BOARD_DIRECTORY: board,
 						STATE: mode,
@@ -256,7 +259,7 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 	const start = (generation: Generation, recoverAfterFailure = false) =>
 		Effect.gen(function* () {
 			const recovery = yield* AppRecovery;
-			const value = yield* launch(generation, recovery.filename, "candidate");
+			const value = yield* launch(generation, recovery.store, "candidate");
 			const started = yield* Effect.gen(function* () {
 				yield* recovery.prepare(value.attempt.epoch);
 				if (isolated && ((yield* fs.stat(recovery.filename)).mode & 0o777) !== 0o660)
@@ -397,6 +400,8 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		assertClosure,
 		// Caller owns operationGate and has retired any current child before retrying startup.
 		recoverClosure: Effect.gen(function* () {
+			// Failed startup proof must remain a refusal for every later repair surface.
+			yield* Ref.set(closureUnproven, true);
 			if (yield* Ref.get(current)) return yield* new ChildError({ code: "child_closure_unproven" });
 			yield* (yield* ChildAttempts).recover;
 			yield* Ref.set(closureUnproven, false);

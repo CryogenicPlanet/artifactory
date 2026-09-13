@@ -15,10 +15,12 @@ it("restores a retained generation's whole source and manifest through cutover w
 	const lockfile = await readFile(join(import.meta.dirname, "../runtime/bun.lock"), "utf8");
 	await writeFile(join(seed, "package.json"), manifest);
 	await writeFile(join(seed, "bun.lock"), lockfile);
-	// The runtime manifest owns an editable protocol workspace, just like stage-runtime.
-	await mkdir(join(seed, "protocol"));
-	for (const file of ["src", "docs", "package.json"])
-		await cp(join(import.meta.dirname, "../../protocol", file), join(seed, "protocol", file), { recursive: true });
+	// Match the runtime manifest's editable workspaces, just like stage-runtime.
+	for (const workspace of ["protocol", "storage"]) {
+		await mkdir(join(seed, workspace));
+		for (const file of ["src", "docs", "package.json"])
+			await cp(join(import.meta.dirname, `../../${workspace}`, file), join(seed, workspace, file), { recursive: true });
+	}
 	await writeFile(join(seed, "retained.sh"), "#!/bin/sh\necho retained\n");
 	await chmod(join(seed, "retained.sh"), 0o750);
 	const diagnostics = await preparationPhases(fixture.root);
@@ -288,10 +290,12 @@ it("keeps source and live writes intact when generation dependency preparation f
 	const lockfile = await readFile(join(import.meta.dirname, "../runtime/bun.lock"), "utf8");
 	await writeFile(join(seed, "package.json"), manifest);
 	await writeFile(join(seed, "bun.lock"), lockfile);
-	// The runtime manifest owns an editable protocol workspace, just like stage-runtime.
-	await mkdir(join(seed, "protocol"));
-	for (const file of ["src", "docs", "package.json"])
-		await cp(join(import.meta.dirname, "../../protocol", file), join(seed, "protocol", file), { recursive: true });
+	// Match the runtime manifest's editable workspaces, just like stage-runtime.
+	for (const workspace of ["protocol", "storage"]) {
+		await mkdir(join(seed, workspace));
+		for (const file of ["src", "docs", "package.json"])
+			await cp(join(import.meta.dirname, `../../${workspace}`, file), join(seed, workspace, file), { recursive: true });
+	}
 	phase("seed_copied");
 	const app = await fixture.launch(join(seed, "server.ts"));
 	await app.setup();

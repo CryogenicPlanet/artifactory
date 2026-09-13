@@ -105,9 +105,10 @@ export const extensionCapabilities = Effect.gen(function* () {
 					lifecycle.gate
 						.withPermit(
 							Effect.gen(function* () {
+								if (path === "") return;
 								const state = yield* Ref.get(lifecycle.state);
 								if (state !== "live" && state !== "accepted") return;
-								if ((path !== "" && !validTopic(path)) || !Number.isSafeInteger(seq) || seq < 0)
+								if (!validTopic(path) || !Number.isSafeInteger(seq) || seq < 0)
 									return yield* new KernelError({ code: "input_invalid" });
 								if (seq > (yield* publication.fence).published_through)
 									return yield* new KernelError({ code: "cursor_ahead" });

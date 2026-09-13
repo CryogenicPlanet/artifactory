@@ -38,8 +38,12 @@ function checkInvariants() {
 			if (specifier.startsWith("@comms/")) {
 				const dependency = specifier.split("/")[1];
 				const allowed =
+					((owner === "boot" || owner === "server") && dependency === "storage") ||
 					((owner === "server" || owner === "ui") && dependency === "protocol") ||
-					(owner === "server" && dependency === "boot") ||
+					(owner === "server" &&
+						dependency === "boot" &&
+						(label === `packages${sep}server${sep}src${sep}start.ts` ||
+							label.startsWith(`packages${sep}server${sep}test${sep}fixtures${sep}`))) ||
 					(owner === "ui" && dependency === "server" && !label.startsWith(`packages${sep}ui${sep}src${sep}`));
 				if (!allowed)
 					failures.push(`${label}: unsupported workspace import: ${specifier}; expected ui launcher -> server -> boot`);

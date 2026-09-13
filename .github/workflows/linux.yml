@@ -59,9 +59,9 @@ jobs:
           packages/boot/test/source-files.test.ts
           --maxWorkers=1 --reporter=verbose
           -t 'forwards upload chunks before the request finishes|creates a passkey and a protected session, forwards verified identity, and logs out|recovers process death at replacement boundary 0 idempotently from its own journal'
-      - name: Boot and server recovery tests
+      - name: Boot, server and storage recovery tests
         # Each file launches Bun processes; four workers exceeded measured fixture budgets on this runner.
-        run: bun run test packages/boot/test packages/server/test --maxWorkers=2 --shard=${{ matrix.shard }}/2 --reporter=verbose
+        run: bun run test packages/boot/test packages/server/test packages/storage/test --maxWorkers=2 --shard=${{ matrix.shard }}/2 --reporter=verbose
 
   image:
     runs-on: ubuntu-24.04

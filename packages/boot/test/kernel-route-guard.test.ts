@@ -1,3 +1,5 @@
+import { Effect, Redacted } from "effect";
+import { render } from "@comms/storage/store";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -72,6 +74,7 @@ it("rejects caller metadata even with the correct secret on direct child control
 			STATE: "candidate",
 			WRITER_EPOCH: "guard-test",
 			GENERATION: "1",
+			APP_STORE: Redacted.value(await Effect.runPromise(render({ _tag: "file", filename: join(directory, "app.db") }))),
 			APP_DATABASE: join(directory, "app.db"),
 			PAGES_DIRECTORY: directory,
 			BOOT_URL: "http://127.0.0.1:1",

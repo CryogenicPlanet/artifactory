@@ -22,6 +22,7 @@
       "name": "@comms/boot",
       "version": "0.0.0",
       "dependencies": {
+        "@comms/storage": "workspace:*",
         "@effect/platform-bun": "4.0.0-rc.113",
         "@effect/sql-sqlite-bun": "4.0.0-rc.113",
         "@simplewebauthn/server": "14.0.1",
@@ -41,6 +42,7 @@
       "dependencies": {
         "@comms/boot": "workspace:*",
         "@comms/protocol": "workspace:*",
+        "@comms/storage": "workspace:*",
         "@effect/platform-bun": "4.0.0-rc.113",
         "@effect/sql-sqlite-bun": "4.0.0-rc.113",
         "@tailwindcss/browser": "4.3.3",
@@ -49,6 +51,14 @@
         "highlight.js": "11.12.0",
         "marked": "18.0.12",
         "mermaid": "12.0.0",
+      },
+    },
+    "packages/storage": {
+      "name": "@comms/storage",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect/sql-sqlite-bun": "4.0.0-rc.113",
+        "effect": "4.0.0-rc.113",
       },
     },
     "packages/ui": {
@@ -141,6 +151,8 @@
     "@comms/protocol": ["@comms/protocol@workspace:packages/protocol"],
 
     "@comms/server": ["@comms/server@workspace:packages/server"],
+
+    "@comms/storage": ["@comms/storage@workspace:packages/storage"],
 
     "@comms/ui": ["@comms/ui@workspace:packages/ui"],
 

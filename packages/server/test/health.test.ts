@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { cp, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { sourcePut } from "./fixtures/source-put.ts";
 import { conversation } from "./fixtures/conversation.ts";
 const execute = promisify(execFile);
 
@@ -53,25 +54,33 @@ it("runs kernel KV mutation/read and rolls back every probe row without publishi
 	]);
 }, 20000);
 
-for (const kind of ["write", "read", "completion"])
+for (const kind of ["write", "read", "completion", "handler", "dispatcher"])
 	it(`rejects a broken kernel health ${kind} and never publishes probe data`, async (test) => {
 		const fixture = await conversation(test);
 		const seed = join(fixture.root, "seed");
 		await cp(join(import.meta.dirname, "../src"), seed, { recursive: true });
-		const source = join(seed, "kernel/health.ts");
+		const source = join(seed, kind === "dispatcher" ? "kernel/ext.ts" : "kernel/health.ts");
 		const before = await readFile(source, "utf8");
 		const anchor =
-			kind === "write"
-				? "INSERT INTO kv("
-				: kind === "read"
-					? "AND updated_seq<=${fence}"
-					: "return yield* new RolledBack();";
+			kind === "dispatcher"
+				? "if (pathname === null || reserved(pathname)) return yield* fallback;"
+				: kind === "handler"
+					? '"x-comms-readiness": "kernel"'
+					: kind === "write"
+						? "INSERT INTO kv("
+						: kind === "read"
+							? "AND updated_seq<=${fence}"
+							: "return yield* new RolledBack();";
 		const replacement =
-			kind === "write"
-				? "INSERT INTO missing_health_table("
-				: kind === "read"
-					? "AND updated_seq<=${fence} AND 0"
-					: 'return yield* new KernelError({ code: "health_failed" });';
+			kind === "dispatcher"
+				? 'return yield* Effect.die("broken dispatch");'
+				: kind === "handler"
+					? '"x-comms-readiness": "broken"'
+					: kind === "write"
+						? "INSERT INTO missing_health_table("
+						: kind === "read"
+							? "AND updated_seq<=${fence} AND 0"
+							: 'return yield* new KernelError({ code: "health_failed" });';
 		expect(before).toContain(anchor);
 		await writeFile(source, before.replace(anchor, replacement));
 		const app = await fixture.launch(join(seed, "server.ts"));
@@ -149,3 +158,32 @@ it("rehearses a WAL-inclusive SQLite clone without changing live rows, epoch or 
 	expect(await fixture.sql("SELECT * FROM seq", "boot.db")).toEqual(sequence);
 	expect(await fixture.sql("SELECT body FROM messages ORDER BY seq")).toEqual(originalRows);
 }, 20000);
+
+it("rejects a reload with broken dispatch and keeps the previous healthy generation serving", async (test) => {
+	const fixture = await conversation(test),
+		app = await fixture.launch();
+	await app.setup();
+	const cookie = await app.login();
+	await app.ready(cookie);
+	expect(
+		(await app.post("/api/messages", { topic: "readiness", body: "retain acknowledged data" }, cookie)).status,
+	).toBe(200);
+	const status = async () => await (await fetch(app.url + "/_boot/status", { headers: { cookie } })).json();
+	const before = await status();
+	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
+	const source = await readFile(join(import.meta.dirname, "../src/kernel/ext.ts"), "utf8");
+	const anchor = "if (pathname === null || reserved(pathname)) return yield* fallback;";
+	expect(source).toContain(anchor);
+	const result = await sourcePut(app.url + "/api/fs/app/kernel/ext.ts", {
+		method: "PUT",
+		headers: { cookie, origin: "https://comms.test" },
+		body: source.replace(anchor, 'return yield* Effect.die("broken dispatch");'),
+	});
+	expect(await result.json()).toMatchObject({ status: "failed" });
+	const after = await status();
+	expect(after.child.generation).toBe(before.child.generation);
+	const response = await fetch(app.url + "/api/messages?topic=readiness&since=0&mark=0", { headers: { cookie } });
+	expect(response.status).toBe(200);
+	expect((await response.json()).items).toEqual([expect.objectContaining({ body: "retain acknowledged data" })]);
+	expect(await fixture.sql("SELECT * FROM kv WHERE ns='kernel-health'")).toEqual([]);
+}, 30000);

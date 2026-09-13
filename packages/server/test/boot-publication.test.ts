@@ -45,7 +45,8 @@ it.effect("shares one idle boot wait, advances from append acknowledgements, and
 						ConfigProvider.layer(
 							ConfigProvider.fromUnknown({
 								WRITER_EPOCH: "epoch",
-								APP_DATABASE: "unused.db",
+								APP_STORE: "file:/unused.db",
+								APP_DATABASE: "/unused.db",
 								GENERATION: "1",
 								STATE: "live",
 								BOOT_URL: "http://localhost",
@@ -91,7 +92,8 @@ it.effect("releases cached-fence waiters on channel failure and resumes after re
 						ConfigProvider.layer(
 							ConfigProvider.fromUnknown({
 								WRITER_EPOCH: "epoch",
-								APP_DATABASE: "unused.db",
+								APP_STORE: "file:/unused.db",
+								APP_DATABASE: "/unused.db",
 								GENERATION: "1",
 								STATE: "live",
 								BOOT_URL: "http://localhost",

@@ -1,5 +1,6 @@
 import { decodeRows } from "./decode-rows.ts";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { clientLayer } from "@comms/storage/client";
+import type { FileStore } from "@comms/storage/store";
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { type Batch, Events, EventError, EventRecord } from "./events.ts";
@@ -76,7 +77,7 @@ export const fenceAppStore = (filename: string, epoch: string, rejectedAttempt?:
 					}).pipe(Effect.result);
 				}),
 			);
-		}).pipe(Effect.provide(SqliteClient.layer({ filename, disableWAL: true })), Effect.scoped);
+		}).pipe(Effect.provide(clientLayer({ _tag: "file", filename })), Effect.scoped);
 		if (evidence._tag === "Failure") return yield* evidence.failure;
 		if (evidence.success && pending.pending_attempt === rejectedAttempt)
 			return yield* new EventError({ code: "candidate_probe_committed" });
@@ -88,6 +89,7 @@ export const fenceAppStore = (filename: string, epoch: string, rejectedAttempt?:
 
 const make = (filename: string, dataDirectory?: string) =>
 	Effect.gen(function* () {
+		const store: FileStore = { _tag: "file", filename };
 		const context = Context.pick(
 			SqlClient.SqlClient,
 			Events,
@@ -96,6 +98,7 @@ const make = (filename: string, dataDirectory?: string) =>
 		const path = yield* Path.Path;
 		const events = yield* Events;
 		return {
+			store,
 			filename,
 			dataDirectory: dataDirectory ?? path.dirname(filename),
 			prepare: (epoch: string, rejectedAttempt?: string) =>

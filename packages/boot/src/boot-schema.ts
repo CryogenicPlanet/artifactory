@@ -1,3 +1,5 @@
+import { RecoveryRejected } from "./recovery-intents.ts";
+import { hasLegacyTopicMoves } from "./legacy-topic-moves.ts";
 import { publicPathsSchema } from "./public-paths.ts";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -26,6 +28,9 @@ export const initializeBootSchema = Effect.gen(function* () {
 	const version = versions[0]?.user_version;
 	if (version === undefined) return yield* Effect.die("Missing boot schema version");
 	if (version > 16) return yield* new BootSchemaTooNew({ found: version, supported: 16 });
+	// Refusal must leave the schema readable by the previous compatible image.
+	if (version < 16 && (yield* hasLegacyTopicMoves(sql)))
+		return yield* new RecoveryRejected({ code: "topic_move_recovery_required" });
 	// New stores can reclaim deleted pages incrementally; legacy conversion needs offline maintenance.
 	if (version === 0) yield* sql`PRAGMA auto_vacuum = INCREMENTAL`;
 	yield* sql`PRAGMA journal_mode = WAL`;

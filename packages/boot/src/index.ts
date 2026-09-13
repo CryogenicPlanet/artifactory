@@ -4,15 +4,28 @@ import { migrateAppStore } from "./app-store-layout.ts";
 import { sourceReverts } from "./source-revert.ts";
 import { SourceRejected } from "./source-schema.ts";
 import { RecoveryRejected, recoveryIntents } from "./recovery-intents.ts";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { Cause, Config, Context, Deferred, Effect, FileSystem, Layer, Logger, Path, Ref, Semaphore } from "effect";
+import { clientLayer } from "@comms/storage/client";
+import {
+	Cause,
+	Config,
+	Context,
+	DateTime,
+	Deferred,
+	Effect,
+	FileSystem,
+	Layer,
+	Logger,
+	Path,
+	Ref,
+	Semaphore,
+} from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { HttpRouter } from "effect/unstable/http";
 import { Auth, layer as authLayer, type AuthConfig } from "./auth.ts";
 import { authErrorResponse, validateAuthConfig } from "./auth-http.ts";
 import type { ApplicationSource } from "./application.ts";
 import { initializeBootSchema } from "./boot-schema.ts";
-import { EditLock, layer as editLockLayer } from "./edit-lock.ts";
+import { EditAuthority, editAuthorityActive, EditLock, EditRejected, layer as editLockLayer } from "./edit-lock.ts";
 import { Generations, layer as generationsLayer } from "./generations.ts";
 import { SourceFiles, layer as sourceLayer } from "./source-files.ts";
 import { Events, layer as eventsLayer } from "./events.ts";
@@ -47,7 +60,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	const fs = yield* FileSystem.FileSystem;
 	const path = yield* Path.Path;
 	const isolated = yield* Config.Boolean("COMMS_ISOLATED").pipe(Config.withDefault(false));
-	const appFilename = path.join(options.dataDirectory, isolated ? "store/comms.db" : "comms.db");
+	const appFilename = path.resolve(options.dataDirectory, isolated ? "store/comms.db" : "comms.db");
 	const phase = yield* Ref.make<RecoveryPhase>({ _tag: "Recovering" });
 	const restart = yield* Deferred.make<void>();
 	const installed = yield* Ref.make<{ readonly handle: Handler; readonly shutdown: Effect.Effect<void> }>({
@@ -62,7 +75,7 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 		),
 	).pipe(
 		Layer.provideMerge(
-			SqliteClient.layer({ filename: path.join(options.dataDirectory, "boot.db"), disableWAL: true }).pipe(
+			clientLayer({ _tag: "file", filename: path.join(options.dataDirectory, "boot.db") }).pipe(
 				Layer.provide(
 					Layer.effectDiscard(
 						validateAuthConfig(options.auth).pipe(
@@ -81,10 +94,8 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 			yield* volume.refresh;
 			yield* volume.run.pipe(Effect.forkScoped);
 			const storage = yield* makeEventStorage(volume.sample);
-			// Historical retirement needs retained event evidence. Keep auth available without pruning it.
-			if (!(yield* hasLegacyTopicMoves(yield* SqlClient.SqlClient))) {
-				yield* storage.run.pipe(Effect.forkScoped);
-			}
+			// Authentication and request diagnostics still append while application recovery is refused.
+			yield* storage.run.pipe(Effect.forkScoped);
 			return eventsLayer(
 				volume.sample.pipe(
 					Effect.flatMap((sample) => headroom.reserve(sample)),
@@ -109,7 +120,6 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 	yield* Effect.gen(function* () {
 		const coordinator = yield* cutover(options, supervisor);
 		const reverts = yield* sourceReverts;
-		yield* reverts.retain.pipe(Effect.forkScoped);
 		const restore = yield* databaseRestore(supervisor);
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* Events;
@@ -217,11 +227,27 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 								const admitted = yield* supervisor.operationGate.withPermit(
 									child.channelGate.withPermit(
 										Effect.gen(function* () {
-											if ((yield* Ref.get(phase))._tag !== "Ready" || (yield* recoveryIntents(sql)).count > 0)
+											if ((yield* recoveryIntents(sql)).count > 0)
 												return yield* new SourceRejected({ code: "publication_pending", path: "recovery" });
-											const state = yield* events.state;
-											if (state.pending_id !== null)
-												return { _tag: "Waiting" as const, fence: state.published_through };
+											const state = yield* Ref.get(phase);
+											if (state._tag !== "Ready") {
+												const authority = yield* Effect.serviceOption(EditAuthority);
+												if (
+													state._tag !== "Failed" ||
+													authority._tag !== "Some" ||
+													authority.value.kind !== "human" ||
+													!authority.value.repairRevert
+												)
+													return yield* new SourceRejected({ code: "publication_pending", path: "recovery" });
+												if (!(yield* editAuthorityActive(sql, authority.value, (yield* DateTime.nowAsDate).getTime())))
+													return yield* new EditRejected({ code: "authority_expired", holder: null, transitions: [] });
+												if (yield* hasLegacyTopicMoves(sql))
+													return yield* new RecoveryRejected({ code: "topic_move_recovery_required" });
+												yield* supervisor.assertClosure;
+											}
+											const sequence = yield* events.state;
+											if (sequence.pending_id !== null)
+												return { _tag: "Waiting" as const, fence: sequence.published_through };
 											return { _tag: "Published" as const, value: yield* effect };
 										}),
 									),

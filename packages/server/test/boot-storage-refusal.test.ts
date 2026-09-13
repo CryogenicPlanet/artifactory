@@ -38,7 +38,8 @@ it("preserves boot storage refusals with distinct quota and measurement retry se
 							ConfigProvider.layer(
 								ConfigProvider.fromUnknown({
 									WRITER_EPOCH: "epoch",
-									APP_DATABASE: "unused.db",
+									APP_STORE: "file:/unused.db",
+									APP_DATABASE: "/unused.db",
 									GENERATION: "1",
 									STATE: "live",
 									BOOT_URL: "http://localhost",

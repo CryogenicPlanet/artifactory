@@ -113,7 +113,7 @@ const helper = Bun.spawn(["/usr/bin/sudo", "-n", "/opt/comms/deployment/child-ke
   env: { COMMS_CHILD_CONFIG: JSON.stringify({
     entry: "/data/gen/1/source/probe.js", cwd: "/data/gen/1/source", attempt,
     receipt: `/data/attempts/${attempt}.closed`,
-    env: { APP_DATABASE: "/data/store/comms.db", STATE: "candidate", EXIT_LEADER: process.argv[3] },
+    env: { APP_STORE: "file:/data/store/comms.db", APP_DATABASE: "/data/store/comms.db", STATE: "candidate", EXIT_LEADER: process.argv[3] },
   }) }, stdin: "pipe", stdout: "inherit", stderr: "inherit",
 });
 writeFileSync("/data/owner.pid", String(process.pid));
@@ -195,6 +195,46 @@ for uid in 1001:1003 1002:1002; do
   docker exec --user "$uid" "$container" sh -ec 'test ! -r /data/cache/bun && test ! -x /data/cache/bun'
 done
 printf '%s\n' 'Passed persistent cache, isolated package inodes and cache permission revocation.'
+# Descriptors are validated before child execution; rehearsal gets a private copy.
+docker exec -i "$container" sh -c 'cat > /data/gen/1/source/descriptor-probe.js' <<'JS'
+import { Database } from "bun:sqlite";
+const filename = process.env.APP_DATABASE;
+if (process.env.APP_STORE !== `file:${filename}` || !filename.startsWith("/data/rehearsals/"))
+  throw new Error("rehearsal descriptor was not rewritten");
+const db = new Database(filename);
+if (db.query("SELECT value FROM keeper_probe").get().value < 3) throw new Error("clone lost source data");
+db.exec("UPDATE keeper_probe SET value=-1");
+db.close();
+console.log("PRIVATE_DESCRIPTOR_VERIFIED");
+JS
+docker exec -i "$container" sh -c 'cat > /tmp/descriptor-owner.js' <<'JS'
+const mode = process.argv[2];
+const attempt = process.argv[3];
+const helper = Bun.spawn(["/usr/bin/sudo", "-n", "/opt/comms/deployment/child-keeper"], {
+  env: { COMMS_CHILD_CONFIG: JSON.stringify({
+    entry: "/data/gen/1/source/descriptor-probe.js", cwd: "/data/gen/1/source", attempt,
+    receipt: `/data/attempts/${attempt}.closed`,
+    env: { STATE: "rehearsal", APP_DATABASE: "/data/store/comms.db",
+      APP_STORE: mode === "mismatch" ? "file:/data/other.db" : mode === "invalid" ? "file:relative" : "file:/data/store/comms.db" },
+  }) }, stdin: "pipe", stdout: "pipe", stderr: "pipe",
+});
+const output = new Response(helper.stdout).text();
+const errors = new Response(helper.stderr).text();
+const code = await helper.exited;
+const text = await output;
+await errors;
+if (mode === "valid" ? code !== 0 || !text.includes("PRIVATE_DESCRIPTOR_VERIFIED") : code === 0 || text.includes("COMMS_CHILD_PID="))
+  throw new Error(`descriptor acceptance failed: ${mode}`);
+JS
+before=$(counter)
+for mode in mismatch invalid valid; do
+    case "$mode" in mismatch) attempt=$(printf '%064d' 3);; invalid) attempt=$(printf '%064d' 4);; valid) attempt=$(printf '%064d' 5);; esac
+    docker exec "$container" setpriv --reuid=1000 --regid=1000 --groups=1003 bun /tmp/descriptor-owner.js "$mode" "$attempt"
+    wait_for closed
+    docker exec "$container" test ! -e "/data/rehearsals/$attempt"
+    test "$(counter)" = "$before"
+done
+printf '%s\n' 'Passed descriptor refusals before spawn, private rehearsal copy, unchanged live rows and closure receipts.'
 # Fake editable Vite entry runs through the real fixed preparation keeper.
 docker exec -i "$container" sh -c 'cat > /data/cache/.prepare-probe/workspace/node_modules/vite/bin/vite.js' <<'JS'
 import { accessSync, constants, readFileSync, writeFileSync } from "node:fs";

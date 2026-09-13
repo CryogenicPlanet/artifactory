@@ -5,7 +5,7 @@ import { extensionCapabilities } from "./ext/core/capabilities.ts";
 // oxlint-disable-next-line effecttsgo/node-builtin-import -- Effect Crypto has no constant-time comparison.
 import { timingSafeEqual } from "node:crypto";
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { clientLayer } from "@comms/storage/client";
 import {
 	Config,
 	Context,
@@ -31,12 +31,12 @@ import {
 	HttpServerRequest,
 	HttpServerResponse,
 } from "effect/unstable/http";
-import { BootChannel, type KernelError, layer as channelLayer } from "./kernel/boot-channel.ts";
+import { BootChannel, KernelError, layer as channelLayer } from "./kernel/boot-channel.ts";
 import { initialize } from "./ext/core/schema.ts";
 import { migrate } from "./kernel/migrations.ts";
 import { type Topics, layer as topicsLayer } from "./ext/core/topics.ts";
 import { type Messages, layer as messagesLayer } from "./ext/core/messages.ts";
-import { probeHealth } from "./kernel/health.ts";
+import { probeHealth, readinessRoute } from "./kernel/health.ts";
 import { Lifecycle, RequestMutation, layer as lifecycleLayer } from "./kernel/lifecycle.ts";
 import type * as HttpServerError from "effect/unstable/http/HttpServerError";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
@@ -114,7 +114,7 @@ const server = Effect.gen(function* () {
 					yield* Ref.set(extensionState, extensions.changeState);
 					yield* Ref.set(quiesce, publication.quiesce);
 					const dispatch = yield* HttpRouter.toHttpEffect(
-						Layer.mergeAll(routes(extensions), pageRoutes, boardRoutes(boardDirectory)),
+						Layer.mergeAll(routes(extensions), pageRoutes, boardRoutes(boardDirectory), readinessRoute),
 					);
 					const context = yield* Effect.context<
 						| BootChannel
@@ -140,9 +140,20 @@ const server = Effect.gen(function* () {
 								if (!["starting", "candidate", "rehearsal"].includes(state))
 									return HttpServerResponse.empty({ status: 409 });
 								if (!(yield* Ref.get(lifecycle.healthy))) {
-									yield* probeHealth(extensions.rehearse, state === "rehearsal").pipe(
-										Effect.provideContext(sqlContext),
-									);
+									yield* probeHealth(
+										Effect.gen(function* () {
+											yield* extensions.rehearse;
+											const response = yield* actual.pipe(
+												Effect.provideService(
+													HttpServerRequest.HttpServerRequest,
+													HttpServerRequest.fromWeb(new Request("http://kernel/_kernel/readiness")),
+												),
+											);
+											if (response.status !== 200 || response.headers["x-comms-readiness"] !== "kernel")
+												return yield* new KernelError({ code: "health_failed" });
+										}),
+										state === "rehearsal",
+									).pipe(Effect.provideContext(sqlContext));
 									yield* Ref.set(lifecycle.healthy, true);
 								}
 								return HttpServerResponse.jsonUnsafe(
@@ -234,7 +245,7 @@ const server = Effect.gen(function* () {
 						),
 					),
 				);
-			}).pipe(Effect.provide(SqliteClient.layer({ filename: boot.filename, disableWAL: true })));
+			}).pipe(Effect.provide(clientLayer({ _tag: "file", filename: boot.filename })));
 		});
 		yield* application.pipe(
 			Effect.catchCause((cause) =>

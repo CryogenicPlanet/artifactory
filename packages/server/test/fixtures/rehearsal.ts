@@ -1,3 +1,5 @@
+import { Redacted } from "effect";
+import { render } from "@comms/storage/store";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Config, Console, Deferred, Effect, FileSystem, Layer, Path, Schema, Stream } from "effect";
@@ -37,6 +39,7 @@ const run = Effect.gen(function* () {
 					PORT: "0",
 					BOOT_SECRET: "private-rehearsal-secret",
 					WRITER_EPOCH: "rehearsal-test",
+					APP_STORE: Redacted.value(yield* render({ _tag: "file", filename: clone })),
 					APP_DATABASE: clone,
 					PAGES_DIRECTORY: pages,
 					STATE: "rehearsal",

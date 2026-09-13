@@ -51,7 +51,8 @@ POST /_boot/tokens mints a pair with a human session and fresh token.mint assert
 GET /_boot/auth/passkeys lists keys; passkey.add and passkey.delete assertions authorize key changes.
 POST /_boot/tokens/:family/revoke requires a human session and fresh token.revoke passkey assertion.
 POST /api/lock acquires the editor; GET/PUT/DELETE /api/fs/app/<path> reads or stages source.
-PUT ?reload=0 stages only; POST /api/reload rehearses and cuts over. Failed edits retain the repair lock.
+Save X-Comms-Base-Version from GET; PUT ?reload=0&baseVersion=<token> stages raw bytes.
+Use baseVersion=null only for an absent file. POST /api/reload rehearses and cuts over. Failed edits retain the repair lock.
 POST /api/reload?release=1 releases the lock after a successful edit.
 POST /api/revert {} undoes the latest app batch; {path}, {batch}, or {version} selects retained source history.
 POST /api/revert {generation:n} restores a retained whole source tree and rebuilds its locked dependencies.
