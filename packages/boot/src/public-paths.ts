@@ -1,4 +1,3 @@
-import { isDescendant } from "@comms/storage/descendant";
 import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { EventRecord } from "./events.ts";
@@ -49,11 +48,11 @@ export const projectPublicPath = (sql: SqlClient, event: typeof EventRecord.Type
 			const value = yield* Schema.decodeUnknownEffect(Deletion)(event.payload);
 			if (value.path !== event.topic) return false;
 			yield* sql`DELETE FROM public_paths WHERE path=${value.path}
-				OR ${isDescendant(sql, sql`path`, sql`${value.path}`)}`;
+				OR substr(path,1,length(${value.path})+1)=${value.path}||'/'`;
 		}
 		return true;
 	});
 
 export const movePublicPaths = (sql: SqlClient, from: string, to: string) =>
 	sql`UPDATE public_paths SET path=${to}||substr(path,length(${from})+1)
-		WHERE path=${from} OR ${isDescendant(sql, sql`path`, sql`${from}`)}`;
+		WHERE path=${from} OR substr(path,1,length(${from})+1)=${from}||'/'`;
