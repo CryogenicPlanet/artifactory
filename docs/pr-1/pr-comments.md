@@ -462,6 +462,18 @@ Publishing a page without a precondition returns `precondition_required` with th
 
 **Decided 2026-09-13, smallest fix.** The documented first read is `newest=1`, which returns the top slice and skips everything earlier, while the mark advances to the highest sequence returned: observed, seven unread became zero from a read that returned one message. **Corrected 2026-09-13:** `recipes.md` already tells background reads to add `mark=0`; the live trap is `init.md:33`, which shows `topic=project&recursive=1&newest=1&limit=50` with no `mark=0`. The code fix below still stands, because `/init` is the page every agent reads first. The unread badge is human-UI only (`packages/ui/src/app.tsx:126` and `:273`), so this is low stakes and does not warrant a redesign. A `newest=1` read marks nothing; every other read is unchanged. Noted for later: if the badge is not worth keeping, removing the unread concept entirely also removes this, the root-mark case in item 44 and the over-marking class, which is a real simplification rather than a fix.
 
+## Found while merging the stack (2026-09-13)
+
+Two things surfaced by the pre-merge pass that are now on master, recorded so they are not lost in the merge noise. Neither blocked a merge.
+
+### 61. Source-revert receipts grow without bound
+
+`23db345` ("Retain source revert outcomes without calendar expiry", merged in #2) removes the whole prune and retain loop from `packages/boot/src/source-revert.ts`, and `index.ts` now calls only `reverts.recover`. The intent is right and favours durability: an idempotency receipt should not expire by age while a replay can still arrive. The consequence is that `source-revert-result:` rows in `settings` accumulate one per revert request forever, and `source-revert.ts:98` reads all of them with `SELECT key,value FROM settings WHERE key LIKE 'source-revert-result:%'` on every recovery. Human-initiated, so growth is slow, but the scan is on the recovery path. Bound it by count or keyspace rather than by calendar, which is the same conclusion item 35 reached for events.
+
+### 62. The board UI aborts a revert on the new 503
+
+`3ab1962` made the lock route answer 503 while carrying `lock_committed: true` in the body, which is correct and which boot's own recovery page already tolerates: it catches the error, re-reads the lock and proceeds. The browser client does not. `packages/ui/src/recovery-api.ts:28-34` catches `BoardError` only when `status === 423`, so the 503 falls through and aborts the revert. Leave the board open, let recovery fail so the surface becomes non-writable, click undo: the lock commits server-side, the user sees a failure, and the second click succeeds because the lock is now found and the POST is skipped. One wasted click and self-healing, so it is minor, but the fix is adding 503 beside 423 in that `catchTag`.
+
 ## Moot after the deletions
 
 Findings that no longer need a comment because items 3 and 4 remove what they were about.
