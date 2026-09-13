@@ -315,12 +315,20 @@ it("keeps source and live writes intact when generation dependency preparation f
 			await cp(join(import.meta.dirname, `../../${workspace}`, file), join(seed, workspace, file), { recursive: true });
 	}
 	phase("seed_copied");
-	const app = await fixture.launch(join(seed, "server.ts"));
+	const diagnostics = await preparationPhases(fixture.root);
+	const app = await fixture.launch(join(seed, "server.ts"), diagnostics.launcher);
 	await app.setup();
 	const cookie = await app.login();
 	// Cold runtime dependency preparation installs, copies and fsyncs the complete tree.
-	phase("initial_preparation_wait");
-	await app.ready(cookie, 60000);
+	phase("initial_startup_wait");
+	try {
+		await app.ready(cookie, 60000);
+	} catch (cause) {
+		// Capture bounded startup evidence before teardown without changing the readiness deadline.
+		throw new Error(`Initial retry-fixture startup phases: ${JSON.stringify(diagnostics.read(app.output()))}`, {
+			cause,
+		});
+	}
 	phase("initial_live");
 	expect((await app.post("/api/lock", {}, cookie)).status).toBe(200);
 	const original = await readFile(join(fixture.root, "app/server.ts"), "utf8");
