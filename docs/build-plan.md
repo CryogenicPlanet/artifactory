@@ -4,7 +4,7 @@ The lead owns integration and acceptance. Writers use isolated checkouts; only t
 
 ## Current review wave — composition and acceptance pending
 
-The [review disposition ledger](stack-review-status.md) maps each comment to its lower layer, frozen fix or remaining implementation. The previous database acceptance below predates this wave.
+The [review disposition ledger](stack-review-status.md) maps each comment to its lower layer, frozen fix or remaining implementation. The previous database acceptance below predates this wave. Five reviewer verification comments posted on 13 September at 00:47–00:48 UTC accept many original fixes but add isolated-layout repair, backup caller-budget, descriptor-path and lower dialect/codec follow-ups. The [latest verification table](stack-review-status.md#latest-reviewer-verification--13-september-2026-00470048-utc) assigns those actions; protection notes overlap pending item 48/core13.
 
 | Order | Work | Dependency / acceptance |
 | --- | --- | --- |

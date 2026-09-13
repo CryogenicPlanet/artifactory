@@ -4,6 +4,20 @@ Read this alongside the [build plan](build-plan.md). The current review wave is 
 
 **Statuses:** **pending** requires implementation or verification; **frozen** identifies a committed worker handoff; **composed below** identifies a lower-layer composition, not final stack acceptance; **already fixed** refers to the recorded accepted checkpoint. A supported disagreement is an explicit disposition, not reviewer approval.
 
+## Latest reviewer verification — 13 September 2026, 00:47–00:48 UTC
+
+Five new issue comments supersede the earlier inventory counts. Original blocking findings were largely accepted, but this wave is **not complete**. No new formal reviews or inline comments appeared; PRs 1/9/10 had no new feedback in this refresh. Findings below were checked against lower heads `2bb3922`/`cb47ffb`/`589736a`/`8d64527`/`221c477` and runtime `fcdaa23`.
+
+| Verification | Accepted findings and remaining actions |
+| --- | --- |
+| [PR2 — ready with nits](https://github.com/CryogenicPlanet/artifactory/pull/2#issuecomment-5649766906) | Reviewer accepts rollback compatibility, parser/render symmetry, import guard and actual child tests. Descriptor lane: resolve rehearsal paths for relative DATA_DIR, handle alias-only keeper input consistently, improve neither-variable diagnostics, and name all three deferred credential boundaries. |
+| [PR3 — isolated repair still broken](https://github.com/CryogenicPlanet/artifactory/pull/3#issuecomment-5649764394) | Reviewer accepts relocation and most identity fixes. Identity lane: prevent isolated-layout `identityStatus` failure from bypassing journal/restore recovery; test production's COMMS_ISOLATED path. Backport runtime's deferred parent-path resolution. Safe UUID/withdrawal diagnostics are already in the current lower composition. Identical protected-table DROP/recreation requires protection-lane review, not a blanket claim from schema inventory. |
+| [PR4 — ready with nits](https://github.com/CryogenicPlanet/artifactory/pull/4#issuecomment-5649766975) | Reviewer accepts provenance, quota and copy-budget fixes and explicitly permits the named API surface at the second-engine rung. Backup lane: reconcile app caller's 20s deadline with the 30s copy budget; provide a safe disposition for interrupted-copy recovery without a kernel boot ID. Never infer closure from a missing process. Refresh active ledgers while retaining unknown historical failure causes. |
+| [PR7 — original findings closed](https://github.com/CryogenicPlanet/artifactory/pull/7#issuecomment-5649767038) | Reviewer accepts all eight original findings. Protection lane: include dynamic registered tables in migration protection, remove duplicate migrations entry, and eliminate coarse SQL false positives. These overlap pending item 48/core13 rather than constituting accepted fixes yet. |
+| [PR8 — not yet; original majors closed](https://github.com/CryogenicPlanet/artifactory/pull/8#issuecomment-5649764457) | Reviewer accepts native CTE/snapshot/dialect coverage and **explicitly withdraws the incoming_seq allegation**. Dialect lane: backport runtime's quoted read-marks table and portable SQL-publication JSON probe; wire the currently unconfigured PostgreSQL raw-JSON test; name tested query modules precisely. Portable boot/system callers are composed in the current lower head, while runtime owns credential/TLS integration. |
+
+The PostgreSQL raw-JSON test is still gated only by `COMMS_PG_JSON_TEST_CONFIG`, with no producer found at `fcdaa23`. Existing native JSON/CTE tests do not make that particular codec fixture executed. The isolated-layout failure also remains in runtime at this checkpoint; fixing lower code alone must not be mistaken for final-stack repair.
+
 ## Current review wave
 
 | Group | Committed work and remaining dependency |
