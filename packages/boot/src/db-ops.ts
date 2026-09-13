@@ -1,5 +1,4 @@
-import type { RemoteDatabaseError } from "./remote-database-journal.ts";
-import type { RemoteCopyError } from "@comms/storage/remote-copy";
+import type { RemoteDatabaseError } from "./remote-db-ops.ts";
 import { EventError } from "./events.ts";
 import { sqliteCopyProcess } from "./sqlite-copy-process.ts";
 import { ChildError } from "./child-process.ts";
@@ -167,7 +166,7 @@ const make = (store: FileStore, dataDirectory: string) =>
 		};
 	});
 type Operations = Effect.Success<ReturnType<typeof make>>;
-type RemoteFailure = RemoteDatabaseError | RemoteCopyError | EventError;
+type RemoteFailure = RemoteDatabaseError | EventError;
 type Result<A, T extends Effect.Effect<unknown, unknown, unknown>> = Effect.Effect<
 	A,
 	Effect.Error<T> | RemoteFailure,
@@ -177,7 +176,7 @@ type Rehearsal = ReturnType<Operations["rehearsal"]>;
 /** A common effect shape keeps the coordinator independent of native versus file mechanics. */
 export interface DbOpsService {
 	readonly engine: "sqlite" | "pg" | "mysql";
-	/** SQLite-only opaque before-image repair; remote restore retains its native verification. */
+	/** SQLite-only opaque before-image repair; remote restore belongs to the provider. */
 	readonly offlineRestore?: Operations["offlineRestore"];
 	readonly estimatedBytes: Result<number, Operations["estimatedBytes"]>;
 	readonly recoverStaging: Result<void, Operations["recoverStaging"]>;
