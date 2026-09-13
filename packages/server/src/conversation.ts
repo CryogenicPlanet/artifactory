@@ -7,7 +7,7 @@ import { sqlGroup, sqlHandlers } from "./sql-http.ts";
 import type { Extensions } from "./kernel/ext.ts";
 import { description as onboardingDescription, routes as onboardingRoutes } from "./onboarding.ts";
 import { identity, failure, refusal } from "./conversation-request.ts";
-export const SystemApi = HttpApi.make("comms-system").add(sqlGroup).add(extGroup);
+export const SystemApi = HttpApi.make("chirp-system").add(sqlGroup).add(extGroup);
 export const routes = (extensions: Extensions["Service"]) => {
 	const system = OpenApi.fromApi(SystemApi.add(onboardingDescription));
 	const specification = {

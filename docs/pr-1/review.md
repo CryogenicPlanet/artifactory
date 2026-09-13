@@ -32,20 +32,20 @@ It is five times smaller, not bigger. Counted with `wc -l` on non-test TypeScrip
 
 | Tree | Lines | Files |
 | --- | --- | --- |
-| comms `packages/boot/src` | 7,239 | 61 |
-| comms `packages/server/src` | 4,423 | 48 |
-| comms `packages/ui/src` | 2,528 (+918 CSS) | 21 |
-| comms total | 14,339 | 134 |
+| chirp `packages/boot/src` | 7,239 | 61 |
+| chirp `packages/server/src` | 4,423 | 48 |
+| chirp `packages/ui/src` | 2,528 (+918 CSS) | 21 |
+| chirp total | 14,339 | 134 |
 | pi `coding-agent/src` | 70,052 | 258 |
 | pi `coding-agent/src/core` | 29,802 | 84 |
 
 Tests are a separate story: 15,226 lines in 132 files, larger than the source tree, with boot's tests at 8.3k against its 7.2k of source.
 
-Feature by feature, comms is smaller everywhere the two overlap: extension loading 793 lines against pi's 4,130; dependency preparation 485 against 4,933; UI 2.5k against pi's 38k of TUI. The three places comms is larger are the ones the spec demands and pi has no equivalent for: hot reload with durable cutover (2,670 lines, pi reloads in-process in about 150), passkey auth with refresh receipts (2,265, pi has none), and the durable event log with SSE (942, pi's event bus is 33 lines in memory).
+Feature by feature, chirp is smaller everywhere the two overlap: extension loading 793 lines against pi's 4,130; dependency preparation 485 against 4,933; UI 2.5k against pi's 38k of TUI. The three places chirp is larger are the ones the spec demands and pi has no equivalent for: hot reload with durable cutover (2,670 lines, pi reloads in-process in about 150), passkey auth with refresh receipts (2,265, pi has none), and the durable event log with SSE (942, pi's event bus is 33 lines in memory).
 
 So why does it feel bigger? Three reasons, all real:
 
-- **The immutable-to-hot ratio is inverted from pi.** pi is one immutable binary hosting 26-line extensions. comms is 7.2k immutable lines hosting a 4.4k kernel hosting a 29-line extension. Half the code is the part you cannot fix by editing.
+- **The immutable-to-hot ratio is inverted from pi.** pi is one immutable binary hosting 26-line extensions. chirp is 7.2k immutable lines hosting a 4.4k kernel hosting a 29-line extension. Half the code is the part you cannot fix by editing.
 - **Concepts per feature.** Adding "pin a message" end to end touches eight existing files and three new ones across six layers: the version ladder, the published-image projection, a new operations file with the mutation protocol copied in, the service record, a new HTTP file, two edits in the conversation group, a UI client and a component. In pi the same class of change is one new file.
 - **Three mechanisms are paid for twice.** The durable mutation protocol (reserve, write, outbox, re-reserve or abort) is hand-copied into seven kernel files while `operational-events.ts` already is the generic combinator. HttpApi is declared for nineteen endpoints and then bypassed by all nineteen. The UI re-declares server schemas in seven hand-rolled clients while `HttpApiClient` ships unused in the pinned Effect.
 
@@ -122,7 +122,7 @@ Not broadly. That reviewer traced `POST /api/messages` through thirteen hops and
 
 The extension API is four members against pi's sixty-two, which is the opposite of over-abstracted. The problem is one level down: the context it hands out is a raw `SqlClient` plus a publication-fence protocol that a correct read must reproduce by hand. The shipped example spends nine lines of ritual (`SELECT epoch FROM kernel_writer`, take a `ceiling`, wrap a `publishedMessages` CTE) to count messages per agent. pi's first example is `pi.registerTool({name:"greet"})`. One `ctx.read(effect)` helper that opens the transaction, pins the epoch and exposes a pre-filtered `visible_messages` removes `ceiling`, `publishedThrough`, `publicationFence`, `kernel_writer` and `publishedMessages` from the agent's vocabulary. That is the single highest-leverage change per line in any of these reports.
 
-Where comms is under-abstracted rather than over: the durable mutation protocol copied seven times, the body reader copied ten times, four idempotency tables for one concept, and the boot HTTP preamble copied seven times with the Origin check encoded slightly differently in each.
+Where chirp is under-abstracted rather than over: the durable mutation protocol copied seven times, the body reader copied ten times, four idempotency tables for one concept, and the boot HTTP preamble copied seven times with the Origin check encoded slightly differently in each.
 
 ### API design for the consuming agent: bare minimum, too much, or too little?
 

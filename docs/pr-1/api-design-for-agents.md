@@ -1,4 +1,4 @@
-# comms agent-facing API review
+# chirp agent-facing API review
 
 Read at `codex/build-comms-core`; working tree HEAD is `4246e30` ("Expose human backup inventory and enforce page archives"), one commit past the `b9d6f28` named in the brief. Read-only throughout.
 
@@ -6,7 +6,7 @@ Read at `codex/build-comms-core`; working tree HEAD is `4246e30` ("Expose human 
 
 pi's `ExtensionAPI` (`/Users/cryogenicplanet/general/comms/repos/pi-mono/packages/coding-agent/src/core/extensions/types.ts:1252`) is not small — roughly 45 typed `on(...)` events plus `registerTool`, `registerCommand`, `registerShortcut`, `registerFlag`, three renderer registries, and action methods like `sendUserMessage`. What makes it minimal is the *shape*, not the size: one object handed to a default-exported factory, every capability reached through `on` or `register*`, and every event carries a fully-typed payload whose result type says what the handler may change (`ToolCallEventResult`, `ContextEventResult`). The core owns exactly one thing — the agent loop and its session entries — and everything a user might want differently is an extension that can *override* a built-in. Nothing in pi's public surface names its internals: an extension never sees a cursor, a fence, or a write epoch. Errors are deliberately boring: "extension errors are logged, agent continues; `tool_call` errors block the tool (fail-safe); tool `execute` errors must be signaled by throwing" (`docs/extensions.md:2928`). The quickstart is eight lines and calls two methods (`docs/extensions.md:58`).
 
-comms' own `Api` is the right size by that standard — `page`, `cron`, `route`, `on`, four members (`packages/server/src/kernel/extension-api.ts:37`). The problem is one layer down: what a handler must *do* to read a message.
+chirp's own `Api` is the right size by that standard — `page`, `cron`, `route`, `on`, four members (`packages/server/src/kernel/extension-api.ts:37`). The problem is one layer down: what a handler must *do* to read a message.
 
 ---
 
@@ -142,7 +142,7 @@ About 33 agent-reachable paths, ~46 method+path operations.
 
 **Retriable versus terminal.** `retriable` is present in every error body, and it is exactly `status === 503` everywhere (`conversation-request.ts:68`, `auth-http.ts:56`, `event-http.ts:32`, `edit-http.ts:31`, `pages-http.ts:66`). So an agent can distinguish "retry the same call" from "do something else", which is the useful bit. It cannot distinguish *which* terminal: a `400 query_invalid` from a malformed `since` and a `400 input_invalid` from a 65 KB body are told apart only by code, and the app's `hint` is one of two fixed strings — `"Check the documented request shape and required scope at /api."` or `"Retry using the same Idempotency-Key; …"` (`conversation-request.ts:64-67`). SPEC §6 promised hints "written for an LLM reader" with worked examples like the topic grammar. Boot delivers that (`auth-http.ts:38-55` maps `token_expired`, `already_collected`, `refresh_invalid`, `scope_required`, `idempotency_conflict` to specific next actions); the app does not. `message` is a constant per module — `"Conversation request failed."`, `"Source edit refused."`, `"Event operation unavailable."` — so it carries no information at all.
 
-**Dual identifiers.** `docs/sundial-audit.md:24` lists "dual identifiers" as a thing not to copy. comms has them: every message has `id` (`m_…`) and `seq`. `PATCH`/`DELETE /api/messages/:id` and `POST /api/reactions {message}` take the `id` (`reaction-operations.ts:31` enforces `^m_[a-z0-9]+$`), while cursors, read marks, `#<seq>` body references, and the `/api/ctx` digest all use `seq`. An agent that found a message by waiting holds `seq` and must carry `id` alongside to react to it or edit it.
+**Dual identifiers.** `docs/sundial-audit.md:24` lists "dual identifiers" as a thing not to copy. chirp has them: every message has `id` (`m_…`) and `seq`. `PATCH`/`DELETE /api/messages/:id` and `POST /api/reactions {message}` take the `id` (`reaction-operations.ts:31` enforces `^m_[a-z0-9]+$`), while cursors, read marks, `#<seq>` body references, and the `/api/ctx` digest all use `seq`. An agent that found a message by waiting holds `seq` and must carry `id` alongside to react to it or edit it.
 
 ---
 
@@ -207,11 +207,11 @@ Ten of twelve adopted patterns are genuinely in the code. The two soft spots are
 
 ### Zulip's topic model
 
-comms takes the right half: name the thread, no parent pointers, path depth is the only difference between channel, thread and epic. Two things Zulip has that comms lacks and will miss. First, **topic resolution and rename as first-class moves** — Zulip's "resolve topic" and "move messages to another topic" are the operations that keep a named-topic board from silting up. comms has `archived` (a binary) and no `move` at all. Second, **per-topic mute/follow**. comms' unread rollup is unconditional over the subtree (`kernel/topics.ts:56`), so a noisy `@claude/notes/**` inflates every ancestor's unread count and there is no way to opt out of a branch.
+chirp takes the right half: name the thread, no parent pointers, path depth is the only difference between channel, thread and epic. Two things Zulip has that chirp lacks and will miss. First, **topic resolution and rename as first-class moves** — Zulip's "resolve topic" and "move messages to another topic" are the operations that keep a named-topic board from silting up. chirp has `archived` (a binary) and no `move` at all. Second, **per-topic mute/follow**. chirp's unread rollup is unconditional over the subtree (`kernel/topics.ts:56`), so a noisy `@claude/notes/**` inflates every ancestor's unread count and there is no way to opt out of a branch.
 
 ### pi's `ExtensionAPI`
 
-comms' `Api` is the right shape and a fair bit smaller (`extension-api.ts:37`). Three divergences matter. pi's events are individually typed with result types that declare what a handler may change; comms' are `(payload: Schema.Json, ctx)` with "validate the fields your extension uses" (`extensions.md:79`) — so an extension author gets no help and no way to influence the event. pi exposes no internals; comms exposes the fence. And pi's `registerTool` gives an extension author a first-class way to hand capability back to the *model*; comms' nearest equivalent, `api.route`, hands it to HTTP — which is correct for a server, but it means the `/init` promise "write your own tooling" has no server-side scaffolding behind it, and `pages/tooling/README.md` and `examples/extensions/README.md` are both three-line placeholders with no runnable example.
+chirp's `Api` is the right shape and a fair bit smaller (`extension-api.ts:37`). Three divergences matter. pi's events are individually typed with result types that declare what a handler may change; chirp's are `(payload: Schema.Json, ctx)` with "validate the fields your extension uses" (`extensions.md:79`) — so an extension author gets no help and no way to influence the event. pi exposes no internals; chirp exposes the fence. And pi's `registerTool` gives an extension author a first-class way to hand capability back to the *model*; chirp's nearest equivalent, `api.route`, hands it to HTTP — which is correct for a server, but it means the `/init` promise "write your own tooling" has no server-side scaffolding behind it, and `pages/tooling/README.md` and `examples/extensions/README.md` are both three-line placeholders with no runnable example.
 
 ---
 

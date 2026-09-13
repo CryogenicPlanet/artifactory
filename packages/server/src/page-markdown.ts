@@ -24,7 +24,7 @@ export const pageDocument = (
 	options: { title?: string; raw?: string; rawHref?: string; assets?: string } = {},
 ) => {
 	let current = "";
-	const crumbs = [`<a href="/">comms</a>`, `<a href="/p/">pages</a>`];
+	const crumbs = [`<a href="/">chirp</a>`, `<a href="/p/">pages</a>`];
 	for (const part of name.split("/").filter(Boolean)) {
 		current = current ? `${current}/${part}` : part;
 		crumbs.push(`<a href="${escapeHtml(pageHref(current))}">${escapeHtml(part)}</a>`);
