@@ -425,8 +425,8 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 				const persisted = yield* read;
 				const { generation: failedGeneration, candidate: failedCandidate } = rollback;
 				const stderr = supervisor.child.redact(
-					failure._tag === "Success" && Schema.is(ChildError)(failure.success)
-						? (failure.success.stderr ?? "")
+					failure._tag === "Success" && Schema.is(ChildError)(failure.success) && failure.success.stderr !== undefined
+						? failure.success.stderr
 						: failedCandidate
 							? yield* Ref.get(failedCandidate.process.stderr)
 							: "",
