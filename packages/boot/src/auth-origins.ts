@@ -69,6 +69,16 @@ export const allowedParties = (sql: SqlClient.SqlClient, config: AuthConfig) =>
 		];
 	});
 
+/** Why no allowed origin can sign in with any stored passkey, or null when at least one can. Pure, so the caller
+ * decides whether a mismatch refuses startup or only warns. */
+export const passkeyOriginMismatch = (
+	passkeyRpIds: ReadonlyArray<string>,
+	parties: ReadonlyArray<RelyingParty>,
+): string | null =>
+	passkeyRpIds.length === 0 || passkeyRpIds.some((rpId) => parties.some((party) => party.rpId === rpId))
+		? null
+		: `no passkey uses an RP ID served by an allowed origin (passkeys use ${passkeyRpIds.join(", ")}; allowed origins serve ${[...new Set(parties.map((party) => party.rpId))].join(", ")}), so nobody could sign in`;
+
 const codeRow = Schema.Struct({ origin: Schema.NullOr(Schema.String), expires_at: Schema.Finite });
 const countRow = Schema.Struct({ rp_id: Schema.NullOr(Schema.String) });
 

@@ -28,7 +28,7 @@ import { makeTokens } from "./tokens.ts";
 import { makeLockBreak, canonicalLockBreak, type BreakLock } from "./lock-break.ts";
 import { canonicalRevocation, type RevokeFamily } from "./refresh-schema.ts";
 import { canonicalDecision, type EnrollmentDecision } from "./enrollment-schema.ts";
-import { allowedParties, configuredParties, makeOriginManagement, type RelyingParty } from "./auth-origins.ts";
+import { allowedParties, makeOriginManagement, passkeyOriginMismatch, type RelyingParty } from "./auth-origins.ts";
 import { makeActionAssertions, restartBinding } from "./action-assertions.ts";
 import { makePasskeyCodes } from "./passkey-code.ts";
 import type { RemoveOrigin } from "./passkey-code-schema.ts";
@@ -142,27 +142,28 @@ const makeAuth = (config: AuthConfig) =>
 		});
 		// Every boot invalidates setup ceremonies created under an earlier stdout code.
 		yield* sql`DELETE FROM auth_challenges WHERE ceremony = 'setup'`;
-		// Startup guarantees that a configured origin can still sign in. Runtime origins do not count: they can be removed.
+		// Startup guarantees that some allowed origin can still sign in: a configured origin, or a runtime origin
+		// activated by a code, whose passkeys can mint a code for any other domain.
 		const refuseConfiguration = (reason: string) =>
 			Effect.gen(function* () {
 				yield* Effect.sync(() => bootConsole.error(`chirp: auth configuration refused: ${reason}`));
 				return yield* refuse("auth_configuration_invalid");
 			});
 		const listHint =
-			"PUBLIC_ORIGINS gives each origin its hostname as RP ID, so it only keeps passkeys whose RP ID equals one of those hostnames; otherwise keep RP_ID and PUBLIC_ORIGIN. Restore the previous configuration to start.";
+			"PUBLIC_ORIGINS gives each origin its hostname as RP ID, so it only keeps passkeys whose RP ID equals one of those hostnames; otherwise keep RP_ID and PUBLIC_ORIGIN. To start, restore the previous configuration, or, if no passkey can be recovered, empty boot's passkey table (DELETE FROM passkeys) and set up again at /setup.";
 		// PUBLIC_ORIGINS names no RP ID for a passkey stored before RP IDs were recorded.
 		if (config.originList && (yield* sql`SELECT id FROM passkeys WHERE rp_id IS NULL LIMIT 1`).length)
 			return yield* refuseConfiguration(
 				`some passkeys predate recorded RP IDs. Start with the previous RP_ID and PUBLIC_ORIGIN, sign in once with each passkey you keep and delete the rest. ${listHint}`,
 			);
-		const configuredRpIds = configuredParties(config).map((party) => party.rpId);
-		const storedRpIds = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ rp_id: Schema.String })))(
+		const passkeyRpIds = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ rp_id: Schema.String })))(
 			yield* sql`SELECT DISTINCT COALESCE(rp_id, ${config.rpId}) AS rp_id FROM passkeys`,
 		);
-		if (storedRpIds.length && !storedRpIds.some((row) => configuredRpIds.includes(row.rp_id)))
-			return yield* refuseConfiguration(
-				`no passkey uses an RP ID served by a configured origin (passkeys use ${storedRpIds.map((row) => row.rp_id).join(", ")}), so nobody could sign in. ${listHint}`,
-			);
+		const mismatch = passkeyOriginMismatch(
+			passkeyRpIds.map((row) => row.rp_id),
+			yield* allowedParties(sql, config),
+		);
+		if (mismatch) return yield* refuseConfiguration(`${mismatch}. ${listHint}`);
 		yield* setupState;
 
 		const allowed = allowedParties(sql, config);

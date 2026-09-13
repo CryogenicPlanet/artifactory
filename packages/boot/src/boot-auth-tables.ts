@@ -272,7 +272,7 @@ export const authTables = (sql: SqlClient, engine: "pg" | "mysql") => [
 		"passkey_codes",
 		[
 			column("id", 128, false),
-			column("selector", 16, false),
+			column("selector", 12, false),
 			column("hash", 64, false),
 			column("origin", 512, true),
 			column("failures", "integer", false),

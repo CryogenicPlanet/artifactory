@@ -52,7 +52,8 @@ Setting `PUBLIC_ORIGINS` together with either single-origin variable is refused.
 each hostname is an RP ID, `PUBLIC_ORIGINS` only keeps existing passkeys whose RP ID equals
 one of those hostnames. Otherwise keep `RP_ID` and `PUBLIC_ORIGIN`: a board with
 `RP_ID=example.com` and `PUBLIC_ORIGIN=https://chirp.example.com` stays on the single-origin
-variables. Boot refuses to start when no passkey's RP ID is served by a configured origin,
+variables. Boot refuses to start when no passkey's RP ID is served by a configured origin
+or a domain added with a code,
 or in `PUBLIC_ORIGINS` mode while any passkey predates recorded RP IDs, and restoring the
 previous variables starts it again.
 

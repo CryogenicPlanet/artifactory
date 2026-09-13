@@ -102,7 +102,7 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 						const now = yield* Clock.currentTimeMillis;
 						if (!(yield* sql`SELECT id FROM sessions WHERE id=${sessionId} AND expires_at>${now}`).length)
 							return yield* refuse("session_invalid");
-						const selector = Buffer.from(yield* crypto.randomBytes(3))
+						const selector = Buffer.from(yield* crypto.randomBytes(6))
 							.toString("hex")
 							.toUpperCase();
 						const secret = Buffer.from(yield* crypto.randomBytes(8))
@@ -146,7 +146,7 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 						if (yield* noPasskeys) return yield* refuse("setup_required");
 						const now = yield* Clock.currentTimeMillis;
 						// An unknown selector or a malformed code is refused without counting or touching any code.
-						const parts = /^([0-9A-F]{6})-([0-9A-F]{16})$/.exec(input.trim().toUpperCase());
+						const parts = /^([0-9A-F]{12})-([0-9A-F]{16})$/.exec(input.trim().toUpperCase());
 						const selector = parts?.[1];
 						const secret = parts?.[2];
 						if (!selector || !secret) return yield* refuse("passkey_code_invalid");
@@ -157,8 +157,9 @@ export const makePasskeyCodes = <E, R, S, SE, SR>(
 							return yield* refuse("passkey_code_invalid");
 						}
 						// An origin that is neither allowed nor bound is refused before the secret is examined and spends nothing.
+						// It gets the same refusal as an unknown selector, so a request cannot learn whether a selector is live.
 						const party = yield* partyFor(code, origin);
-						if (!party) return yield* refuse("origin_invalid");
+						if (!party) return yield* refuse("passkey_code_invalid");
 						if (code.locked_until > now) return yield* refuse("passkey_code_locked");
 						// Only the right selector with a wrong secret counts. The stored value is a hash of the secret,
 						// compared in constant time.

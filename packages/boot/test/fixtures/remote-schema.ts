@@ -83,7 +83,7 @@ await Effect.runPromise(
 			yield* expectFailure(
 				sql`INSERT INTO auth_origins(origin,rp_id,created_at) VALUES ('https://new.comms.test','other',1)`,
 			);
-			yield* sql`INSERT INTO passkey_codes(id,selector,hash,origin,failures,locked_until,expires_at,created_at) VALUES ('code','ABCDEF',${"a".repeat(64)},NULL,0,0,1,1)`;
+			yield* sql`INSERT INTO passkey_codes(id,selector,hash,origin,failures,locked_until,expires_at,created_at) VALUES ('code','ABCDEF123456',${"a".repeat(64)},NULL,0,0,1,1)`;
 			assert.deepEqual(yield* sql`SELECT origin FROM sessions WHERE id='session'`, [{ origin: null }]);
 			process.stdout.write("boot native constraints, long values, binary, sequence and reopen durability passed\n");
 		}

@@ -167,10 +167,22 @@ it("accepts each configured origin, redeems a bound code only on its domain, and
 	expect(page.status).toBe(200);
 	expect(await page.text()).toContain('data-mode="code"');
 	expect((await fetch(`${url}/auth/passkey-code/extra`)).status).not.toBe(200);
-	// Redeeming from another allowed origin is refused.
-	const elsewhere = await send("/_boot/auth/passkey-code/options", { code: code.code }, other.origin);
-	expect(elsewhere.status).toBe(403);
-	expect(await errorCode(elsewhere)).toBe("origin_invalid");
+	// A malformed code, an unknown selector, and the live selector from an origin that is neither allowed nor bound
+	// all get byte-identical refusals, so nobody can learn whether a selector is live.
+	const refusal = async (input: string, origin: string) => {
+		const response = await send("/_boot/auth/passkey-code/options", { code: input }, origin);
+		return { status: response.status, body: await response.text() };
+	};
+	const baseline = await refusal(`${"0".repeat(12)}-${code.code.slice(13)}`, added.origin);
+	expect(baseline.status).toBe(401);
+	expect(JSON.parse(baseline.body).error.code).toBe("passkey_code_invalid");
+	for (const [input, origin] of [
+		["not a code", added.origin],
+		[code.code, other.origin],
+		[code.code, primary.origin],
+		[code.code.toLowerCase(), "https://evil.test"],
+	] as const)
+		expect(await refusal(input, origin)).toEqual(baseline);
 
 	const options = await send("/_boot/auth/passkey-code/options", { code: code.code }, added.origin);
 	expect(options.status).toBe(200);
