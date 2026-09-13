@@ -29,7 +29,10 @@ for (const boundary of ["finish", "journal", "release"] as const) {
 		);
 		if (boundary === "release") expect(staged.status).toBe(200);
 		const response = boundary === "release" ? await app.post("/api/reload?release=1", {}, cookie) : staged;
-		expect(response.status).toBe(500);
+		expect(response.status).toBe(503);
+		expect(await response.json()).toMatchObject({
+			error: { code: "accepted_cleanup_pending", retriable: false, hint: expect.stringContaining("POST /_boot/lock") },
+		});
 		const accepted = await status();
 		expect(accepted).toMatchObject({ child: { state: "live" }, traffic: { frozen: false } });
 		const attempts = await fixture.sql("SELECT id,closed FROM child_attempts ORDER BY rowid", "boot.db");
@@ -44,7 +47,7 @@ for (const boundary of ["finish", "journal", "release"] as const) {
 		const staging = await fixture.sql("SELECT * FROM staging", "boot.db");
 		expect(staging).toHaveLength(1);
 		// Persistent faults retain the pin and overlay, but do not take down the accepted app.
-		expect((await app.post("/api/lock", {}, cookie)).status).toBe(500);
+		expect((await app.post("/api/lock", {}, cookie)).status).toBe(503);
 		expect((await status()).child.pid).toBe(accepted.child.pid);
 		expect(await fixture.sql("SELECT * FROM staging", "boot.db")).toEqual(staging);
 		await fixture.sql("DROP TRIGGER fail_cleanup", "boot.db");
@@ -77,7 +80,7 @@ it("finishes an accepted reset without consuming the borrowed editor's overlay",
 		"CREATE TRIGGER fail_reset_cleanup BEFORE UPDATE OF cutover_in_flight ON edit_lock WHEN NEW.cutover_in_flight=0 BEGIN SELECT RAISE(ABORT,'reset finish unavailable'); END",
 		"boot.db",
 	);
-	expect((await request()).status).toBe(500);
+	expect((await request()).status).toBe(503);
 	const status = async () => (await fetch(`${app.url}/_boot/status`, { headers: { cookie } })).json();
 	const accepted = await status();
 	expect(accepted.child.state).toBe("live");
