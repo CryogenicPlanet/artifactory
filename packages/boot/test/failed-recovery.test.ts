@@ -286,7 +286,7 @@ it("commits human lock metadata while recovery remains broken and refuses confli
 	await expect.poll(restarted.status, { timeout: 10000 }).toMatchObject({ child: { state: "failed" } });
 	const post = { method: "POST", headers: { "content-type": "application/json" }, body: "{}" };
 	const acquired = await restarted.call(`${restarted.url}/_boot/lock`, post);
-	expect(acquired.status).toBe(200);
+	expect(acquired.status).toBe(503);
 	const value: unknown = await acquired.json();
 	expect(value).toMatchObject({
 		lock_committed: true,
@@ -299,7 +299,7 @@ it("commits human lock metadata while recovery remains broken and refuses confli
 		(await restarted.call(`${restarted.url}/_boot/fs/app/nope.ts?reload=0`, { method: "PUT", body: "unsafe" })).status,
 	).toBe(503);
 	const released = await restarted.call(`${restarted.url}/_boot/lock`, { method: "DELETE" });
-	expect(released.status).toBe(200);
+	expect(released.status).toBe(503);
 	expect(await released.json()).toMatchObject({ lock: null, lock_committed: true, recovery: { status: "failed" } });
 	expect(await env.sql("SELECT * FROM edit_lock")).toEqual([]);
 	await env.sql("INSERT INTO cutover VALUES(1,1,NULL,NULL,'missing-lock','family','working',NULL)");
