@@ -411,7 +411,9 @@ it("codes malformed store shape in both legacy and pending fresh adoption", asyn
 	await app.sql("CREATE TABLE unrelated(value TEXT)", "comms.db");
 	expect(await app.run()).toContain("app_store_identity_invalid");
 	expect(await app.sql("SELECT name FROM sqlite_master WHERE name='store_identity'", "comms.db")).toEqual([]);
-	await app.sql("DELETE FROM settings WHERE key='app_store_adoption'");
+	await app.sql(
+		"DELETE FROM settings WHERE key='app_store_adoption'; INSERT INTO settings(key,value) VALUES('app_store_initialized','1')",
+	);
 	expect(await app.run()).toContain("app_store_identity_invalid");
 });
 
@@ -431,4 +433,38 @@ it.for(["cutover", "restore"])("refuses a v18 %s upgrade before enabling copy-ow
 	expect(await app.run()).toContain("BootIdentityUpgradePending");
 	expect(await readFile(join(app.root, "boot.db"))).toEqual(before);
 	expect(await app.sql("PRAGMA user_version")).toEqual([{ user_version: 18 }]);
+});
+
+it("refuses an existing legacy store after all publication evidence was pruned and boot was replaced", async (test) => {
+	const app = await fixture(test);
+	await app.legacy();
+	await app.sql(
+		"DELETE FROM outbox; DELETE FROM mutation_batches; UPDATE kernel_writer SET epoch='retained-owner'",
+		"comms.db",
+	);
+	await app.sql("DELETE FROM settings WHERE key='app_store_initialized'");
+	const bootBefore = await readFile(join(app.root, "boot.db"));
+	const appBefore = await readFile(join(app.root, "comms.db"));
+	expect(await app.run()).toContain("app_evidence_invalid");
+	expect(await readFile(join(app.root, "boot.db"))).toEqual(bootBefore);
+	expect(await readFile(join(app.root, "comms.db"))).toEqual(appBefore);
+	expect(await app.sql("SELECT epoch FROM kernel_writer", "comms.db")).toEqual([{ epoch: "retained-owner" }]);
+	expect(await app.sql("SELECT * FROM messages", "comms.db")).toEqual([{ id: "ack", body: "retained" }]);
+	expect(
+		await app.sql(
+			"SELECT key FROM settings WHERE key IN ('app_store_adoption','app_store_id','app_store_initialized')",
+		),
+	).toEqual([]);
+	expect(await app.sql("SELECT name FROM sqlite_master WHERE name='store_identity'", "comms.db")).toEqual([]);
+});
+
+it("resumes a reserved fresh adoption after the app commit before the initialized marker", async (test) => {
+	const app = await fixture(test, true);
+	await writeFile(join(app.root, "armed"), "pause");
+	await app.crash("prepare");
+	const identity = await app.sql("SELECT store_id AS id FROM store_identity", "comms.db");
+	expect(await app.sql("SELECT key FROM settings WHERE key='app_store_initialized'")).toEqual([]);
+	await rm(join(app.root, "armed"));
+	expect(await app.run()).toContain('"Success"');
+	expect(await app.sql("SELECT value AS id FROM settings WHERE key='app_store_id'")).toEqual(identity);
 });
