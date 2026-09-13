@@ -120,7 +120,7 @@ export const makeEventStorage = <R>(volume: Effect.Effect<StorageVolume, never, 
 						yield* Ref.set(state, { status: "over_budget", reason: "pruning_in_progress", ...usage });
 						const rows =
 							yield* sql`SELECT seq FROM events WHERE seq<=(SELECT published_through FROM seq WHERE singleton=1)
-						ORDER BY seq LIMIT 256`.pipe(
+						ORDER BY CASE WHEN type='http.request' THEN 0 ELSE 1 END,seq LIMIT 256`.pipe(
 								Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ seq: Schema.Int })))),
 							);
 						if (!rows.length) {
@@ -137,8 +137,7 @@ export const makeEventStorage = <R>(volume: Effect.Effect<StorageVolume, never, 
 						}
 						if (chunk === 8)
 							return { status: "over_budget", reason: "pruning_in_progress", ...usage } satisfies EventStorageStatus;
-						const last = rows.at(-1);
-						if (last) yield* sql`DELETE FROM events WHERE seq<=${last.seq}`;
+						yield* sql`DELETE FROM events WHERE seq IN ${sql.in(rows.map((row) => row.seq))}`;
 						deleted += rows.length;
 						return null;
 					}),

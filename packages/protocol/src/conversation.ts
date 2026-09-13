@@ -31,7 +31,7 @@ const conversationGroup = HttpApiGroup.make("conversation").add(
 	),
 	HttpApiEndpoint.get("messages", "/api/messages", { error: errorSchemas, query, success: Envelope }).annotate(
 		OpenApi.Description,
-		"Read published messages. since is exclusive and defaults to now; since=0 reads history. newest=1 returns latest limit in ascending sequence order. topic/subtree OR comma-list mentions selects addressed messages; other filters combine with AND. exclude_self=1 and waits exclude this instance. cursor is considered-through, including empty results. Views mark highest returned seq at topic or root; mark=0 peeks. wait up to60 seconds sends whitespace heartbeats and drains on swap.",
+		"Read published messages. since is exclusive and defaults to now; since=0 reads history. newest=1 returns latest limit in ascending sequence order. topic/subtree OR comma-list mentions selects addressed messages; other filters combine with AND. exclude_self=1 and waits exclude this instance. cursor is considered-through, including empty results. Views with a topic mark only returned messages inside that subtree. Root and mentions-only views never mark reads; mark=0 peeks. wait up to60 seconds sends whitespace heartbeats and drains on swap.",
 	),
 );
 

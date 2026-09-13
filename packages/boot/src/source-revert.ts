@@ -1,5 +1,5 @@
 import { decodeRows } from "./decode-rows.ts";
-import { Cause, Clock, Crypto, Effect, Ref, Schema, Semaphore } from "effect";
+import { Clock, Crypto, Effect, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { HttpServerResponse } from "effect/unstable/http";
 import { SourceRejected } from "./source-schema.ts";
@@ -67,13 +67,7 @@ export const sourceReverts = Effect.gen(function* () {
 	const context = yield* Effect.context<SqlClient.SqlClient>();
 	const reconcilePage = (id: string, receipt: typeof Receipt.Type) =>
 		Effect.gen(function* () {
-			if (receipt.outcome !== null) {
-				if (receipt.completed_at !== undefined && receipt.completed_at !== null) return receipt;
-				// Historical terminal receipts have no trustworthy age. Start their full window when observed.
-				const stamped = { ...receipt, completed_at: yield* Clock.currentTimeMillis };
-				yield* save(id, stamped);
-				return stamped;
-			}
+			if (receipt.outcome !== null) return receipt;
 			if (receipt.page_batch === null) return receipt;
 			const batches = yield* sql`SELECT state FROM source_batches WHERE id=${receipt.page_batch}`.pipe(
 				decodeRows(Schema.Struct({ state: Schema.String })),
@@ -88,66 +82,7 @@ export const sourceReverts = Effect.gen(function* () {
 			yield* save(id, completed);
 			return completed;
 		});
-	const cursor = yield* Ref.make("source-revert-result:");
-	const prune = gate
-		.withPermit(
-			sql.withTransaction(
-				Effect.gen(function* () {
-					// A current durable publication/cutover owner may still need an otherwise terminal receipt.
-					if (
-						(yield* sql`SELECT singleton FROM cutover LIMIT 1`).length > 0 ||
-						(yield* sql`SELECT id FROM source_batches WHERE state='publishing' LIMIT 1`).length > 0
-					)
-						return 0;
-					const after = yield* Ref.get(cursor);
-					const rows =
-						yield* sql`SELECT key,value FROM settings WHERE key>${after} AND key<'source-revert-result:~' ORDER BY key LIMIT 256`.pipe(
-							decodeRows(Schema.Struct({ key: Schema.String, value: Schema.String })),
-						);
-					const now = yield* Clock.currentTimeMillis;
-					let deleted = 0;
-					for (const row of rows) {
-						const stored = yield* Schema.decodeEffect(Stored)(row.value);
-						// Never infer a terminal outcome from age or discard unresolved journal bindings.
-						if (stored.outcome === null) continue;
-						if (
-							stored.page_batch !== null &&
-							!(yield* sql`SELECT id FROM source_batches WHERE id=${stored.page_batch} AND state='published'`).length
-						)
-							continue;
-						const receipt = yield* reconcilePage(row.key, stored);
-						if (
-							receipt.completed_at !== undefined &&
-							receipt.completed_at !== null &&
-							receipt.completed_at < now - 30 * 86_400_000
-						) {
-							yield* sql`DELETE FROM settings WHERE key=${row.key}`;
-							deleted++;
-						}
-					}
-					yield* Ref.set(
-						cursor,
-						rows.length === 256 ? (rows.at(-1)?.key ?? "source-revert-result:") : "source-revert-result:",
-					);
-					return deleted;
-				}),
-			),
-		)
-		.pipe(Effect.provideContext(context));
 	return {
-		prune,
-		retain: Effect.sleep("1 hour").pipe(
-			Effect.andThen(
-				prune.pipe(
-					Effect.catchCause((cause) =>
-						Cause.hasInterruptsOnly(cause)
-							? Effect.interrupt
-							: Effect.logError("Source revert retention failed", cause),
-					),
-				),
-			),
-			Effect.forever,
-		),
 		// SQL only: SourceFiles already holds its gate and the journal admission transaction.
 		bindPage: (id: string, batch: string) =>
 			Effect.gen(function* () {

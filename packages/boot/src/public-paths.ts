@@ -37,7 +37,9 @@ export const projectPublicPath = (sql: SqlClient, event: typeof EventRecord.Type
 			// Activation replaces the complete policy, including topics removed by editable migrations.
 			// The enclosing append transaction keeps the previous grants visible until commit.
 			yield* sql`DELETE FROM public_paths`;
-			for (const path of value.paths) yield* sql`INSERT INTO public_paths(path) VALUES(${path})`;
+			// Bound parameters per statement while keeping the entire replacement atomic.
+			for (let start = 0; start < value.paths.length; start += 500)
+				yield* sql`INSERT INTO public_paths ${sql.insert(value.paths.slice(start, start + 500).map((path) => ({ path })))}`;
 		} else if (event.type === "topic.meta") {
 			const value = yield* Schema.decodeUnknownEffect(Metadata)(event.payload);
 			if (value.path !== event.topic) return false;
