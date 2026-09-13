@@ -4,9 +4,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { sourcePut } from "./fixtures/source-put.ts";
 import { seedSession } from "./fixtures/session.ts";
 
-it("boots a real app with a relative data directory and an absolute store descriptor", async (test) => {
+it("boots, rehearses and reloads a real app with a relative data directory", async (test) => {
 	const root = await mkdtemp(join(tmpdir(), "comms-relative-data-"));
 	test.onTestFinished(() => rm(root, { recursive: true, force: true }));
 	const child = spawn("bun", [join(import.meta.dirname, "fixtures/launcher.ts")], {
@@ -35,4 +36,16 @@ it("boots a real app with a relative data directory and an absolute store descri
 	await expect
 		.poll(async () => (await (await fetch(`${url}/_boot/status`, { headers: { cookie } })).json()).child.state)
 		.toBe("live");
-});
+	const headers = { cookie, origin: "https://comms.test", "content-type": "application/json" };
+	expect((await fetch(`${url}/api/lock`, { method: "POST", headers, body: "{}" })).status).toBe(200);
+	const response = await sourcePut(`${url}/api/fs/app/ext/relative-data.ts?reload=0`, {
+		headers,
+		body: "export default function () {}\n",
+	});
+	expect(response.status).toBe(200);
+	const check = await fetch(`${url}/api/reload?check=1`, { method: "POST", headers, body: "{}" });
+	expect(await check.json()).toMatchObject({ status: "checked" });
+	const reload = await fetch(`${url}/api/reload?release=1`, { method: "POST", headers, body: "{}" });
+	expect(await reload.json()).toMatchObject({ status: "live" });
+	expect((await fetch(`${url}/api/me`, { headers: { cookie } })).status).toBe(200);
+}, 30000);
