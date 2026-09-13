@@ -111,13 +111,13 @@ it(
 				body: "{}",
 			});
 			expect({ status: retry.status, body: await retry.json() }).toMatchObject({
-				status: 200,
+				status: 503,
 				body: { lock_committed: true, recovery: { status: "failed", error: { code: "recovery_failed" } } },
 			});
 		}
 		const refused = await restarted.post("/api/revert", {}, cookie);
 		expect(refused.status).toBe(409);
-		expect(await refused.json()).toMatchObject({ error: { code: "topic_move_recovery_required", retriable: false } });
+		expect(await refused.json()).toMatchObject({ error: { code: "cutover_recovery_required", retriable: false } });
 		const after = await evidence();
 		expect(after.slice(2)).toEqual(before.slice(2));
 		expect(after.slice(0, 2)).toEqual([[], []]);
