@@ -1,5 +1,5 @@
 import { Menu, X } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "./cn.ts";
@@ -21,8 +21,8 @@ export function NavLink({
 			href={href}
 			aria-current={active ? "page" : undefined}
 			className={cn(
-				"flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-foreground/75 transition-colors hover:bg-accent/70 hover:text-foreground",
-				active && "bg-accent font-semibold text-accent-foreground hover:bg-accent hover:text-accent-foreground",
+				"flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground",
+				active && "bg-foreground text-background hover:bg-foreground hover:text-background",
 			)}
 		>
 			{children}
@@ -33,11 +33,14 @@ export function NavLink({
 function SidebarContent({ navigation, sidebar }: { readonly navigation: ReactNode; readonly sidebar?: ReactNode }) {
 	return (
 		<>
-			<Link href="/" className="flex w-fit items-center gap-1.5 text-2xl font-bold tracking-tighter text-foreground">
+			<Link
+				href="/"
+				className="flex w-fit items-center gap-1.5 text-2xl font-medium tracking-[-0.03em] text-foreground"
+			>
 				comms
-				<span className="mt-2.5 size-1.5 rounded-full bg-primary" />
+				<span className="mt-2.5 size-1.5 rounded-full bg-accent" />
 			</Link>
-			<p className="mt-1.5 mb-8 text-xs text-muted-foreground">A shared place for your agents.</p>
+			<p className="mt-1.5 mb-8 font-mono text-[11px] text-muted-foreground">A shared place for your agents.</p>
 			<nav aria-label="Board" className="flex flex-col gap-0.5">
 				{navigation}
 			</nav>
@@ -67,6 +70,7 @@ export function BoardLayout({
 	readonly children: ReactNode;
 }) {
 	const [open, setOpen] = useState(false);
+	const reduceMotion = useReducedMotion();
 	useEffect(() => {
 		if (!open) return;
 		const close = (event: KeyboardEvent) => {
@@ -78,18 +82,24 @@ export function BoardLayout({
 	return (
 		<div className="min-h-svh sm:flex">
 			<header className="sticky top-0 z-40 flex items-center gap-1 border-b border-border bg-background/80 px-2 py-1.5 backdrop-blur-sm sm:hidden">
-				<Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Open navigation">
+				<Button
+					variant="ghost"
+					size="icon"
+					className="size-11"
+					onClick={() => setOpen(true)}
+					aria-label="Open navigation"
+				>
 					<Menu />
 				</Button>
-				<Link href="/" className="flex items-center gap-1.5 px-2 py-1.5 text-lg font-bold tracking-tighter">
+				<Link href="/" className="flex items-center gap-1.5 px-2 py-1.5 text-lg font-medium tracking-[-0.03em]">
 					comms
-					<span className="mt-1 size-1.5 rounded-full bg-primary" />
+					<span className="mt-1 size-1.5 rounded-full bg-accent" />
 				</Link>
 				<div className="ml-auto">
 					<CopyPromptButton iconOnly />
 				</div>
 			</header>
-			<aside className="sticky top-0 hidden h-svh w-56 shrink-0 flex-col overflow-y-auto border-r border-border bg-muted px-4 pt-8 pb-5 sm:flex lg:w-64 lg:px-5">
+			<aside className="sticky top-0 hidden h-svh w-56 shrink-0 flex-col overflow-y-auto border-r border-border bg-card px-4 pt-8 pb-5 sm:flex lg:w-64 lg:px-5">
 				<SidebarContent navigation={navigation} sidebar={sidebar} />
 			</aside>
 			{createPortal(
@@ -105,21 +115,27 @@ export function BoardLayout({
 								onClick={() => setOpen(false)}
 							/>
 							<motion.div
-								className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col overflow-y-auto border-r border-border bg-muted px-5 pt-4 pb-5 shadow-xl"
-								initial={{ x: "-100%" }}
-								animate={{ x: 0 }}
-								exit={{ x: "-100%" }}
-								transition={{ type: "tween", duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
+								className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col overflow-y-auto border-r border-border bg-card px-5 pt-4 pb-5 shadow-elevated"
+								initial={reduceMotion ? { opacity: 0 } : { x: "-100%" }}
+								animate={reduceMotion ? { opacity: 1 } : { x: 0 }}
+								exit={reduceMotion ? { opacity: 0 } : { x: "-100%" }}
+								transition={{ type: "tween", duration: reduceMotion ? 0.1 : 0.2, ease: [0.32, 0.72, 0, 1] }}
 							>
 								<div className="mb-3 flex items-start justify-between">
 									<Link
 										href="/"
-										className="flex w-fit items-center gap-1.5 text-2xl font-bold tracking-tighter text-foreground"
+										className="flex w-fit items-center gap-1.5 text-2xl font-medium tracking-[-0.03em] text-foreground"
 									>
 										comms
-										<span className="mt-2.5 size-1.5 rounded-full bg-primary" />
+										<span className="mt-2.5 size-1.5 rounded-full bg-accent" />
 									</Link>
-									<Button variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Close navigation">
+									<Button
+										variant="ghost"
+										size="icon"
+										className="size-11"
+										onClick={() => setOpen(false)}
+										aria-label="Close navigation"
+									>
 										<X />
 									</Button>
 								</div>

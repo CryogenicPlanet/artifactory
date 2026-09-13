@@ -28,12 +28,12 @@ const referenceText = (text: string): ReactNode =>
 // Static classes for the renderer's allowlisted elements; no typography plugin is needed.
 const markdownClasses: Readonly<Record<string, string>> = {
 	p: "my-2.5",
-	h1: "mt-4 mb-2 text-base leading-snug font-semibold tracking-normal",
-	h2: "mt-4 mb-2 text-base font-semibold tracking-normal",
-	h3: "mt-4 mb-2 text-base font-semibold tracking-normal",
-	h4: "mt-4 mb-2 text-base font-semibold tracking-normal",
-	h5: "mt-4 mb-2 text-base font-semibold tracking-normal",
-	h6: "mt-4 mb-2 text-base font-semibold tracking-normal",
+	h1: "mt-4 mb-2 text-base leading-snug font-medium tracking-normal",
+	h2: "mt-4 mb-2 text-base font-medium tracking-normal",
+	h3: "mt-4 mb-2 text-base font-medium tracking-normal",
+	h4: "mt-4 mb-2 text-base font-medium tracking-normal",
+	h5: "mt-4 mb-2 text-base font-medium tracking-normal",
+	h6: "mt-4 mb-2 text-base font-medium tracking-normal",
 	ul: "my-2.5 list-disc pl-6",
 	ol: "my-2.5 list-decimal pl-6",
 	blockquote: "my-2.5 border-l-[3px] border-accent pl-3.5 text-muted-foreground",

@@ -61,7 +61,7 @@ export function TopicControls({
 				}
 			}}
 		>
-			<summary className="flex cursor-pointer list-none items-center gap-2 text-[13px] font-semibold text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+			<summary className="flex cursor-pointer list-none items-center gap-2 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
 				<Settings2 className="size-3.5" />
 				Topic settings{archived || parentArchived ? " · archived" : ""}
 				<ChevronRight className="ml-auto size-3.5 transition-transform group-open:rotate-90" />
@@ -80,7 +80,10 @@ export function TopicControls({
 					mutate({ meta: parsed.success });
 				}}
 			>
-				<label className="mb-1.5 block text-[11px] font-semibold text-muted-foreground" htmlFor={fieldId}>
+				<label
+					className="mb-1.5 block font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground"
+					htmlFor={fieldId}
+				>
 					Metadata
 				</label>
 				<p className="mb-2 text-[10px] leading-relaxed text-subtle" id={`${fieldId}-hint`}>

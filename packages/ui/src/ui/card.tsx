@@ -2,12 +2,7 @@ import type { HTMLAttributes } from "react";
 import { cn } from "../cn.ts";
 
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-	return (
-		<div
-			className={cn("rounded-lg border border-border bg-card text-card-foreground shadow-xs", className)}
-			{...props}
-		/>
-	);
+	return <div className={cn("rounded-lg bg-card text-card-foreground shadow-card", className)} {...props} />;
 }
 
 export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
@@ -16,7 +11,10 @@ export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElemen
 
 export function CardTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
 	return (
-		<h2 className={cn("text-xs font-semibold tracking-wide text-muted-foreground uppercase", className)} {...props} />
+		<h2
+			className={cn("font-mono text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase", className)}
+			{...props}
+		/>
 	);
 }
 

@@ -79,7 +79,10 @@ export function AccountControls() {
 								run(addPasskey(label.trim()), "Passkey added.");
 							}}
 						>
-							<label className="mb-1.5 block text-[11px] font-semibold text-muted-foreground" htmlFor="passkey-label">
+							<label
+								className="mb-1.5 block font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground"
+								htmlFor="passkey-label"
+							>
 								New passkey label
 							</label>
 							<Input

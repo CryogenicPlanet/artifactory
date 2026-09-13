@@ -109,8 +109,8 @@ function Board({ pathname }: { readonly pathname: string }) {
 						All topics
 					</NavLink>
 					<NavLink href="/ext">Extensions</NavLink>
-					<div className="mx-2 mt-6 mb-2 hidden justify-between text-[10px] font-semibold tracking-widest text-subtle uppercase sm:flex">
-						Topics <span>{root?.subtopics.length ?? ""}</span>
+					<div className="mx-2 mt-6 mb-2 hidden justify-between font-mono text-[10px] font-medium tracking-[0.12em] text-subtle uppercase sm:flex">
+						Topics <span className="tabular-nums">{root?.subtopics.length ?? ""}</span>
 					</div>
 					{root?.subtopics.map((item) => (
 						<NavLink
@@ -310,7 +310,7 @@ function Board({ pathname }: { readonly pathname: string }) {
 										<section className="mb-8" aria-label="Messages">
 											<SectionHeading title={path ? "Messages" : "Recent messages"}>
 												<span className="flex items-center gap-1.5">
-													<span className="size-1.5 animate-pulse rounded-full bg-primary" />
+													<span className="size-1.5 animate-pulse rounded-full bg-accent" />
 													Live updates
 												</span>
 											</SectionHeading>

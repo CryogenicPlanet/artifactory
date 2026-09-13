@@ -3,11 +3,11 @@ import type { HTMLAttributes } from "react";
 import { cn } from "../cn.ts";
 
 const badgeVariants = cva(
-	"inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-px text-[10px] font-medium wrap-anywhere tabular-nums",
+	"inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-px font-mono text-[10px] font-medium tracking-[0.04em] wrap-anywhere tabular-nums",
 	{
 		variants: {
 			variant: {
-				default: "bg-accent text-accent-foreground",
+				default: "bg-accent-surface text-accent-foreground",
 				muted: "border border-tag-border bg-tag-surface text-tag",
 				outline: "border border-border text-muted-foreground",
 				destructive: "bg-destructive-surface text-destructive",

@@ -8,7 +8,8 @@ import { Button } from "./ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.tsx";
 import { Input, Textarea } from "./ui/input.tsx";
 
-const labelClass = "mt-3.5 mb-1.5 block text-[11px] font-semibold text-muted-foreground";
+const labelClass =
+	"mt-3.5 mb-1.5 block font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground";
 const hintClass = "mt-1.5 text-[10px] leading-relaxed text-subtle";
 
 export function Composer({
