@@ -1,3 +1,4 @@
+import { refusalSchema } from "./fixtures/openapi-refusal.ts";
 import { cp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -123,7 +124,7 @@ api.mount(definition,HttpApiBuilder.group(definition,"mixed-input",h=>h.handle("
 			expect.objectContaining({ in: "path", name: "*" }),
 		]),
 	);
-	const leafErrors = JSON.stringify(docs.paths["/api/tree/{branch}/{*}"].post.responses[500]);
+	const leafErrors = refusalSchema(docs, docs.paths["/api/tree/{branch}/{*}"].post.responses[500]);
 	expect(leafErrors).toContain("custom_failure");
 	expect(leafErrors).toContain("extension_disabled");
 	expect(docs.paths["/api/topics"].get).toMatchObject({ operationId: "topics.detail.root" });

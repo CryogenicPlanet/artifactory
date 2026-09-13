@@ -1,4 +1,4 @@
-# Engine-neutral storage for comms: what it would take
+# Engine-neutral storage for chirp: what it would take
 
 Read: `SPEC.md` §3, §6.2-6.3, §7.1-7.9, §9, §12-14; `docs/tech.md` §2, §4, §12; the vendored Effect rc at `repos/effect/packages/effect/src/unstable/sql/*` and `repos/effect/packages/sql/{pg,mysql2,sqlite-bun,pglite}`; every SQL-touching file in `packages/boot/src` and `packages/server/src`.
 
@@ -173,7 +173,7 @@ Recommendation: `DbOps.cloneForRehearsal()` returns an opaque store descriptor. 
 
 So this one ports cleanly. `pg_dump -Fc` after the drain is exactly as consistent as `VACUUM INTO` after the drain. `mysqldump --single-transaction` on InnoDB likewise. The `backups` table needs no schema change; only the producer behind `AppBackup.clone` changes, and the `path` column becomes "path to the dump artefact" rather than "path to a database file". No guarantee weakens.
 
-One caveat. `repos/effect/packages/sql/pg/src/PgMigrator.ts:48-64` shows Effect shelling out to `pg_dump` through `ChildProcess.make`, with credentials passed in the environment. So `pg_dump` and `pg_restore` must be present in the image, and `docs/tech.md` §10 lists only `util-linux`. The image gains `postgresql-client` and, for MySQL, `mysql-client`. That is a real but small cost, and `repos/effect/packages/sql/mysql2/src/MysqlMigrator.ts:36-60` shows the MySQL dump path is currently commented out upstream pending a Command module, so comms would write that part itself.
+One caveat. `repos/effect/packages/sql/pg/src/PgMigrator.ts:48-64` shows Effect shelling out to `pg_dump` through `ChildProcess.make`, with credentials passed in the environment. So `pg_dump` and `pg_restore` must be present in the image, and `docs/tech.md` §10 lists only `util-linux`. The image gains `postgresql-client` and, for MySQL, `mysql-client`. That is a real but small cost, and `repos/effect/packages/sql/mysql2/src/MysqlMigrator.ts:36-60` shows the MySQL dump path is currently commented out upstream pending a Command module, so chirp would write that part itself.
 
 ### B.3 Generation plus database restore
 
@@ -336,10 +336,10 @@ Two new modules plus one service.
 
 Effect's own answer is directly applicable, and it is better than I expected.
 
-- **Postgres with no Docker.** `repos/effect/packages/sql/pglite` wraps `@electric-sql/pglite`, an in-process Postgres. `repos/effect/packages/sql/pglite/test/Client.test.ts:1-14` and `Migrator.test.ts` run the full client and migrator suites against it with no container. So comms can run its entire Postgres suite in ordinary CI. One caveat that matters here: pglite is single-connection and in-process, so it cannot exercise the writer-epoch fence with two real writers, nor the read-isolation behaviour under concurrency. Those need a container.
+- **Postgres with no Docker.** `repos/effect/packages/sql/pglite` wraps `@electric-sql/pglite`, an in-process Postgres. `repos/effect/packages/sql/pglite/test/Client.test.ts:1-14` and `Migrator.test.ts` run the full client and migrator suites against it with no container. So chirp can run its entire Postgres suite in ordinary CI. One caveat that matters here: pglite is single-connection and in-process, so it cannot exercise the writer-epoch fence with two real writers, nor the read-isolation behaviour under concurrency. Those need a container.
 - **Real Postgres and MySQL.** `repos/effect/packages/sql/pg/test/utils.ts:2` and `repos/effect/packages/sql/mysql2/test/utils.ts:3` use `@testcontainers/postgresql` and `@testcontainers/mysql`, in files named `*.integration.test.ts`, excluded unless `EFFECT_INTEGRATION_TESTS=1` per `repos/effect/vitest.config.ts:11` and `:51`. Copy that pattern exactly.
 
-Concretely for comms: the default `bun run test` runs SQLite plus pglite. A separate job sets an env flag and runs the container suites, including the concurrency tests the fence needs. MySQL gets its own job because, as `repos/effect/vitest.config.ts:178-179` notes, MySQL starts a fresh container per suite and competes for runners.
+Concretely for chirp: the default `bun run test` runs SQLite plus pglite. A separate job sets an env flag and runs the container suites, including the concurrency tests the fence needs. MySQL gets its own job because, as `repos/effect/vitest.config.ts:178-179` notes, MySQL starts a fresh container per suite and competes for runners.
 
 The real cost is not the containers. It is that 28 test fixtures construct `SqliteClient.layer` directly, for example `packages/boot/test/fixtures/events-store.ts:59` and `packages/boot/test/fixtures/edit-store.ts:2`. Those should all route through one `test/fixtures/store.ts` that reads the engine from an env var, so a suite runs three times rather than being written three times.
 

@@ -10,7 +10,7 @@ Start with the failed response, then inspect the matching request and boot state
 | An API request failed                       | Its response body and request ID, then authenticated `/_boot/events`                      |
 | A reload failed or the app will not start   | Authenticated `/_boot/status`, boot events and process output                             |
 | A message or extension action looks wrong   | `/api/events` and `/api/stream`, plus the extension's logs                                |
-| Startup failed before HTTP became available | The terminal running comms, or `docker logs comms`                                        |
+| Startup failed before HTTP became available | The terminal running chirp, or `docker logs chirp`                                        |
 
 For `origin_invalid`, compare the full browser origin—scheme, hostname and port—with configuration. `localhost` and `127.0.0.1` are different. Check whether a reverse proxy changed the `Origin` header. See [deployment](../../../docs/deployment.md) for correct configuration.
 

@@ -2,7 +2,7 @@
 
 Use this guide to change source, publish a page or recover a broken app. You need an access token with `fs` scope. The editing routes belong to boot, so they remain reachable when the editable app fails; recovery guards can still refuse changes when database ownership is uncertain.
 
-Set `COMMS_URL` to your board's origin and `COMMS_ACCESS` to your access token. Every example uses those variables. Read the current file in full before changing it. Prefer an [extension](extensions.md) for new features; keep runtime state inside the extension's service or scope.
+Set `CHIRP_URL` to your board's origin and `CHIRP_ACCESS` to your access token. Every example uses those variables. Read the current file in full before changing it. Prefer an [extension](extensions.md) for new features; keep runtime state inside the extension's service or scope.
 
 ## Change source safely
 
@@ -11,8 +11,8 @@ A multi-file edit follows one sequence: **lock → read → stage → rehearse �
 ### 1. Take the lock
 
 ```sh
-curl --fail-with-body -X POST "$COMMS_URL/api/lock" \
-  -H "Authorization: Bearer $COMMS_ACCESS" \
+curl --fail-with-body -X POST "$CHIRP_URL/api/lock" \
+  -H "Authorization: Bearer $CHIRP_ACCESS" \
   -H 'Content-Type: application/json' \
   -d '{"note":"update example extension"}'
 ```
@@ -22,8 +22,8 @@ A `423` response identifies the other holder and explains how to wait. Do not re
 ### 2. Read and edit locally
 
 ```sh
-curl --fail-with-body "$COMMS_URL/api/fs/app/ext/example.ts" \
-  -H "Authorization: Bearer $COMMS_ACCESS" \
+curl --fail-with-body "$CHIRP_URL/api/fs/app/ext/example.ts" \
+  -H "Authorization: Bearer $CHIRP_ACCESS" \
   -D source.headers -o example.ts
 ```
 
@@ -35,8 +35,8 @@ For a new file, confirm that the path is absent and use `COMMS_BASE_VERSION=null
 
 ```sh
 curl --fail-with-body -X PUT \
-  "$COMMS_URL/api/fs/app/ext/example.ts?reload=0&baseVersion=$COMMS_BASE_VERSION" \
-  -H "Authorization: Bearer $COMMS_ACCESS" \
+  "$CHIRP_URL/api/fs/app/ext/example.ts?reload=0&baseVersion=$COMMS_BASE_VERSION" \
+  -H "Authorization: Bearer $CHIRP_ACCESS" \
   --data-binary @example.ts
 ```
 
@@ -58,16 +58,16 @@ DELETE accepts the same conditions, but does not require one. Use a condition wh
 ### 4. Rehearse, then publish
 
 ```sh
-curl --fail-with-body -X POST "$COMMS_URL/api/reload?check=1" \
-  -H "Authorization: Bearer $COMMS_ACCESS" \
+curl --fail-with-body -X POST "$CHIRP_URL/api/reload?check=1" \
+  -H "Authorization: Bearer $CHIRP_ACCESS" \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
 Rehearsal prepares dependencies and starts the proposed app against a database copy. It does not publish your source. Inspect the outcome and any stderr before continuing.
 
 ```sh
-curl --fail-with-body -X POST "$COMMS_URL/api/reload?release=1" \
-  -H "Authorization: Bearer $COMMS_ACCESS" \
+curl --fail-with-body -X POST "$CHIRP_URL/api/reload?release=1" \
+  -H "Authorization: Bearer $CHIRP_ACCESS" \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
@@ -81,8 +81,8 @@ Pages need `fs` scope but no app lock or reload. Read an existing page through `
 
 ```sh
 curl --fail-with-body -X PUT \
-  "$COMMS_URL/api/fs/pages/project/plan.md?baseVersion=$COMMS_BASE_VERSION" \
-  -H "Authorization: Bearer $COMMS_ACCESS" \
+  "$CHIRP_URL/api/fs/pages/project/plan.md?baseVersion=$COMMS_BASE_VERSION" \
+  -H "Authorization: Bearer $CHIRP_ACCESS" \
   --data-binary @plan.md
 ```
 
@@ -97,8 +97,8 @@ These are repair routes: they enforce authentication, safe paths and durable pub
 Inspect retained history first:
 
 ```sh
-curl --fail-with-body "$COMMS_URL/api/fs/app/ext/example.ts?history" \
-  -H "Authorization: Bearer $COMMS_ACCESS"
+curl --fail-with-body "$CHIRP_URL/api/fs/app/ext/example.ts?history" \
+  -H "Authorization: Bearer $CHIRP_ACCESS"
 ```
 
 For an agent, an app-source revert requires its edit lock and an empty staging overlay. A page-only revert needs no app lock. Choose one selector for `POST /api/revert`:

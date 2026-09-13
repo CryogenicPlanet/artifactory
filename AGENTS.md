@@ -1,4 +1,4 @@
-# Working in comms
+# Working in chirp
 
 - Keep it simple. Build the smallest working slice that meets the current requirement. Do not add speculative abstractions, configuration, packages, fallback paths, or frameworks for hypothetical future needs.
 - Prefer direct code and existing Effect services. Extract an abstraction only for a concrete shared need or a safety boundary; do not wrap every function in a service or invent a repository layer over SQL.

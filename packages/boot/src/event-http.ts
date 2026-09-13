@@ -282,7 +282,9 @@ export const eventRoute = (
 						return yield* new EventError({ code: "stale_attempt" });
 					// Reads must not delay child publication or retirement on the channel gate.
 					const page = yield* attempt
-						? service.query({ ...input, omitRequestEvents: true })
+						? // Sequence reservation and request bookkeeping are boot's own lifecycle records, and
+							// carry nothing an app consumer can act on. They stay on /_boot/events.
+							service.query({ ...input, omitRequestEvents: true, omitSequenceEvents: true })
 						: service.diagnostics(input, identity?.kind === "human" || identity?.scopes.includes("fs"));
 					if (attempt && !(yield* Ref.get(attempts)).some((item) => item.epoch === attempt.epoch))
 						return yield* new EventError({ code: "stale_attempt" });

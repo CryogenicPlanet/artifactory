@@ -62,7 +62,7 @@ export const makePasskeyManagement = <E, R>(
 						const options = yield* Effect.tryPromise({
 							try: () =>
 								generateRegistrationOptions({
-									rpName: "comms",
+									rpName: "chirp",
 									rpID: config.rpId,
 									userName: "human",
 									userID: new TextEncoder().encode("comms-human"),

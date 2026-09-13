@@ -237,6 +237,13 @@ export const policy = {
 	Record<typeof KernelErrorCode.Type, { readonly status: number; readonly message: string; readonly hint: string }>
 >;
 
+/**
+ * One code stays actionable when the refusal names the offending field and the rule it broke.
+ * Four unrelated mistakes shared input_invalid and one generic hint, and each cost a guess.
+ */
+export const ErrorDetail = Schema.Struct({ field: Schema.String, hint: Schema.String });
+export type ErrorDetail = typeof ErrorDetail.Type;
+
 /** The same status-specific envelope codecs describe and encode app refusals. */
 export const errorSchema = <const Code extends string>(code: Code, status: number) =>
 	Schema.Struct({
@@ -245,6 +252,7 @@ export const errorSchema = <const Code extends string>(code: Code, status: numbe
 			message: Schema.String,
 			hint: Schema.String,
 			retriable: Schema.Literal(status === 503),
+			field: Schema.optionalKey(Schema.String),
 		}),
 	}).pipe(HttpApiSchema.status(status));
 const codes = [...KernelErrorCode.literals, "store_unavailable", "handler_failed"] as const;

@@ -1,10 +1,12 @@
-import { policy, encodeError, ErrorEnvelope } from "@comms/protocol/errors";
+import { policy, encodeError, ErrorEnvelope, type ErrorDetail } from "@comms/protocol/errors";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError";
 import { Cause, Effect, Option, Schema } from "effect";
 import { isHttpServerError, RequestParseError, RouteNotFound } from "effect/unstable/http/HttpServerError";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { KernelError } from "./kernel/boot-channel.ts";
+import { queryBoundHint } from "@comms/protocol/query-number";
+import { requestDetail } from "./request-detail.ts";
 import type { Identity } from "./kernel/identity.ts";
 /** Recognize only failures caused by incoming wire data; response encoding remains a defect. */
 export const requestErrorCode = (value: unknown): "input_invalid" | "query_invalid" | undefined => {
@@ -38,6 +40,7 @@ const normalize = <E>(cause: Cause.Cause<E>) =>
 		const request = Option.getOrUndefined(yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest));
 		const route = request ? `${request.method} ${request.url.split("?")[0]}` : "the requested route";
 		let code: KernelError["code"] | "store_unavailable" | "handler_failed" = "handler_failed";
+		let named: ErrorDetail | undefined;
 		if (Cause.hasInterruptsOnly(cause)) return yield* Effect.interrupt;
 		const unexpected = cause.reasons.some((reason) => {
 			if (reason._tag === "Interrupt") return false;
@@ -54,15 +57,22 @@ const normalize = <E>(cause: Cause.Cause<E>) =>
 			const invalid = requestErrorCode(value);
 			if (invalid !== undefined) {
 				code = invalid;
+				// The declared bounds run here rather than in the middleware, which sees only encoded shapes.
+				if (HttpApiSchemaError.is(value))
+					named =
+						invalid === "query_invalid"
+							? requestDetail("query", value.cause.issue, queryBoundHint).detail
+							: requestDetail("body", value.cause.issue).detail;
 				break;
 			}
 			if (reason._tag === "Fail" && Schema.is(KernelError)(reason.error)) {
 				code = reason.error.code;
+				named = reason.error.detail;
 				break;
 			}
 			if (reason._tag === "Fail" && isSqlError(reason.error) && reason.error.isRetryable) code = "store_unavailable";
 		}
-		const detail =
+		const policyEntry =
 			code === "handler_failed"
 				? {
 						status: 500,
@@ -76,8 +86,16 @@ const normalize = <E>(cause: Cause.Cause<E>) =>
 							hint: "Retry the unchanged request with the same Idempotency-Key. If it persists, inspect authenticated /_boot/status.",
 						}
 					: policy[code];
-		if (detail.status === 500) yield* Effect.logError(cause).pipe(Effect.annotateLogs("route", route));
-		return { error: { code, message: detail.message, hint: detail.hint, retriable: detail.status === 503 } };
+		if (policyEntry.status === 500) yield* Effect.logError(cause).pipe(Effect.annotateLogs("route", route));
+		return {
+			error: {
+				code,
+				message: policyEntry.message,
+				hint: named?.hint ?? policyEntry.hint,
+				retriable: policyEntry.status === 503,
+				...(named === undefined ? {} : { field: named.field }),
+			},
+		};
 	});
 /** HttpApi encodes these typed envelope failures using the endpoint's declared errors. */
 export const refusal = <A, E, R>(effect: Effect.Effect<A, E, R>) =>

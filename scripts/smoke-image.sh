@@ -1,7 +1,7 @@
 #!/bin/sh
 # Uses a new disposable container and volume; never touches an existing instance.
 set -eu
-image=${1:-comms:local}
+image=${1:-chirp:local}
 container=
 volume=
 cleanup() {
