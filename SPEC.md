@@ -494,6 +494,20 @@ guide. Material an agent needs on a running board belongs on the board, where th
 read it can fix it. The review record that this decision removed ran to roughly 15,000 lines,
 against a source tree it was supposed to be describing.
 
+**2026-09-13 — A board can have several domains, and a signed-in human can mint a code that adds a passkey and a domain together.**
+Owner: *"can we spin up a sub agent to make this easier, like you can have multiple domains
+and generate a code inside the dashboard to add a new passkey"*
+Owner: *"yeah this is the correct workflow ig also like when generating the code you can add
+a domain there that add its to the RP_ID or whatever"*
+
+A board is reachable at more than one origin, each passkey records the domain it was created
+for, and the set of origins is board state rather than a single startup setting. A human who
+is already signed in can generate a one-time code that enrols a passkey, and generating that
+code is also where a new domain is named. This settles that multiple domains are wanted and
+that the code is the mechanism for adding both a passkey and a domain. It settles nothing
+about how a domain is proved, when it becomes usable, or how one is removed. Those are
+recorded in section 10 as the elaboration they are.
+
 ## 10. Open and accepted
 
 Neither list is a requirement, and saying so is the point. **Accepted** means the product
@@ -545,6 +559,16 @@ than continuing. The events half follows from the owner's events split; the stre
 not.
 
 ### Open: nobody has decided
+
+**How a new domain is proved, activated and removed.** The owner asked for several domains
+and for a code that adds a passkey and a domain together, quoted in section 9. Everything
+beyond that is design nobody has ruled on: whether a named domain stays pending until a code
+is redeemed from it, whether redemption is itself the proof that the domain routes to this
+board, and what removing a domain does to passkeys created for it. This entry exists because
+the feature was designed and recorded on the same day it was asked for, which is the moment
+the request and the elaboration are still separable. Constraint 16 binds the redemption path
+whatever shape it takes: it is a new public entry point, so it carries its own proof, and the
+set of accepted origins is explicit and matched exactly rather than by pattern.
 
 **The shape of sequence reservation.** The owner's design was a block lease, on the reasoning
 that gaps are fine and order is what matters. What ships is one outstanding reservation per
