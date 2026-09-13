@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { memoryStoreLayer } from "./test-store.ts";
 import { Clock, Console, Deferred, Effect, Fiber, Layer, Ref } from "effect";
 import { TestClock } from "effect/testing";
 import { SqlClient } from "effect/unstable/sql";
@@ -172,8 +172,5 @@ const program = Effect.gen(function* () {
 		} else return yield* Effect.die(`Unknown fixture mode ${mode}`);
 	}).pipe(Effect.provide(publicationLayer), Effect.provideService(BootChannel, boot));
 	yield* Console.log(`PUBLICATION_RELAY_${mode}_OK`);
-}).pipe(
-	Effect.scoped,
-	Effect.provide(Layer.mergeAll(BunServices.layer, SqliteClient.layer({ filename: ":memory:" }), TestClock.layer())),
-);
+}).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(BunServices.layer, memoryStoreLayer(), TestClock.layer())));
 BunRuntime.runMain(program);

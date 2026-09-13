@@ -1,7 +1,7 @@
 import { extensionCapabilities } from "../../src/ext/core/capabilities.ts";
 import { layer as publicationLayer } from "../../src/kernel/publication.ts";
 import { BunRuntime, BunServices, BunHttpPlatform } from "@effect/platform-bun";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { memoryStoreLayer } from "./test-store.ts";
 import { Config, Console, Effect, Ref, FileSystem, Layer, Path, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Etag } from "effect/unstable/http";
@@ -95,6 +95,6 @@ const run = Effect.gen(function* () {
 		abort: () => Effect.void,
 		append: () => Effect.succeed({ published_through: 0 }),
 	}),
-	Effect.provide(Layer.mergeAll(lifecycleLayer, SqliteClient.layer({ filename: ":memory:" }), BunServices.layer)),
+	Effect.provide(Layer.mergeAll(lifecycleLayer, memoryStoreLayer(), BunServices.layer)),
 );
 run.pipe(BunRuntime.runMain);

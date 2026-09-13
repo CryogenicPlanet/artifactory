@@ -6,6 +6,10 @@ import { on } from "@comms/storage/dialect";
 import { remoteClientLayer } from "@comms/storage/remote-client";
 import { RemoteInspector, remoteInspectorLayer } from "@comms/storage/remote-inspector";
 
+/** Private, scope-owned scratch databases. These are not deployment descriptors. */
+export const memoryStore = () => SqliteClient.make({ filename: ":memory:" });
+export const memoryStoreLayer = () => SqliteClient.layer({ filename: ":memory:" });
+
 const settings = Schema.fromJsonString(
 	Schema.Struct({
 		engine: Schema.Literals(["pg", "mysql"]),
@@ -27,7 +31,7 @@ export const testStore = (options: {
 }) =>
 	Effect.gen(function* () {
 		const sql = yield* Effect.gen(function* () {
-			if (options.engine === "sqlite") return yield* SqliteClient.make({ filename: ":memory:" });
+			if (options.engine === "sqlite") return yield* memoryStore();
 			if (options.engine === "pglite")
 				return yield* PgliteClient.make({
 					// Match remote raw JSON and checked int8 decoding without global parser mutation.

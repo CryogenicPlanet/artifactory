@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { memoryStoreLayer } from "../test-store.ts";
 import { Console, Effect, FileSystem, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { inspectTransferSource, resolveTransferSource } from "../../../src/transfer/source-preflight.ts";
@@ -164,7 +164,7 @@ const main = Effect.gen(function* () {
 	yield* sql`DELETE FROM boot_migrations WHERE migration_id=20`;
 	yield* refuse(resolveTransferSource({ app: remote, dataDirectory: directory }, sql), "transfer_protocol_unsupported");
 	return { passed: true };
-}).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" })), Effect.scoped, Effect.provide(BunServices.layer));
+}).pipe(Effect.provide(memoryStoreLayer()), Effect.scoped, Effect.provide(BunServices.layer));
 main.pipe(
 	Effect.flatMap((value) => Console.log(JSON.stringify(value))),
 	BunRuntime.runMain,

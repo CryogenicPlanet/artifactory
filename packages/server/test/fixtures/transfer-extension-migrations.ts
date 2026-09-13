@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { memoryStoreLayer } from "./test-store.ts";
 import { Cause, Console, Effect, FileSystem, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { transferExtensionMigrations } from "../../src/kernel/transfer-extension-migrations.ts";
@@ -96,5 +96,5 @@ const program = Effect.gen(function* () {
 	assert.equal(duplicate._tag, "Failure");
 
 	yield* Console.log("TRANSFER_EXTENSION_REPLAY_VERIFIED");
-}).pipe(Effect.scoped, Effect.provide(SqliteClient.layer({ filename: ":memory:" })), Effect.provide(BunServices.layer));
+}).pipe(Effect.scoped, Effect.provide(memoryStoreLayer()), Effect.provide(BunServices.layer));
 program.pipe(BunRuntime.runMain);

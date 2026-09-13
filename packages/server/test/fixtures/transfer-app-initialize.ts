@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { memoryStoreLayer } from "./test-store.ts";
 import { Console, Effect, FileSystem, Path } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { initializeTransferApp, TransferAppInitializationError } from "../../src/kernel/transfer-app-initialize.ts";
@@ -57,5 +57,5 @@ const program = Effect.gen(function* () {
 		{ store_id: "aabbccdd-1234-4567-89ab-0123456789ab", initialized_at: 1, transferred_to: null },
 	]);
 	yield* Console.log("TRANSFER_APP_SCHEMA_VERIFIED");
-}).pipe(Effect.scoped, Effect.provide(SqliteClient.layer({ filename: ":memory:" })), Effect.provide(BunServices.layer));
+}).pipe(Effect.scoped, Effect.provide(memoryStoreLayer()), Effect.provide(BunServices.layer));
 program.pipe(BunRuntime.runMain);

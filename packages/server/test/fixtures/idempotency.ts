@@ -1,7 +1,7 @@
 import { migrateIdempotency } from "../../src/ext/core/legacy-idempotency.ts";
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { memoryStoreLayer } from "./test-store.ts";
 import { Clock, Console, Crypto, Effect, Option, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { EventRecord } from "@comms/protocol/events";
@@ -200,5 +200,5 @@ const program = Effect.gen(function* () {
 		}
 	}
 	yield* Console.log(`IDEMPOTENCY_${mode}_OK`);
-}).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" })), Effect.scoped, Effect.provide(BunServices.layer));
+}).pipe(Effect.provide(memoryStoreLayer()), Effect.scoped, Effect.provide(BunServices.layer));
 BunRuntime.runMain(program);

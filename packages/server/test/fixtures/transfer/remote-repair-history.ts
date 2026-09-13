@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { memoryStoreLayer } from "../test-store.ts";
 import { Console, Context, Effect, Layer, Redacted, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { withDatabase, type RemoteStore } from "@comms/storage/store";
@@ -17,7 +17,7 @@ import { prepareControlSettings } from "../../../src/transfer/control-settings.t
 const main = Effect.gen(function* () {
 	const source = yield* SqlClient.SqlClient;
 	const open = Effect.gen(function* () {
-		return Context.get(yield* Layer.build(SqliteClient.layer({ filename: ":memory:" })), SqlClient.SqlClient);
+		return Context.get(yield* Layer.build(memoryStoreLayer()), SqlClient.SqlClient);
 	});
 	const app = yield* open;
 	const target = yield* open;
@@ -140,7 +140,7 @@ const main = Effect.gen(function* () {
 	return { passed: true };
 }).pipe(
 	Effect.provide(eventsLayer(Effect.void)),
-	Effect.provide(SqliteClient.layer({ filename: ":memory:" })),
+	Effect.provide(memoryStoreLayer()),
 	Effect.scoped,
 	Effect.provide(BunServices.layer),
 );

@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { BunServices } from "@effect/platform-bun";
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
+import { memoryStoreLayer } from "./test-store.ts";
 import { Effect, FileSystem, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { migrate } from "../../src/kernel/migrations.ts";
@@ -94,5 +94,5 @@ await Effect.runPromise(
 			assert.deepEqual(yield* sql`SELECT name FROM temp.sqlite_schema WHERE type='trigger'`, []);
 			console.log("MIGRATION_STATE_PRESERVED");
 		}),
-	).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" })), Effect.provide(BunServices.layer)),
+	).pipe(Effect.provide(memoryStoreLayer()), Effect.provide(BunServices.layer)),
 );
