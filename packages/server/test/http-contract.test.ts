@@ -105,18 +105,22 @@ it("runs declared payload, query and success schemas with bounded request bodies
 	const success = await post('{"count":7}');
 	expect(success.status).toBe(200);
 	expect(await success.json()).toEqual({ count: 7 });
-	for (const [body, query, code] of [
-		['{"count":"7"}', "", "input_invalid"],
-		['{"count":7,"extra":true}', "", "input_invalid"],
-		['{"count":', "", "input_invalid"],
-		['{"count":7}', "?unknown=1", "query_invalid"],
-		['{"count":7}', "?mode=ok&mode=ok", "query_invalid"],
-		['{"count":7}', "?mode=wrong", "query_invalid"],
-		[" ".repeat(65) + '{"count":7}', "", "input_invalid"],
+	// One code per refusal as before, now with the offending field where the decoder knows it.
+	for (const [body, query, code, field] of [
+		['{"count":"7"}', "", "input_invalid", "count"],
+		['{"count":7,"extra":true}', "", "input_invalid", "extra"],
+		['{"count":', "", "input_invalid", undefined],
+		['{"count":7}', "?unknown=1", "query_invalid", "unknown"],
+		['{"count":7}', "?mode=ok&mode=ok", "query_invalid", "mode"],
+		['{"count":7}', "?mode=wrong", "query_invalid", "mode"],
+		[" ".repeat(65) + '{"count":7}', "", "input_invalid", undefined],
 	] as const) {
 		const response = await post(body, query);
 		expect(response.status, `${body} ${query}`).toBe(400);
-		expect(await response.json()).toMatchObject({ error: { code, retriable: false } });
+		const envelope = await response.json();
+		expect(envelope, `${body} ${query}`).toMatchObject({ error: { code, retriable: false } });
+		expect(envelope.error.field, `${body} ${query}`).toBe(field);
+		if (field !== undefined) expect(envelope.error.hint).toContain(field);
 	}
 	expect(called).toBe(1);
 	const refused = await post('{"count":7}', "?mode=refused");

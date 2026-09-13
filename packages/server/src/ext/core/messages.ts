@@ -1,4 +1,5 @@
 import { Message, MessageInput } from "@comms/protocol/messages";
+import type { ErrorDetail } from "@comms/protocol/errors";
 import { Publication } from "../../kernel/publication.ts";
 import type { Identity } from "../../kernel/identity.ts";
 import type { PageMoveIO } from "./topic-page-continuation.ts";
@@ -22,6 +23,11 @@ export const StoredMessage = Schema.Struct({
 });
 export const validTopic = (topic: string) =>
 	topic.length <= 200 && /^@?[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(topic);
+/** One sentence about the grammar, named beside it, so every path refusal says the same thing. */
+export const topicPathDetail = (field: string): ErrorDetail => ({
+	field,
+	hint: "Topic paths are lowercase: letters, digits, dot, underscore and hyphen, joined by /, optionally starting with @, at most 200 characters.",
+});
 const messageRows = Schema.decodeUnknownEffect(Schema.Array(StoredMessage));
 const jsonObject = Schema.encodeSync(Schema.fromJsonString(Schema.JsonObject));
 /** Core domain operations consume the same SQL/read/mutation capabilities exposed to extensions. */
@@ -34,15 +40,30 @@ export const makeMessages = (
 	const { mutate, read } = publication;
 	const create = (identity: Identity, input: typeof MessageInput.Type, key?: string) =>
 		Effect.gen(function* () {
-			if (
-				!validTopic(input.topic) ||
-				input.body.length === 0 ||
-				input.body.length > 65536 ||
-				input.tags?.some((tag) => tag.length > 100) ||
-				(input.tags?.length ?? 0) > 100 ||
-				(key !== undefined && (key.length < 1 || key.length > 200))
-			)
-				return yield* new KernelError({ code: "input_invalid" });
+			// One code, six unrelated rules: keep them apart so the refusal can name the one that failed.
+			const refused = (
+				[
+					{ invalid: !validTopic(input.topic), ...topicPathDetail("topic") },
+					{ invalid: input.body.length === 0, field: "body", hint: "Body cannot be empty." },
+					{ invalid: input.body.length > 65536, field: "body", hint: "Body accepts at most 65536 characters." },
+					{
+						invalid: input.tags?.some((tag) => tag.length > 100) === true,
+						field: "tags",
+						hint: "Each tag accepts at most 100 characters.",
+					},
+					{ invalid: (input.tags?.length ?? 0) > 100, field: "tags", hint: "A message accepts at most 100 tags." },
+					{
+						invalid: key !== undefined && (key.length < 1 || key.length > 200),
+						field: "Idempotency-Key",
+						hint: "Idempotency-Key accepts 1 through 200 characters.",
+					},
+				] satisfies ReadonlyArray<ErrorDetail & { readonly invalid: boolean }>
+			).find((rule) => rule.invalid);
+			if (refused)
+				return yield* new KernelError({
+					code: "input_invalid",
+					detail: { field: refused.field, hint: refused.hint },
+				});
 			const id = `m_${Buffer.from(yield* crypto.randomBytes(12)).toString("hex")}`;
 			const now = (yield* DateTime.nowAsDate).getTime();
 			const normalized = { topic: input.topic, body: input.body, tags: input.tags ?? [], meta: input.meta ?? {} };
@@ -63,7 +84,10 @@ export const makeMessages = (
 				body: (reserve) =>
 					Effect.gen(function* () {
 						if (new TextEncoder().encode(encoded).byteLength > 131072)
-							return yield* new KernelError({ code: "input_invalid" });
+							return yield* new KernelError({
+								code: "input_invalid",
+								detail: { field: "body", hint: "The encoded message must stay under 131072 bytes." },
+							});
 						const deleted =
 							yield* sql`SELECT path FROM topics WHERE deleted_at IS NOT NULL AND (path=${input.topic} OR substr(${input.topic},1,length(path)+1)=path||'/') LIMIT 1`;
 						if (deleted.length > 0) return yield* new KernelError({ code: "topic_not_found" });

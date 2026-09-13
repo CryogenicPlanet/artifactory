@@ -10,7 +10,7 @@ import { refusal } from "../../conversation-request.ts";
 import { KernelError } from "../../kernel/boot-channel.ts";
 
 import { markView } from "./read-view.ts";
-import { validTopic } from "./messages.ts";
+import { topicPathDetail, validTopic } from "./messages.ts";
 
 export const topicHandlers = (api: typeof Api, extension: ExtensionApi) => {
 	const detail = (path: string, query: typeof TopicQuery.Type) =>
@@ -18,7 +18,8 @@ export const topicHandlers = (api: typeof Api, extension: ExtensionApi) => {
 			Effect.gen(function* () {
 				const ctx = yield* extension.context("read");
 				const depth = query.depth ?? 1;
-				if (path !== "" && !validTopic(path)) return yield* new KernelError({ code: "input_invalid" });
+				if (path !== "" && !validTopic(path))
+					return yield* new KernelError({ code: "input_invalid", detail: topicPathDetail("path") });
 				const result = yield* ctx.topics.read(path, { depth, archived: query.archived === "1" });
 				yield* markView(ctx, result.messages, path, query.mark !== "0");
 				return result;
