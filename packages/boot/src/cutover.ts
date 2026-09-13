@@ -165,6 +165,7 @@ export const cutover = Effect.fn("cutover")(function* (options: ApplicationSourc
 		yield* Ref.update(pendingCleanup, (current) => (current === cleanup ? null : current));
 	});
 	const recover = Effect.gen(function* () {
+		yield* refresh;
 		yield* completeCleanup;
 		const record = yield* read;
 		if (!record) {
