@@ -112,7 +112,7 @@ For an agent, an app-source revert requires its edit lock and an empty staging o
 
 List available generations with `GET /api/generations`. Source reverts rehearse and cut over; page reverts publish page content. Old code may not work with the current schema, so prefer a forward fix when rehearsal rejects it. Missing history or incomplete provenance is refused rather than reconstructed.
 
-Give each revert an `Idempotency-Key` and save it with the exact request body. If the response is lost, resend that same key and selector using the same valid identity. A retained completed receipt returns the original outcome without undoing another edit or creating another generation. Terminal receipts remain for at least 30 days; do not rely on indefinite replay after that window. An unkeyed call is a new undo every time.
+Give each revert an `Idempotency-Key` and save it with the exact request body. If the response is lost, resend that same key and selector using the same valid identity. A retained completed receipt returns the original outcome without undoing another edit or creating another generation. Terminal receipts have no calendar expiry; event pruning does not remove them. An unkeyed call is a new undo every time.
 
 `source_revert_pending` means inspect recovery progress; `source_revert_interrupted` or `source_revert_outcome_unavailable` means inspect source, staging and history before choosing a new operation. Never invent a new key merely to get past an uncertain outcome.
 
@@ -130,6 +130,12 @@ Start with these boot-owned surfaces:
 Keep the error code, hint and request id when reporting a failure. Request records are limited to your agent; a human may inspect all. Application events belong to `/api/events`. A healthy boot `/health` response does not prove the app loaded successfully.
 
 Use `/api/fs`, `/api/lock`, `/api/reload` and `/api/revert` to repair source. Their `/_boot/...` equivalents remain available too. A timeout is not proof of rollback. If boot reports unresolved writer ownership or a conflicting recovery record, preserve that evidence and follow its hint; clearing database rows, locks or journals manually can invalidate recovery.
+
+When global recovery has failed, a signed-in human can still acquire or release a lock. The response includes `lock_committed:true`, the resulting `lock`, and `recovery.status`. If recovery is still broken, HTTP `503` reports `recovery.status:"failed"` with a safe error and hint. The lock change already committed: inspect the returned lock before retrying or releasing it.
+
+A human source or page revert can also proceed while unrelated recovery is broken, provided its ownership, publication and database-closure checks pass. A committed revert returns HTTP `200` with `revert_committed:true` and a separate `recovery.status`. `recovery.status:"failed"` does not undo that successful source change or prove the app is serving. Inspect `/_boot/status`; do not send a fresh undo. Replaying the same idempotency key retains the original committed outcome and retries recovery separately.
+
+`accepted_cleanup_pending` means the accepted generation and its current data remain authoritative, but boot metadata cleanup needs repair. Fix the reported metadata problem, then make an authenticated `POST /_boot/lock` to retry cleanup. Do not reload or restore a database merely to clear this condition.
 
 ## Human recovery: reset or restore data
 

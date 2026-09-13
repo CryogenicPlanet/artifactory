@@ -416,6 +416,8 @@ export const supervise = Effect.fn("supervise")(function* (options: ApplicationS
 		assertClosure,
 		// Caller owns operationGate and has retired any current child before retrying startup.
 		recoverClosure: Effect.gen(function* () {
+			// Failed startup proof must remain a refusal for every later repair surface.
+			yield* Ref.set(closureUnproven, true);
 			if (yield* Ref.get(current)) return yield* new ChildError({ code: "child_closure_unproven" });
 			yield* (yield* ChildAttempts).recover;
 			yield* Ref.set(closureUnproven, false);
