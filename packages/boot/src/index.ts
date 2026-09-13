@@ -9,6 +9,7 @@ import {
 	Cause,
 	Config,
 	Context,
+	DateTime,
 	Deferred,
 	Effect,
 	FileSystem,
@@ -25,7 +26,7 @@ import { Auth, layer as authLayer, type AuthConfig } from "./auth.ts";
 import { authErrorResponse, validateAuthConfig } from "./auth-http.ts";
 import type { ApplicationSource } from "./application.ts";
 import { initializeBootSchema, BootIdentityUpgradePending } from "./boot-schema.ts";
-import { EditLock, layer as editLockLayer } from "./edit-lock.ts";
+import { EditAuthority, editAuthorityActive, EditLock, EditRejected, layer as editLockLayer } from "./edit-lock.ts";
 import { Generations, layer as generationsLayer } from "./generations.ts";
 import { SourceFiles, layer as sourceLayer } from "./source-files.ts";
 import { Events, layer as eventsLayer } from "./events.ts";
@@ -246,11 +247,27 @@ export const boot = Effect.fn("boot")(function* (options: ApplicationSource & { 
 								const admitted = yield* supervisor.operationGate.withPermit(
 									child.channelGate.withPermit(
 										Effect.gen(function* () {
-											if ((yield* Ref.get(phase))._tag !== "Ready" || (yield* recoveryIntents(sql)).count > 0)
+											if ((yield* recoveryIntents(sql)).count > 0)
 												return yield* new SourceRejected({ code: "publication_pending", path: "recovery" });
-											const state = yield* events.state;
-											if (state.pending_id !== null)
-												return { _tag: "Waiting" as const, fence: state.published_through };
+											const state = yield* Ref.get(phase);
+											if (state._tag !== "Ready") {
+												const authority = yield* Effect.serviceOption(EditAuthority);
+												if (
+													state._tag !== "Failed" ||
+													authority._tag !== "Some" ||
+													authority.value.kind !== "human" ||
+													!authority.value.repairRevert
+												)
+													return yield* new SourceRejected({ code: "publication_pending", path: "recovery" });
+												if (!(yield* editAuthorityActive(sql, authority.value, (yield* DateTime.nowAsDate).getTime())))
+													return yield* new EditRejected({ code: "authority_expired", holder: null, transitions: [] });
+												if (yield* hasLegacyTopicMoves(sql))
+													return yield* new RecoveryRejected({ code: "topic_move_recovery_required" });
+												yield* supervisor.assertClosure;
+											}
+											const sequence = yield* events.state;
+											if (sequence.pending_id !== null)
+												return { _tag: "Waiting" as const, fence: sequence.published_through };
 											return { _tag: "Published" as const, value: yield* effect };
 										}),
 									),

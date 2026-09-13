@@ -61,7 +61,13 @@ export class EditRejected extends Schema.TaggedError<EditRejected>()("EditReject
 /** Supplied only by authenticated edit HTTP mutations; checked under the lock's SQL admission transaction. */
 export class EditAuthority extends Context.Service<
 	EditAuthority,
-	{ readonly kind: "human" | "agent"; readonly id: string; readonly expiresAt: number; readonly repairLock?: boolean }
+	{
+		readonly kind: "human" | "agent";
+		readonly id: string;
+		readonly expiresAt: number;
+		readonly repairLock?: boolean;
+		readonly repairRevert?: boolean;
+	}
 >()("comms/boot/EditAuthority") {}
 export const authorityLayer = (authority: EditAuthority["Service"]) => Layer.succeed(EditAuthority, authority);
 
@@ -183,13 +189,15 @@ const make = Effect.gen(function* () {
 					const authority = checkAuthority ? Option.getOrNull(yield* Effect.serviceOption(EditAuthority)) : null;
 					if (authority && !(yield* editAuthorityActive(sql, authority, now)))
 						return reject("authority_expired", lock, transitions);
-					if (authority?.repairLock) {
+					if (authority?.repairLock || authority?.repairRevert) {
 						// A failed recovery must not let expiry or release discard journal-owned staging.
 						const owners = yield* sql`SELECT lock_id AS id, family, 0 AS source FROM cutover
 							UNION ALL SELECT lock_id AS id, lock_family AS family, 0 AS source FROM db_restore_requests
 							WHERE phase IN ('authorized','restoring','working','rollback') OR lock_id IS NOT NULL OR lock_family IS NOT NULL
 							UNION ALL SELECT lock_id AS id, NULL AS family, 1 AS source FROM source_batches
-							WHERE state='publishing'`.pipe(
+							WHERE state='publishing' AND (lock_id IS NOT NULL
+								OR NOT EXISTS(SELECT 1 FROM source_changes WHERE batch=source_batches.id)
+								OR EXISTS(SELECT 1 FROM source_changes WHERE batch=source_batches.id AND substr(path,1,6) <> 'pages/'))`.pipe(
 							Effect.flatMap(
 								Schema.decodeUnknownEffect(
 									Schema.Array(
