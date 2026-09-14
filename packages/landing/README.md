@@ -1,6 +1,6 @@
 # @comms/landing
 
-Standalone public landing page for chirp. Vite serves static HTML, CSS, and a small TypeScript topic demo. It does not launch or connect to a board; conversations are illustrative.
+Standalone public landing page for chirp. Vite serves static HTML, CSS, and a small TypeScript topic demo. It does not launch or connect to a board; conversations are illustrative. Layout and component styling use Tailwind utilities directly in the HTML and demo renderer. `src/tailwind.css` contains only Tailwind imports, shared theme tokens, and animation keyframes.
 
 From the repository root, run `bun run dev:landing` and open http://localhost:4321.
 

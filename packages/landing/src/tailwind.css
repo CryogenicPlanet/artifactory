@@ -1,0 +1,65 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+@import "tailwindcss";
+
+@theme {
+	--font-sans: "DM Sans", sans-serif;
+	--font-serif: Georgia, "Times New Roman", serif;
+	--font-mono: "IBM Plex Mono", monospace;
+	--color-background: #161b1d;
+	--color-foreground: #ece9e1;
+	--color-muted: #9ca5a6;
+	--color-line: #343c3e;
+	--color-accent: #b8d7c3;
+	--color-lilac: #b9b0df;
+}
+
+@keyframes bird-arrive {
+	from {
+		opacity: 0;
+		transform: translateY(9px) rotate(-8deg);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) rotate(0);
+	}
+}
+@keyframes message-arrive {
+	from {
+		opacity: 0.2;
+		transform: translateY(3px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@keyframes handoff-origin {
+	from {
+		opacity: 0.4;
+		transform: translateY(5px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@keyframes handoff-signal {
+	from {
+		opacity: 0;
+		transform: translateY(-6px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@keyframes handoff-message {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}

@@ -173,15 +173,17 @@ function setupLanding() {
 		messages.replaceChildren(
 			...conversation.messages.map((message, index) => {
 				const article = document.createElement("article");
-				article.className = "message";
+				article.className =
+					"message grid grid-cols-[30px_1fr] gap-[13px] pt-[19px] pb-[5px] max-[600px]:gap-2.5 motion-safe:animate-[message-arrive_300ms_ease_both] motion-safe:group-[.handoff-playing]:animate-[handoff-message_650ms_ease_both] motion-safe:group-[.handoff-playing]:[animation-delay:calc(900ms+var(--step)*800ms)]";
 				article.style.setProperty("--step", String(index));
 				const avatar = document.createElement("span");
-				avatar.className = `avatar ${message.color}`;
+				avatar.className = "flex items-center justify-center size-[29px] font-mono text-[12px] text-[#aeb8b8]";
 				const logo = document.querySelector<HTMLImageElement>(`.agent-mark.${message.color} img`);
 				if (logo) {
 					const image = document.createElement("img");
 					image.src = logo.src;
 					image.alt = "";
+					image.className = "size-[22px] object-contain grayscale opacity-[0.85]";
 					image.width = 24;
 					image.height = 24;
 					avatar.append(image);
@@ -191,13 +193,16 @@ function setupLanding() {
 				avatar.setAttribute("aria-hidden", "true");
 				const content = document.createElement("div");
 				const meta = document.createElement("div");
-				meta.className = "message-meta";
+				meta.className = "flex items-center gap-3 text-[11px]";
 				const name = document.createElement("strong");
+				name.className = "font-medium";
 				name.textContent = message.agent;
 				const time = document.createElement("span");
+				time.className = "text-[#8d9899] font-mono text-[9px]";
 				time.textContent = message.time;
 				meta.append(name, time);
 				const body = document.createElement("p");
+				body.className = "text-[12px] leading-[1.8] text-[#adb7b7] max-w-[585px] mt-[7px] mb-0 max-[900px]:text-[11px]";
 				body.textContent = message.body;
 				content.append(meta, body);
 				article.append(avatar, content);
@@ -206,7 +211,6 @@ function setupLanding() {
 		);
 		for (const button of buttons) {
 			const active = button.dataset.topic === key;
-			button.classList.toggle("active", active);
 			button.setAttribute("aria-pressed", String(active));
 		}
 	}
