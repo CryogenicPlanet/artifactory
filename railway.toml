@@ -5,6 +5,8 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
+# Landing-only edits do not redeploy the board.
+watchPatterns = ["**", "!/packages/landing/**"]
 
 [deploy]
 # No healthcheckPath: chirp exposes no unauthenticated health route, and the image's entrypoint must stay in charge.

@@ -197,7 +197,7 @@ it("redirects unauthenticated page navigations to login and forwards to open set
 	expect(board.headers.get("cache-control")).toBe("no-store");
 	const loginPage = await fetch(`${app.url}/auth/login?next=%2Ft%2Fdesign`, { redirect: "manual" });
 	expect(loginPage.status).toBe(302);
-	expect(loginPage.headers.get("location")).toBe("/setup?next=%2Ft%2Fdesign");
+	expect(loginPage.headers.get("location")).toBe("/onboarding?next=%2Ft%2Fdesign");
 	const api = await fetch(`${app.url}/t/design`, { headers: { accept: "application/json" } });
 	expect(api.status).toBe(401);
 	expect((await api.json()).error.code).toBe("session_invalid");
@@ -207,6 +207,29 @@ it("redirects unauthenticated page navigations to login and forwards to open set
 	const stillRedirects = await fetch(`${app.url}/`, { headers: { accept: "text/html" }, redirect: "manual" });
 	expect(stillRedirects.status).toBe(302);
 	expect(stillRedirects.headers.get("location")).toBe("/auth/login?next=%2F");
+});
+
+it("reports minimal setup state while the editable onboarding is unavailable", async (test) => {
+	const app = await launch(test, "exit");
+	const getState = (cookie?: string) => fetch(`${app.url}/_boot/auth/state`, { headers: cookie ? { cookie } : {} });
+	const fresh = await getState();
+	expect(fresh.headers.get("cache-control")).toBe("no-store");
+	expect(await fresh.json()).toEqual({ setup_required: true, authenticated: false });
+	expect((await fetch(`${app.url}/setup`)).status).toBe(200);
+	expect((await fetch(`${app.url}/onboarding`)).status).toBe(503);
+	expect((await app.post("/_boot/auth/setup/options", { code: "wrong" })).status).toBe(401);
+	await app.setup();
+	expect(await (await getState()).json()).toEqual({ setup_required: false, authenticated: false });
+	const session = await app.login();
+	expect(await (await getState(session.cookie)).json()).toEqual({ setup_required: false, authenticated: true });
+	expect((await fetch(`${app.url}/setup`)).status).toBe(404);
+	for (const path of ["/_boot/auth/state", "/onboarding", "/assets/board.js", "/assets/style.css"])
+		expect((await fetch(`${app.url}${path}`, { headers: { authorization: "Bearer invalid" } })).status).toBe(401);
+	expect((await getState("__Host-comms_session=expired")).status).toBe(401);
+	expect((await fetch(`${app.url}/onboarding/other`)).status).toBe(401);
+	expect((await fetch(`${app.url}/onboarding`, { method: "POST" })).status).toBe(401);
+	expect((await fetch(`${app.url}/_boot/auth/state/other`)).status).toBe(401);
+	expect((await fetch(`${app.url}/_boot/auth/state`, { method: "POST" })).status).toBe(401);
 });
 
 it("rejects cross-origin, malformed, oversized, replayed and explicit invalid credentials", async (test) => {

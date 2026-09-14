@@ -34,6 +34,15 @@
         "@effect/sql-pg": "4.0.0-rc.113",
       },
     },
+    "packages/landing": {
+      "name": "@comms/landing",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@tailwindcss/vite": "4.3.3",
+        "tailwindcss": "4.3.3",
+        "vite": "8.2.2",
+      },
+    },
     "packages/protocol": {
       "name": "@comms/protocol",
       "version": "0.0.0",
@@ -163,6 +172,8 @@
     "@chevrotain/utils": ["@chevrotain/utils@11.1.2", "", {}, "sha512-4mudFAQ6H+MqBTfqLmU7G1ZwRzCLfJEooL/fsF6rCX5eePMbGhoy5n4g+G4vlh2muDcsCTJtL+uKbOzWxs5LHA=="],
 
     "@comms/boot": ["@comms/boot@workspace:packages/boot"],
+
+    "@comms/landing": ["@comms/landing@workspace:packages/landing"],
 
     "@comms/protocol": ["@comms/protocol@workspace:packages/protocol"],
 

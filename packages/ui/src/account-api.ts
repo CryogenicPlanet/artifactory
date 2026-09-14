@@ -5,6 +5,9 @@ import { BoardError } from "./board-api.ts";
 
 const failure = Schema.Struct({ error: Schema.Struct({ code: Schema.String }) });
 const explanation = (code: string) => {
+	if (code === "setup_code_invalid")
+		return "That setup code is incorrect. Check the latest code in your deployment logs.";
+	if (code === "setup_closed") return "A passkey is already registered. Sign in to continue.";
 	if (code === "origin_last_passkey")
 		return "Keep at least one passkey for each configured address. Add another there before removing this one.";
 	if (code === "last_passkey") return "Keep at least one passkey. Add another before removing this one.";

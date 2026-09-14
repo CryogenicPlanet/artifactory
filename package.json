@@ -14,9 +14,10 @@
 		"lint": "oxlint --type-aware packages scripts",
 		"typecheck": "tsc --noEmit && bun run --filter '*' check",
 		"check:invariants": "bun scripts/check-invariants.ts",
-		"build": "bun run --filter '*' build",
+		"build": "bun run --filter @comms/boot --filter @comms/server --filter @comms/ui build",
 		"test": "vitest run",
 		"start": "bun run --filter @comms/server stage:runtime && bun packages/server/src/main.ts",
+		"dev:landing": "bun run --filter @comms/landing dev",
 		"dev:server": "bun run --filter @comms/server stage:runtime && bun packages/server/src/main.ts",
 		"dev:ui": "bun run --filter @comms/server stage:runtime && bun packages/ui/dev.ts"
 	},

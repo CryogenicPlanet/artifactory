@@ -219,6 +219,9 @@ export const proxy = Effect.gen(function* () {
 		const isPublic =
 			(request.method === "GET" || request.method === "HEAD") &&
 			([
+				"/onboarding",
+				"/assets/board.js",
+				"/assets/style.css",
 				"/init",
 				"/init.md",
 				"/page-assets/markdown.css",

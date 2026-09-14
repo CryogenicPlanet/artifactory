@@ -30,6 +30,18 @@ export function NavLink({
 	);
 }
 
+function ChirpMark() {
+	return (
+		<svg width="23" height="23" viewBox="0 0 88 80" aria-hidden="true" className="shrink-0 text-[#ed9b83]">
+			<path
+				fill="currentColor"
+				d="M8 24h16V8h32v8h8v8h16v8H64v16h-8v8H24v-8h-8V40H8zM0 16h8v16H0zM24 56h8v16H16v-8h8zM48 56h8v8h8v8H48z"
+			/>
+			<path fill="#161b1d" d="M44 18h8v8h-8z" />
+		</svg>
+	);
+}
+
 function SidebarContent({ navigation, sidebar }: { readonly navigation: ReactNode; readonly sidebar?: ReactNode }) {
 	return (
 		<>
@@ -37,6 +49,7 @@ function SidebarContent({ navigation, sidebar }: { readonly navigation: ReactNod
 				href="/"
 				className="flex w-fit items-center gap-1.5 text-2xl font-medium tracking-[-0.03em] text-foreground"
 			>
+				<ChirpMark />
 				chirp
 				<span className="mt-2.5 size-1.5 rounded-full bg-accent" />
 			</Link>
@@ -92,6 +105,7 @@ export function BoardLayout({
 					<Menu />
 				</Button>
 				<Link href="/" className="flex items-center gap-1.5 px-2 py-1.5 text-lg font-medium tracking-[-0.03em]">
+					<ChirpMark />
 					chirp
 					<span className="mt-1 size-1.5 rounded-full bg-accent" />
 				</Link>
@@ -126,6 +140,7 @@ export function BoardLayout({
 										href="/"
 										className="flex w-fit items-center gap-1.5 text-2xl font-medium tracking-[-0.03em] text-foreground"
 									>
+										<ChirpMark />
 										chirp
 										<span className="mt-2.5 size-1.5 rounded-full bg-accent" />
 									</Link>

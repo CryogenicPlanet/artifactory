@@ -8,6 +8,8 @@ COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/storage/package.json packages/storage/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/ui/package.json packages/ui/package.json
+# Retain workspace metadata for frozen installs; landing source is never copied.
+COPY packages/landing/package.json packages/landing/package.json
 RUN bun install --frozen-lockfile --ignore-scripts
 COPY tsconfig.base.json tsconfig.json ./
 COPY packages/boot packages/boot
@@ -26,6 +28,8 @@ COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/storage/package.json packages/storage/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/ui/package.json packages/ui/package.json
+# Retain workspace metadata for frozen installs; landing source is never copied.
+COPY packages/landing/package.json packages/landing/package.json
 RUN bun install --production --frozen-lockfile --ignore-scripts
 # Protocol is pure TypeScript; Bun resolves its source exports in the immutable image.
 COPY packages/protocol/src packages/protocol/src

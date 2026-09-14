@@ -4,6 +4,12 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
 	plugins: [react(), tailwindcss()],
+	build: {
+		cssCodeSplit: false,
+		rolldownOptions: {
+			output: { entryFileNames: "assets/board.js", assetFileNames: "assets/[name][extname]", codeSplitting: false },
+		},
+	},
 	server: {
 		host: "localhost",
 		port: Number(process.env.UI_PORT ?? 5173),

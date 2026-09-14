@@ -17,6 +17,11 @@ it("serves immutable recovery metadata without opening authentication or app sto
 		{ commsBootSession: [] },
 		{ commsBootAccess: [] },
 	]);
+	expect(manifest.endpoints["/onboarding"]).toBeUndefined();
+	expect(manifest.endpoints["/_boot/auth/state"]).toHaveProperty(
+		"get.description",
+		expect.stringContaining("verified human session"),
+	);
 	expect(manifest.endpoints["/_boot/seq"]).toBeUndefined();
 	expect(manifest.endpoints["/_boot/events/append"]).toBeUndefined();
 	expect(manifest.endpoints["/api/messages"]).toBeUndefined();

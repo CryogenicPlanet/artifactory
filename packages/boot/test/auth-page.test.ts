@@ -93,8 +93,8 @@ it.each([
 	}
 });
 
-it("returns to the requested page after sign-in and refuses external targets", async () => {
-	const run = async (search: string) => {
+it("returns to a safe requested page after sign-in or standalone setup", async () => {
+	const run = async (search: string, setup = false) => {
 		const status = { textContent: "" },
 			button = { disabled: false };
 		let submit: (() => Promise<void>) | undefined;
@@ -116,35 +116,41 @@ it("returns to the requested page after sign-in and refuses external targets", a
 				getElementById: (id: string) =>
 					id === "status"
 						? status
-						: {
-								dataset: { mode: "login" },
-								querySelector: () => button,
-								addEventListener: (
-									_name: string,
-									callback: (event: { preventDefault: () => void }) => Promise<void>,
-								) => {
-									submit = () => callback({ preventDefault: () => {} });
-								},
-							},
+						: id === "code"
+							? { value: "setup-code" }
+							: id !== "auth"
+								? null
+								: {
+										dataset: { mode: setup ? "setup" : "login" },
+										querySelector: () => button,
+										addEventListener: (
+											_name: string,
+											callback: (event: { preventDefault: () => void }) => Promise<void>,
+										) => {
+											submit = () => callback({ preventDefault: () => {} });
+										},
+									},
 			},
 			window: {
 				isSecureContext: true,
 				location: {
+					origin: "https://comms.test",
 					search,
 					assign: (value: string) => {
 						assigned = value;
 					},
 				},
 			},
-			navigator: { credentials: { get: async () => credential } },
+			navigator: { credentials: { get: async () => credential, create: async () => credential } },
 			AuthenticatorAttestationResponse: class {},
+			URL,
 			URLSearchParams,
 			atob,
 			btoa,
 			Uint8Array,
 			fetch: async () =>
 				Response.json(
-					{ id: "challenge", options: { challenge: "YWJj" } },
+					{ id: "challenge", options: { challenge: "YWJj", user: { id: "YWJj" } } },
 					{ headers: { [requestIdHeader]: "1234567890abcdef1234567890abcdef" } },
 				),
 		});
@@ -156,4 +162,7 @@ it("returns to the requested page after sign-in and refuses external targets", a
 	expect(await run("?next=https://evil.example")).toBe("/");
 	expect(await run("?next=//evil.example")).toBe("/");
 	expect(await run("")).toBe("/");
+	expect(await run("?next=/\\evil.example")).toBe("/");
+	expect(await run("?next=/t/design", true)).toBe("/auth/login?next=%2Ft%2Fdesign");
+	expect(await run("", true)).toBe("/auth/login?next=%2F");
 });

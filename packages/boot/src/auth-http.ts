@@ -324,6 +324,19 @@ export const authRoute = (auth: Auth["Service"], requestId: string) =>
 				contentType: "text/javascript",
 				headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
 			});
+		if (request.method === "GET" && path === "/_boot/auth/state")
+			return yield* authFailure(
+				Effect.gen(function* () {
+					const explicit =
+						request.headers.authorization !== undefined ||
+						(request.headers.cookie ?? "").split(";").some((part) => part.trim().startsWith(`${sessionCookie}=`));
+					const identity = explicit ? yield* authenticate(auth, request) : null;
+					return HttpServerResponse.jsonUnsafe(
+						{ setup_required: yield* auth.setupRequired, authenticated: identity?.kind === "human" },
+						{ headers: { "cache-control": "no-store", vary: "Cookie, Authorization" } },
+					);
+				}),
+			);
 		const page = request.method === "GET" && (path === "/setup" || path === "/auth/login");
 		const post =
 			request.method === "POST" &&
@@ -345,11 +358,12 @@ export const authRoute = (auth: Auth["Service"], requestId: string) =>
 						return HttpServerResponse.empty({
 							status: 302,
 							headers: {
-								location: `/setup${next === null ? "" : `?next=${encodeURIComponent(next)}`}`,
+								location: `/onboarding${next === null ? "" : `?next=${encodeURIComponent(next)}`}`,
 								"cache-control": "no-store",
 							},
 						});
 					}
+
 					if (path === "/setup" && !setupOpen)
 						return HttpServerResponse.empty({ status: 404, headers: { "cache-control": "no-store" } });
 					return HttpServerResponse.text(authPage(path === "/setup" ? "setup" : "login"), {

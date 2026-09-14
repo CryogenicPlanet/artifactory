@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { conversation } from "./fixtures/conversation.ts";
 
-it("serves a private compiled board from its generation and confines SPA fallback and assets", async (test) => {
+it("serves a compiled board with a public onboarding shell from its generation and confines SPA fallback and assets", async (test) => {
 	const fixture = await conversation(test),
 		seed = join(fixture.root, "built");
 	await promisify(execFile)("bun", [
@@ -25,14 +25,28 @@ it("serves a private compiled board from its generation and confines SPA fallbac
 	await mkdir(join(seed, "board/assets"), { recursive: true });
 	const html = '<!doctype html><title>Snapshot board</title><script src="/assets/board.js"></script>';
 	await writeFile(join(seed, "board/index.html"), html);
+	await writeFile(join(seed, "board/assets/style.css"), "body { color: white; }");
 	await writeFile(join(seed, "board/assets/board.js"), 'document.title="Compiled board";');
 	const app = await fixture.launch(join(seed, "server.js"));
+	const first = await fetch(`${app.url}/`, { headers: { accept: "text/html" }, redirect: "follow" });
+	await expect.poll(async () => (await fetch(`${app.url}/onboarding`)).status).toBe(200);
+	expect(await (await fetch(`${app.url}/onboarding`)).text()).toBe(html);
+	expect(first.url).toContain("/onboarding");
 	await app.setup();
 	const cookie = await app.login();
 	await app.ready(cookie);
 	const get = (path: string, method = "GET") => fetch(`${app.url}${path}`, { method, headers: { cookie } });
-	for (const path of ["/", "/t/project/thread", "/ext", "/@rahul", "/assets/board.js", "/_boot/recovery"])
+	for (const path of ["/", "/t/project/thread", "/ext", "/@rahul", "/_boot/recovery"])
 		expect((await fetch(`${app.url}${path}`)).status).toBe(401);
+	for (const path of ["/onboarding", "/assets/board.js", "/assets/style.css"]) {
+		const publicResponse = await fetch(`${app.url}${path}`);
+		expect(publicResponse.status).toBe(200);
+		expect(publicResponse.headers.get("cache-control")).toBe("no-store");
+		expect((await fetch(`${app.url}${path}`, { headers: { authorization: "Bearer invalid" } })).status).toBe(401);
+	}
+	for (const path of ["/onboarding/other", "/assets/other.js", "/api/messages", "/api/sql", "/t/private"])
+		expect((await fetch(`${app.url}${path}`)).status).toBe(401);
+	expect((await fetch(`${app.url}/onboarding`, { method: "POST" })).status).toBe(401);
 	for (const path of ["/", "/t/project/thread", "/ext", "/@rahul"]) {
 		const response = await get(path);
 		expect(response.status).toBe(200);

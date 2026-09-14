@@ -158,6 +158,12 @@ const routes = [
 		"public",
 		"First-passkey setup page; available only before setup completes, or for one recovery passkey on the primary origin per boot process while the operator sets REOPEN_SETUP=1.",
 	],
+	[
+		"get",
+		["/_boot/auth/state"],
+		"public",
+		"Whether first-passkey setup is required and whether the caller has a verified human session. Explicit credentials are authenticated; no credential or passkey details are returned.",
+	],
 	["get", ["/auth/login"], "public", "Human passkey sign-in page."],
 	[
 		"post",

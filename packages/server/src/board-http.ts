@@ -13,11 +13,12 @@ const boardHeaders = Object.freeze({
 /** Only built board files adjacent to this generation are served; never the editable tree. */
 const board = (directory: string) =>
 	Effect.gen(function* () {
-		yield* identity("read");
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
 		const pathname = new URL(request.url, "http://localhost").pathname;
+		// Public shell and its two fixed build assets contain no board data. Every other path stays private.
+		if (!["/onboarding", "/assets/board.js", "/assets/style.css"].includes(pathname)) yield* identity("read");
 		const asset = pathname.startsWith("/assets/");
 		const name = asset
 			? yield* Effect.try(() => decodeURIComponent(pathname.slice(1))).pipe(Effect.orElseSucceed(() => ""))
@@ -58,6 +59,7 @@ const board = (directory: string) =>
 export const routes = (directory: string) =>
 	Layer.mergeAll(
 		HttpRouter.add("GET", "/", board(directory)),
+		HttpRouter.add("GET", "/onboarding", board(directory)),
 		HttpRouter.add("GET", "/t/*", board(directory)),
 		HttpRouter.add("GET", "/ext", board(directory)),
 		HttpRouter.add("GET", "/@:agent", board(directory)),
